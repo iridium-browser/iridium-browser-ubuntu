@@ -24,13 +24,13 @@ class AppResourceCacheFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<AppResourceCacheFactory>;
 
   AppResourceCacheFactory();
-  virtual ~AppResourceCacheFactory();
+  ~AppResourceCacheFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_NTP_APP_RESOURCE_CACHE_FACTORY_H_

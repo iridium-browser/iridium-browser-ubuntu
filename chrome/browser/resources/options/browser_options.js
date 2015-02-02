@@ -13,13 +13,17 @@ cr.exportPath('options');
  *            setupInProgress: (boolean|undefined),
  *            signedIn: (boolean|undefined),
  *            signinAllowed: (boolean|undefined),
- *            signinAllowed: boolean,
  *            signoutAllowed: (boolean|undefined),
  *            statusText: (string|undefined),
  *            syncSystemEnabled: (boolean|undefined)}}
  * @see chrome/browser/ui/webui/options/browser_options_handler.cc
  */
 options.SyncStatus;
+
+/**
+ * @typedef {{id: string, name: string}}
+ */
+options.ExtensionData;
 
 cr.define('options', function() {
   var OptionsPage = options.OptionsPage;
@@ -220,8 +224,12 @@ cr.define('options', function() {
                     ['Options_Homepage_ShowSettings']);
       };
 
-      var hotwordIndicator = $('hotword-search-setting-indicator');
-      HotwordSearchSettingIndicator.decorate(hotwordIndicator);
+      HotwordSearchSettingIndicator.decorate(
+          $('hotword-search-setting-indicator'));
+      HotwordSearchSettingIndicator.decorate(
+          $('hotword-no-dsp-search-setting-indicator'));
+      HotwordSearchSettingIndicator.decorate(
+          $('hotword-always-on-search-setting-indicator'));
       chrome.send('requestHotwordAvailable');
 
       if ($('set-wallpaper')) {
@@ -244,6 +252,14 @@ cr.define('options', function() {
         return true;
       };
 
+      // Open the Hotword Audio Verification app to retrain a voice model.
+      $('hotword-retrain-link').onclick = function(event) {
+        chrome.send('launchHotwordAudioVerificationApp', [true]);
+      };
+      Preferences.getInstance().addEventListener(
+          'hotword.always_on_search_enabled',
+          this.onHotwordAlwaysOnChanged_.bind(this));
+
       $('themes-gallery').onclick = function(event) {
         window.open(loadTimeData.getString('themesGalleryURL'));
         chrome.send('coreOptionsUserMetricsAction',
@@ -265,6 +281,11 @@ cr.define('options', function() {
 
       // Device section (ChromeOS only).
       if (cr.isChromeOS) {
+        $('power-settings-button').onclick = function(evt) {
+          PageManager.showPageByName('power-overlay');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_ShowPowerSettings']);
+        };
         $('battery-button').onclick = function(evt) {
           WebsiteSettingsManager.showWebsiteSettings('battery');
         };
@@ -528,6 +549,8 @@ cr.define('options', function() {
           PageManager.showPageByName('easyUnlockTurnOffOverlay');
         };
       }
+      $('easy-unlock-enable-proximity-detection').hidden =
+          !loadTimeData.getBoolean('easyUnlockProximityDetectionAllowed');
 
       // Website Settings section.
       if (loadTimeData.getBoolean('websiteSettingsManagerEnabled')) {
@@ -1118,26 +1141,75 @@ cr.define('options', function() {
 
     /**
      * Activates the Hotword section from the System settings page.
-     * @param {boolean} opt_enabled Current preference state for hotwording.
-     * @param {string} opt_error The error message to display.
+     * @param {string} sectionId The id of the section to display.
+     * @param {string} indicatorId The id of the indicator to display.
+     * @param {string=} opt_error The error message to display.
      * @private
      */
-    showHotwordSection_: function(opt_enabled, opt_error) {
-      $('hotword-search').hidden = false;
-      $('hotword-search-setting-indicator').setError(opt_error);
-      if (opt_enabled && opt_error)
-        $('hotword-search-setting-indicator').updateBasedOnError();
+    showHotwordCheckboxAndIndicator_: function(sectionId, indicatorId,
+                                               opt_error) {
+      $(sectionId).hidden = false;
+      $(indicatorId).setError(opt_error);
+      if (opt_error)
+        $(indicatorId).updateBasedOnError();
+    },
+
+    /**
+     * Activates the Hotword section from the System settings page.
+     * @param {string=} opt_error The error message to display.
+     * @private
+     */
+    showHotwordSection_: function(opt_error) {
+      this.showHotwordCheckboxAndIndicator_(
+          'hotword-search',
+          'hotword-search-setting-indicator',
+          opt_error);
     },
 
     /**
      * Activates the Audio History and Always-On Hotword sections from the
      * System settings page.
+     * @param {string=} opt_error The error message to display.
      * @private
      */
-    showHotwordAlwaysOnSection_: function() {
-      $('voice-section-title').hidden = false;
-      $('hotword-always-on-search').hidden = false;
+    showHotwordAlwaysOnSection_: function(opt_error) {
+      this.showHotwordCheckboxAndIndicator_(
+          'hotword-always-on-search',
+          'hotword-always-on-search-setting-indicator',
+          opt_error);
       $('audio-logging').hidden = false;
+    },
+
+    /**
+     * Activates the Hotword section on devices with no DSP
+     * from the System settings page.
+     * @param {string=} opt_error The error message to display.
+     * @private
+     */
+    showHotwordNoDspSection_: function(opt_error) {
+      this.showHotwordCheckboxAndIndicator_(
+          'hotword-no-dsp-search',
+          'hotword-no-dsp-search-setting-indicator',
+          opt_error);
+    },
+
+    /**
+     * Shows or hides the hotword retrain link
+     * @param {boolean} visible Whether to show the link.
+     * @private
+     */
+    setHotwordRetrainLinkVisible_: function(visible) {
+      $('hotword-retrain-link').hidden = !visible;
+    },
+
+    /**
+     * Event listener for the 'hotword always on search enabled' preference.
+     * Updates the visibility of the 'retrain' link.
+     * @param {Event} event The preference change event.
+     * @private
+     */
+    onHotwordAlwaysOnChanged_: function(event) {
+      this.setHotwordRetrainLinkVisible_(event.value.value);
     },
 
     /**
@@ -1368,7 +1440,7 @@ cr.define('options', function() {
       // date. If showing the "delete" overlay, close it.
       if (ManageProfileOverlay.getInstance().visible &&
           !$('manage-profile-overlay-manage').hidden) {
-        ManageProfileOverlay.showManageDialog();
+        ManageProfileOverlay.showManageDialog(false);
       } else {
         ManageProfileOverlay.getInstance().visible = false;
       }
@@ -1504,16 +1576,15 @@ cr.define('options', function() {
      * @param {boolean} managed
      */
     setWallpaperManaged_: function(managed) {
-      var button = $('set-wallpaper');
-      button.disabled = !!managed;
+      if (managed)
+        $('set-wallpaper').disabled = true;
+      else
+        this.enableElementIfPossible_(getRequiredElement('set-wallpaper'));
 
       // Create a synthetic pref change event decorated as
       // CoreOptionsHandler::CreateValueForPref() does.
       var event = new Event('wallpaper');
-      if (managed)
-        event.value = { controlledBy: 'policy' };
-      else
-        event.value = {};
+      event.value = managed ? { controlledBy: 'policy' } : {};
       $('wallpaper-indicator').handlePrefChange(event);
     },
 
@@ -1560,10 +1631,12 @@ cr.define('options', function() {
       $('metricsReportingEnabled').disabled = disabled;
 
       // If checkbox gets disabled then add an attribute for displaying the
-      // special icon. The opposite shouldn't be possible to do.
+      // special icon. Otherwise remove the indicator attribute.
       if (disabled) {
         $('metrics-reporting-disabled-icon').setAttribute('controlled-by',
                                                           'policy');
+      } else {
+        $('metrics-reporting-disabled-icon').removeAttribute('controlled-by');
       }
     },
 
@@ -1791,8 +1864,12 @@ cr.define('options', function() {
     /**
      * Toggles the warning boxes that show which extension is controlling
      * various settings of Chrome.
-     * @param {object} details A dictionary of ID+name pairs for each of the
-     *     settings controlled by an extension.
+     * @param {{searchEngine: options.ExtensionData,
+     *          homePage: options.ExtensionData,
+     *          startUpPage: options.ExtensionData,
+     *          newTabPage: options.ExtensionData,
+     *          proxy: options.ExtensionData}} details A dictionary of ID+name
+     *     pairs for each of the settings controlled by an extension.
      * @private
      */
     toggleExtensionIndicators_: function(details) {
@@ -1960,6 +2037,41 @@ cr.define('options', function() {
     handleSetTime_: function() {
       chrome.send('showSetTime');
     },
+
+    /**
+     * Enables the given element if possible; on Chrome OS, it won't enable
+     * an element that must stay disabled for the session type.
+     * @param {!Element} element Element to enable.
+     */
+    enableElementIfPossible_: function(element) {
+      if (cr.isChromeOS)
+        UIAccountTweaks.enableElementIfPossible(element);
+      else
+        element.disabled = false;
+    },
+
+    /**
+     * Sets the icon in the battery section.
+     * @param {string} iconData The data representing the icon to display.
+     * @private
+     */
+    setBatteryIcon_: function(iconData) {
+      $('battery-icon').style.backgroundImage = 'url(' + iconData + ')';
+      $('battery-icon').hidden = false;
+    },
+
+    /**
+     * Sets the text for the battery section.
+     * @param {string} statusText The battery status, with a relevant label.
+     * @private
+     */
+    setBatteryStatusText_: function(statusText) {
+      $('battery').hidden = !statusText.length;
+      if (statusText.length) {
+        $('battery-status').textContent = statusText;
+        chrome.send('requestBatteryIcon');
+      }
+    },
   };
 
   //Forward public APIs to private implementations.
@@ -1978,9 +2090,12 @@ cr.define('options', function() {
     'setAccountPictureManaged',
     'setWallpaperManaged',
     'setAutoOpenFileTypesDisplayed',
+    'setBatteryIcon',
+    'setBatteryStatusText',
     'setBluetoothState',
     'setCanSetTime',
     'setFontSize',
+    'setHotwordRetrainLinkVisible',
     'setNativeThemeButtonEnabled',
     'setNetworkPredictionValue',
     'setHighContrastCheckboxState',
@@ -1997,6 +2112,7 @@ cr.define('options', function() {
     'showCreateProfileSuccess',
     'showCreateProfileWarning',
     'showHotwordAlwaysOnSection',
+    'showHotwordNoDspSection',
     'showHotwordSection',
     'showMouseControls',
     'showSupervisedUserImportError',

@@ -42,15 +42,18 @@
 namespace blink {
 
 class Element;
+class TracedValue;
 
 // Tracks data to determine which elements of a DOM subtree need to have style
 // recalculated.
-class DescendantInvalidationSet FINAL : public RefCountedWillBeGarbageCollected<DescendantInvalidationSet> {
+class DescendantInvalidationSet final : public RefCountedWillBeGarbageCollected<DescendantInvalidationSet> {
 public:
     static PassRefPtrWillBeRawPtr<DescendantInvalidationSet> create()
     {
         return adoptRefWillBeNoop(new DescendantInvalidationSet);
     }
+
+    static void cacheTracingFlag();
 
     bool invalidatesElement(Element&) const;
 
@@ -67,12 +70,17 @@ public:
     void setTreeBoundaryCrossing() { m_treeBoundaryCrossing = true; }
     bool treeBoundaryCrossing() const { return m_treeBoundaryCrossing; }
 
+    void setInsertionPointCrossing() { m_insertionPointCrossing = true; }
+    bool insertionPointCrossing() const { return m_insertionPointCrossing; }
+
     void setCustomPseudoInvalid() { m_customPseudoInvalid = true; }
     bool customPseudoInvalid() const { return m_customPseudoInvalid; }
 
     bool isEmpty() const { return !m_classes && !m_ids && !m_tagNames && !m_attributes; }
 
     void trace(Visitor*);
+
+    void toTracedValue(TracedValue*) const;
 
 #ifndef NDEBUG
     void show() const;
@@ -100,6 +108,9 @@ private:
 
     // If true, the invalidation must traverse into ShadowRoots with this set.
     unsigned m_treeBoundaryCrossing : 1;
+
+    // If true, insertion point descendants must be invalidated.
+    unsigned m_insertionPointCrossing : 1;
 };
 
 } // namespace blink

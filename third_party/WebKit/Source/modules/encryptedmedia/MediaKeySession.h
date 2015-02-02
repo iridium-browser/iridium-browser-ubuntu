@@ -33,16 +33,14 @@
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebContentDecryptionModuleSession.h"
-#include "wtf/Forward.h"
 
 namespace blink {
 
-class ScriptPromise;
-class ScriptState;
+class DOMArrayBuffer;
+class DOMArrayBufferView;
 class GenericEventQueue;
 class MediaKeyError;
 class MediaKeys;
-class WebContentDecryptionModule;
 class WebString;
 
 // References are held by JS only. However, even if all JS references are
@@ -58,7 +56,7 @@ class WebString;
 // Because this object controls the lifetime of the WebContentDecryptionModuleSession,
 // it may outlive any JavaScript references as long as the MediaKeys object is alive.
 // The WebContentDecryptionModuleSession has the same lifetime as this object.
-class MediaKeySession FINAL
+class MediaKeySession final
     : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<MediaKeySession>, public ActiveDOMObject, public EventTargetWithInlineData
     , private WebContentDecryptionModuleSession::Client {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<MediaKeySession>);
@@ -66,54 +64,63 @@ class MediaKeySession FINAL
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaKeySession);
 public:
     static MediaKeySession* create(ScriptState*, MediaKeys*, const String& sessionType);
+    static bool isValidSessionType(const String& sessionType);
     virtual ~MediaKeySession();
 
     const String& keySystem() const { return m_keySystem; }
     String sessionId() const;
+    double expiration() const { return m_expiration; }
     ScriptPromise closed(ScriptState*);
 
-    ScriptPromise generateRequest(ScriptState*, const String& initDataType, ArrayBuffer* initData);
-    ScriptPromise generateRequest(ScriptState*, const String& initDataType, ArrayBufferView* initData);
+    ScriptPromise generateRequest(ScriptState*, const String& initDataType, DOMArrayBuffer* initData);
+    ScriptPromise generateRequest(ScriptState*, const String& initDataType, DOMArrayBufferView* initData);
+    ScriptPromise load(ScriptState*, const String& sessionId);
 
     void setError(MediaKeyError*);
     MediaKeyError* error() { return m_error.get(); }
 
-    ScriptPromise update(ScriptState*, ArrayBuffer* response);
-    ScriptPromise update(ScriptState*, ArrayBufferView* response);
-    ScriptPromise release(ScriptState*);
+    ScriptPromise update(ScriptState*, DOMArrayBuffer* response);
+    ScriptPromise update(ScriptState*, DOMArrayBufferView* response);
+    ScriptPromise close(ScriptState*);
+    ScriptPromise remove(ScriptState*);
 
     void enqueueEvent(PassRefPtrWillBeRawPtr<Event>);
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const OVERRIDE;
-    virtual ExecutionContext* executionContext() const OVERRIDE;
+    virtual const AtomicString& interfaceName() const override;
+    virtual ExecutionContext* executionContext() const override;
 
     // ActiveDOMObject
-    virtual bool hasPendingActivity() const OVERRIDE;
-    virtual void stop() OVERRIDE;
+    virtual bool hasPendingActivity() const override;
+    virtual void stop() override;
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     class PendingAction;
     friend class NewSessionResult;
+    friend class LoadSessionResult;
 
     MediaKeySession(ScriptState*, MediaKeys*, const String& sessionType);
 
     void actionTimerFired(Timer<MediaKeySession>*);
 
     // WebContentDecryptionModuleSession::Client
-    virtual void message(const unsigned char* message, size_t messageLength, const WebURL& destinationURL) OVERRIDE;
-    virtual void ready() OVERRIDE;
-    virtual void close() OVERRIDE;
-    virtual void error(MediaKeyErrorCode, unsigned long systemCode) OVERRIDE;
-    virtual void error(WebContentDecryptionModuleException, unsigned long systemCode, const WebString& errorMessage) OVERRIDE;
+    virtual void message(const unsigned char* message, size_t messageLength, const WebURL& destinationURL) override;
+    virtual void ready() override;
+    virtual void close() override;
+    virtual void error(MediaKeyErrorCode, unsigned long systemCode) override;
+    virtual void error(WebContentDecryptionModuleException, unsigned long systemCode, const WebString& errorMessage) override;
+    virtual void expirationChanged(double updatedExpiryTimeInMS) override;
 
-    ScriptPromise generateRequestInternal(ScriptState*, const String& initDataType, PassRefPtr<ArrayBuffer> initData);
-    ScriptPromise updateInternal(ScriptState*, PassRefPtr<ArrayBuffer> response);
+    ScriptPromise generateRequestInternal(ScriptState*, const String& initDataType, PassRefPtr<DOMArrayBuffer> initData);
+    ScriptPromise updateInternal(ScriptState*, PassRefPtr<DOMArrayBuffer> response);
 
-    // Called by NewSessionResult when the new sesison has been created.
+    // Called by NewSessionResult when the new session has been created.
     void finishGenerateRequest();
+
+    // Called by LoadSessionResult when the session has been loaded.
+    void finishLoad();
 
     String m_keySystem;
     RefPtrWillBeMember<MediaKeyError> m_error;
@@ -125,6 +132,7 @@ private:
 
     // Session properties.
     String m_sessionType;
+    double m_expiration;
 
     // Session states.
     bool m_isUninitialized;

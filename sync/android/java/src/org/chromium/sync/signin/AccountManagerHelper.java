@@ -13,7 +13,6 @@ import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.app.Activity;
 import android.content.Context;
-import android.content.Intent;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.util.Log;
@@ -25,8 +24,10 @@ import org.chromium.net.NetworkChangeNotifier;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
 
@@ -38,6 +39,12 @@ import javax.annotation.Nullable;
 public class AccountManagerHelper {
 
     private static final String TAG = "AccountManagerHelper";
+
+    private static final Pattern AT_SYMBOL = Pattern.compile("@");
+
+    private static final String GMAIL_COM = "gmail.com";
+
+    private static final String GOOGLEMAIL_COM = "googlemail.com";
 
     public static final String GOOGLE_ACCOUNT_TYPE = "com.google";
 
@@ -51,6 +58,9 @@ public class AccountManagerHelper {
 
     private Context mApplicationContext;
 
+    /**
+     * A simple callback for getAuthToken.
+     */
     public interface GetAuthTokenCallback {
         /**
          * Invoked on the UI thread once a token has been provided by the AccountManager.
@@ -107,8 +117,7 @@ public class AccountManagerHelper {
 
     public List<String> getGoogleAccountNames() {
         List<String> accountNames = new ArrayList<String>();
-        Account[] accounts = mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE);
-        for (Account account : accounts) {
+        for (Account account : getGoogleAccounts()) {
             accountNames.add(account.name);
         }
         return accountNames;
@@ -122,13 +131,27 @@ public class AccountManagerHelper {
         return getGoogleAccounts().length > 0;
     }
 
+    private String canonicalizeName(String name) {
+        String[] parts = AT_SYMBOL.split(name);
+        if (parts.length != 2) return name;
+
+        if (GOOGLEMAIL_COM.equalsIgnoreCase(parts[1])) {
+            parts[1] = GMAIL_COM;
+        }
+        if (GMAIL_COM.equalsIgnoreCase(parts[1])) {
+            parts[0] = parts[0].replace(".", "");
+        }
+        return (parts[0] + "@" + parts[1]).toLowerCase(Locale.US);
+    }
+
     /**
      * Returns the account if it exists, null otherwise.
      */
     public Account getAccountFromName(String accountName) {
-        Account[] accounts = mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE);
+        String canonicalName = canonicalizeName(accountName);
+        Account[] accounts = getGoogleAccounts();
         for (Account account : accounts) {
-            if (account.name.equals(accountName)) {
+            if (canonicalizeName(account.name).equals(canonicalName)) {
                 return account;
             }
         }
@@ -161,8 +184,8 @@ public class AccountManagerHelper {
      */
     @Deprecated
     public String getAuthTokenFromBackground(Account account, String authTokenType) {
-        AccountManagerFuture<Bundle> future = mAccountManager.getAuthToken(account,
-                authTokenType, false, null, null);
+        AccountManagerFuture<Bundle> future = mAccountManager.getAuthToken(
+                account, authTokenType, true, null, null);
         AtomicBoolean errorEncountered = new AtomicBoolean(false);
         return getAuthTokenInner(future, errorEncountered);
     }
@@ -219,16 +242,6 @@ public class AccountManagerHelper {
         try {
             Bundle result = future.getResult();
             if (result != null) {
-                if (result.containsKey(AccountManager.KEY_INTENT)) {
-                    Log.d(TAG, "Starting intent to get auth credentials");
-                    // Need to start intent to get credentials
-                    Intent intent = result.getParcelable(AccountManager.KEY_INTENT);
-                    int flags = intent.getFlags();
-                    flags |= Intent.FLAG_ACTIVITY_NEW_TASK;
-                    intent.setFlags(flags);
-                    mApplicationContext.startActivity(intent);
-                    return null;
-                }
                 return result.getString(AccountManager.KEY_AUTHTOKEN);
             } else {
                 Log.w(TAG, "Auth token - getAuthToken returned null");
@@ -248,15 +261,8 @@ public class AccountManagerHelper {
             final String authTokenType, final GetAuthTokenCallback callback,
             final AtomicInteger numTries, final AtomicBoolean errorEncountered,
             final ConnectionRetry retry) {
-        AccountManagerFuture<Bundle> future;
-        if (numTries.get() == 0 && activity != null) {
-            future = mAccountManager.getAuthToken(
-                    account, authTokenType, null, activity, null, null);
-        } else {
-            future = mAccountManager.getAuthToken(
-                    account, authTokenType, false, null, null);
-        }
-        final AccountManagerFuture<Bundle> finalFuture = future;
+        final AccountManagerFuture<Bundle> future = mAccountManager.getAuthToken(
+                account, authTokenType, true, null, null);
         errorEncountered.set(false);
 
         // On ICS onPostExecute is never called when running an AsyncTask from a different thread
@@ -265,7 +271,7 @@ public class AccountManagerHelper {
             new AsyncTask<Void, Void, String>() {
                 @Override
                 public String doInBackground(Void... params) {
-                    return getAuthTokenInner(finalFuture, errorEncountered);
+                    return getAuthTokenInner(future, errorEncountered);
                 }
                 @Override
                 public void onPostExecute(String authToken) {
@@ -274,7 +280,7 @@ public class AccountManagerHelper {
                 }
             }.execute();
         } else {
-            String authToken = getAuthTokenInner(finalFuture, errorEncountered);
+            String authToken = getAuthTokenInner(future, errorEncountered);
             onGotAuthTokenResult(account, authTokenType, authToken, callback, numTries,
                     errorEncountered, retry);
         }
@@ -308,13 +314,11 @@ public class AccountManagerHelper {
      */
     @Deprecated
     public String getNewAuthToken(Account account, String authToken, String authTokenType) {
+        invalidateAuthToken(authToken);
+
         // TODO(dsmyers): consider reimplementing using an AccountManager function with an
         // explicit timeout.
         // Bug: https://code.google.com/p/chromium/issues/detail?id=172394.
-        if (authToken != null && !authToken.isEmpty()) {
-            mAccountManager.invalidateAuthToken(GOOGLE_ACCOUNT_TYPE, authToken);
-        }
-
         try {
             return mAccountManager.blockingGetAuthToken(account, authTokenType, true);
         } catch (OperationCanceledException e) {
@@ -334,19 +338,19 @@ public class AccountManagerHelper {
      */
     public void getNewAuthTokenFromForeground(Account account, String authToken,
                 String authTokenType, GetAuthTokenCallback callback) {
-        if (authToken != null && !authToken.isEmpty()) {
-            mAccountManager.invalidateAuthToken(GOOGLE_ACCOUNT_TYPE, authToken);
-        }
+        invalidateAuthToken(authToken);
         AtomicInteger numTries = new AtomicInteger(0);
         AtomicBoolean errorEncountered = new AtomicBoolean(false);
         getAuthTokenAsynchronously(
-            null, account, authTokenType, callback, numTries, errorEncountered, null);
+                null, account, authTokenType, callback, numTries, errorEncountered, null);
     }
 
     /**
      * Removes an auth token from the AccountManager's cache.
      */
     public void invalidateAuthToken(String authToken) {
-        mAccountManager.invalidateAuthToken(GOOGLE_ACCOUNT_TYPE, authToken);
+        if (authToken != null && !authToken.isEmpty()) {
+            mAccountManager.invalidateAuthToken(GOOGLE_ACCOUNT_TYPE, authToken);
+        }
     }
 }

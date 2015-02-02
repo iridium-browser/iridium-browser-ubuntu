@@ -29,6 +29,7 @@
 #include "bindings/core/v8/ArrayValue.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/V8ArrayBufferView.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMError.h"
 #include "bindings/core/v8/V8Element.h"
@@ -40,21 +41,7 @@
 #include "bindings/core/v8/V8TextTrack.h"
 #include "bindings/core/v8/V8VoidCallback.h"
 #include "bindings/core/v8/V8Window.h"
-#include "bindings/core/v8/custom/V8ArrayBufferViewCustom.h"
-#include "bindings/core/v8/custom/V8Uint8ArrayCustom.h"
-#include "bindings/modules/v8/V8Gamepad.h"
-#include "bindings/modules/v8/V8Headers.h"
-#include "bindings/modules/v8/V8IDBKeyRange.h"
-#include "bindings/modules/v8/V8MIDIPort.h"
-#include "bindings/modules/v8/V8MediaStream.h"
-#include "bindings/modules/v8/V8SpeechRecognitionResult.h"
-#include "bindings/modules/v8/V8SpeechRecognitionResultList.h"
 #include "core/html/track/TrackBase.h"
-#include "modules/gamepad/Gamepad.h"
-#include "modules/indexeddb/IDBKeyRange.h"
-#include "modules/mediastream/MediaStream.h"
-#include "modules/speech/SpeechRecognitionResult.h"
-#include "modules/speech/SpeechRecognitionResultList.h"
 #include "wtf/MathExtras.h"
 
 namespace blink {
@@ -264,6 +251,29 @@ bool Dictionary::getOwnPropertyNames(Vector<String>& names) const
         return false;
 
     v8::Local<v8::Array> properties = options->GetOwnPropertyNames();
+    if (properties.IsEmpty())
+        return true;
+    for (uint32_t i = 0; i < properties->Length(); ++i) {
+        v8::Local<v8::String> key = properties->Get(i)->ToString();
+        if (!options->Has(key))
+            continue;
+        TOSTRING_DEFAULT(V8StringResource<>, stringKey, key, false);
+        names.append(stringKey);
+    }
+
+    return true;
+}
+
+bool Dictionary::getPropertyNames(Vector<String>& names) const
+{
+    if (!isObject())
+        return false;
+
+    v8::Handle<v8::Object> options = m_options->ToObject();
+    if (options.IsEmpty())
+        return false;
+
+    v8::Local<v8::Array> properties = options->GetPropertyNames();
     if (properties.IsEmpty())
         return true;
     for (uint32_t i = 0; i < properties->Length(); ++i) {

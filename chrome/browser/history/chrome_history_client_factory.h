@@ -19,20 +19,25 @@ class ChromeHistoryClientFactory : public BrowserContextKeyedServiceFactory {
  public:
   static ChromeHistoryClient* GetForProfile(Profile* profile);
 
+  // TODO(sdefresne): remove this once ChromeHistoryClient is no longer an
+  // HistoryServiceObserver and can follow the regular shutdown even during
+  // tests.
+  static ChromeHistoryClient* GetForProfileWithoutCreating(Profile* profile);
+
   static ChromeHistoryClientFactory* GetInstance();
 
  private:
   friend struct DefaultSingletonTraits<ChromeHistoryClientFactory>;
 
   ChromeHistoryClientFactory();
-  virtual ~ChromeHistoryClientFactory();
+  ~ChromeHistoryClientFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 };
 
 #endif  // CHROME_BROWSER_HISTORY_CHROME_HISTORY_CLIENT_FACTORY_H_

@@ -17,9 +17,9 @@ class PowerMonitorMessageSender : public IPC::Sender {
         suspends_(0),
         resumes_(0) {
   }
-  virtual ~PowerMonitorMessageSender() {}
+  ~PowerMonitorMessageSender() override {}
 
-  virtual bool Send(IPC::Message* msg) OVERRIDE {
+  bool Send(IPC::Message* msg) override {
     switch (msg->type()) {
       case PowerMonitorMsg_Suspend::ID:
         suspends_++;
@@ -53,7 +53,7 @@ class PowerMonitorMessageBroadcasterTest : public testing::Test {
     power_monitor_.reset(new base::PowerMonitor(
         scoped_ptr<base::PowerMonitorSource>(power_monitor_source_)));
   }
-  virtual ~PowerMonitorMessageBroadcasterTest() {};
+  ~PowerMonitorMessageBroadcasterTest() override {}
 
   base::PowerMonitorTestSource* source() { return power_monitor_source_; }
   base::PowerMonitor* monitor() { return power_monitor_.get(); }

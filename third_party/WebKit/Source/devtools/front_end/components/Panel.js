@@ -71,21 +71,6 @@ WebInspector.Panel.prototype = {
     },
 
     /**
-     * @param {string} text
-     */
-    replaceSelectionWith: function(text)
-    {
-    },
-
-    /**
-     * @param {string} query
-     * @param {string} text
-     */
-    replaceAllWith: function(query, text)
-    {
-    },
-
-    /**
      * @return {!Array.<!Element>}
      */
     elementsToRestoreScrollPositionsFor: function()
@@ -208,9 +193,23 @@ WebInspector.PanelDescriptor.prototype = {
     title: function() {},
 
     /**
-     * @return {!WebInspector.Panel}
+     * @return {!Promise.<!WebInspector.Panel>}
      */
     panel: function() {}
+}
+
+/**
+ * @interface
+ */
+WebInspector.PanelFactory = function()
+{
+}
+
+WebInspector.PanelFactory.prototype = {
+    /**
+     * @return {!WebInspector.Panel}
+     */
+    createPanel: function() { }
 }
 
 /**
@@ -243,10 +242,19 @@ WebInspector.RuntimeExtensionPanelDescriptor.prototype = {
     },
 
     /**
-     * @return {!WebInspector.Panel}
+     * @return {!Promise.<!WebInspector.Panel>}
      */
     panel: function()
     {
-        return /** @type {!WebInspector.Panel} */ (this._extension.instance());
+        return this._extension.instancePromise().then(createPanel);
+
+        /**
+         * @param {!Object} panelFactory
+         * @return {!WebInspector.Panel}
+         */
+        function createPanel(panelFactory)
+        {
+            return /** @type {!WebInspector.PanelFactory} */ (panelFactory).createPanel();
+        }
     }
 }

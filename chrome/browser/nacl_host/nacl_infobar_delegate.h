@@ -15,12 +15,12 @@ class NaClInfoBarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   NaClInfoBarDelegate();
-  virtual ~NaClInfoBarDelegate();
+  ~NaClInfoBarDelegate() override;
 
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual int GetButtons() const OVERRIDE;
-  virtual base::string16 GetLinkText() const OVERRIDE;
-  virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
+  base::string16 GetMessageText() const override;
+  int GetButtons() const override;
+  base::string16 GetLinkText() const override;
+  bool LinkClicked(WindowOpenDisposition disposition) override;
 
   DISALLOW_COPY_AND_ASSIGN(NaClInfoBarDelegate);
 };

@@ -9,6 +9,7 @@
 #include "bindings/core/v8/ScriptCallStackFactory.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
+#include "wtf/CurrentTime.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/WeakPtr.h"
 
@@ -18,7 +19,7 @@ using blink::TypeBuilder::Debugger::PromiseDetails;
 
 namespace blink {
 
-class PromiseTracker::PromiseData FINAL : public RefCountedWillBeGarbageCollectedFinalized<PromiseData> {
+class PromiseTracker::PromiseData final : public RefCountedWillBeGarbageCollectedFinalized<PromiseData> {
 public:
     static PassRefPtrWillBeRawPtr<PromiseData> create(ScriptState* scriptState, int promiseHash, int promiseId, v8::Handle<v8::Object> promise)
     {
@@ -26,6 +27,7 @@ public:
     }
 
     int promiseHash() const { return m_promiseHash; }
+    int promiseId() const { return m_promiseId; }
     ScopedPersistent<v8::Object>& promise() { return m_promise; }
 
 #if ENABLE(OILPAN)
@@ -56,6 +58,8 @@ private:
         , m_promise(scriptState->isolate(), promise)
         , m_parentPromiseId(0)
         , m_status(0)
+        , m_creationTime(0)
+        , m_settlementTime(0)
 #if !ENABLE(OILPAN)
         , m_weakPtrFactory(this)
 #endif
@@ -70,6 +74,8 @@ private:
     int m_status;
     RefPtrWillBeMember<ScriptCallStack> m_callStack;
     ScopedPersistent<v8::Object> m_parentPromise;
+    double m_creationTime;
+    double m_settlementTime;
 #if !ENABLE(OILPAN)
     WeakPtrFactory<PromiseData> m_weakPtrFactory;
 #endif
@@ -86,7 +92,7 @@ static int indexOf(PromiseTracker::PromiseDataVector* vector, const ScopedPersis
 
 namespace {
 
-class PromiseDataWrapper FINAL : public NoBaseWillBeGarbageCollected<PromiseDataWrapper> {
+class PromiseDataWrapper final : public NoBaseWillBeGarbageCollected<PromiseDataWrapper> {
 public:
     static PassOwnPtrWillBeRawPtr<PromiseDataWrapper> create(PromiseTracker::PromiseData* data, PromiseTracker* tracker)
     {
@@ -112,6 +118,8 @@ public:
         WeakPtrWillBeRawPtr<PromiseTracker::PromiseData> promiseData = wrapper->m_data;
         if (!promiseData || !wrapper->m_tracker)
             return;
+
+        wrapper->m_tracker->promiseIdToDataMap().remove(promiseData->promiseId());
 
 #if ENABLE(OILPAN)
         // Oilpan: let go of ScopedPersistent<>s right here (and not wait until the
@@ -169,6 +177,7 @@ void PromiseTracker::trace(Visitor* visitor)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_promiseDataMap);
+    visitor->trace(m_promiseIdToDataMap);
 #endif
 }
 
@@ -182,6 +191,7 @@ void PromiseTracker::setEnabled(bool enabled)
 void PromiseTracker::clear()
 {
     m_promiseDataMap.clear();
+    m_promiseIdToDataMap.clear();
 }
 
 int PromiseTracker::circularSequentialId()
@@ -197,19 +207,20 @@ PassRefPtrWillBeRawPtr<PromiseTracker::PromiseData> PromiseTracker::createPromis
     int promiseHash = promise->GetIdentityHash();
     RawPtr<PromiseDataVector> vector = nullptr;
     PromiseDataMap::iterator it = m_promiseDataMap.find(promiseHash);
-    if (it != m_promiseDataMap.end())
+    if (it != m_promiseDataMap.end()) {
         vector = &it->value;
-    else
+        int index = indexOf(vector, ScopedPersistent<v8::Object>(scriptState->isolate(), promise));
+        if (index != -1)
+            return vector->at(index);
+    } else {
         vector = &m_promiseDataMap.add(promiseHash, PromiseDataVector()).storedValue->value;
-
-    int index = indexOf(vector, ScopedPersistent<v8::Object>(scriptState->isolate(), promise));
-    if (index != -1)
-        return vector->at(index);
+    }
 
     // FIXME: Consider using the ScriptState's DOMWrapperWorld instead
     // to handle the lifetime of PromiseDataWrapper, avoiding all this
     // manual labor to achieve the same, with and without Oilpan.
-    RefPtrWillBeRawPtr<PromiseData> data = PromiseData::create(scriptState, promiseHash, circularSequentialId(), promise);
+    int promiseId = circularSequentialId();
+    RefPtrWillBeRawPtr<PromiseData> data = PromiseData::create(scriptState, promiseHash, promiseId, promise);
     OwnPtrWillBeRawPtr<PromiseDataWrapper> dataWrapper = PromiseDataWrapper::create(data.get(), this);
 #if ENABLE(OILPAN)
     OwnPtr<Persistent<PromiseDataWrapper> > wrapper = adoptPtr(new Persistent<PromiseDataWrapper>(dataWrapper));
@@ -218,6 +229,8 @@ PassRefPtrWillBeRawPtr<PromiseTracker::PromiseData> PromiseTracker::createPromis
 #endif
     data->m_promise.setWeak(wrapper.leakPtr(), &PromiseDataWrapper::didRemovePromise);
     vector->append(data);
+
+    m_promiseIdToDataMap.set(promiseId, data);
 
     return data.release();
 }
@@ -233,11 +246,18 @@ void PromiseTracker::didReceiveV8PromiseEvent(ScriptState* scriptState, v8::Hand
         data->m_parentPromiseId = parentData->m_promiseId;
         data->m_parentPromise.set(scriptState->isolate(), handle);
     } else {
+        ASSERT(!data->m_status);
         data->m_status = status;
-        if (!status && !data->m_callStack) {
-            RefPtrWillBeRawPtr<ScriptCallStack> stack = createScriptCallStack(1, true);
-            if (stack && stack->size())
-                data->m_callStack = stack;
+        if (!status) {
+            if (!data->m_creationTime)
+                data->m_creationTime = currentTimeMS();
+            if (!data->m_callStack) {
+                RefPtrWillBeRawPtr<ScriptCallStack> stack = createScriptCallStack(1, true);
+                if (stack && stack->size())
+                    data->m_callStack = stack;
+            }
+        } else if (!data->m_settlementTime) {
+            data->m_settlementTime = currentTimeMS();
         }
     }
 }
@@ -265,6 +285,10 @@ PassRefPtr<Array<PromiseDetails> > PromiseTracker::promises()
                 promiseDetails->setParentId(data->m_parentPromiseId);
             if (data->m_callStack)
                 promiseDetails->setCallFrame(data->m_callStack->at(0).buildInspectorObject());
+            if (data->m_creationTime)
+                promiseDetails->setCreationTime(data->m_creationTime);
+            if (data->m_settlementTime)
+                promiseDetails->setSettlementTime(data->m_settlementTime);
             result->addItem(promiseDetails);
         }
     }
@@ -276,18 +300,14 @@ ScriptValue PromiseTracker::promiseById(int promiseId) const
 {
     ASSERT(isEnabled());
 
-    for (PromiseDataMap::const_iterator it = m_promiseDataMap.begin(); it != m_promiseDataMap.end(); ++it) {
-        const PromiseDataVector* vector = &it->value;
-        for (size_t index = 0; index < vector->size(); ++index) {
-            RefPtrWillBeRawPtr<PromiseData> data = vector->at(index);
-            if (data->m_promiseId == promiseId) {
-                ScriptState* scriptState = data->m_scriptState.get();
-                return ScriptValue(scriptState, data->m_promise.newLocal(scriptState->isolate()));
-            }
-        }
-    }
-
-    return ScriptValue();
+    PromiseIdToDataMap::const_iterator it = m_promiseIdToDataMap.find(promiseId);
+    if (it == m_promiseIdToDataMap.end())
+        return ScriptValue();
+    RefPtrWillBeRawPtr<PromiseData> data = it->value;
+    ASSERT(data && data->m_promiseId == promiseId);
+    ScriptState* scriptState = data->m_scriptState.get();
+    v8::HandleScope scope(scriptState->isolate());
+    return ScriptValue(scriptState, data->m_promise.newLocal(scriptState->isolate()));
 }
 
 } // namespace blink

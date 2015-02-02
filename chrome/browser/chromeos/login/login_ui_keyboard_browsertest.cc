@@ -88,7 +88,7 @@ class LoginUIKeyboardTest : public chromeos::LoginManagerTest {
   LoginUIKeyboardTest() : LoginManagerTest(false) {}
   virtual ~LoginUIKeyboardTest() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     user_input_methods.push_back("xkb:fr::fra");
     user_input_methods.push_back("xkb:de::ger");
 
@@ -143,7 +143,8 @@ IN_PROC_BROWSER_TEST_F(LoginUIKeyboardTest, PRE_CheckPODScreenWithUsers) {
   StartupUtils::MarkOobeCompleted();
 }
 
-IN_PROC_BROWSER_TEST_F(LoginUIKeyboardTest, CheckPODScreenWithUsers) {
+// Hangs flakily. See http://crbug.com/421450.
+IN_PROC_BROWSER_TEST_F(LoginUIKeyboardTest, DISABLED_CheckPODScreenWithUsers) {
   js_checker().ExpectEQ("$('pod-row').pods.length", 2);
 
   EXPECT_EQ(user_input_methods[0],
@@ -178,14 +179,14 @@ class LoginUIKeyboardTestWithUsersAndOwner : public chromeos::LoginManagerTest {
   LoginUIKeyboardTestWithUsersAndOwner() : LoginManagerTest(false) {}
   virtual ~LoginUIKeyboardTestWithUsersAndOwner() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     LoginManagerTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kStubCrosSettings);
 
     LoginManagerTest::SetUpCommandLine(command_line);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     user_input_methods.push_back("xkb:fr::fra");
     user_input_methods.push_back("xkb:de::ger");
     user_input_methods.push_back("xkb:pl::pol");

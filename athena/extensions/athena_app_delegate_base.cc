@@ -25,7 +25,7 @@ content::WebContents* OpenURLInActivity(content::BrowserContext* context,
       context, base::string16(), params.url);
   Activity::Show(activity);
   // TODO(oshima): Get the web cotnents from activity.
-  return NULL;
+  return nullptr;
 }
 
 }  // namespace
@@ -36,14 +36,14 @@ class AthenaAppDelegateBase::NewActivityContentsDelegate
     : public content::WebContentsDelegate {
  public:
   NewActivityContentsDelegate() {}
-  virtual ~NewActivityContentsDelegate() {}
+  ~NewActivityContentsDelegate() override {}
 
   // content::WebContentsDelegate:
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE {
+      const content::OpenURLParams& params) override {
     if (!source)
-      return NULL;
+      return nullptr;
     return OpenURLInActivity(source->GetBrowserContext(), params);
   }
 

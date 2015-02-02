@@ -23,7 +23,7 @@ class SupervisedUserPrefStoreFixture : public PrefStore::Observer {
  public:
   explicit SupervisedUserPrefStoreFixture(
       SupervisedUserSettingsService* settings_service);
-  virtual ~SupervisedUserPrefStoreFixture();
+  ~SupervisedUserPrefStoreFixture() override;
 
   base::DictionaryValue* changed_prefs() {
     return &changed_prefs_;
@@ -34,8 +34,8 @@ class SupervisedUserPrefStoreFixture : public PrefStore::Observer {
   }
 
   // PrefStore::Observer implementation:
-  virtual void OnPrefValueChanged(const std::string& key) OVERRIDE;
-  virtual void OnInitializationCompleted(bool succeeded) OVERRIDE;
+  void OnPrefValueChanged(const std::string& key) override;
+  void OnInitializationCompleted(bool succeeded) override;
 
  private:
   scoped_refptr<SupervisedUserPrefStore> pref_store_;
@@ -72,8 +72,8 @@ void SupervisedUserPrefStoreFixture::OnInitializationCompleted(bool succeeded) {
 
 class SupervisedUserPrefStoreTest : public ::testing::Test {
  public:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   SupervisedUserSettingsService service_;

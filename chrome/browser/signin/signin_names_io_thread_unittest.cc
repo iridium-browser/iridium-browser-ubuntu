@@ -22,8 +22,8 @@
 class SigninNamesOnIOThreadTest : public testing::Test {
  public:
   SigninNamesOnIOThreadTest();
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   void SimulateSignin(const base::string16& email);
   void AddNewProfile(const base::string16& name, const base::string16& email);

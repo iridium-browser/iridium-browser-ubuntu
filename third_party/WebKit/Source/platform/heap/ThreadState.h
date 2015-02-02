@@ -34,6 +34,7 @@
 #include "platform/PlatformExport.h"
 #include "platform/heap/AddressSanitizer.h"
 #include "public/platform/WebThread.h"
+#include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
@@ -42,9 +43,9 @@
 #include "wtf/ThreadingPrimitives.h"
 #include "wtf/Vector.h"
 
-#if ENABLE(GC_PROFILE_HEAP)
-#include "wtf/HashMap.h"
-#endif
+namespace v8 {
+class Isolate;
+};
 
 namespace blink {
 
@@ -52,16 +53,15 @@ class BaseHeap;
 class BaseHeapPage;
 class FinalizedHeapObjectHeader;
 struct GCInfo;
-class HeapContainsCache;
 class HeapObjectHeader;
 class PageMemory;
 class PersistentNode;
-class WrapperPersistentRegion;
 class Visitor;
 class SafePointBarrier;
 class SafePointAwareMutexLocker;
 template<typename Header> class ThreadHeap;
 class CallbackStack;
+class PageMemoryRegion;
 
 typedef uint8_t* Address;
 
@@ -87,10 +87,15 @@ enum ThreadAffinity {
     MainThreadOnly,
 };
 
+// FIXME: These forward declarations violate dependency rules. Remove them.
+// Ideally we want to provide a USED_IN_MAIN_THREAD_ONLY(T) macro, which
+// indicates that classes in T's hierarchy are used only by the main thread.
 class Node;
-class CSSValue;
+class NodeList;
 
-template<typename T, bool derivesNode = WTF::IsSubclass<typename WTF::RemoveConst<T>::Type, Node>::value> struct DefaultThreadingTrait;
+template<typename T,
+    bool mainThreadOnly = WTF::IsSubclass<typename WTF::RemoveConst<T>::Type, Node>::value
+        || WTF::IsSubclass<typename WTF::RemoveConst<T>::Type, NodeList>::value> struct DefaultThreadingTrait;
 
 template<typename T>
 struct DefaultThreadingTrait<T, false> {
@@ -107,29 +112,54 @@ struct ThreadingTrait {
     static const ThreadAffinity Affinity = DefaultThreadingTrait<T>::Affinity;
 };
 
-// Marks the specified class as being used from multiple threads. When
-// a class is used from multiple threads we go through thread local
-// storage to get the heap in which to allocate an object of that type
-// and when allocating a Persistent handle for an object with that
-// type. Notice that marking the base class does not automatically
-// mark its descendants and they have to be explicitly marked.
-#define USED_FROM_MULTIPLE_THREADS(Class)                 \
-    class Class;                                          \
-    template<> struct ThreadingTrait<Class> {             \
-        static const ThreadAffinity Affinity = AnyThread; \
-    }
-
-#define USED_FROM_MULTIPLE_THREADS_NAMESPACE(Namespace, Class)          \
-    namespace Namespace {                                               \
-        class Class;                                                    \
-    }                                                                   \
-    namespace blink {                                                 \
-        template<> struct ThreadingTrait<Namespace::Class> {            \
-            static const ThreadAffinity Affinity = AnyThread;           \
-        };                                                              \
-    }
-
 template<typename U> class ThreadingTrait<const U> : public ThreadingTrait<U> { };
+
+// Declare that a class has a pre-finalizer function.  The function is called in
+// the object's owner thread, and can access Member<>s to other
+// garbage-collected objects allocated in the thread.  However we must not
+// allocate new garbage-collected objects, nor update Member<> and Persistent<>
+// pointers.
+//
+// This feature is similar to the HeapHashMap<WeakMember<Foo>, OwnPtr<Disposer>>
+// idiom.  The difference between this and the idiom is that pre-finalizer
+// function is called whenever an object is destructed with this feature.  The
+// HeapHashMap<WeakMember<Foo>, OwnPtr<Disposer>> idiom requires an assumption
+// that the HeapHashMap outlives objects pointed by WeakMembers.
+// FIXME: Replace all of the HeapHashMap<WeakMember<Foo>, OwnPtr<Disposer>>
+// idiom usages with the pre-finalizer if the replacement won't cause
+// performance regressions.
+//
+// See ThreadState::registerPreFinalizer.
+//
+// Usage:
+//
+// class Foo : GarbageCollected<Foo> {
+//     USING_PRE_FINALIZER(Foo, dispose);
+// public:
+//     Foo()
+//     {
+//         ThreadState::current()->registerPreFinalizer(*this);
+//     }
+// private:
+//     void dispose();
+//     Member<Bar> m_bar;
+// };
+//
+// void Foo::dispose()
+// {
+//     m_bar->...
+// }
+#define USING_PRE_FINALIZER(Class, method)   \
+    public: \
+        static bool invokePreFinalizer(void* object, Visitor& visitor)   \
+        { \
+            Class* self = reinterpret_cast<Class*>(object); \
+            if (visitor.isAlive(self)) \
+                return false; \
+            self->method(); \
+            return true; \
+        } \
+        typedef char UsingPreFinazlizerMacroNeedsTrailingSemiColon
 
 // List of typed heaps. The list is used to generate the implementation
 // of typed heap related methods.
@@ -137,23 +167,32 @@ template<typename U> class ThreadingTrait<const U> : public ThreadingTrait<U> { 
 // To create a new typed heap add a H(<ClassName>) to the
 // FOR_EACH_TYPED_HEAP macro below.
 #define FOR_EACH_TYPED_HEAP(H)  \
-    H(Node)
+    H(Node) \
+    H(RenderObject) \
+    H(CSSValue)
+
 
 #define TypedHeapEnumName(Type) Type##Heap,
 #define TypedHeapEnumNameNonFinalized(Type) Type##HeapNonFinalized,
 
 enum TypedHeaps {
-    GeneralHeap = 0,
+    General1Heap = 0,
+    General2Heap,
+    General3Heap,
+    General4Heap,
     CollectionBackingHeap,
     FOR_EACH_TYPED_HEAP(TypedHeapEnumName)
-    GeneralHeapNonFinalized,
+    General1HeapNonFinalized,
+    General2HeapNonFinalized,
+    General3HeapNonFinalized,
+    General4HeapNonFinalized,
     CollectionBackingHeapNonFinalized,
     FOR_EACH_TYPED_HEAP(TypedHeapEnumNameNonFinalized)
     // Values used for iteration of heap segments.
     NumberOfHeaps,
-    FirstFinalizedHeap = GeneralHeap,
-    FirstNonFinalizedHeap = GeneralHeapNonFinalized,
-    NumberOfFinalizedHeaps = GeneralHeapNonFinalized,
+    FirstFinalizedHeap = General1Heap,
+    FirstNonFinalizedHeap = General1HeapNonFinalized,
+    NumberOfFinalizedHeaps = General1HeapNonFinalized,
     NumberOfNonFinalizedHeaps = NumberOfHeaps - NumberOfFinalizedHeaps,
     NonFinalizedHeapOffset = FirstNonFinalizedHeap
 };
@@ -165,9 +204,41 @@ struct HeapIndexTraitBase {
     typedef ThreadHeap<HeaderType> HeapType;
     static const int finalizedIndex = heapIndex;
     static const int nonFinalizedIndex = heapIndex + static_cast<int>(NonFinalizedHeapOffset);
-    static int index(bool isFinalized)
+    static int index(bool isFinalized, size_t)
     {
         return isFinalized ? finalizedIndex : nonFinalizedIndex;
+    }
+};
+
+class ThreadState;
+
+// We use four heaps for general type objects depending on their object sizes.
+// Objects whose size is 1 - 3 words go to the first general type heap.
+// Objects whose size is 4 - 7 words go to the second general type heap.
+// Objects whose size is 8 - 15 words go to the third general type heap.
+// Objects whose size is more than 15 words go to the fourth general type heap.
+template<int heapIndex>
+struct GeneralHeapIndexTraitBase {
+    typedef FinalizedHeapObjectHeader HeaderType;
+    typedef ThreadHeap<HeaderType> HeapType;
+    static const int finalizedIndex = heapIndex;
+    static const int nonFinalizedIndex = heapIndex + static_cast<int>(NonFinalizedHeapOffset);
+    static int index(bool isFinalized, size_t size)
+    {
+        static const int wordSize = sizeof(void*);
+        int generalHeapOffset = 0;
+        if (size < 8 * wordSize) {
+            if (size < 4 * wordSize)
+                generalHeapOffset = 0;
+            else
+                generalHeapOffset = 1;
+        } else {
+            if (size < 16 * wordSize)
+                generalHeapOffset = 2;
+            else
+                generalHeapOffset = 3;
+        }
+        return generalHeapOffset + (isFinalized ? finalizedIndex : nonFinalizedIndex);
     }
 };
 
@@ -176,9 +247,21 @@ template<int index>
 struct HeapIndexTrait;
 
 template<>
-struct HeapIndexTrait<GeneralHeap> : public HeapIndexTraitBase<GeneralHeap> { };
+struct HeapIndexTrait<General1Heap> : public GeneralHeapIndexTraitBase<General1Heap> { };
 template<>
-struct HeapIndexTrait<GeneralHeapNonFinalized> : public HeapIndexTrait<GeneralHeap> { };
+struct HeapIndexTrait<General1HeapNonFinalized> : public HeapIndexTrait<General1Heap> { };
+template<>
+struct HeapIndexTrait<General2Heap> : public GeneralHeapIndexTraitBase<General2Heap> { };
+template<>
+struct HeapIndexTrait<General2HeapNonFinalized> : public HeapIndexTrait<General2Heap> { };
+template<>
+struct HeapIndexTrait<General3Heap> : public GeneralHeapIndexTraitBase<General3Heap> { };
+template<>
+struct HeapIndexTrait<General3HeapNonFinalized> : public HeapIndexTrait<General3Heap> { };
+template<>
+struct HeapIndexTrait<General4Heap> : public GeneralHeapIndexTraitBase<General4Heap> { };
+template<>
+struct HeapIndexTrait<General4HeapNonFinalized> : public HeapIndexTrait<General4Heap> { };
 
 template<>
 struct HeapIndexTrait<CollectionBackingHeap> : public HeapIndexTraitBase<CollectionBackingHeap> { };
@@ -197,9 +280,10 @@ FOR_EACH_TYPED_HEAP(DEFINE_TYPED_HEAP_INDEX_TRAIT)
 #undef DEFINE_TYPED_HEAP_INDEX_TRAIT
 
 // HeapTypeTrait defines which heap to use for particular types.
-// By default objects are allocated in the GeneralHeap.
+// By default objects are allocated in one of the general heaps
+// depending on object size.
 template<typename T>
-struct HeapTypeTrait : public HeapIndexTrait<GeneralHeap> { };
+struct HeapTypeTrait : public HeapIndexTrait<General1Heap> { };
 
 // We don't have any type-based mappings to the CollectionBackingHeap.
 
@@ -331,7 +415,27 @@ public:
     // can no longer use the garbage collected heap after this call.
     static void detach();
 
-    static ThreadState* current() { return **s_threadSpecific; }
+    static ThreadState* current()
+    {
+#if defined(__GLIBC__) || OS(ANDROID) || OS(FREEBSD)
+        // TLS lookup is fast in these platforms.
+        return **s_threadSpecific;
+#else
+        uintptr_t dummy;
+        uintptr_t addressDiff = s_mainThreadStackStart - reinterpret_cast<uintptr_t>(&dummy);
+        // This is a fast way to judge if we are in the main thread.
+        // If |&dummy| is within |s_mainThreadUnderestimatedStackSize| byte from
+        // the stack start of the main thread, we judge that we are in
+        // the main thread.
+        if (LIKELY(addressDiff < s_mainThreadUnderestimatedStackSize)) {
+            ASSERT(**s_threadSpecific == mainThreadState());
+            return mainThreadState();
+        }
+        // TLS lookup is slow.
+        return **s_threadSpecific;
+#endif
+    }
+
     static ThreadState* mainThreadState()
     {
         return reinterpret_cast<ThreadState*>(s_mainThreadStateStorage);
@@ -415,6 +519,8 @@ public:
     // sweeping?
     bool isSweepInProgress() const { return m_sweepInProgress; }
 
+    void prepareRegionTree();
+    void flushHeapDoesNotContainCacheIfNeeded();
     void prepareForGC();
 
     // Safepoint related functionality.
@@ -548,18 +654,9 @@ public:
     // Infrastructure to determine if an address is within one of the
     // address ranges for the Blink heap. If the address is in the Blink
     // heap the containing heap page is returned.
-    HeapContainsCache* heapContainsCache() { return m_heapContainsCache.get(); }
     BaseHeapPage* contains(Address address) { return heapPageFromAddress(address); }
     BaseHeapPage* contains(void* pointer) { return contains(reinterpret_cast<Address>(pointer)); }
     BaseHeapPage* contains(const void* pointer) { return contains(const_cast<void*>(pointer)); }
-
-    WrapperPersistentRegion* wrapperRoots() const
-    {
-        ASSERT(m_liveWrapperPersistents);
-        return m_liveWrapperPersistents;
-    }
-    WrapperPersistentRegion* takeWrapperPersistentRegion();
-    void freeWrapperPersistentRegion(WrapperPersistentRegion*);
 
     // List of persistent roots allocated on the given thread.
     PersistentNode* roots() const { return m_persistents.get(); }
@@ -578,10 +675,6 @@ public:
 
     // Visit all persistents allocated on this thread.
     void visitPersistents(Visitor*);
-
-    // Checks a given address and if a pointer into the oilpan heap marks
-    // the object to which it points.
-    bool checkAndMarkPointer(Visitor*, Address);
 
 #if ENABLE(GC_PROFILE_MARKING)
     const GCInfo* findGCInfo(Address);
@@ -621,15 +714,48 @@ public:
     bool popAndInvokeWeakPointerCallback(Visitor*);
 
     void getStats(HeapStats&);
+    void getStatsForTesting(HeapStats&);
     HeapStats& stats() { return m_stats; }
-    HeapStats& statsAfterLastGC() { return m_statsAfterLastGC; }
 
     void setupHeapsForTermination();
 
     void registerSweepingTask();
     void unregisterSweepingTask();
 
+    // Request to call a pref-finalizer of the target object before the object
+    // is destructed.  The class T must have USING_PRE_FINALIZER().  The
+    // argument should be |*this|.  Registering a lot of objects affects GC
+    // performance.  We should register an object only if the object really
+    // requires pre-finalizer, and we should unregister the object if
+    // pre-finalizer is unnecessary.
+    template<typename T>
+    void registerPreFinalizer(T& target)
+    {
+        ASSERT(!m_preFinalizers.contains(&target));
+        ASSERT(!isSweepInProgress());
+        m_preFinalizers.add(&target, &T::invokePreFinalizer);
+    }
+
+    // Cancel above requests.  The argument should be |*this|.  This function is
+    // ignored if it is called in pre-finalizer functions.
+    template<typename T>
+    void unregisterPreFinalizer(T& target)
+    {
+        ASSERT(&T::invokePreFinalizer);
+        unregisterPreFinalizerInternal(&target);
+    }
+
     Mutex& sweepMutex() { return m_sweepMutex; }
+
+    Vector<PageMemoryRegion*>& allocatedRegionsSinceLastGC() { return m_allocatedRegionsSinceLastGC; }
+
+    void shouldFlushHeapDoesNotContainCache() { m_shouldFlushHeapDoesNotContainCache = true; }
+
+    void registerTraceDOMWrappers(v8::Isolate* isolate, void (*traceDOMWrappers)(v8::Isolate*, Visitor*))
+    {
+        m_isolate = isolate;
+        m_traceDOMWrappers = traceDOMWrappers;
+    }
 
 private:
     explicit ThreadState();
@@ -666,9 +792,14 @@ private:
 
     void setLowCollectionRate(bool value) { m_lowCollectionRate = value; }
 
+    void performPendingSweepInParallel();
     void waitUntilSweepersDone();
+    void unregisterPreFinalizerInternal(void*);
+    void invokePreFinalizers(Visitor&);
 
     static WTF::ThreadSpecific<ThreadState*>* s_threadSpecific;
+    static uintptr_t s_mainThreadStackStart;
+    static uintptr_t s_mainThreadUnderestimatedStackSize;
     static SafePointBarrier* s_safePointBarrier;
 
     // This variable is flipped to true after all threads are stoped
@@ -685,9 +816,6 @@ private:
     static uint8_t s_mainThreadStateStorage[];
 
     ThreadIdentifier m_thread;
-    WrapperPersistentRegion* m_liveWrapperPersistents;
-    WrapperPersistentRegion* m_pooledWrapperPersistents;
-    size_t m_pooledWrapperPersistentRegionCount;
     OwnPtr<PersistentNode> m_persistents;
     StackState m_stackState;
     intptr_t* m_startOfStack;
@@ -703,25 +831,31 @@ private:
     size_t m_noAllocationCount;
     bool m_inGC;
     BaseHeap* m_heaps[NumberOfHeaps];
-    OwnPtr<HeapContainsCache> m_heapContainsCache;
     HeapStats m_stats;
     HeapStats m_statsAfterLastGC;
 
     Vector<OwnPtr<CleanupTask> > m_cleanupTasks;
     bool m_isTerminating;
 
+    bool m_shouldFlushHeapDoesNotContainCache;
     bool m_lowCollectionRate;
 
-    OwnPtr<blink::WebThread> m_sweeperThread;
+    OwnPtr<WebThread> m_sweeperThread;
     int m_numberOfSweeperTasks;
     Mutex m_sweepMutex;
     ThreadCondition m_sweepThreadCondition;
 
     CallbackStack* m_weakCallbackStack;
+    HashMap<void*, bool (*)(void*, Visitor&)> m_preFinalizers;
+
+    v8::Isolate* m_isolate;
+    void (*m_traceDOMWrappers)(v8::Isolate*, Visitor*);
 
 #if defined(ADDRESS_SANITIZER)
     void* m_asanFakeStack;
 #endif
+
+    Vector<PageMemoryRegion*> m_allocatedRegionsSinceLastGC;
 };
 
 template<ThreadAffinity affinity> class ThreadStateFor;
@@ -822,13 +956,7 @@ public:
     ThreadState* threadState() const { return m_threadState; }
     const GCInfo* gcInfo() { return m_gcInfo; }
     virtual bool isLargeObject() { return false; }
-    virtual void markOrphaned()
-    {
-        m_threadState = 0;
-        m_gcInfo = 0;
-        m_terminating = false;
-        m_tracedAfterOrphaned = false;
-    }
+    virtual void markOrphaned();
     bool orphaned() { return !m_threadState; }
     bool terminating() { return m_terminating; }
     void setTerminating() { m_terminating = true; }
@@ -851,6 +979,6 @@ private:
     uintptr_t m_promptlyFreedSize : 17; // == blinkPageSizeLog2
 };
 
-}
+} // namespace blink
 
 #endif // ThreadState_h

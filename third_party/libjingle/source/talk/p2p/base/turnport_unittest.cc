@@ -28,12 +28,12 @@
 #include <dirent.h>
 #endif
 
-#include "talk/p2p/base/basicpacketsocketfactory.h"
-#include "talk/p2p/base/constants.h"
-#include "talk/p2p/base/tcpport.h"
-#include "talk/p2p/base/testturnserver.h"
-#include "talk/p2p/base/turnport.h"
-#include "talk/p2p/base/udpport.h"
+#include "webrtc/p2p/base/basicpacketsocketfactory.h"
+#include "webrtc/p2p/base/constants.h"
+#include "webrtc/p2p/base/tcpport.h"
+#include "webrtc/p2p/base/testturnserver.h"
+#include "webrtc/p2p/base/turnport.h"
+#include "webrtc/p2p/base/udpport.h"
 #include "webrtc/base/asynctcpsocket.h"
 #include "webrtc/base/buffer.h"
 #include "webrtc/base/dscp.h"
@@ -122,14 +122,6 @@ class TurnPortTest : public testing::Test,
         udp_ready_(false),
         test_finish_(false) {
     network_.AddIP(rtc::IPAddress(INADDR_ANY));
-  }
-
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
   }
 
   virtual void OnMessage(rtc::Message* msg) {

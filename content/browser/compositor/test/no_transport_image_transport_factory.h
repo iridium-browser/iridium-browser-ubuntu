@@ -19,25 +19,26 @@ namespace content {
 class NoTransportImageTransportFactory : public ImageTransportFactory {
  public:
   NoTransportImageTransportFactory();
-  virtual ~NoTransportImageTransportFactory();
+  ~NoTransportImageTransportFactory() override;
 
   // ImageTransportFactory implementation.
-  virtual ui::ContextFactory* GetContextFactory() OVERRIDE;
-  virtual gfx::GLSurfaceHandle GetSharedSurfaceHandle() OVERRIDE;
-  virtual scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator()
-      OVERRIDE;
-  virtual cc::SurfaceManager* GetSurfaceManager() OVERRIDE;
-  virtual GLHelper* GetGLHelper() OVERRIDE;
-  virtual void AddObserver(ImageTransportFactoryObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(ImageTransportFactoryObserver* observer) OVERRIDE;
+  ui::ContextFactory* GetContextFactory() override;
+  gfx::GLSurfaceHandle GetSharedSurfaceHandle() override;
+  cc::SurfaceManager* GetSurfaceManager() override;
+  GLHelper* GetGLHelper() override;
+  void AddObserver(ImageTransportFactoryObserver* observer) override;
+  void RemoveObserver(ImageTransportFactoryObserver* observer) override;
 #if defined(OS_MACOSX)
-  virtual void OnSurfaceDisplayed(int surface_id) OVERRIDE {}
+  void OnSurfaceDisplayed(int surface_id) override {}
+  void OnCompositorRecycled(ui::Compositor* compositor) override {}
+  bool SurfaceShouldNotShowFramesAfterRecycle(int surface_id) const override;
 #endif
 
  private:
   scoped_ptr<ui::ContextFactory> context_factory_;
   scoped_refptr<cc::ContextProvider> context_provider_;
   scoped_ptr<GLHelper> gl_helper_;
+  scoped_ptr<cc::SurfaceManager> surface_manager_;
   ObserverList<ImageTransportFactoryObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(NoTransportImageTransportFactory);

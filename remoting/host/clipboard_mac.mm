@@ -28,14 +28,12 @@ namespace remoting {
 class ClipboardMac : public Clipboard {
  public:
   ClipboardMac();
-  virtual ~ClipboardMac();
+  ~ClipboardMac() override;
 
   // Must be called on the UI thread.
-  virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
-  virtual void InjectClipboardEvent(
-      const protocol::ClipboardEvent& event) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
+  void InjectClipboardEvent(const protocol::ClipboardEvent& event) override;
+  void Stop() override;
 
  private:
   void CheckClipboardForChanges();
@@ -117,7 +115,7 @@ void ClipboardMac::CheckClipboardForChanges() {
 }
 
 scoped_ptr<Clipboard> Clipboard::Create() {
-  return scoped_ptr<Clipboard>(new ClipboardMac());
+  return make_scoped_ptr(new ClipboardMac());
 }
 
 }  // namespace remoting

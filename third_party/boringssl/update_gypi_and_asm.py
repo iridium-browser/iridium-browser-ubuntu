@@ -18,7 +18,8 @@ OS_ARCH_COMBOS = [
     ('linux', 'x86_64', 'elf', [''], 'S'),
     ('mac', 'x86', 'macosx', ['-fPIC'], 'S'),
     ('mac', 'x86_64', 'macosx', [''], 'S'),
-    ('win', 'x86_64', 'masm', [''], 'asm'),
+    ('win', 'x86', 'win32n', [''], 'asm'),
+    ('win', 'x86_64', 'nasm', [''], 'asm'),
 ]
 
 # NON_PERL_FILES enumerates assembly files that are not processed by the
@@ -219,6 +220,9 @@ def main():
       'sources': [
         '%s',
       ],
+      # TODO(davidben): Fix size_t truncations in BoringSSL.
+      # https://crbug.com/429039
+      'msvs_disabled_warnings': [ 4267, ],
     },\n""" % (test_name, test))
       test_names.append(test_name)
 

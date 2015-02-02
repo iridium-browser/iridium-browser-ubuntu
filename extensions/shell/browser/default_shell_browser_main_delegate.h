@@ -16,12 +16,12 @@ namespace extensions {
 class DefaultShellBrowserMainDelegate : public ShellBrowserMainDelegate {
  public:
   DefaultShellBrowserMainDelegate();
-  virtual ~DefaultShellBrowserMainDelegate();
+  ~DefaultShellBrowserMainDelegate() override;
 
   // ShellBrowserMainDelegate:
-  virtual void Start(content::BrowserContext* context) OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
-  virtual DesktopController* CreateDesktopController() OVERRIDE;
+  void Start(content::BrowserContext* context) override;
+  void Shutdown() override;
+  DesktopController* CreateDesktopController() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DefaultShellBrowserMainDelegate);

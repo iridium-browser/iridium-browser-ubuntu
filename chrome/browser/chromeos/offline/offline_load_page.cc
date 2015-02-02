@@ -20,15 +20,18 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/localized_error.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
+#include "components/error_page/common/error_page_params.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/renderer_preferences.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
@@ -87,7 +90,7 @@ std::string OfflineLoadPage::GetHTMLContents() {
     LocalizedError::GetStrings(net::ERR_INTERNET_DISCONNECTED,
                                net::kErrorDomain, url_, false, false, locale,
                                accept_languages,
-                               scoped_ptr<LocalizedError::ErrorPageParams>(),
+                               scoped_ptr<error_page::ErrorPageParams>(),
                                &error_strings);
     resource_id = IDR_OFFLINE_NET_LOAD_HTML;
   }
@@ -103,7 +106,8 @@ void OfflineLoadPage::OverrideRendererPrefs(
     content::RendererPreferences* prefs) {
   Profile* profile = Profile::FromBrowserContext(
       web_contents_->GetBrowserContext());
-  renderer_preferences_util::UpdateFromSystemSettings(prefs, profile);
+  renderer_preferences_util::UpdateFromSystemSettings(
+      prefs, profile, web_contents_);
 }
 
 void OfflineLoadPage::OnProceed() {

@@ -22,7 +22,7 @@
 #include "ui/gfx/gdi_util.h"
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/common/crash_keys.h"
 #include "printing/backend/print_backend.h"
 #endif
@@ -179,7 +179,7 @@ class PdfFunctionsWin : public PdfFunctionsBase {
 
   bool PlatformInit(
       const base::FilePath& pdf_module_path,
-      const base::ScopedNativeLibrary& pdf_lib) OVERRIDE {
+      const base::ScopedNativeLibrary& pdf_lib) override {
     // Patch the IAT for handling specific APIs known to fail in the sandbox.
     if (!g_iat_patch_createdca.is_patched()) {
       g_iat_patch_createdca.Patch(pdf_module_path.value().c_str(),
@@ -267,14 +267,14 @@ bool PrintingHandler::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_RenderPDFPagesToMetafiles_Stop,
                         OnRenderPDFPagesToMetafileStop)
 #endif  // OS_WIN
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_RenderPDFPagesToPWGRaster,
                         OnRenderPDFPagesToPWGRaster)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_GetPrinterCapsAndDefaults,
                         OnGetPrinterCapsAndDefaults)
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_GetPrinterSemanticCapsAndDefaults,
                         OnGetPrinterSemanticCapsAndDefaults)
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -295,7 +295,7 @@ void PrintingHandler::OnRenderPDFPagesToMetafileGetPage(
     int page_number,
     IPC::PlatformFileForTransit output_file) {
   base::File emf_file = IPC::PlatformFileForTransitToFile(output_file);
-  double scale_factor = 1.0;
+  float scale_factor = 1.0f;
   bool success =
       RenderPdfPageToMetafile(page_number, emf_file.Pass(), &scale_factor);
   Send(new ChromeUtilityHostMsg_RenderPDFPagesToMetafiles_PageDone(
@@ -308,7 +308,7 @@ void PrintingHandler::OnRenderPDFPagesToMetafileStop() {
 
 #endif  // OS_WIN
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 void PrintingHandler::OnRenderPDFPagesToPWGRaster(
     IPC::PlatformFileForTransit pdf_transit,
     const printing::PdfRenderSettings& settings,
@@ -324,16 +324,17 @@ void PrintingHandler::OnRenderPDFPagesToPWGRaster(
   }
   ReleaseProcessIfNeeded();
 }
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
 
 #if defined(OS_WIN)
 int PrintingHandler::LoadPDF(base::File pdf_file) {
   if (!g_pdf_lib.Get().IsValid())
     return 0;
 
-  int64 length = pdf_file.GetLength();
-  if (length < 0)
+  int64 length64 = pdf_file.GetLength();
+  if (length64 <= 0 || length64 > std::numeric_limits<int>::max())
     return 0;
+  int length = static_cast<int>(length64);
 
   pdf_data_.resize(length);
   if (length != pdf_file.Read(0, pdf_data_.data(), pdf_data_.size()))
@@ -349,7 +350,7 @@ int PrintingHandler::LoadPDF(base::File pdf_file) {
 
 bool PrintingHandler::RenderPdfPageToMetafile(int page_number,
                                               base::File output_file,
-                                              double* scale_factor) {
+                                              float* scale_factor) {
   printing::Emf metafile;
   metafile.Init();
 
@@ -394,7 +395,7 @@ bool PrintingHandler::RenderPdfPageToMetafile(int page_number,
 
 #endif  // OS_WIN
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 bool PrintingHandler::RenderPDFPagesToPWGRaster(
     base::File pdf_file,
     const printing::PdfRenderSettings& settings,
@@ -405,16 +406,17 @@ bool PrintingHandler::RenderPDFPagesToPWGRaster(
     return false;
 
   base::File::Info info;
-  if (!pdf_file.GetInfo(&info) || info.size <= 0)
+  if (!pdf_file.GetInfo(&info) || info.size <= 0 ||
+      info.size > std::numeric_limits<int>::max())
     return false;
+  int data_size = static_cast<int>(info.size);
 
-  std::string data(info.size, 0);
-  int data_size = pdf_file.Read(0, &data[0], data.size());
-  if (data_size != static_cast<int>(data.size()))
+  std::string data(data_size, 0);
+  if (pdf_file.Read(0, &data[0], data_size) != data_size)
     return false;
 
   int total_page_count = 0;
-  if (!g_pdf_lib.Get().GetPDFDocInfo(data.data(), data.size(),
+  if (!g_pdf_lib.Get().GetPDFDocInfo(data.data(), data_size,
                                      &total_page_count, NULL)) {
     return false;
   }
@@ -437,7 +439,7 @@ bool PrintingHandler::RenderPDFPagesToPWGRaster(
     }
 
     if (!g_pdf_lib.Get().RenderPDFPageToBitmap(data.data(),
-                                               data.size(),
+                                               data_size,
                                                page_number,
                                                image.pixel_data(),
                                                image.size().width(),
@@ -524,4 +526,4 @@ void PrintingHandler::OnGetPrinterSemanticCapsAndDefaults(
   }
   ReleaseProcessIfNeeded();
 }
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW

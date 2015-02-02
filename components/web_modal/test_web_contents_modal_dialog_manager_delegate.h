@@ -18,13 +18,12 @@ class TestWebContentsModalDialogManagerDelegate
   TestWebContentsModalDialogManagerDelegate();
 
   // WebContentsModalDialogManagerDelegate overrides:
-  virtual void SetWebContentsBlocked(content::WebContents* web_contents,
-                                     bool blocked) OVERRIDE;
+  void SetWebContentsBlocked(content::WebContents* web_contents,
+                             bool blocked) override;
 
-  virtual WebContentsModalDialogHost* GetWebContentsModalDialogHost() OVERRIDE;
+  WebContentsModalDialogHost* GetWebContentsModalDialogHost() override;
 
-  virtual bool IsWebContentsVisible(
-      content::WebContents* web_contents) OVERRIDE;
+  bool IsWebContentsVisible(content::WebContents* web_contents) override;
 
   void set_web_contents_visible(bool visible) {
     web_contents_visible_ = visible;

@@ -35,7 +35,6 @@
 #include "modules/gamepad/GamepadEvent.h"
 #include "modules/gamepad/GamepadList.h"
 #include "modules/gamepad/WebKitGamepadList.h"
-#include "platform/RuntimeEnabledFeatures.h"
 
 namespace blink {
 
@@ -76,7 +75,7 @@ NavigatorGamepad* NavigatorGamepad::from(Document& document)
 {
     if (!document.frame() || !document.frame()->domWindow())
         return 0;
-    Navigator& navigator = document.frame()->domWindow()->navigator();
+    Navigator& navigator = *document.frame()->domWindow()->navigator();
     return &from(navigator);
 }
 
@@ -129,6 +128,7 @@ void NavigatorGamepad::trace(Visitor* visitor)
     visitor->trace(m_pendingEvents);
     WillBeHeapSupplement<Navigator>::trace(visitor);
     DOMWindowProperty::trace(visitor);
+    PlatformEventController::trace(visitor);
 }
 
 void NavigatorGamepad::didUpdateData()
@@ -181,9 +181,6 @@ NavigatorGamepad::NavigatorGamepad(LocalFrame* frame)
 
 NavigatorGamepad::~NavigatorGamepad()
 {
-#if ENABLE(OILPAN)
-    stopUpdating();
-#endif
 }
 
 const char* NavigatorGamepad::supplementName()
@@ -228,7 +225,7 @@ static bool isGamepadEvent(const AtomicString& eventType)
 
 void NavigatorGamepad::didAddEventListener(LocalDOMWindow*, const AtomicString& eventType)
 {
-    if (RuntimeEnabledFeatures::gamepadEnabled() && isGamepadEvent(eventType)) {
+    if (isGamepadEvent(eventType)) {
         if (page() && page()->visibilityState() == PageVisibilityStateVisible)
             startUpdating();
         m_hasEventListener = true;

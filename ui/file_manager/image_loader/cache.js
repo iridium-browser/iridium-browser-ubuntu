@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Persistent cache storing images in an indexed database on the hard disk.
  * @constructor
@@ -196,7 +194,7 @@ Cache.prototype.evictCache_ = function(
     }.bind(this);
 
     metadataStore.openCursor().onsuccess = function(e) {
-      var cursor = event.target.result;
+      var cursor = e.target.result;
       if (cursor) {
         metadataEntries.push(cursor.value);
         cursor.continue();
@@ -255,7 +253,7 @@ Cache.prototype.saveImage = function(key, data, timestamp) {
  * @param {string} key Cache key.
  * @param {number} timestamp Last modification timestamp. If different
  *     that the one in cache, then the entry will be invalidated.
- * @param {function(<string>)} onSuccess Success callback with the image's data.
+ * @param {function(string)} onSuccess Success callback with the image's data.
  * @param {function()} onFailure Failure callback.
  */
 Cache.prototype.loadImage = function(key, timestamp, onSuccess, onFailure) {
@@ -367,7 +365,7 @@ Cache.prototype.removeImage = function(
     // an error.
     if (cacheSize === null || !metadataEntry) {
       if (opt_onFailure)
-        onFailure();
+        opt_onFailure();
       return;
     }
 

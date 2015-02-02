@@ -38,12 +38,12 @@ class ASH_WITH_CONTENT_EXPORT KeyboardOverlayView
   KeyboardOverlayView(content::BrowserContext* context,
                       ui::WebDialogDelegate* delegate,
                       WebContentsHandler* handler);
-  virtual ~KeyboardOverlayView();
+  ~KeyboardOverlayView() override;
 
   // Overridden from ash::OverlayEventFilter::Delegate:
-  virtual void Cancel() OVERRIDE;
-  virtual bool IsCancelingKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual aura::Window* GetWindow() OVERRIDE;
+  void Cancel() override;
+  bool IsCancelingKeyEvent(ui::KeyEvent* event) override;
+  aura::Window* GetWindow() override;
 
   // Shows the keyboard overlay.
   static void ShowDialog(content::BrowserContext* context,
@@ -55,7 +55,7 @@ class ASH_WITH_CONTENT_EXPORT KeyboardOverlayView
   FRIEND_TEST_ALL_PREFIXES(KeyboardOverlayViewTest, NoRedundantCancelingKeys);
 
   // Overridden from views::WidgetDelegate:
-  virtual void WindowClosing() OVERRIDE;
+  void WindowClosing() override;
 
   static void GetCancelingKeysForTesting(
       std::vector<KeyEventData>* canceling_keys);

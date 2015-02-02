@@ -55,11 +55,17 @@ class IOSPListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
                                         expected_output,
                                         parse,
                                         decode_and_parse):
+
+
+    _defines = { '_chromium': '1',
+                 'mac_bundle_id': 'com.example.Test',
+                 'version': '39.0.0.0' }
+
     # Generate the grit output for |templates|.
     output = self.GetOutput(
         self.PrepareTest(templates),
         'fr',
-        { '_chromium': '1', 'mac_bundle_id': 'com.example.Test' },
+        _defines,
         'ios_plist',
         'en')
 
@@ -114,6 +120,17 @@ class IOSPListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
     ''' % (name, type, example, extra)
 
   def testEmpty(self):
+    templates = '''
+    {
+      'policy_definitions': [],
+      'placeholders': [],
+      'messages': {},
+    }
+    '''
+    expected = {}
+    self._VerifyGeneratedOutput(templates, expected)
+
+  def testEmptyVersion(self):
     templates = '''
     {
       'policy_definitions': [],

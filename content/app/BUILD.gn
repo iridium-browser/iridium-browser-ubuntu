@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# TODO(GYP) enable chrome_multiple_dll support
+is_chrome_multiple_dll = false
+
 content_app_sources = [
   "android/app_jni_registrar.cc",
   "android/app_jni_registrar.h",
@@ -51,10 +54,9 @@ if (is_ios) {
   ]
 } else {
   content_app_deps += [
-    "//mojo/application_manager",
+    "//mojo/edk/system",
     "//mojo/environment:chromium",
     "//mojo/public/interfaces/application",
-    "//mojo/system",
   ]
 }
 
@@ -62,6 +64,10 @@ content_app_extra_configs = [
   "//build/config/compiler:wexit_time_destructors",
   "//content:content_implementation",
 ]
+
+if (!is_chrome_multiple_dll) {
+  content_app_deps += [ "//content/gpu" ]
+}
 
 # This includes the app sources for both the browser and child processes.
 source_set("both") {
@@ -73,9 +79,6 @@ source_set("both") {
   configs += content_app_extra_configs
   deps = content_app_deps
 }
-
-# TODO(GYP) enable chrome_multiple_dll support
-is_chrome_multiple_dll = false
 
 if (is_chrome_multiple_dll) {
   # It doesn't make sense to do the browser/child dll split in component mode.

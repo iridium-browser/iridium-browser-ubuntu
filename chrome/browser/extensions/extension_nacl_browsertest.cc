@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/web_contents.h"
@@ -31,7 +30,7 @@ using extensions::Manifest;
 
 namespace {
 
-const char* kExtensionId = "bjjcibdiodkkeanflmiijlcfieiemced";
+const char kExtensionId[] = "bjjcibdiodkkeanflmiijlcfieiemced";
 
 // This class tests that the Native Client plugin is blocked unless the
 // .nexe is part of an extension from the Chrome Webstore.
@@ -143,7 +142,6 @@ class NaClExtensionTest : public ExtensionBrowserTest {
     CheckPluginsCreated(extension->GetResourceURL("test.html"),
                         expected_to_succeed);
   }
-
 };
 
 // Test that the NaCl plugin isn't blocked for Webstore extensions.

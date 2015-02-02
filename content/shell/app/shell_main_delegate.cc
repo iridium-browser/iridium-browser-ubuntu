@@ -17,11 +17,14 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/layouttest_support.h"
+#include "content/shell/app/blink_test_platform_support.h"
 #include "content/shell/app/shell_crash_reporter_client.h"
-#include "content/shell/app/webkit_test_platform_support.h"
+#include "content/shell/browser/layout_test/layout_test_browser_main.h"
+#include "content/shell/browser/layout_test/layout_test_content_browser_client.h"
 #include "content/shell/browser/shell_browser_main.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/common/shell_switches.h"
+#include "content/shell/renderer/layout_test/layout_test_content_renderer_client.h"
 #include "content/shell/renderer/shell_content_renderer_client.h"
 #include "media/base/media_switches.h"
 #include "net/cookies/cookie_monster.h"
@@ -59,6 +62,7 @@
 #include <windows.h>
 #include "base/logging_win.h"
 #include "components/crash/app/breakpad_win.h"
+#include "content/shell/common/v8_breakpad_support_win.h"
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -113,10 +117,12 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
 #if defined(OS_WIN)
   // Enable trace control and transport through event tracing for Windows.
   logging::LogEventProvider::Initialize(kContentShellProviderName);
+
+  v8_breakpad_support::SetUp();
 #endif
 #if defined(OS_MACOSX)
   // Needs to happen before InitializeResourceBundle() and before
-  // WebKitTestPlatformInitialize() are called.
+  // BlinkTestPlatformInitialize() are called.
   OverrideFrameworkBundlePath();
   OverrideChildProcessPath();
   EnsureCorrectResolutionSettings();
@@ -126,7 +132,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
   CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kCheckLayoutTestSysDeps)) {
     // If CheckLayoutSystemDeps succeeds, we don't exit early. Instead we
-    // continue and try to load the fonts in WebKitTestPlatformInitialize
+    // continue and try to load the fonts in BlinkTestPlatformInitialize
     // below, and then try to bring up the rest of the content module.
     if (!CheckLayoutSystemDeps()) {
       if (exit_code)
@@ -185,7 +191,7 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
     net::RemoveProprietaryMediaTypesAndCodecsForTests();
 #endif
 
-    if (!WebKitTestPlatformInitialize()) {
+    if (!BlinkTestPlatformInitialize()) {
       if (exit_code)
         *exit_code = 1;
       return true;
@@ -247,7 +253,11 @@ int ShellMainDelegate::RunProcess(
 #endif
 
   browser_runner_.reset(BrowserMainRunner::Create());
-  return ShellBrowserMain(main_function_params, browser_runner_);
+  CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  return command_line.HasSwitch(switches::kDumpRenderTree) ||
+                 command_line.HasSwitch(switches::kCheckLayoutTestSysDeps)
+             ? LayoutTestBrowserMain(main_function_params, browser_runner_)
+             : ShellBrowserMain(main_function_params, browser_runner_);
 }
 
 #if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
@@ -299,12 +309,20 @@ void ShellMainDelegate::InitializeResourceBundle() {
 }
 
 ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
-  browser_client_.reset(new ShellContentBrowserClient);
+  browser_client_.reset(
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree) ?
+          new LayoutTestContentBrowserClient :
+          new ShellContentBrowserClient);
+
   return browser_client_.get();
 }
 
 ContentRendererClient* ShellMainDelegate::CreateContentRendererClient() {
-  renderer_client_.reset(new ShellContentRendererClient);
+  renderer_client_.reset(
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree) ?
+          new LayoutTestContentRendererClient :
+          new ShellContentRendererClient);
+
   return renderer_client_.get();
 }
 

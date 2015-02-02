@@ -48,23 +48,22 @@ class PrerenderTabHelper
       content::WebContents* web_contents,
       password_manager::PasswordManager* password_manager);
 
-  virtual ~PrerenderTabHelper();
+  ~PrerenderTabHelper() override;
 
   // content::WebContentsObserver implementation.
-  virtual void DidGetRedirectForResourceRequest(
+  void DidGetRedirectForResourceRequest(
       content::RenderViewHost* render_view_host,
-      const content::ResourceRedirectDetails& details) OVERRIDE;
-  virtual void DidStopLoading(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
+      const content::ResourceRedirectDetails& details) override;
+  void DidStopLoading(content::RenderViewHost* render_view_host) override;
+  void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       bool is_error_page,
-      bool is_iframe_srcdoc) OVERRIDE;
-  virtual void DidCommitProvisionalLoadForFrame(
+      bool is_iframe_srcdoc) override;
+  void DidCommitProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
-      ui::PageTransition transition_type) OVERRIDE;
+      ui::PageTransition transition_type) override;
 
   // Called when the URL of the main frame changed, either when the load
   // commits, or a redirect happens.

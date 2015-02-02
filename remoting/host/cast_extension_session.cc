@@ -71,16 +71,16 @@ class CastSetSessionDescriptionObserver
   static CastSetSessionDescriptionObserver* Create() {
     return new rtc::RefCountedObject<CastSetSessionDescriptionObserver>();
   }
-  virtual void OnSuccess() OVERRIDE {
+  void OnSuccess() override {
     VLOG(1) << "Setting session description succeeded.";
   }
-  virtual void OnFailure(const std::string& error) OVERRIDE {
+  void OnFailure(const std::string& error) override {
     LOG(ERROR) << "Setting session description failed: " << error;
   }
 
  protected:
   CastSetSessionDescriptionObserver() {}
-  virtual ~CastSetSessionDescriptionObserver() {}
+  ~CastSetSessionDescriptionObserver() override {}
 
   DISALLOW_COPY_AND_ASSIGN(CastSetSessionDescriptionObserver);
 };
@@ -95,7 +95,7 @@ class CastCreateSessionDescriptionObserver
     return new rtc::RefCountedObject<CastCreateSessionDescriptionObserver>(
         session);
   }
-  virtual void OnSuccess(webrtc::SessionDescriptionInterface* desc) OVERRIDE {
+  void OnSuccess(webrtc::SessionDescriptionInterface* desc) override {
     if (cast_extension_session_ == NULL) {
       LOG(ERROR)
           << "No CastExtensionSession. Creating session description succeeded.";
@@ -103,7 +103,7 @@ class CastCreateSessionDescriptionObserver
     }
     cast_extension_session_->OnCreateSessionDescription(desc);
   }
-  virtual void OnFailure(const std::string& error) OVERRIDE {
+  void OnFailure(const std::string& error) override {
     if (cast_extension_session_ == NULL) {
       LOG(ERROR)
           << "No CastExtensionSession. Creating session description failed.";
@@ -118,7 +118,7 @@ class CastCreateSessionDescriptionObserver
  protected:
   explicit CastCreateSessionDescriptionObserver(CastExtensionSession* session)
       : cast_extension_session_(session) {}
-  virtual ~CastCreateSessionDescriptionObserver() {}
+  ~CastCreateSessionDescriptionObserver() override {}
 
  private:
   CastExtensionSession* cast_extension_session_;
@@ -134,8 +134,7 @@ class CastStatsObserver : public webrtc::StatsObserver {
     return new rtc::RefCountedObject<CastStatsObserver>();
   }
 
-  virtual void OnComplete(
-      const std::vector<webrtc::StatsReport>& reports) OVERRIDE {
+  void OnComplete(const std::vector<webrtc::StatsReport>& reports) override {
     typedef webrtc::StatsReport::Values::iterator ValuesIterator;
 
     VLOG(1) << "Received " << reports.size() << " new StatsReports.";
@@ -153,7 +152,7 @@ class CastStatsObserver : public webrtc::StatsObserver {
 
  protected:
   CastStatsObserver() {}
-  virtual ~CastStatsObserver() {}
+  ~CastStatsObserver() override {}
 
   DISALLOW_COPY_AND_ASSIGN(CastStatsObserver);
 };
@@ -185,11 +184,9 @@ scoped_ptr<CastExtensionSession> CastExtensionSession::Create(
                                network_settings,
                                client_session_control,
                                client_stub));
-  if (!cast_extension_session->WrapTasksAndSave()) {
-    return scoped_ptr<CastExtensionSession>();
-  }
-  if (!cast_extension_session->InitializePeerConnection()) {
-    return scoped_ptr<CastExtensionSession>();
+  if (!cast_extension_session->WrapTasksAndSave() ||
+      !cast_extension_session->InitializePeerConnection()) {
+    return nullptr;
   }
   return cast_extension_session.Pass();
 }
@@ -556,7 +553,7 @@ bool CastExtensionSession::SetupVideoStream(
   stream_ = peer_conn_factory_->CreateLocalMediaStream(kStreamLabel);
 
   if (!stream_->AddTrack(video_track) ||
-      !peer_connection_->AddStream(stream_, NULL)) {
+      !peer_connection_->AddStream(stream_)) {
     return false;
   }
 
@@ -590,11 +587,6 @@ bool CastExtensionSession::connection_active() const {
 }
 
 // webrtc::PeerConnectionObserver implementation -------------------------------
-
-void CastExtensionSession::OnError() {
-  VLOG(1) << "PeerConnectionObserver: an error occurred.";
-}
-
 void CastExtensionSession::OnSignalingChange(
     webrtc::PeerConnectionInterface::SignalingState new_state) {
   VLOG(1) << "PeerConnectionObserver: SignalingState changed to:" << new_state;

@@ -89,10 +89,10 @@ extern const char kChromeUIVersionURL[];
 extern const char kChromeUIVoiceSearchURL[];
 
 #if defined(OS_ANDROID)
+extern const char kChromeUINativeScheme[];
 extern const char kChromeUINativeNewTabURL[];
 extern const char kChromeUINativeBookmarksURL[];
 extern const char kChromeUINativeRecentTabsURL[];
-extern const char kChromeUIWelcomeURL[];
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -243,9 +243,9 @@ extern const char kChromeUIWorkersHost[];
 extern const char kChromeUIScreenshotPath[];
 extern const char kChromeUIThemePath[];
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 extern const char kChromeUIPrintHost[];
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
 
 #if defined(OS_ANDROID)
 extern const char kChromeUIWelcomeHost[];
@@ -297,6 +297,11 @@ extern const char kChromeUIWrenchMenu[];
 extern const char kEULAPathFormat[];
 extern const char kOemEulaURLPath[];
 extern const char kOnlineEulaURLPath[];
+
+extern const char kChromeOSCreditsPath[];
+
+extern const char kChromeOSAssetHost[];
+extern const char kChromeOSAssetPath[];
 #endif
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
@@ -517,7 +522,6 @@ extern const char kChromeSearchMostVisitedUrl[];
 
 #if defined(OS_CHROMEOS)
 extern const char kCrosScheme[];
-extern const char kExternalFileScheme[];
 #endif
 
 // "Learn more" URL for the Cloud Print section under Options.

@@ -197,11 +197,11 @@ class TestCopyOrMoveFileValidatorFactory
   // TODO(gbillock): switch args to enum or something
   explicit TestCopyOrMoveFileValidatorFactory(Validity validity)
       : validity_(validity) {}
-  virtual ~TestCopyOrMoveFileValidatorFactory() {}
+  ~TestCopyOrMoveFileValidatorFactory() override {}
 
-  virtual storage::CopyOrMoveFileValidator* CreateCopyOrMoveFileValidator(
+  storage::CopyOrMoveFileValidator* CreateCopyOrMoveFileValidator(
       const FileSystemURL& /*src_url*/,
-      const base::FilePath& /*platform_path*/) OVERRIDE {
+      const base::FilePath& /*platform_path*/) override {
     return new TestCopyOrMoveFileValidator(validity_);
   }
 
@@ -216,18 +216,18 @@ class TestCopyOrMoveFileValidatorFactory
                         base::File::FILE_OK :
                         base::File::FILE_ERROR_SECURITY) {
     }
-    virtual ~TestCopyOrMoveFileValidator() {}
+    ~TestCopyOrMoveFileValidator() override {}
 
-    virtual void StartPreWriteValidation(
-        const ResultCallback& result_callback) OVERRIDE {
+    void StartPreWriteValidation(
+        const ResultCallback& result_callback) override {
       // Post the result since a real validator must do work asynchronously.
       base::MessageLoop::current()->PostTask(
           FROM_HERE, base::Bind(result_callback, result_));
     }
 
-    virtual void StartPostWriteValidation(
+    void StartPostWriteValidation(
         const base::FilePath& dest_platform_path,
-        const ResultCallback& result_callback) OVERRIDE {
+        const ResultCallback& result_callback) override {
       // Post the result since a real validator must do work asynchronously.
       base::MessageLoop::current()->PostTask(
           FROM_HERE, base::Bind(result_callback, write_result_));

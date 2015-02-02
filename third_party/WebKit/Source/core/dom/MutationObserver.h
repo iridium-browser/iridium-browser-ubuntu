@@ -59,7 +59,7 @@ typedef WillBeHeapHashSet<RawPtrWillBeWeakMember<MutationObserverRegistration> >
 typedef WillBeHeapVector<RefPtrWillBeMember<MutationObserver> > MutationObserverVector;
 typedef WillBeHeapVector<RefPtrWillBeMember<MutationRecord> > MutationRecordVector;
 
-class MutationObserver FINAL : public RefCountedWillBeGarbageCollectedFinalized<MutationObserver>, public ScriptWrappable {
+class MutationObserver final : public RefCountedWillBeGarbageCollectedFinalized<MutationObserver>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum MutationType {
@@ -93,7 +93,6 @@ public:
     void observationEnded(MutationObserverRegistration*);
     void enqueueMutationRecord(PassRefPtrWillBeRawPtr<MutationRecord>);
     void setHasTransientRegistration();
-    bool canDeliver();
 
     WillBeHeapHashSet<RawPtrWillBeMember<Node> > getObservedNodes() const;
 
@@ -104,6 +103,7 @@ private:
 
     explicit MutationObserver(PassOwnPtr<MutationCallback>);
     void deliver();
+    bool shouldBeSuspended() const;
 
     OwnPtr<MutationCallback> m_callback;
     MutationRecordVector m_records;

@@ -125,6 +125,7 @@ public:
 
     bool getOwnPropertiesAsStringHashMap(HashMap<String, String>&) const;
     bool getOwnPropertyNames(Vector<String>&) const;
+    bool getPropertyNames(Vector<String>&) const;
 
     bool getWithUndefinedOrNullCheck(const String&, String&) const;
     bool getWithUndefinedOrNullCheck(const String&, RefPtrWillBeMember<Element>&) const;
@@ -156,6 +157,8 @@ struct DictionaryHelper {
     static bool get(const Dictionary&, const String& key, T& value);
     template <typename T>
     static bool get(const Dictionary&, const String& key, T& value, bool& hasValue);
+    template <typename T>
+    static bool get(const Dictionary&, const String& key, T& value, ExceptionState&);
     template <typename T>
     static bool getWithUndefinedOrNullCheck(const Dictionary& dictionary, const String& key, T& value)
     {

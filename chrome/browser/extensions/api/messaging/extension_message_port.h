@@ -21,21 +21,19 @@ class ExtensionMessagePort : public MessageService::MessagePort {
   ExtensionMessagePort(content::RenderProcessHost* process,
                        int routing_id,
                        const std::string& extension_id);
-  virtual void DispatchOnConnect(
-      int dest_port_id,
-      const std::string& channel_name,
-      const base::DictionaryValue& source_tab,
-      const std::string& source_extension_id,
-      const std::string& target_extension_id,
-      const GURL& source_url,
-      const std::string& tls_channel_id) OVERRIDE;
-  virtual void DispatchOnDisconnect(int source_port_id,
-                                    const std::string& error_message) OVERRIDE;
-  virtual void DispatchOnMessage(const Message& message,
-                                 int target_port_id) OVERRIDE;
-  virtual void IncrementLazyKeepaliveCount() OVERRIDE;
-  virtual void DecrementLazyKeepaliveCount() OVERRIDE;
-  virtual content::RenderProcessHost* GetRenderProcessHost() OVERRIDE;
+  void DispatchOnConnect(int dest_port_id,
+                         const std::string& channel_name,
+                         const base::DictionaryValue& source_tab,
+                         const std::string& source_extension_id,
+                         const std::string& target_extension_id,
+                         const GURL& source_url,
+                         const std::string& tls_channel_id) override;
+  void DispatchOnDisconnect(int source_port_id,
+                            const std::string& error_message) override;
+  void DispatchOnMessage(const Message& message, int target_port_id) override;
+  void IncrementLazyKeepaliveCount() override;
+  void DecrementLazyKeepaliveCount() override;
+  content::RenderProcessHost* GetRenderProcessHost() override;
 
  private:
   content::RenderProcessHost* process_;

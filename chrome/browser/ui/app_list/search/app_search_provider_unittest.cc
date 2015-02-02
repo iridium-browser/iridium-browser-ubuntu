@@ -11,13 +11,13 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/app_list/app_list_test_util.h"
 #include "chrome/browser/ui/app_list/search/app_search_provider.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension_set.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/app_list/search_result.h"
 
 namespace app_list {
 namespace test {
@@ -31,10 +31,10 @@ bool MoreRelevant(const SearchResult* result1, const SearchResult* result2) {
 class AppSearchProviderTest : public AppListTestBase {
  public:
   AppSearchProviderTest() {}
-  virtual ~AppSearchProviderTest() {}
+  ~AppSearchProviderTest() override {}
 
   // AppListTestBase overrides:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AppListTestBase::SetUp();
 
     app_search_.reset(new AppSearchProvider(profile_.get(), NULL));

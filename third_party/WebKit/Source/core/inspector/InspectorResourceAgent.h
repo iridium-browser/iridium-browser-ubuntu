@@ -39,10 +39,6 @@
 #include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
 
-namespace WTF {
-class String;
-}
-
 namespace blink {
 
 class Resource;
@@ -54,11 +50,9 @@ class LocalFrame;
 class HTTPHeaderMap;
 class InspectorFrontend;
 class InspectorPageAgent;
-class InstrumentingAgents;
 class JSONObject;
 class KURL;
 class NetworkResourcesData;
-class Page;
 class ResourceError;
 class ResourceLoader;
 class ResourceRequest;
@@ -72,19 +66,19 @@ class WebSocketHandshakeResponse;
 
 typedef String ErrorString;
 
-class InspectorResourceAgent FINAL : public InspectorBaseAgent<InspectorResourceAgent>, public InspectorBackendDispatcher::NetworkCommandHandler {
+class InspectorResourceAgent final : public InspectorBaseAgent<InspectorResourceAgent>, public InspectorBackendDispatcher::NetworkCommandHandler {
 public:
     static PassOwnPtrWillBeRawPtr<InspectorResourceAgent> create(InspectorPageAgent* pageAgent)
     {
         return adoptPtrWillBeNoop(new InspectorResourceAgent(pageAgent));
     }
 
-    virtual void setFrontend(InspectorFrontend*) OVERRIDE;
-    virtual void clearFrontend() OVERRIDE;
-    virtual void restore() OVERRIDE;
+    virtual void setFrontend(InspectorFrontend*) override;
+    virtual void clearFrontend() override;
+    virtual void restore() override;
 
     virtual ~InspectorResourceAgent();
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     // Called from instrumentation.
     void willSendRequest(unsigned long identifier, DocumentLoader*, ResourceRequest&, const ResourceResponse& redirectResponse, const FetchInitiatorInfo&);
@@ -102,7 +96,7 @@ public:
     void documentThreadableLoaderStartedLoadingForClient(unsigned long identifier, ThreadableLoaderClient*);
     void willLoadXHR(XMLHttpRequest*, ThreadableLoaderClient*, const AtomicString& method, const KURL&, bool async, PassRefPtr<FormData> body, const HTTPHeaderMap& headers, bool includeCrendentials);
     void didFailXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*);
-    void didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long identifier, ScriptString sourceString, const AtomicString&, const String&, const String&, unsigned);
+    void didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long identifier, ScriptString sourceString, const AtomicString&, const String&);
 
     void willDestroyResource(Resource*);
 
@@ -130,20 +124,20 @@ public:
     void setResourcesDataSizeLimitsFromInternals(int maximumResourcesContentSize, int maximumSingleResourceContentSize);
 
     // Called from frontend
-    virtual void enable(ErrorString*) OVERRIDE;
-    virtual void disable(ErrorString*) OVERRIDE;
-    virtual void setUserAgentOverride(ErrorString*, const String& userAgent) OVERRIDE;
-    virtual void setExtraHTTPHeaders(ErrorString*, const RefPtr<JSONObject>&) OVERRIDE;
-    virtual void getResponseBody(ErrorString*, const String& requestId, String* content, bool* base64Encoded) OVERRIDE;
+    virtual void enable(ErrorString*) override;
+    virtual void disable(ErrorString*) override;
+    virtual void setUserAgentOverride(ErrorString*, const String& userAgent) override;
+    virtual void setExtraHTTPHeaders(ErrorString*, const RefPtr<JSONObject>&) override;
+    virtual void getResponseBody(ErrorString*, const String& requestId, String* content, bool* base64Encoded) override;
 
-    virtual void replayXHR(ErrorString*, const String& requestId) OVERRIDE;
+    virtual void replayXHR(ErrorString*, const String& requestId) override;
 
-    virtual void canClearBrowserCache(ErrorString*, bool*) OVERRIDE;
-    virtual void canClearBrowserCookies(ErrorString*, bool*) OVERRIDE;
-    virtual void emulateNetworkConditions(ErrorString*, bool, double, double, double) OVERRIDE;
-    virtual void setCacheDisabled(ErrorString*, bool cacheDisabled) OVERRIDE;
+    virtual void canClearBrowserCache(ErrorString*, bool*) override;
+    virtual void canClearBrowserCookies(ErrorString*, bool*) override;
+    virtual void emulateNetworkConditions(ErrorString*, bool, double, double, double) override;
+    virtual void setCacheDisabled(ErrorString*, bool cacheDisabled) override;
 
-    virtual void loadResourceForFrontend(ErrorString*, const String& frameId, const String& url, const RefPtr<JSONObject>* requestHeaders, PassRefPtrWillBeRawPtr<LoadResourceForFrontendCallback>) OVERRIDE;
+    virtual void loadResourceForFrontend(ErrorString*, const String& frameId, const String& url, const RefPtr<JSONObject>* requestHeaders, PassRefPtrWillBeRawPtr<LoadResourceForFrontendCallback>) override;
 
     // Called from other agents.
     void setHostId(const String&);

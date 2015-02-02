@@ -53,7 +53,7 @@ class PoolBuffer : public media::VideoCaptureDevice::Client::Buffer {
   }
 
  private:
-  virtual ~PoolBuffer() { pool_->RelinquishProducerReservation(id()); }
+  ~PoolBuffer() override { pool_->RelinquishProducerReservation(id()); }
 
   const scoped_refptr<VideoCaptureBufferPool> pool_;
 };
@@ -61,11 +61,9 @@ class PoolBuffer : public media::VideoCaptureDevice::Client::Buffer {
 class SyncPointClientImpl : public media::VideoFrame::SyncPointClient {
  public:
   explicit SyncPointClientImpl(GLHelper* gl_helper) : gl_helper_(gl_helper) {}
-  virtual ~SyncPointClientImpl() {}
-  virtual uint32 InsertSyncPoint() OVERRIDE {
-    return gl_helper_->InsertSyncPoint();
-  }
-  virtual void WaitSyncPoint(uint32 sync_point) OVERRIDE {
+  ~SyncPointClientImpl() override {}
+  uint32 InsertSyncPoint() override { return gl_helper_->InsertSyncPoint(); }
+  void WaitSyncPoint(uint32 sync_point) override {
     gl_helper_->WaitSyncPoint(sync_point);
   }
 
@@ -156,24 +154,23 @@ class VideoCaptureController::VideoCaptureDeviceClient
   explicit VideoCaptureDeviceClient(
       const base::WeakPtr<VideoCaptureController>& controller,
       const scoped_refptr<VideoCaptureBufferPool>& buffer_pool);
-  virtual ~VideoCaptureDeviceClient();
+  ~VideoCaptureDeviceClient() override;
 
   // VideoCaptureDevice::Client implementation.
-  virtual scoped_refptr<Buffer> ReserveOutputBuffer(
-      media::VideoFrame::Format format,
-      const gfx::Size& size) OVERRIDE;
-  virtual void OnIncomingCapturedData(const uint8* data,
-                                      int length,
-                                      const VideoCaptureFormat& frame_format,
-                                      int rotation,
-                                      base::TimeTicks timestamp) OVERRIDE;
-  virtual void OnIncomingCapturedVideoFrame(
+  scoped_refptr<Buffer> ReserveOutputBuffer(media::VideoFrame::Format format,
+                                            const gfx::Size& size) override;
+  void OnIncomingCapturedData(const uint8* data,
+                              int length,
+                              const VideoCaptureFormat& frame_format,
+                              int rotation,
+                              base::TimeTicks timestamp) override;
+  void OnIncomingCapturedVideoFrame(
       const scoped_refptr<Buffer>& buffer,
       const VideoCaptureFormat& buffer_format,
       const scoped_refptr<media::VideoFrame>& frame,
-      base::TimeTicks timestamp) OVERRIDE;
-  virtual void OnError(const std::string& reason) OVERRIDE;
-  virtual void OnLog(const std::string& message) OVERRIDE;
+      base::TimeTicks timestamp) override;
+  void OnError(const std::string& reason) override;
+  void OnLog(const std::string& message) override;
 
  private:
   scoped_refptr<Buffer> DoReserveOutputBuffer(media::VideoFrame::Format format,
@@ -189,7 +186,7 @@ class VideoCaptureController::VideoCaptureDeviceClient
 VideoCaptureController::VideoCaptureController(int max_buffers)
     : buffer_pool_(new VideoCaptureBufferPool(max_buffers)),
       state_(VIDEO_CAPTURE_STATE_STARTED),
-      frame_received_(false),
+      has_received_frames_(false),
       weak_ptr_factory_(this) {
 }
 
@@ -578,7 +575,6 @@ VideoCaptureController::VideoCaptureDeviceClient::DoReserveOutputBuffer(
 VideoCaptureController::~VideoCaptureController() {
   STLDeleteContainerPointers(controller_clients_.begin(),
                              controller_clients_.end());
-  UMA_HISTOGRAM_BOOLEAN("Media.VideoCapture.FramesReceived", frame_received_);
 }
 
 void VideoCaptureController::DoIncomingCapturedVideoFrameOnIOThread(
@@ -627,7 +623,7 @@ void VideoCaptureController::DoIncomingCapturedVideoFrameOnIOThread(
     }
   }
 
-  if (!frame_received_) {
+  if (!has_received_frames_) {
     UMA_HISTOGRAM_COUNTS("Media.VideoCapture.Width",
                          buffer_format.frame_size.width());
     UMA_HISTOGRAM_COUNTS("Media.VideoCapture.Height",
@@ -637,10 +633,7 @@ void VideoCaptureController::DoIncomingCapturedVideoFrameOnIOThread(
                                buffer_format.frame_size.height());
     UMA_HISTOGRAM_COUNTS("Media.VideoCapture.FrameRate",
                          buffer_format.frame_rate);
-    UMA_HISTOGRAM_ENUMERATION("Media.VideoCapture.PixelFormat",
-                              buffer_format.pixel_format,
-                              media::PIXEL_FORMAT_MAX);
-    frame_received_ = true;
+    has_received_frames_ = true;
   }
 
   buffer_pool_->HoldForConsumers(buffer->id(), count);

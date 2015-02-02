@@ -39,13 +39,11 @@ class FileSystemProviderOperationsWriteFileTest : public testing::Test {
   FileSystemProviderOperationsWriteFileTest() {}
   virtual ~FileSystemProviderOperationsWriteFileTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
+    MountOptions mount_options(kFileSystemId, "" /* display_name */);
+    mount_options.writable = true;
     file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* display_name */,
-                               true /* writable */,
-                               base::FilePath() /* mount_path */);
+        ProvidedFileSystemInfo(kExtensionId, mount_options, base::FilePath());
     io_buffer_ = make_scoped_refptr(new net::StringIOBuffer(kWriteData));
   }
 
@@ -115,11 +113,9 @@ TEST_F(FileSystemProviderOperationsWriteFileTest, Execute_ReadOnly) {
   util::StatusCallbackLog callback_log;
 
   const ProvidedFileSystemInfo read_only_file_system_info(
-        kExtensionId,
-        kFileSystemId,
-        "" /* file_system_name */,
-        false /* writable */,
-        base::FilePath() /* mount_path */);
+      kExtensionId,
+      MountOptions(kFileSystemId, "" /* display_name */),
+      base::FilePath() /* mount_path */);
 
   WriteFile write_file(NULL,
                        read_only_file_system_info,

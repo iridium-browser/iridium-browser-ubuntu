@@ -24,34 +24,33 @@ class InvalidationLoggerObserverTest : public InvalidationLoggerObserver {
     registered_handlers = std::multiset<std::string>();
   }
 
-  virtual void OnRegistrationChange(const std::multiset<std::string>& handlers)
-      OVERRIDE {
+  void OnRegistrationChange(
+      const std::multiset<std::string>& handlers) override {
     registered_handlers = handlers;
     registration_change_received = true;
   }
 
-  virtual void OnStateChange(const syncer::InvalidatorState& new_state,
-                             const base::Time& last_change_timestamp)
-      OVERRIDE {
+  void OnStateChange(const syncer::InvalidatorState& new_state,
+                     const base::Time& last_change_timestamp) override {
     state_received = true;
   }
 
-  virtual void OnUpdateIds(const std::string& handler,
-                           const syncer::ObjectIdCountMap& details) OVERRIDE {
+  void OnUpdateIds(const std::string& handler,
+                   const syncer::ObjectIdCountMap& details) override {
     update_id_received = true;
     update_id_replicated[handler] = details;
   }
 
-  virtual void OnDebugMessage(const base::DictionaryValue& details) OVERRIDE {
+  void OnDebugMessage(const base::DictionaryValue& details) override {
     debug_message_received = true;
   }
 
-  virtual void OnInvalidation(
-      const syncer::ObjectIdInvalidationMap& new_invalidations) OVERRIDE {
+  void OnInvalidation(
+      const syncer::ObjectIdInvalidationMap& new_invalidations) override {
     invalidation_received = true;
   }
 
-  virtual void OnDetailedStatus(const base::DictionaryValue& details) OVERRIDE {
+  void OnDetailedStatus(const base::DictionaryValue& details) override {
     detailed_status_received = true;
   }
 

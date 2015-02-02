@@ -48,7 +48,7 @@ class SchemaRegistryServiceFactory : public BrowserContextKeyedBaseFactory {
   friend struct DefaultSingletonTraits<SchemaRegistryServiceFactory>;
 
   SchemaRegistryServiceFactory();
-  virtual ~SchemaRegistryServiceFactory();
+  ~SchemaRegistryServiceFactory() override;
 
   SchemaRegistryService* GetForContextInternal(
       content::BrowserContext* context);
@@ -59,14 +59,11 @@ class SchemaRegistryServiceFactory : public BrowserContextKeyedBaseFactory {
       CombinedSchemaRegistry* global_registry);
 
   // BrowserContextKeyedBaseFactory:
-  virtual void BrowserContextShutdown(
-      content::BrowserContext* context) OVERRIDE;
-  virtual void BrowserContextDestroyed(
-      content::BrowserContext* context) OVERRIDE;
-  virtual void SetEmptyTestingFactory(
-      content::BrowserContext* context) OVERRIDE;
-  virtual bool HasTestingFactory(content::BrowserContext* context) OVERRIDE;
-  virtual void CreateServiceNow(content::BrowserContext* context) OVERRIDE;
+  void BrowserContextShutdown(content::BrowserContext* context) override;
+  void BrowserContextDestroyed(content::BrowserContext* context) override;
+  void SetEmptyTestingFactory(content::BrowserContext* context) override;
+  bool HasTestingFactory(content::BrowserContext* context) override;
+  void CreateServiceNow(content::BrowserContext* context) override;
 
   typedef std::map<content::BrowserContext*, SchemaRegistryService*>
       RegistryMap;

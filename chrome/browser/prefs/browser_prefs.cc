@@ -7,26 +7,23 @@
 #include <string>
 
 #include "base/debug/trace_event.h"
+#include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/accessibility/invert_bubble_prefs.h"
-#include "chrome/browser/apps/drive/drive_app_mapping.h"
-#include "chrome/browser/apps/shortcut_manager.h"
 #include "chrome/browser/autocomplete/zero_suggest_provider.h"
-#include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/component_updater/recovery_component_installer.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/geolocation/geolocation_prefs.h"
-#include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/intranet_redirect_detector.h"
@@ -61,12 +58,13 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/task_manager/task_manager.h"
+#include "chrome/browser/ui/app_list/app_list_prefs.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_ui_prefs.h"
 #include "chrome/browser/ui/navigation_correction_tab_observer.h"
 #include "chrome/browser/ui/network_profile_bubble.h"
+#include "chrome/browser/ui/passwords/password_bubble_experiment.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/ui/startup/autolaunch_prompt.h"
@@ -77,15 +75,16 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/print_preview/sticky_settings.h"
+#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/dom_distiller/core/distilled_page_prefs.h"
+#include "components/enhanced_bookmarks/bookmark_server_cluster_service.h"
 #include "components/gcm_driver/gcm_channel_status_syncer.h"
-#include "components/google/core/browser/google_pref_names.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -100,6 +99,10 @@
 #include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #endif
 
+#if defined(ENABLE_BACKGROUND)
+#include "chrome/browser/background/background_mode_manager.h"
+#endif
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
@@ -107,6 +110,8 @@
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/apps/drive/drive_app_mapping.h"
+#include "chrome/browser/apps/shortcut_manager.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
@@ -140,6 +145,10 @@
 #include "chrome/browser/ui/autofill/generated_credit_card_bubble_controller.h"
 #endif
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#include "chrome/browser/signin/signin_promo.h"
+#endif
+
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/attestation/platform_verification_flow.h"
@@ -147,7 +156,7 @@
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/display/display_preferences.h"
 #include "chrome/browser/chromeos/extensions/echo_private_api.h"
-#include "chrome/browser/chromeos/file_system_provider/service.h"
+#include "chrome/browser/chromeos/file_system_provider/registry.h"
 #include "chrome/browser/chromeos/first_run/first_run.h"
 #include "chrome/browser/chromeos/login/default_pinned_apps_field_trial.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
@@ -157,7 +166,6 @@
 #include "chrome/browser/chromeos/login/users/avatar/user_image_sync_observer.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_impl.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/net/proxy_config_handler.h"
 #include "chrome/browser/chromeos/policy/auto_enrollment_client.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -202,13 +210,16 @@
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #endif
 
+#if !defined(USE_ATHENA)
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
+#endif
+
 namespace {
 
 enum MigratedPreferences {
   NO_PREFS = 0,
   DNS_PREFS = 1 << 0,
   WINDOWS_PREFS = 1 << 1,
-  GOOGLE_URL_TRACKER_PREFS = 1 << 2,
 };
 
 // A previous feature (see
@@ -330,7 +341,9 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   chromeos::system::AutomaticRebootManager::RegisterPrefs(registry);
   chromeos::UserImageManager::RegisterPrefs(registry);
   chromeos::UserSessionManager::RegisterPrefs(registry);
+#if !defined(USE_ATHENA)
   chromeos::WallpaperManager::RegisterPrefs(registry);
+#endif
   chromeos::echo_offer::RegisterPrefs(registry);
   extensions::ExtensionAssetsManagerChromeOS::RegisterPrefs(registry);
   invalidation::InvalidatorStorage::RegisterPrefs(registry);
@@ -380,6 +393,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   chrome_prefs::RegisterProfilePrefs(registry);
   dom_distiller::DistilledPagePrefs::RegisterProfilePrefs(registry);
   DownloadPrefs::RegisterProfilePrefs(registry);
+  enhanced_bookmarks::BookmarkServerClusterService::RegisterPrefs(registry);
   gcm::GCMProfileService::RegisterProfilePrefs(registry);
   HostContentSettingsMap::RegisterProfilePrefs(registry);
   IncognitoModePrefs::RegisterProfilePrefs(registry);
@@ -390,6 +404,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   MediaStreamDevicesController::RegisterProfilePrefs(registry);
   NetPrefObserver::RegisterProfilePrefs(registry);
   password_manager::PasswordManager::RegisterProfilePrefs(registry);
+  password_bubble_experiment::RegisterPrefs(registry);
   PrefProxyConfigTrackerImpl::RegisterProfilePrefs(registry);
   PrefsTabHelper::RegisterProfilePrefs(registry);
   Profile::RegisterProfilePrefs(registry);
@@ -418,7 +433,11 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   extensions::ExtensionPrefs::RegisterProfilePrefs(registry);
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_APP_LIST)
+  app_list::AppListPrefs::RegisterProfilePrefs(registry);
+#endif
+
+#if defined(ENABLE_PRINT_PREVIEW)
   print_dialog_cloud::RegisterProfilePrefs(registry);
   printing::StickySettings::RegisterProfilePrefs(registry);
 #endif
@@ -456,9 +475,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   DriveAppMapping::RegisterProfilePrefs(registry);
   extensions::CommandService::RegisterProfilePrefs(registry);
   extensions::ExtensionSettingsHandler::RegisterProfilePrefs(registry);
-#if !defined(USE_ATHENA)
   extensions::TabsCaptureVisibleTabFunction::RegisterProfilePrefs(registry);
-#endif
   first_run::RegisterProfilePrefs(registry);
   gcm::GCMChannelStatusSyncer::RegisterProfilePrefs(registry);
   NewTabUI::RegisterProfilePrefs(registry);
@@ -599,29 +616,6 @@ void MigrateBrowserPrefs(Profile* profile, PrefService* local_state) {
                             current_version);
   }
 
-  if (!(current_version & GOOGLE_URL_TRACKER_PREFS)) {
-    registry->RegisterStringPref(prefs::kLastKnownGoogleURL,
-                                 GoogleURLTracker::kDefaultGoogleHomepage);
-    if (local_state->HasPrefPath(prefs::kLastKnownGoogleURL)) {
-      user_prefs->SetString(prefs::kLastKnownGoogleURL,
-                            local_state->GetString(prefs::kLastKnownGoogleURL));
-    }
-    local_state->ClearPref(prefs::kLastKnownGoogleURL);
-
-    registry->RegisterStringPref(prefs::kLastPromptedGoogleURL,
-                                 std::string());
-    if (local_state->HasPrefPath(prefs::kLastPromptedGoogleURL)) {
-      user_prefs->SetString(
-          prefs::kLastPromptedGoogleURL,
-          local_state->GetString(prefs::kLastPromptedGoogleURL));
-    }
-    local_state->ClearPref(prefs::kLastPromptedGoogleURL);
-
-    current_version |= GOOGLE_URL_TRACKER_PREFS;
-    local_state->SetInteger(prefs::kMultipleProfilePrefMigration,
-                            current_version);
-  }
-
 #if !defined(OS_ANDROID)
   local_state->ClearPref(kLegacyProfileResetPromptMemento);
 #endif
@@ -633,6 +627,59 @@ void MigrateBrowserPrefs(Profile* profile, PrefService* local_state) {
 #if defined(TOOLKIT_VIEWS)
   MigrateBrowserTabStripPrefs(local_state);
 #endif
+}
+
+// As part of the migration from per-profile to per-partition HostZoomMaps,
+// we need to detect if an existing per-profile set of preferences exist, and
+// if so convert them to be per-partition. We migrate any per-profile zoom
+// level prefs via zoom_level_prefs.
+// Code that updates zoom prefs in the profile prefs store has been removed,
+// so once we clear these values here, they should never get set again.
+// TODO(wjmaclean): Remove this migration machinery after histograms show
+// that an aceptable percentage of users have been migrated.
+// crbug.com/420643
+void MigrateProfileZoomLevelPrefs(Profile* profile) {
+  PrefService* prefs = profile->GetPrefs();
+  chrome::ChromeZoomLevelPrefs* zoom_level_prefs = profile->GetZoomLevelPrefs();
+  DCHECK(zoom_level_prefs);
+
+  bool migrated = false;
+  // Only migrate the default zoom level if it is not equal to the registered
+  // default for the preference.
+  const base::Value* per_profile_default_zoom_level_value =
+      prefs->GetUserPrefValue(prefs::kDefaultZoomLevelDeprecated);
+  if (per_profile_default_zoom_level_value) {
+    if (per_profile_default_zoom_level_value->GetType() ==
+           base::Value::TYPE_DOUBLE) {
+      double per_profile_default_zoom_level = 0.0;
+      bool success = per_profile_default_zoom_level_value->GetAsDouble(
+          &per_profile_default_zoom_level);
+      DCHECK(success);
+      zoom_level_prefs->SetDefaultZoomLevelPref(per_profile_default_zoom_level);
+    }
+    prefs->ClearPref(prefs::kDefaultZoomLevelDeprecated);
+    migrated = true;
+  }
+
+  const base::DictionaryValue* host_zoom_dictionary =
+      prefs->GetDictionary(prefs::kPerHostZoomLevelsDeprecated);
+  // Collect stats on frequency with which migrations are occuring. This measure
+  // is not perfect, since it will consider an un-migrated user with only
+  // default value as being already migrated, but it will catch all non-trivial
+  // migrations.
+  migrated |= !host_zoom_dictionary->empty();
+  UMA_HISTOGRAM_BOOLEAN("Settings.ZoomLevelPreferencesMigrated", migrated);
+
+  // Since |host_zoom_dictionary| is not partition-based, do not attempt to
+  // sanitize it.
+  zoom_level_prefs->ExtractPerHostZoomLevels(
+      host_zoom_dictionary, false /* sanitize_partition_host_zoom_levels */);
+
+  // We're done migrating the profile per-host zoom level values, so we clear
+  // them all.
+  DictionaryPrefUpdate host_zoom_dictionary_update(
+      prefs, prefs::kPerHostZoomLevelsDeprecated);
+  host_zoom_dictionary_update->Clear();
 }
 
 }  // namespace chrome

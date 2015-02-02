@@ -33,7 +33,6 @@
 
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
-#include "platform/weborigin/Referrer.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
@@ -68,7 +67,7 @@ private:
     static unsigned s_navigationDisableCount;
 };
 
-class NavigationScheduler FINAL {
+class NavigationScheduler final {
     WTF_MAKE_NONCOPYABLE(NavigationScheduler);
     DISALLOW_ALLOCATION();
 public:
@@ -78,11 +77,10 @@ public:
     bool locationChangePending();
 
     void scheduleRedirect(double delay, const String& url);
-    void scheduleLocationChange(Document*, const String& url, const Referrer& referrer, bool lockBackForwardList = true);
-    void schedulePageBlock(Document*, const Referrer&);
+    void scheduleLocationChange(Document*, const String& url, bool lockBackForwardList = true);
+    void schedulePageBlock(Document*);
     void scheduleFormSubmission(PassRefPtrWillBeRawPtr<FormSubmission>);
     void scheduleReload();
-    void scheduleHistoryNavigation(int steps);
 
     void startTimer();
     void cancel();

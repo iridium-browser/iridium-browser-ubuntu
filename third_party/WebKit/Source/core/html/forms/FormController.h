@@ -31,7 +31,6 @@
 
 namespace blink {
 
-class FormAssociatedElement;
 class FormKeyGenerator;
 class HTMLFormControlElementWithState;
 class HTMLFormElement;
@@ -72,9 +71,9 @@ inline void FormControlState::append(const String& value)
     m_values.append(value);
 }
 
-typedef HashMap<AtomicString, OwnPtr<SavedFormState> > SavedFormStateMap;
+typedef HashMap<AtomicString, OwnPtr<SavedFormState>> SavedFormStateMap;
 
-class DocumentState FINAL : public RefCountedWillBeGarbageCollected<DocumentState> {
+class DocumentState final : public RefCountedWillBeGarbageCollected<DocumentState> {
     DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(DocumentState);
 public:
     static PassRefPtrWillBeRawPtr<DocumentState> create();
@@ -89,7 +88,7 @@ private:
     FormElementListHashSet m_formControls;
 };
 
-class FormController FINAL : public NoBaseWillBeGarbageCollectedFinalized<FormController> {
+class FormController final : public NoBaseWillBeGarbageCollectedFinalized<FormController> {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     static PassOwnPtrWillBeRawPtr<FormController> create()

@@ -7,28 +7,32 @@
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/supervised_user/custodian_profile_downloader_service.h"
 #include "chrome/browser/supervised_user/custodian_profile_downloader_service_factory.h"
+#include "chrome/browser/supervised_user/permission_request_creator.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
+#include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_service_test_base.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest_constants.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#endif
 
 using content::MessageLoopRunner;
 
@@ -57,9 +61,7 @@ class SupervisedUserURLFilterObserver :
   }
 
   // SupervisedUserURLFilter::Observer
-  virtual void OnSiteListUpdated() OVERRIDE {
-    message_loop_runner_->Quit();
-  }
+  void OnSiteListUpdated() override { message_loop_runner_->Quit(); }
 
  private:
   void Reset() {
@@ -70,11 +72,33 @@ class SupervisedUserURLFilterObserver :
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
 };
 
+class AsyncResultHolder {
+ public:
+  AsyncResultHolder() : result_(false) {}
+  ~AsyncResultHolder() {}
+
+  void SetResult(bool result) {
+    result_ = result;
+    run_loop_.Quit();
+  }
+
+  bool GetResult() {
+    run_loop_.Run();
+    return result_;
+  }
+
+ private:
+  base::RunLoop run_loop_;
+  bool result_;
+
+  DISALLOW_COPY_AND_ASSIGN(AsyncResultHolder);
+};
+
 class SupervisedUserServiceTest : public ::testing::Test {
  public:
   SupervisedUserServiceTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     TestingProfile::Builder builder;
     builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
                               BuildFakeProfileOAuth2TokenService);
@@ -83,13 +107,17 @@ class SupervisedUserServiceTest : public ::testing::Test {
         SupervisedUserServiceFactory::GetForProfile(profile_.get());
   }
 
-  virtual void TearDown() OVERRIDE {
-    profile_.reset();
-  }
+  void TearDown() override { profile_.reset(); }
 
-  virtual ~SupervisedUserServiceTest() {}
+  ~SupervisedUserServiceTest() override {}
 
  protected:
+  void AddAccessRequest(const GURL& url, AsyncResultHolder* result_holder) {
+    supervised_user_service_->AddAccessRequest(
+        url, base::Bind(&AsyncResultHolder::SetResult,
+                        base::Unretained(result_holder)));
+  }
+
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<TestingProfile> profile_;
   SupervisedUserService* supervised_user_service_;
@@ -97,61 +125,11 @@ class SupervisedUserServiceTest : public ::testing::Test {
 
 }  // namespace
 
-TEST_F(SupervisedUserServiceTest, GetManualExceptionsForHost) {
-  GURL kExampleFooURL("http://www.example.com/foo");
-  GURL kExampleBarURL("http://www.example.com/bar");
-  GURL kExampleFooNoWWWURL("http://example.com/foo");
-  GURL kBlurpURL("http://blurp.net/bla");
-  GURL kMooseURL("http://moose.org/baz");
-  {
-    DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kSupervisedUserManualURLs);
-    base::DictionaryValue* dict = update.Get();
-    dict->SetBooleanWithoutPathExpansion(kExampleFooURL.spec(), true);
-    dict->SetBooleanWithoutPathExpansion(kExampleBarURL.spec(), false);
-    dict->SetBooleanWithoutPathExpansion(kExampleFooNoWWWURL.spec(), true);
-    dict->SetBooleanWithoutPathExpansion(kBlurpURL.spec(), true);
-  }
-
-  EXPECT_EQ(SupervisedUserService::MANUAL_ALLOW,
-            supervised_user_service_->GetManualBehaviorForURL(kExampleFooURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_BLOCK,
-            supervised_user_service_->GetManualBehaviorForURL(kExampleBarURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_ALLOW,
-            supervised_user_service_->GetManualBehaviorForURL(
-                kExampleFooNoWWWURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_ALLOW,
-            supervised_user_service_->GetManualBehaviorForURL(kBlurpURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_NONE,
-            supervised_user_service_->GetManualBehaviorForURL(kMooseURL));
-  std::vector<GURL> exceptions;
-  supervised_user_service_->GetManualExceptionsForHost("www.example.com",
-                                                       &exceptions);
-  ASSERT_EQ(2u, exceptions.size());
-  EXPECT_EQ(kExampleBarURL, exceptions[0]);
-  EXPECT_EQ(kExampleFooURL, exceptions[1]);
-
-  {
-    DictionaryPrefUpdate update(profile_->GetPrefs(),
-                                prefs::kSupervisedUserManualURLs);
-    base::DictionaryValue* dict = update.Get();
-    for (std::vector<GURL>::iterator it = exceptions.begin();
-         it != exceptions.end(); ++it) {
-      dict->RemoveWithoutPathExpansion(it->spec(), NULL);
-    }
-  }
-
-  EXPECT_EQ(SupervisedUserService::MANUAL_NONE,
-            supervised_user_service_->GetManualBehaviorForURL(kExampleFooURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_NONE,
-            supervised_user_service_->GetManualBehaviorForURL(kExampleBarURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_ALLOW,
-            supervised_user_service_->GetManualBehaviorForURL(
-                kExampleFooNoWWWURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_ALLOW,
-            supervised_user_service_->GetManualBehaviorForURL(kBlurpURL));
-  EXPECT_EQ(SupervisedUserService::MANUAL_NONE,
-            supervised_user_service_->GetManualBehaviorForURL(kMooseURL));
+TEST_F(SupervisedUserServiceTest, ChangesIncludedSessionOnChangedSettings) {
+  supervised_user_service_->Init();
+  EXPECT_TRUE(supervised_user_service_->IncludesSyncSessionsType());
+  profile_->GetPrefs()->SetBoolean(prefs::kRecordHistory, false);
+  EXPECT_FALSE(supervised_user_service_->IncludesSyncSessionsType());
 }
 
 // Ensure that the CustodianProfileDownloaderService shuts down cleanly. If no
@@ -166,16 +144,138 @@ TEST_F(SupervisedUserServiceTest, ShutDownCustodianProfileDownloader) {
   downloader_service->DownloadProfile(base::Bind(&OnProfileDownloadedFail));
 }
 
-#if !defined(OS_ANDROID)
+namespace {
+
+class MockPermissionRequestCreator : public PermissionRequestCreator {
+ public:
+  MockPermissionRequestCreator() : enabled_(false) {}
+  ~MockPermissionRequestCreator() override {}
+
+  void set_enabled(bool enabled) {
+    enabled_ = enabled;
+  }
+
+  const std::vector<GURL>& requested_urls() const {
+    return requested_urls_;
+  }
+
+  void AnswerRequest(size_t index, bool result) {
+    ASSERT_LT(index, requested_urls_.size());
+    callbacks_[index].Run(result);
+    callbacks_.erase(callbacks_.begin() + index);
+    requested_urls_.erase(requested_urls_.begin() + index);
+  }
+
+ private:
+  // PermissionRequestCreator:
+  bool IsEnabled() const override { return enabled_; }
+
+  void CreatePermissionRequest(const GURL& url_requested,
+                               const SuccessCallback& callback) override {
+    ASSERT_TRUE(enabled_);
+    requested_urls_.push_back(url_requested);
+    callbacks_.push_back(callback);
+  }
+
+  bool enabled_;
+  std::vector<GURL> requested_urls_;
+  std::vector<SuccessCallback> callbacks_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockPermissionRequestCreator);
+};
+
+}  // namespace
+
+TEST_F(SupervisedUserServiceTest, CreatePermissionRequest) {
+  GURL url("http://www.example.com");
+
+  // Without any permission request creators, it should be disabled, and any
+  // AddAccessRequest() calls should fail.
+  EXPECT_FALSE(supervised_user_service_->AccessRequestsEnabled());
+  {
+    AsyncResultHolder result_holder;
+    AddAccessRequest(url, &result_holder);
+    EXPECT_FALSE(result_holder.GetResult());
+  }
+
+  // Add a disabled permission request creator. This should not change anything.
+  MockPermissionRequestCreator* creator = new MockPermissionRequestCreator;
+  supervised_user_service_->AddPermissionRequestCreatorForTesting(creator);
+
+  EXPECT_FALSE(supervised_user_service_->AccessRequestsEnabled());
+  {
+    AsyncResultHolder result_holder;
+    AddAccessRequest(url, &result_holder);
+    EXPECT_FALSE(result_holder.GetResult());
+  }
+
+  // Enable the permission request creator. This should enable permission
+  // requests and queue them up.
+  creator->set_enabled(true);
+  EXPECT_TRUE(supervised_user_service_->AccessRequestsEnabled());
+  {
+    AsyncResultHolder result_holder;
+    AddAccessRequest(url, &result_holder);
+    ASSERT_EQ(1u, creator->requested_urls().size());
+    EXPECT_EQ(url.spec(), creator->requested_urls()[0].spec());
+
+    creator->AnswerRequest(0, true);
+    EXPECT_TRUE(result_holder.GetResult());
+  }
+
+  {
+    AsyncResultHolder result_holder;
+    AddAccessRequest(url, &result_holder);
+    ASSERT_EQ(1u, creator->requested_urls().size());
+    EXPECT_EQ(url.spec(), creator->requested_urls()[0].spec());
+
+    creator->AnswerRequest(0, false);
+    EXPECT_FALSE(result_holder.GetResult());
+  }
+
+  // Add a second permission request creator.
+  MockPermissionRequestCreator* creator_2 = new MockPermissionRequestCreator;
+  creator_2->set_enabled(true);
+  supervised_user_service_->AddPermissionRequestCreatorForTesting(creator_2);
+
+  {
+    AsyncResultHolder result_holder;
+    AddAccessRequest(url, &result_holder);
+    ASSERT_EQ(1u, creator->requested_urls().size());
+    EXPECT_EQ(url.spec(), creator->requested_urls()[0].spec());
+
+    // Make the first creator succeed. This should make the whole thing succeed.
+    creator->AnswerRequest(0, true);
+    EXPECT_TRUE(result_holder.GetResult());
+  }
+
+  {
+    AsyncResultHolder result_holder;
+    AddAccessRequest(url, &result_holder);
+    ASSERT_EQ(1u, creator->requested_urls().size());
+    EXPECT_EQ(url.spec(), creator->requested_urls()[0].spec());
+
+    // Make the first creator fail. This should fall back to the second one.
+    creator->AnswerRequest(0, false);
+    ASSERT_EQ(1u, creator_2->requested_urls().size());
+    EXPECT_EQ(url.spec(), creator_2->requested_urls()[0].spec());
+
+    // Make the second creator succeed, which will make the whole thing succeed.
+    creator_2->AnswerRequest(0, true);
+    EXPECT_TRUE(result_holder.GetResult());
+  }
+}
+
+#if defined(ENABLE_EXTENSIONS)
 class SupervisedUserServiceExtensionTestBase
     : public extensions::ExtensionServiceTestBase {
  public:
   explicit SupervisedUserServiceExtensionTestBase(bool is_supervised)
       : is_supervised_(is_supervised),
         channel_(chrome::VersionInfo::CHANNEL_DEV) {}
-  virtual ~SupervisedUserServiceExtensionTestBase() {}
+  ~SupervisedUserServiceExtensionTestBase() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ExtensionServiceTestBase::SetUp();
     ExtensionServiceTestBase::ExtensionServiceInitParams params =
         CreateDefaultInitParams();
@@ -389,14 +489,12 @@ TEST_F(SupervisedUserServiceExtensionTest, InstallContentPacks) {
   ASSERT_EQ(4u, sites.size());
   // The site lists might be returned in any order, so we put them into a set.
   std::set<std::string> site_names;
-  for (std::vector<SupervisedUserSiteList::Site>::const_iterator it =
-      sites.begin(); it != sites.end(); ++it) {
-    site_names.insert(base::UTF16ToUTF8(it->name));
-  }
-  EXPECT_TRUE(site_names.count("YouTube") == 1u);
-  EXPECT_TRUE(site_names.count("Homestar Runner") == 1u);
-  EXPECT_TRUE(site_names.count(std::string()) == 1u);
-  EXPECT_TRUE(site_names.count("Moose") == 1u);
+  for (const SupervisedUserSiteList::Site& site : sites)
+    site_names.insert(base::UTF16ToUTF8(site.name));
+  EXPECT_EQ(1u, site_names.count("YouTube"));
+  EXPECT_EQ(1u, site_names.count("Homestar Runner"));
+  EXPECT_EQ(1u, site_names.count(std::string()));
+  EXPECT_EQ(1u, site_names.count("Moose"));
 
   EXPECT_EQ(SupervisedUserURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(example_url));
@@ -420,4 +518,4 @@ TEST_F(SupervisedUserServiceExtensionTest, InstallContentPacks) {
   EXPECT_EQ(SupervisedUserURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(moose_url));
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // defined(ENABLE_EXTENSIONS)

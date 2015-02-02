@@ -14,6 +14,9 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "url/gurl.h"
 
+namespace bookmarks {
+namespace test {
+
 namespace {
 
 // BookmarkLoadObserver is used when blocking until the BookmarkModel finishes
@@ -22,13 +25,12 @@ namespace {
 class BookmarkLoadObserver : public BaseBookmarkModelObserver {
  public:
   explicit BookmarkLoadObserver(const base::Closure& quit_task);
-  virtual ~BookmarkLoadObserver();
+  ~BookmarkLoadObserver() override;
 
  private:
   // BaseBookmarkModelObserver:
-  virtual void BookmarkModelChanged() OVERRIDE;
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
+  void BookmarkModelChanged() override;
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
 
   base::Closure quit_task_;
 
@@ -93,8 +95,6 @@ std::string::size_type AddNodesFromString(BookmarkModel* model,
 
 }  // namespace
 
-namespace test {
-
 void WaitForBookmarkModelToLoad(BookmarkModel* model) {
   if (model->loaded())
     return;
@@ -137,3 +137,4 @@ void AddNodesFromModelString(BookmarkModel* model,
 }
 
 }  // namespace test
+}  // namespace bookmarks

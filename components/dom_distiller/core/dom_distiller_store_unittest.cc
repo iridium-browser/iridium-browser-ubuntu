@@ -48,9 +48,9 @@ void AddEntry(const ArticleEntry& e, EntryMap* map) {
 
 class FakeSyncErrorFactory : public syncer::SyncErrorFactory {
  public:
-  virtual syncer::SyncError CreateAndUploadError(
+  syncer::SyncError CreateAndUploadError(
       const tracked_objects::Location& location,
-      const std::string& message) OVERRIDE {
+      const std::string& message) override {
     return syncer::SyncError();
   }
 };
@@ -59,15 +59,13 @@ class FakeSyncChangeProcessor : public syncer::SyncChangeProcessor {
  public:
   explicit FakeSyncChangeProcessor(EntryMap* model) : model_(model) {}
 
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE {
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override {
     ADD_FAILURE() << "FakeSyncChangeProcessor::GetAllSyncData not implemented.";
     return syncer::SyncDataList();
   }
 
-  virtual SyncError ProcessSyncChanges(
-      const tracked_objects::Location&,
-      const syncer::SyncChangeList& changes) OVERRIDE {
+  SyncError ProcessSyncChanges(const tracked_objects::Location&,
+                               const syncer::SyncChangeList& changes) override {
     for (SyncChangeList::const_iterator it = changes.begin();
          it != changes.end(); ++it) {
       AddEntry(GetEntryFromChange(*it), model_);
@@ -124,14 +122,14 @@ class MockDistillerObserver : public DomDistillerObserver {
 
 class DomDistillerStoreTest : public testing::Test {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     db_model_.clear();
     sync_model_.clear();
     store_model_.clear();
     next_sync_id_ = 1;
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     store_.reset();
     fake_db_ = NULL;
     fake_sync_processor_ = NULL;
@@ -438,8 +436,9 @@ TEST_F(DomDistillerStoreTest, TestSyncMergeWithSecondDomDistillerStore) {
 
   FakeSyncErrorFactory* other_error_factory = new FakeSyncErrorFactory();
   store_->MergeDataAndStartSyncing(
-      kDomDistillerModelType, SyncDataFromEntryMap(other_db_model),
-      owned_other_store.PassAs<SyncChangeProcessor>(),
+      kDomDistillerModelType,
+      SyncDataFromEntryMap(other_db_model),
+      owned_other_store.Pass(),
       make_scoped_ptr<SyncErrorFactory>(other_error_factory));
 
   EXPECT_TRUE(AreEntriesEqual(store_->GetEntries(), expected_model));

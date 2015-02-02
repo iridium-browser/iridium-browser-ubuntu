@@ -34,7 +34,7 @@ namespace blink {
 struct FilterData {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    enum FilterDataState { PaintingSource, Applying, Built, CycleDetected };
+    enum FilterDataState { PaintingSource, Built, CycleDetected };
 
     FilterData()
         : state(PaintingSource)
@@ -50,22 +50,22 @@ public:
 
 class GraphicsContext;
 
-class RenderSVGResourceFilter FINAL : public RenderSVGResourceContainer {
+class RenderSVGResourceFilter final : public RenderSVGResourceContainer {
 public:
     explicit RenderSVGResourceFilter(SVGFilterElement*);
     virtual ~RenderSVGResourceFilter();
-    virtual void destroy() OVERRIDE;
+    virtual void destroy() override;
 
-    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const OVERRIDE;
+    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const override;
 
-    virtual const char* renderName() const OVERRIDE { return "RenderSVGResourceFilter"; }
-    virtual bool isSVGResourceFilter() const OVERRIDE { return true; }
+    virtual const char* renderName() const override { return "RenderSVGResourceFilter"; }
+    virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectSVGResourceFilter || RenderSVGResourceContainer::isOfType(type); }
 
-    virtual void removeAllClientsFromCache(bool markForInvalidation = true) OVERRIDE;
-    virtual void removeClientFromCache(RenderObject*, bool markForInvalidation = true) OVERRIDE;
+    virtual void removeAllClientsFromCache(bool markForInvalidation = true) override;
+    virtual void removeClientFromCache(RenderObject*, bool markForInvalidation = true) override;
 
-    virtual bool applyResource(RenderObject*, RenderStyle*, GraphicsContext*&, unsigned short resourceMode) OVERRIDE;
-    virtual void postApplyResource(RenderObject*, GraphicsContext*&) OVERRIDE;
+    bool prepareEffect(RenderObject*, GraphicsContext*&);
+    void finishEffect(RenderObject*, GraphicsContext*&);
 
     FloatRect resourceBoundingBox(const RenderObject*);
 
@@ -76,8 +76,8 @@ public:
 
     void primitiveAttributeChanged(RenderObject*, const QualifiedName&);
 
-    virtual RenderSVGResourceType resourceType() const OVERRIDE { return s_resourceType; }
-    static const RenderSVGResourceType s_resourceType;
+    static const RenderSVGResourceType s_resourceType = FilterResourceType;
+    virtual RenderSVGResourceType resourceType() const override { return s_resourceType; }
 
     FloatRect drawingRegion(RenderObject*) const;
 private:

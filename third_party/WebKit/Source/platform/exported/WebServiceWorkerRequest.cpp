@@ -8,18 +8,29 @@
 #include "platform/blob/BlobData.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebHTTPHeaderVisitor.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
 class WebServiceWorkerRequestPrivate : public RefCounted<WebServiceWorkerRequestPrivate> {
 public:
     WebServiceWorkerRequestPrivate()
-        : m_isReload(false) { }
+        : m_mode(WebURLRequest::FetchRequestModeNoCORS)
+        , m_credentialsMode(WebURLRequest::FetchCredentialsModeOmit)
+        , m_requestContext(WebURLRequest::RequestContextUnspecified)
+        , m_frameType(WebURLRequest::FrameTypeNone)
+        , m_isReload(false)
+    {
+    }
     WebURL m_url;
     WebString m_method;
     HTTPHeaderMap m_headers;
     RefPtr<BlobDataHandle> blobDataHandle;
     Referrer m_referrer;
+    WebURLRequest::FetchRequestMode m_mode;
+    WebURLRequest::FetchCredentialsMode m_credentialsMode;
+    WebURLRequest::RequestContext m_requestContext;
+    WebURLRequest::FrameType m_frameType;
     bool m_isReload;
 };
 
@@ -113,6 +124,46 @@ WebReferrerPolicy WebServiceWorkerRequest::referrerPolicy() const
 const Referrer& WebServiceWorkerRequest::referrer() const
 {
     return m_private->m_referrer;
+}
+
+void WebServiceWorkerRequest::setMode(WebURLRequest::FetchRequestMode mode)
+{
+    m_private->m_mode = mode;
+}
+
+WebURLRequest::FetchRequestMode WebServiceWorkerRequest::mode() const
+{
+    return m_private->m_mode;
+}
+
+void WebServiceWorkerRequest::setCredentialsMode(WebURLRequest::FetchCredentialsMode credentialsMode)
+{
+    m_private->m_credentialsMode = credentialsMode;
+}
+
+WebURLRequest::FetchCredentialsMode WebServiceWorkerRequest::credentialsMode() const
+{
+    return m_private->m_credentialsMode;
+}
+
+void WebServiceWorkerRequest::setRequestContext(WebURLRequest::RequestContext requestContext)
+{
+    m_private->m_requestContext = requestContext;
+}
+
+WebURLRequest::RequestContext WebServiceWorkerRequest::requestContext() const
+{
+    return m_private->m_requestContext;
+}
+
+void WebServiceWorkerRequest::setFrameType(WebURLRequest::FrameType frameType)
+{
+    m_private->m_frameType = frameType;
+}
+
+WebURLRequest::FrameType WebServiceWorkerRequest::frameType() const
+{
+    return m_private->m_frameType;
 }
 
 void WebServiceWorkerRequest::setIsReload(bool isReload)

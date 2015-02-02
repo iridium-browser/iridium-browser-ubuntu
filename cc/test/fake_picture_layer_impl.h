@@ -33,20 +33,18 @@ class FakePictureLayerImpl : public PictureLayerImpl {
         new FakePictureLayerImpl(tree_impl, id, pile, layer_bounds));
   }
 
-  virtual scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl)
-      OVERRIDE;
-  virtual void AppendQuads(RenderPass* render_pass,
-                           const OcclusionTracker<LayerImpl>& occlusion_tracker,
-                           AppendQuadsData* append_quads_data) OVERRIDE;
-  virtual gfx::Size CalculateTileSize(
-      const gfx::Size& content_bounds) const OVERRIDE;
+  scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  void AppendQuads(RenderPass* render_pass,
+                   const Occlusion& occlusion_in_content_space,
+                   AppendQuadsData* append_quads_data) override;
+  gfx::Size CalculateTileSize(const gfx::Size& content_bounds) const override;
 
-  virtual void DidBecomeActive() OVERRIDE;
+  void DidBecomeActive() override;
   size_t did_become_active_call_count() {
     return did_become_active_call_count_;
   }
 
-  virtual bool HasValidTilePriorities() const OVERRIDE;
+  bool HasValidTilePriorities() const override;
   void set_has_valid_tile_priorities(bool has_valid_priorities) {
     has_valid_tile_priorities_ = has_valid_priorities;
     use_set_valid_tile_priorities_flag_ = true;
@@ -55,7 +53,6 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   using PictureLayerImpl::AddTiling;
   using PictureLayerImpl::CleanUpTilingsOnActiveLayer;
   using PictureLayerImpl::CanHaveTilings;
-  using PictureLayerImpl::MarkVisibleResourcesAsRequired;
   using PictureLayerImpl::DoPostCommitInitializationIfNeeded;
   using PictureLayerImpl::MinimumContentsScale;
   using PictureLayerImpl::GetViewportForTilePriorityInContentSpace;
@@ -84,10 +81,9 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   PictureLayerTiling* LowResTiling() const;
   size_t num_tilings() const { return tilings_->num_tilings(); }
 
-  PictureLayerImpl* twin_layer() { return twin_layer_; }
-  void set_twin_layer(PictureLayerImpl* twin) { twin_layer_ = twin; }
   PictureLayerTilingSet* tilings() { return tilings_.get(); }
   PicturePileImpl* pile() { return pile_.get(); }
+  void SetPile(scoped_refptr<PicturePileImpl> pile);
   size_t append_quads_count() { return append_quads_count_; }
 
   const Region& invalidation() const { return invalidation_; }
@@ -95,12 +91,6 @@ class FakePictureLayerImpl : public PictureLayerImpl {
 
   gfx::Rect visible_rect_for_tile_priority() {
     return visible_rect_for_tile_priority_;
-  }
-  gfx::Rect viewport_rect_for_tile_priority() {
-    return viewport_rect_for_tile_priority_;
-  }
-  gfx::Transform screen_space_transform_for_tile_priority() {
-    return screen_space_transform_for_tile_priority_;
   }
 
   void set_fixed_tile_size(const gfx::Size& size) { fixed_tile_size_ = size; }
@@ -116,7 +106,11 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   size_t release_resources_count() const { return release_resources_count_; }
   void reset_release_resources_count() { release_resources_count_ = 0; }
 
-  virtual void ReleaseResources() OVERRIDE;
+  void ReleaseResources() override;
+
+  bool only_used_low_res_last_append_quads() const {
+    return only_used_low_res_last_append_quads_;
+  }
 
  protected:
   FakePictureLayerImpl(

@@ -25,6 +25,7 @@
         # Note: sources list duplicated in GN build.
         'password_manager/core/browser/browser_save_password_progress_logger.cc',
         'password_manager/core/browser/browser_save_password_progress_logger.h',
+        'password_manager/core/browser/credential_manager_dispatcher.h',
         'password_manager/core/browser/log_receiver.h',
         'password_manager/core/browser/log_router.cc',
         'password_manager/core/browser/log_router.h',
@@ -138,12 +139,15 @@
       'target_name': 'password_manager_core_common',
       'type': 'static_library',
       'dependencies': [
+        '../base/base.gyp:base',
       ],
       'include_dirs': [
         '..',
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
+        'password_manager/core/common/experiments.cc',
+        'password_manager/core/common/experiments.h',
         'password_manager/core/common/password_manager_pref_names.cc',
         'password_manager/core/common/password_manager_pref_names.h',
         'password_manager/core/common/password_manager_switches.cc',
@@ -220,8 +224,12 @@
           ],
           'sources': [
             # Note: sources list duplicated in GN build.
+            'password_manager/content/browser/content_credential_manager_dispatcher.cc',
+            'password_manager/content/browser/content_credential_manager_dispatcher.h',
             'password_manager/content/browser/content_password_manager_driver.cc',
             'password_manager/content/browser/content_password_manager_driver.h',
+            'password_manager/content/browser/credential_manager_password_form_manager.cc',
+            'password_manager/content/browser/credential_manager_password_form_manager.h',
             'password_manager/content/browser/password_manager_internals_service_factory.cc',
             'password_manager/content/browser/password_manager_internals_service_factory.h',
           ],

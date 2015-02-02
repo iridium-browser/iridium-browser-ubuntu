@@ -47,7 +47,7 @@ class NET_EXPORT_PRIVATE AddressTrackerLinux :
   AddressTrackerLinux(const base::Closure& address_callback,
                       const base::Closure& link_callback,
                       const base::Closure& tunnel_callback);
-  virtual ~AddressTrackerLinux();
+  ~AddressTrackerLinux() override;
 
   // In tracking mode, it starts watching the system configuration for
   // changes. The current thread must have a MessageLoopForIO. In
@@ -108,8 +108,8 @@ class NET_EXPORT_PRIVATE AddressTrackerLinux :
   void AbortAndForceOnline();
 
   // MessageLoopForIO::Watcher:
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
-  virtual void OnFileCanWriteWithoutBlocking(int /* fd */) OVERRIDE;
+  void OnFileCanReadWithoutBlocking(int fd) override;
+  void OnFileCanWriteWithoutBlocking(int /* fd */) override;
 
   // Close |netlink_fd_|
   void CloseSocket();

@@ -28,15 +28,14 @@ class PermissionMenuModel : public ui::SimpleMenuModel,
   PermissionMenuModel(const GURL& url,
                       ContentSetting setting,
                       const ChangeCallback& callback);
-  virtual ~PermissionMenuModel();
+  ~PermissionMenuModel() override;
 
   // Overridden from ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
   // The permission info represented by the menu model.

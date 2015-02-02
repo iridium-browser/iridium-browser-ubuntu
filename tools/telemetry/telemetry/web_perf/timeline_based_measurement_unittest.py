@@ -186,7 +186,7 @@ class TestTimelinebasedMeasurementPage(page_module.Page):
     self._trigger_jank = trigger_jank
     self._trigger_slow = trigger_slow
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     if self._trigger_animation:
       action_runner.TapElement('#animating-button')
       action_runner.WaitForJavaScriptCondition('window.animationDone')
@@ -214,9 +214,11 @@ class TimelineBasedMeasurementTest(page_test_test_case.PageTestTestCase):
                                   options=self._options)
 
     self.assertEquals(0, len(results.failures))
-    v = results.FindAllPageSpecificValuesNamed('CenterAnimation-jank')
+    v = results.FindAllPageSpecificValuesNamed(
+        'CenterAnimation-frame_time_discrepancy')
     self.assertEquals(len(v), 1)
-    v = results.FindAllPageSpecificValuesNamed('DrawerAnimation-jank')
+    v = results.FindAllPageSpecificValuesNamed(
+        'DrawerAnimation-frame_time_discrepancy')
     self.assertEquals(len(v), 1)
 
   def testFastTimelineBasedMeasurementForSmoke(self):
@@ -239,6 +241,7 @@ class TimelineBasedMeasurementTest(page_test_test_case.PageTestTestCase):
         'SlowThreadJsRun-fast-scavenger_outside_idle',
         'SlowThreadJsRun-fast-total_garbage_collection',
         'SlowThreadJsRun-fast-total_garbage_collection_outside_idle',
+        'trace',
         ])
     if platform.GetHostPlatform().GetOSName() != 'win':
       # CPU metric is only supported non-Windows platforms.

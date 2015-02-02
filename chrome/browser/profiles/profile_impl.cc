@@ -28,12 +28,10 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/shortcuts_backend.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
-#include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -73,6 +71,7 @@
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
+#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -81,9 +80,11 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -114,6 +115,10 @@
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "components/user_manager/user_manager.h"
+#endif
+
+#if defined(ENABLE_BACKGROUND)
+#include "chrome/browser/background/background_mode_manager.h"
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -320,6 +325,10 @@ void ProfileImpl::RegisterProfilePrefs(
       prefs::kForceSafeSearch,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kRecordHistory,
+      false,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterIntegerPref(
       prefs::kProfileAvatarIndex,
       -1,
@@ -517,10 +526,6 @@ void ProfileImpl::DoFinalInit() {
       prefs::kSupervisedUserId,
       base::Bind(&ProfileImpl::UpdateProfileSupervisedUserIdCache,
                  base::Unretained(this)));
-  pref_change_registrar_.Add(
-      prefs::kDefaultZoomLevel,
-      base::Bind(&ProfileImpl::OnDefaultZoomLevelChanged,
-                 base::Unretained(this)));
 
   // Changes in the profile avatar.
   pref_change_registrar_.Add(
@@ -573,6 +578,7 @@ void ProfileImpl::DoFinalInit() {
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(local_state));
 
+#if defined(ENABLE_BACKGROUND)
   // Initialize the BackgroundModeManager - this has to be done here before
   // InitExtensions() is called because it relies on receiving notifications
   // when extensions are loaded. BackgroundModeManager is not needed under
@@ -587,6 +593,7 @@ void ProfileImpl::DoFinalInit() {
     if (g_browser_process->background_mode_manager())
       g_browser_process->background_mode_manager()->RegisterProfile(this);
   }
+#endif  // defined(ENABLE_BACKGROUND)
 
   base::FilePath cookie_path = GetPath();
   cookie_path = cookie_path.Append(chrome::kCookieFilename);
@@ -663,10 +670,13 @@ void ProfileImpl::DoFinalInit() {
 #else
   base::TimeDelta commit_delay = base::TimeDelta::FromMinutes(60);
 #endif
+  // TODO(bengr): Remove this in M-43.
+  data_reduction_proxy::MigrateStatisticsPrefs(g_browser_process->local_state(),
+                                               prefs_.get());
   data_reduction_proxy_statistics_prefs =
       scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>(
           new data_reduction_proxy::DataReductionProxyStatisticsPrefs(
-              g_browser_process->local_state(),
+              prefs_.get(),
               base::MessageLoopProxy::current(),
               commit_delay));
   data_reduction_proxy_chrome_settings->SetDataReductionProxyStatisticsPrefs(
@@ -749,49 +759,13 @@ void ProfileImpl::DoFinalInit() {
 
 void ProfileImpl::InitHostZoomMap() {
   HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
-  host_zoom_map->SetDefaultZoomLevel(
-      prefs_->GetDouble(prefs::kDefaultZoomLevel));
+  DCHECK(!zoom_level_prefs_);
+  zoom_level_prefs_.reset(
+      new chrome::ChromeZoomLevelPrefs(prefs_.get(), GetPath()));
+  zoom_level_prefs_->InitPrefsAndCopyToHostZoomMap(GetPath(), host_zoom_map);
 
-  const base::DictionaryValue* host_zoom_dictionary =
-      prefs_->GetDictionary(prefs::kPerHostZoomLevels);
-  // Careful: The returned value could be NULL if the pref has never been set.
-  if (host_zoom_dictionary != NULL) {
-    std::vector<std::string> keys_to_remove;
-    for (base::DictionaryValue::Iterator i(*host_zoom_dictionary); !i.IsAtEnd();
-         i.Advance()) {
-      const std::string& host(i.key());
-      double zoom_level = 0;
-
-      bool success = i.value().GetAsDouble(&zoom_level);
-      DCHECK(success);
-
-      // Filter out A) the empty host, B) zoom levels equal to the default; and
-      // remember them, so that we can later erase them from Prefs.
-      // Values of type A and B could have been stored due to crbug.com/364399.
-      // Values of type B could further have been stored before the default zoom
-      // level was set to its current value. In either case, SetZoomLevelForHost
-      // will ignore type B values, thus, to have consistency with HostZoomMap's
-      // internal state, these values must also be removed from Prefs.
-      if (host.empty() ||
-          content::ZoomValuesEqual(zoom_level,
-                                   host_zoom_map->GetDefaultZoomLevel())) {
-        keys_to_remove.push_back(host);
-        continue;
-      }
-
-      host_zoom_map->SetZoomLevelForHost(host, zoom_level);
-    }
-
-    DictionaryPrefUpdate update(prefs_.get(), prefs::kPerHostZoomLevels);
-    base::DictionaryValue* host_zoom_dictionary = update.Get();
-    for (std::vector<std::string>::const_iterator it = keys_to_remove.begin();
-         it != keys_to_remove.end(); ++it) {
-      host_zoom_dictionary->RemoveWithoutPathExpansion(*it, NULL);
-    }
-  }
-
-  zoom_subscription_ = host_zoom_map->AddZoomLevelChangedCallback(
-      base::Bind(&ProfileImpl::OnZoomLevelChanged, base::Unretained(this)));
+  // TODO(wjmaclean): Remove this. crbug.com/420643
+  chrome::MigrateProfileZoomLevelPrefs(this);
 }
 
 base::FilePath ProfileImpl::last_selected_directory() {
@@ -1012,6 +986,10 @@ PrefService* ProfileImpl::GetPrefs() {
   return prefs_.get();
 }
 
+chrome::ChromeZoomLevelPrefs* ProfileImpl::GetZoomLevelPrefs() {
+  return zoom_level_prefs_.get();
+}
+
 PrefService* ProfileImpl::GetOffTheRecordPrefs() {
   DCHECK(prefs_);
   if (!otr_prefs_) {
@@ -1101,6 +1079,7 @@ net::SSLConfigService* ProfileImpl::GetSSLConfigService() {
 }
 
 HostContentSettingsMap* ProfileImpl::GetHostContentSettingsMap() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), false);
   }
@@ -1158,26 +1137,6 @@ history::TopSites* ProfileImpl::GetTopSites() {
 
 history::TopSites* ProfileImpl::GetTopSitesWithoutCreating() {
   return top_sites_.get();
-}
-
-void ProfileImpl::OnDefaultZoomLevelChanged() {
-  HostZoomMap::GetDefaultForBrowserContext(this)->SetDefaultZoomLevel(
-      pref_change_registrar_.prefs()->GetDouble(prefs::kDefaultZoomLevel));
-}
-
-void ProfileImpl::OnZoomLevelChanged(
-    const HostZoomMap::ZoomLevelChange& change) {
-
-  if (change.mode != HostZoomMap::ZOOM_CHANGED_FOR_HOST)
-    return;
-  HostZoomMap* host_zoom_map = HostZoomMap::GetDefaultForBrowserContext(this);
-  double level = change.zoom_level;
-  DictionaryPrefUpdate update(prefs_.get(), prefs::kPerHostZoomLevels);
-  base::DictionaryValue* host_zoom_dictionary = update.Get();
-  if (content::ZoomValuesEqual(level, host_zoom_map->GetDefaultZoomLevel()))
-    host_zoom_dictionary->RemoveWithoutPathExpansion(change.host, NULL);
-  else
-    host_zoom_dictionary->SetDoubleWithoutPathExpansion(change.host, level);
 }
 
 #if defined(ENABLE_SESSION_SERVICE)

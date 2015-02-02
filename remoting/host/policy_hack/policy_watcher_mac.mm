@@ -28,18 +28,14 @@ class PolicyWatcherMac : public PolicyWatcher {
     : PolicyWatcher(task_runner) {
   }
 
-  virtual ~PolicyWatcherMac() {
-  }
+  ~PolicyWatcherMac() override {}
 
  protected:
-  virtual void StartWatchingInternal() OVERRIDE {
-    Reload();
-  }
+  void StartWatchingInternal() override { Reload(); }
 
-  virtual void StopWatchingInternal() OVERRIDE {
-  }
+  void StopWatchingInternal() override {}
 
-  virtual void Reload() OVERRIDE {
+  void Reload() override {
     DCHECK(OnPolicyWatcherThread());
     base::DictionaryValue policy;
 
@@ -86,9 +82,10 @@ class PolicyWatcherMac : public PolicyWatcher {
   }
 };
 
-PolicyWatcher* PolicyWatcher::Create(
-        scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  return new PolicyWatcherMac(task_runner);
+scoped_ptr<PolicyWatcher> PolicyWatcher::Create(
+    policy::PolicyService* policy_service,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  return make_scoped_ptr(new PolicyWatcherMac(task_runner));
 }
 
 }  // namespace policy_hack

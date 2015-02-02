@@ -29,10 +29,10 @@ class ASH_EXPORT PanelFrameView : public views::NonClientFrameView {
   };
 
   PanelFrameView(views::Widget* frame, FrameType frame_type);
-  virtual ~PanelFrameView();
+  ~PanelFrameView() override;
 
   // Overridden from views::View:
-  virtual const char* GetClassName() const OVERRIDE;
+  const char* GetClassName() const override;
 
  private:
   void InitHeaderPainter();
@@ -41,21 +41,20 @@ class ASH_EXPORT PanelFrameView : public views::NonClientFrameView {
   int NonClientTopBorderHeight() const;
 
   // Overridden from views::NonClientFrameView:
-  virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
-  virtual gfx::Rect GetWindowBoundsForClientBounds(
-      const gfx::Rect& client_bounds) const OVERRIDE;
-  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
-  virtual void GetWindowMask(const gfx::Size& size,
-                             gfx::Path* window_mask) OVERRIDE;
-  virtual void ResetWindowControls() OVERRIDE;
-  virtual void UpdateWindowIcon() OVERRIDE;
-  virtual void UpdateWindowTitle() OVERRIDE;
-  virtual void SizeConstraintsChanged() OVERRIDE;
+  gfx::Rect GetBoundsForClientView() const override;
+  gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const override;
+  int NonClientHitTest(const gfx::Point& point) override;
+  void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) override;
+  void ResetWindowControls() override;
+  void UpdateWindowIcon() override;
+  void UpdateWindowTitle() override;
+  void SizeConstraintsChanged() override;
 
   // Overridden from views::View:
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  gfx::Size GetMinimumSize() const override;
+  void Layout() override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // Child View class describing the panel's title bar behavior
   // and buttons, owned by the view hierarchy

@@ -68,7 +68,7 @@ class Json::JsonImpl {
     assert(value != NULL);
 
     Value::ConstMemberIterator member = value_->FindMember(key.c_str());
-    if (member == NULL || !member->value.IsString()) {
+    if (member == value_->MemberEnd() || !member->value.IsString()) {
       return false;
     }
 

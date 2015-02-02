@@ -14,12 +14,12 @@ namespace extensions {
 class APIFeature : public SimpleFeature {
  public:
   APIFeature();
-  virtual ~APIFeature();
+  ~APIFeature() override;
 
   // extensions::Feature:
-  virtual bool IsInternal() const OVERRIDE;
+  bool IsInternal() const override;
 
-  virtual std::string Parse(const base::DictionaryValue* value) OVERRIDE;
+  std::string Parse(const base::DictionaryValue* value) override;
 
  private:
   bool internal_;

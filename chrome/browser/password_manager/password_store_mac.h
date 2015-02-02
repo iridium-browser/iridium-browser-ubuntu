@@ -37,43 +37,41 @@ class PasswordStoreMac : public password_manager::PasswordStore {
       password_manager::LoginDatabase* login_db);
 
   // Initializes |thread_|.
-  virtual bool Init(
-      const syncer::SyncableService::StartSyncFlare& flare,
-      const std::string& sync_username) OVERRIDE;
+  bool Init(const syncer::SyncableService::StartSyncFlare& flare) override;
 
   // Stops |thread_|.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
  protected:
-  virtual ~PasswordStoreMac();
+  ~PasswordStoreMac() override;
 
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-      GetBackgroundTaskRunner() OVERRIDE;
+  scoped_refptr<base::SingleThreadTaskRunner> GetBackgroundTaskRunner()
+      override;
 
  private:
-  virtual void ReportMetricsImpl(const std::string& sync_username) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList AddLoginImpl(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList UpdateLoginImpl(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList RemoveLoginImpl(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList
-      RemoveLoginsCreatedBetweenImpl(base::Time delete_begin,
-                                     base::Time delete_end) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList
-      RemoveLoginsSyncedBetweenImpl(base::Time delete_begin,
-                                    base::Time delete_end) OVERRIDE;
-  virtual void GetLoginsImpl(
-      const autofill::PasswordForm& form,
-      AuthorizationPromptPolicy prompt_policy,
-      const ConsumerCallbackRunner& callback_runner) OVERRIDE;
-  virtual void GetAutofillableLoginsImpl(GetLoginsRequest* request) OVERRIDE;
-  virtual void GetBlacklistLoginsImpl(GetLoginsRequest* request) OVERRIDE;
-  virtual bool FillAutofillableLogins(
-      std::vector<autofill::PasswordForm*>* forms) OVERRIDE;
-  virtual bool FillBlacklistLogins(
-      std::vector<autofill::PasswordForm*>* forms) OVERRIDE;
+  void ReportMetricsImpl(const std::string& sync_username,
+                         bool custom_passphrase_sync_enabled) override;
+  password_manager::PasswordStoreChangeList AddLoginImpl(
+      const autofill::PasswordForm& form) override;
+  password_manager::PasswordStoreChangeList UpdateLoginImpl(
+      const autofill::PasswordForm& form) override;
+  password_manager::PasswordStoreChangeList RemoveLoginImpl(
+      const autofill::PasswordForm& form) override;
+  password_manager::PasswordStoreChangeList RemoveLoginsCreatedBetweenImpl(
+      base::Time delete_begin,
+      base::Time delete_end) override;
+  password_manager::PasswordStoreChangeList RemoveLoginsSyncedBetweenImpl(
+      base::Time delete_begin,
+      base::Time delete_end) override;
+  void GetLoginsImpl(const autofill::PasswordForm& form,
+                     AuthorizationPromptPolicy prompt_policy,
+                     const ConsumerCallbackRunner& callback_runner) override;
+  void GetAutofillableLoginsImpl(GetLoginsRequest* request) override;
+  void GetBlacklistLoginsImpl(GetLoginsRequest* request) override;
+  bool FillAutofillableLogins(
+      std::vector<autofill::PasswordForm*>* forms) override;
+  bool FillBlacklistLogins(
+      std::vector<autofill::PasswordForm*>* forms) override;
 
   // Adds the given form to the Keychain if it's something we want to store
   // there (i.e., not a blacklist entry). Returns true if the operation

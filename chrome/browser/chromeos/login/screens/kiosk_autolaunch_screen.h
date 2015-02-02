@@ -9,29 +9,29 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/screens/kiosk_autolaunch_screen_actor.h"
-#include "chrome/browser/chromeos/login/screens/wizard_screen.h"
 
 namespace chromeos {
 
 // Representation independent class that controls screen showing auto launch
 // warning to users.
-class KioskAutolaunchScreen : public WizardScreen,
+class KioskAutolaunchScreen : public BaseScreen,
                               public KioskAutolaunchScreenActor::Delegate {
  public:
-  KioskAutolaunchScreen(ScreenObserver* observer,
+  KioskAutolaunchScreen(BaseScreenDelegate* base_screen_delegate,
                         KioskAutolaunchScreenActor* actor);
   virtual ~KioskAutolaunchScreen();
 
-  // WizardScreen implementation:
-  virtual void PrepareToShow() OVERRIDE {}
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE {}
-  virtual std::string GetName() const OVERRIDE;
+  // BaseScreen implementation:
+  virtual void PrepareToShow() override {}
+  virtual void Show() override;
+  virtual void Hide() override {}
+  virtual std::string GetName() const override;
 
   // KioskAutolaunchScreenActor::Delegate implementation:
-  virtual void OnExit(bool confirmed) OVERRIDE;
-  virtual void OnActorDestroyed(KioskAutolaunchScreenActor* actor) OVERRIDE;
+  virtual void OnExit(bool confirmed) override;
+  virtual void OnActorDestroyed(KioskAutolaunchScreenActor* actor) override;
 
  private:
   KioskAutolaunchScreenActor* actor_;

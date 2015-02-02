@@ -21,7 +21,7 @@ class TestExtensionWarningSet : public WarningService {
  public:
   explicit TestExtensionWarningSet(Profile* profile) : WarningService(profile) {
   }
-  virtual ~TestExtensionWarningSet() {}
+  ~TestExtensionWarningSet() override {}
 
   void AddWarning(const Warning& warning) {
     WarningSet warnings;
@@ -36,10 +36,9 @@ class TestExtensionWarningBadgeService : public ExtensionWarningBadgeService {
                                    WarningService* warning_service)
       : ExtensionWarningBadgeService(profile),
         warning_service_(warning_service) {}
-  virtual ~TestExtensionWarningBadgeService() {}
+  ~TestExtensionWarningBadgeService() override {}
 
-  virtual const std::set<Warning>&
-  GetCurrentWarnings() const OVERRIDE {
+  const std::set<Warning>& GetCurrentWarnings() const override {
     return warning_service_->warnings();
   }
 
@@ -54,8 +53,8 @@ bool HasBadge(Profile* profile) {
       NULL;
 }
 
-const char* ext1_id = "extension1";
-const char* ext2_id = "extension2";
+const char ext1_id[] = "extension1";
+const char ext2_id[] = "extension2";
 
 }  // namespace
 

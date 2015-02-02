@@ -6,7 +6,8 @@
 #define CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_CHROME_SETTINGS_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
 
 namespace base {
@@ -36,7 +37,7 @@ class DataReductionProxyChromeSettings
       data_reduction_proxy::DataReductionProxyParams* params);
 
   // Destructs the settings object.
-  virtual ~DataReductionProxyChromeSettings();
+  ~DataReductionProxyChromeSettings() override;
 
   // Initialize the settings object with the given configurator, prefs services,
   // and request context.
@@ -47,7 +48,7 @@ class DataReductionProxyChromeSettings
       net::URLRequestContextGetter* request_context);
 
   // Gets the client type for the data reduction proxy.
-  static std::string GetClient();
+  static data_reduction_proxy::Client GetClient();
 
  private:
   // Registers the DataReductionProxyEnabled synthetic field trial with

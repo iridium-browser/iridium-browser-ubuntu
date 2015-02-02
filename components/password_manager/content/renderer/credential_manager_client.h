@@ -11,6 +11,7 @@
 #include "content/public/renderer/render_view_observer.h"
 #include "ipc/ipc_listener.h"
 #include "third_party/WebKit/public/platform/WebCredentialManagerClient.h"
+#include "third_party/WebKit/public/platform/WebCredentialManagerError.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 
 namespace blink {
@@ -48,10 +49,10 @@ class CredentialManagerClient : public blink::WebCredentialManagerClient,
                                 public content::RenderViewObserver {
  public:
   explicit CredentialManagerClient(content::RenderView* render_view);
-  virtual ~CredentialManagerClient();
+  ~CredentialManagerClient() override;
 
   // RenderViewObserver:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // Message handlers for messages from the browser process:
   virtual void OnAcknowledgeFailedSignIn(int request_id);
@@ -59,19 +60,22 @@ class CredentialManagerClient : public blink::WebCredentialManagerClient,
   virtual void OnAcknowledgeSignedOut(int request_id);
   virtual void OnSendCredential(int request_id,
                                 const CredentialInfo& credential_info);
+  virtual void OnRejectCredentialRequest(
+      int request_id,
+      blink::WebCredentialManagerError::ErrorType error_type);
 
   // blink::WebCredentialManager:
   virtual void dispatchFailedSignIn(
       const blink::WebCredential& credential,
-      WebCredentialManagerClient::NotificationCallbacks* callbacks) OVERRIDE;
+      WebCredentialManagerClient::NotificationCallbacks* callbacks);
   virtual void dispatchSignedIn(
       const blink::WebCredential& credential,
-      WebCredentialManagerClient::NotificationCallbacks* callbacks) OVERRIDE;
-  virtual void dispatchSignedOut(NotificationCallbacks* callbacks) OVERRIDE;
+      WebCredentialManagerClient::NotificationCallbacks* callbacks);
+  virtual void dispatchSignedOut(NotificationCallbacks* callbacks);
   virtual void dispatchRequest(
       bool zero_click_only,
       const blink::WebVector<blink::WebURL>& federations,
-      RequestCallbacks* callbacks) OVERRIDE;
+      RequestCallbacks* callbacks);
 
  private:
   typedef IDMap<blink::WebCredentialManagerClient::RequestCallbacks,

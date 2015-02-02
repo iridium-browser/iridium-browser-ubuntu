@@ -21,10 +21,10 @@ namespace content {
 class TestRenderFrameHostCreationObserver : public WebContentsObserver {
  public:
   explicit TestRenderFrameHostCreationObserver(WebContents* web_contents);
-  virtual ~TestRenderFrameHostCreationObserver();
+  ~TestRenderFrameHostCreationObserver() override;
 
   // WebContentsObserver implementation.
-  virtual void RenderFrameCreated(RenderFrameHost* render_frame_host) OVERRIDE;
+  void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
 
   RenderFrameHost* last_created_frame() const { return last_created_frame_; }
 
@@ -41,21 +41,22 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
                       FrameTreeNode* frame_tree_node,
                       int routing_id,
                       bool is_swapped_out);
-  virtual ~TestRenderFrameHost();
+  ~TestRenderFrameHost() override;
 
   // RenderFrameHostImpl overrides (same values, but in Test* types)
-  virtual TestRenderViewHost* GetRenderViewHost() OVERRIDE;
+  TestRenderViewHost* GetRenderViewHost() override;
 
   // RenderFrameHostTester implementation.
-  virtual TestRenderFrameHost* AppendChild(
-      const std::string& frame_name) OVERRIDE;
-  virtual void SendNavigateWithTransition(
-      int page_id,
-      const GURL& url,
-      ui::PageTransition transition) OVERRIDE;
+  TestRenderFrameHost* AppendChild(const std::string& frame_name) override;
+  void SendNavigate(int page_id, const GURL& url) override;
+  void SendFailedNavigate(int page_id, const GURL& url) override;
+  void SendNavigateWithTransition(int page_id,
+                                  const GURL& url,
+                                  ui::PageTransition transition) override;
+  void SetContentsMimeType(const std::string& mime_type) override;
+  void SendBeforeUnloadACK(bool proceed) override;
+  void SimulateSwapOutACK() override;
 
-  void SendNavigate(int page_id, const GURL& url);
-  void SendFailedNavigate(int page_id, const GURL& url);
   void SendNavigateWithTransitionAndResponseCode(
       int page_id,
       const GURL& url, ui::PageTransition transition,
@@ -86,10 +87,6 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
 
   void DidDisownOpener();
 
-  void set_contents_mime_type(const std::string& mime_type) {
-    contents_mime_type_ = mime_type;
-  }
-
   // If set, navigations will appear to have cleared the history list in the
   // RenderFrame
   // (FrameHostMsg_DidCommitProvisionalLoad_Params::history_list_was_cleared).
@@ -97,9 +94,6 @@ class TestRenderFrameHost : public RenderFrameHostImpl,
   void set_simulate_history_list_was_cleared(bool cleared) {
     simulate_history_list_was_cleared_ = cleared;
   }
-
-  // TODO(nick): As necessary for testing, override behavior of RenderFrameHost
-  // here.
 
  private:
   TestRenderFrameHostCreationObserver child_creation_observer_;

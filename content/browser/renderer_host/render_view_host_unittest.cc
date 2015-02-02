@@ -29,9 +29,9 @@ namespace content {
 class RenderViewHostTestBrowserClient : public TestContentBrowserClient {
  public:
   RenderViewHostTestBrowserClient() {}
-  virtual ~RenderViewHostTestBrowserClient() {}
+  ~RenderViewHostTestBrowserClient() override {}
 
-  virtual bool IsHandledURL(const GURL& url) OVERRIDE {
+  bool IsHandledURL(const GURL& url) override {
     return url.scheme() == url::kFileScheme;
   }
 
@@ -42,14 +42,14 @@ class RenderViewHostTestBrowserClient : public TestContentBrowserClient {
 class RenderViewHostTest : public RenderViewHostImplTestHarness {
  public:
   RenderViewHostTest() : old_browser_client_(NULL) {}
-  virtual ~RenderViewHostTest() {}
+  ~RenderViewHostTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     old_browser_client_ = SetBrowserClientForTesting(&test_browser_client_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     SetBrowserClientForTesting(old_browser_client_);
     RenderViewHostImplTestHarness::TearDown();
   }
@@ -64,7 +64,7 @@ class RenderViewHostTest : public RenderViewHostImplTestHarness {
 // All about URLs reported by the renderer should get rewritten to about:blank.
 // See RenderViewHost::OnNavigate for a discussion.
 TEST_F(RenderViewHostTest, FilterAbout) {
-  test_rvh()->SendNavigate(1, GURL("about:cache"));
+  contents()->GetMainFrame()->SendNavigate(1, GURL("about:cache"));
   ASSERT_TRUE(controller().GetVisibleEntry());
   EXPECT_EQ(GURL(url::kAboutBlankURL),
             controller().GetVisibleEntry()->GetURL());
@@ -99,11 +99,11 @@ TEST_F(RenderViewHostTest, ResetUnloadOnReload) {
       url2, Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
   // Simulate the ClosePage call which is normally sent by the net::URLRequest.
   rvh()->ClosePage();
-  // Needed so that navigations are not suspended on the RVH.
-  test_rvh()->SendBeforeUnloadACK(true);
+  // Needed so that navigations are not suspended on the RFH.
+  main_test_rfh()->SendBeforeUnloadACK(true);
   contents()->Stop();
   controller().Reload(false);
-  EXPECT_FALSE(test_rvh()->IsWaitingForUnloadACK());
+  EXPECT_FALSE(main_test_rfh()->IsWaitingForUnloadACK());
 }
 
 // Ensure we do not grant bindings to a process shared with unprivileged views.
@@ -119,18 +119,18 @@ TEST_F(RenderViewHostTest, DontGrantBindingsToSharedProcess) {
 class MockDraggingRenderViewHostDelegateView
     : public RenderViewHostDelegateView {
  public:
-  virtual ~MockDraggingRenderViewHostDelegateView() {}
-  virtual void StartDragging(const DropData& drop_data,
-                             blink::WebDragOperationsMask allowed_ops,
-                             const gfx::ImageSkia& image,
-                             const gfx::Vector2d& image_offset,
-                             const DragEventSourceInfo& event_info) OVERRIDE {
+  ~MockDraggingRenderViewHostDelegateView() override {}
+  void StartDragging(const DropData& drop_data,
+                     blink::WebDragOperationsMask allowed_ops,
+                     const gfx::ImageSkia& image,
+                     const gfx::Vector2d& image_offset,
+                     const DragEventSourceInfo& event_info) override {
     drag_url_ = drop_data.url;
     html_base_url_ = drop_data.html_base_url;
   }
-  virtual void UpdateDragCursor(blink::WebDragOperation operation) OVERRIDE {}
-  virtual void GotFocus() OVERRIDE {}
-  virtual void TakeFocus(bool reverse) OVERRIDE {}
+  void UpdateDragCursor(blink::WebDragOperation operation) override {}
+  void GotFocus() override {}
+  void TakeFocus(bool reverse) override {}
   virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}
 
   GURL drag_url() {
@@ -232,18 +232,20 @@ TEST_F(RenderViewHostTest, NavigationWithBadHistoryItemFiles) {
   EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &file_path));
   file_path = file_path.AppendASCII("bar");
   EXPECT_EQ(0, process()->bad_msg_count());
-  test_rvh()->SendNavigateWithFile(1, url, file_path);
+  contents()->GetMainFrame()->SendNavigateWithFile(1, url, file_path);
   EXPECT_EQ(1, process()->bad_msg_count());
 
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadFile(
       process()->GetID(), file_path);
-  test_rvh()->SendNavigateWithFile(process()->GetID(), url, file_path);
+  contents()->GetMainFrame()->SendNavigateWithFile(process()->GetID(), url,
+                                                   file_path);
   EXPECT_EQ(1, process()->bad_msg_count());
 }
 
 TEST_F(RenderViewHostTest, RoutingIdSane) {
   RenderFrameHostImpl* root_rfh =
       contents()->GetFrameTree()->root()->current_frame_host();
+  EXPECT_EQ(contents()->GetMainFrame(), root_rfh);
   EXPECT_EQ(test_rvh()->GetProcess(), root_rfh->GetProcess());
   EXPECT_NE(test_rvh()->GetRoutingID(), root_rfh->routing_id());
 }
@@ -282,12 +284,12 @@ class TestSaveImageFromDataURL : public RenderMessageFilter {
   }
 
  protected:
-  virtual ~TestSaveImageFromDataURL() { }
-  virtual void DownloadUrl(int render_view_id,
-                           const GURL& url,
-                           const Referrer& referrer,
-                           const base::string16& suggested_name,
-                           const bool use_prompt) const OVERRIDE {
+  ~TestSaveImageFromDataURL() override {}
+  void DownloadUrl(int render_view_id,
+                   const GURL& url,
+                   const Referrer& referrer,
+                   const base::string16& suggested_name,
+                   const bool use_prompt) const override {
     url_string_ = url.spec();
     is_downloaded_ = true;
   }

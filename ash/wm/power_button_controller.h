@@ -46,7 +46,7 @@ class ASH_EXPORT PowerButtonController : ui::EventHandler
       {
  public:
   explicit PowerButtonController(LockStateController* controller);
-  virtual ~PowerButtonController();
+  ~PowerButtonController() override;
 
   void set_has_legacy_power_button_for_test(bool legacy) {
     has_legacy_power_button_ = legacy;
@@ -64,12 +64,12 @@ class ASH_EXPORT PowerButtonController : ui::EventHandler
   void OnLockButtonEvent(bool down, const base::TimeTicks& timestamp);
 
   // ui::EventHandler:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
+  void OnKeyEvent(ui::KeyEvent* event) override;
 
 #if defined(OS_CHROMEOS)
   // Overriden from ui::DisplayConfigurator::Observer:
   virtual void OnDisplayModeChanged(
-      const ui::DisplayConfigurator::DisplayStateList& outputs) OVERRIDE;
+      const ui::DisplayConfigurator::DisplayStateList& outputs) override;
 #endif
 
  private:

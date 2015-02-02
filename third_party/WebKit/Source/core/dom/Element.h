@@ -195,7 +195,7 @@ public:
     // Returns the absolute bounding box translated into screen coordinates:
     IntRect screenRect() const;
 
-    virtual void didMoveToNewDocument(Document&) OVERRIDE;
+    virtual void didMoveToNewDocument(Document&) override;
 
     void removeAttribute(const AtomicString& name);
     void removeAttributeNS(const AtomicString& namespaceURI, const AtomicString& localName);
@@ -211,7 +211,7 @@ public:
     PassRefPtrWillBeRawPtr<Attr> attrIfExists(const QualifiedName&);
     PassRefPtrWillBeRawPtr<Attr> ensureAttr(const QualifiedName&);
 
-    WillBeHeapVector<RefPtrWillBeMember<Attr> >* attrNodeList();
+    WillBeHeapVector<RefPtrWillBeMember<Attr>>* attrNodeList();
 
     CSSStyleDeclaration* style();
 
@@ -228,15 +228,15 @@ public:
     // A fast function for checking the local name against another atomic string.
     bool hasLocalName(const AtomicString& other) const { return m_tagName.localName() == other; }
 
-    virtual const AtomicString& localName() const OVERRIDE FINAL { return m_tagName.localName(); }
+    virtual const AtomicString& localName() const override final { return m_tagName.localName(); }
     const AtomicString& prefix() const { return m_tagName.prefix(); }
-    virtual const AtomicString& namespaceURI() const OVERRIDE FINAL { return m_tagName.namespaceURI(); }
+    virtual const AtomicString& namespaceURI() const override final { return m_tagName.namespaceURI(); }
 
     const AtomicString& locateNamespacePrefix(const AtomicString& namespaceURI) const;
 
-    virtual KURL baseURI() const OVERRIDE FINAL;
+    virtual KURL baseURI() const override final;
 
-    virtual String nodeName() const OVERRIDE;
+    virtual String nodeName() const override;
 
     PassRefPtrWillBeRawPtr<Element> cloneElementWithChildren();
     PassRefPtrWillBeRawPtr<Element> cloneElementWithoutChildren();
@@ -247,10 +247,10 @@ public:
 
     void setBooleanAttribute(const QualifiedName& name, bool);
 
-    virtual const StylePropertySet* additionalPresentationAttributeStyle() { return 0; }
+    virtual const StylePropertySet* additionalPresentationAttributeStyle() { return nullptr; }
     void invalidateStyleAttribute();
 
-    const StylePropertySet* inlineStyle() const { return elementData() ? elementData()->m_inlineStyle.get() : 0; }
+    const StylePropertySet* inlineStyle() const { return elementData() ? elementData()->m_inlineStyle.get() : nullptr; }
 
     bool setInlineStyleProperty(CSSPropertyID, CSSValueID identifier, bool important = false);
     bool setInlineStyleProperty(CSSPropertyID, double value, CSSPrimitiveValue::UnitType, bool important = false);
@@ -298,11 +298,11 @@ public:
 
     virtual void copyNonAttributePropertiesFromElement(const Element&) { }
 
-    virtual void attach(const AttachContext& = AttachContext()) OVERRIDE;
-    virtual void detach(const AttachContext& = AttachContext()) OVERRIDE;
+    virtual void attach(const AttachContext& = AttachContext()) override;
+    virtual void detach(const AttachContext& = AttachContext()) override;
     virtual RenderObject* createRenderer(RenderStyle*);
     virtual bool rendererIsNeeded(const RenderStyle&);
-    void recalcStyle(StyleRecalcChange, Text* nextTextSibling = 0);
+    void recalcStyle(StyleRecalcChange, Text* nextTextSibling = nullptr);
     void pseudoStateChanged(CSSSelector::PseudoType);
     void setAnimationStyleChange(bool);
     void setNeedsAnimationStyleRecalc();
@@ -351,7 +351,7 @@ public:
     KURL getNonEmptyURLAttribute(const QualifiedName&) const;
 
     virtual const AtomicString imageSourceURL() const;
-    virtual Image* imageContents() { return 0; }
+    virtual Image* imageContents() { return nullptr; }
 
     virtual void focus(bool restorePreviousSelection = true, FocusType = FocusTypeNone);
     virtual void updateFocusAppearance(bool restorePreviousSelection);
@@ -409,6 +409,7 @@ public:
 
     virtual bool matchesReadOnlyPseudoClass() const { return false; }
     virtual bool matchesReadWritePseudoClass() const { return false; }
+    virtual bool matchesValidityPseudoClasses() const { return false; }
     bool matches(const String& selectors, ExceptionState&);
     virtual bool shouldAppearIndeterminate() const { return false; }
 
@@ -429,12 +430,12 @@ public:
     virtual bool isRequiredFormControl() const { return false; }
     virtual bool isDefaultButtonForForm() const { return false; }
     virtual bool willValidate() const { return false; }
-    virtual bool isValidFormControlElement() { return false; }
+    virtual bool isValidElement() { return false; }
     virtual bool isInRange() const { return false; }
     virtual bool isOutOfRange() const { return false; }
     virtual bool isClearButtonElement() const { return false; }
 
-    virtual bool canContainRangeEndPoint() const OVERRIDE { return true; }
+    virtual bool canContainRangeEndPoint() const override { return true; }
 
     // Used for disabled form elements; if true, prevents mouse events from being dispatched
     // to event listeners, and prevents DOMActivate events from being sent at all.
@@ -484,11 +485,11 @@ public:
     void clearMutableInlineStyleIfEmpty();
 
     void setTabIndex(int);
-    virtual short tabIndex() const OVERRIDE;
+    virtual short tabIndex() const override;
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
-    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) OVERRIDE;
+    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
 
 protected:
     Element(const QualifiedName& tagName, Document*, ConstructionType);
@@ -500,9 +501,9 @@ protected:
     void addPropertyToPresentationAttributeStyle(MutableStylePropertySet*, CSSPropertyID, double value, CSSPrimitiveValue::UnitType);
     void addPropertyToPresentationAttributeStyle(MutableStylePropertySet*, CSSPropertyID, const String& value);
 
-    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
-    virtual void removedFrom(ContainerNode*) OVERRIDE;
-    virtual void childrenChanged(const ChildrenChange&) OVERRIDE;
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
+    virtual void removedFrom(ContainerNode*) override;
+    virtual void childrenChanged(const ChildrenChange&) override;
 
     virtual void willRecalcStyle(StyleRecalcChange);
     virtual void didRecalcStyle(StyleRecalcChange);
@@ -579,8 +580,8 @@ private:
     void updateId(TreeScope&, const AtomicString& oldId, const AtomicString& newId);
     void updateName(const AtomicString& oldName, const AtomicString& newName);
 
-    virtual NodeType nodeType() const OVERRIDE FINAL;
-    virtual bool childTypeAllowed(NodeType) const OVERRIDE FINAL;
+    virtual NodeType nodeType() const override final;
+    virtual bool childTypeAllowed(NodeType) const override final;
 
     void setAttributeInternal(size_t index, const QualifiedName&, const AtomicString& value, SynchronizationOfLazyAttribute);
     void appendAttributeInternal(const QualifiedName&, const AtomicString& value, SynchronizationOfLazyAttribute);
@@ -588,14 +589,14 @@ private:
     void attributeChangedFromParserOrByCloning(const QualifiedName&, const AtomicString&, AttributeModificationReason);
 
 #ifndef NDEBUG
-    virtual void formatForDebugger(char* buffer, unsigned length) const OVERRIDE;
+    virtual void formatForDebugger(char* buffer, unsigned length) const override;
 #endif
 
     bool pseudoStyleCacheIsInvalid(const RenderStyle* currentStyle, RenderStyle* newStyle);
 
     void cancelFocusAppearanceUpdate();
 
-    virtual RenderStyle* virtualComputedStyle(PseudoId pseudoElementSpecifier = NOPSEUDO) OVERRIDE { return computedStyle(pseudoElementSpecifier); }
+    virtual RenderStyle* virtualComputedStyle(PseudoId pseudoElementSpecifier = NOPSEUDO) override { return computedStyle(pseudoElementSpecifier); }
 
     inline void updateCallbackSelectors(RenderStyle* oldStyle, RenderStyle* newStyle);
     inline void removeCallbackSelectors();
@@ -603,7 +604,7 @@ private:
 
     // cloneNode is private so that non-virtual cloneElementWithChildren and cloneElementWithoutChildren
     // are used instead.
-    virtual PassRefPtrWillBeRawPtr<Node> cloneNode(bool deep) OVERRIDE;
+    virtual PassRefPtrWillBeRawPtr<Node> cloneNode(bool deep) override;
     virtual PassRefPtrWillBeRawPtr<Element> cloneElementWithoutAttributesAndChildren();
 
     QualifiedName m_tagName;
@@ -620,7 +621,7 @@ private:
     ElementRareData* elementRareData() const;
     ElementRareData& ensureElementRareData();
 
-    WillBeHeapVector<RefPtrWillBeMember<Attr> >& ensureAttrNodeList();
+    WillBeHeapVector<RefPtrWillBeMember<Attr>>& ensureAttrNodeList();
     void removeAttrNodeList();
     void detachAllAttrNodesFromElement();
     void detachAttrNodeFromElementWithValue(Attr*, const AtomicString& value);
@@ -670,7 +671,7 @@ inline bool isDisabledFormControl(const Node* node)
 inline Element* Node::parentElement() const
 {
     ContainerNode* parent = parentNode();
-    return parent && parent->isElementNode() ? toElement(parent) : 0;
+    return parent && parent->isElementNode() ? toElement(parent) : nullptr;
 }
 
 inline bool Element::fastHasAttribute(const QualifiedName& name) const
@@ -804,7 +805,7 @@ inline void Element::invalidateStyleAttribute()
 inline const StylePropertySet* Element::presentationAttributeStyle()
 {
     if (!elementData())
-        return 0;
+        return nullptr;
     if (elementData()->m_presentationAttributeStyleIsDirty)
         updatePresentationAttributeStyle();
     // Need to call elementData() again since updatePresentationAttributeStyle()
@@ -825,9 +826,19 @@ inline bool isShadowHost(const Node* node)
     return node && node->isElementNode() && toElement(node)->shadow();
 }
 
+inline bool isShadowHost(const Node& node)
+{
+    return node.isElementNode() && toElement(node).shadow();
+}
+
 inline bool isShadowHost(const Element* element)
 {
     return element && element->shadow();
+}
+
+inline bool isShadowHost(const Element& element)
+{
+    return element.shadow();
 }
 
 inline bool isAtShadowBoundary(const Element* element)

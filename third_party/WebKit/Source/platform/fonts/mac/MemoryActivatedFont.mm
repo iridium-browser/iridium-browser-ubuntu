@@ -21,7 +21,7 @@
  */
 
 // This file provides additional functionality to the Mac FontPlatformData class
-// defined in WebCore/platform/cocoa/FontPlatformDataCocoa.mm .
+// defined in WebCore/platform/mac/FontPlatformDataMac.mm.
 // Because we want to support loading fonts between processes in the face of
 // font loading being blocked by the sandbox, we need a mechnasim to both
 // do the loading of in-memory fonts and keep track of them.
@@ -40,7 +40,7 @@ namespace blink {
 
 namespace {
 
-typedef HashMap<uint32, MemoryActivatedFont*> FontContainerRefMemoryFontHash;
+typedef HashMap<uint32_t, MemoryActivatedFont*> FontContainerRefMemoryFontHash;
 typedef HashMap<WTF::String, MemoryActivatedFont*> FontNameMemoryFontHash;
 
 // Caching:

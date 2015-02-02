@@ -17,6 +17,7 @@
 #include "SkPicture.h"
 #include "SkRegion.h"
 #include "GrContext.h"
+#include "GrSurfacePriv.h"
 
 struct SkDrawProcs;
 struct GrSkDrawProcs;
@@ -33,8 +34,7 @@ class SK_API SkGpuDevice : public SkBaseDevice {
 public:
     enum Flags {
         kNeedClear_Flag = 1 << 0,  //!< Surface requires an initial clear
-        kCached_Flag    = 1 << 1,  //!< Surface is cached and needs to be unlocked when released
-        kDFFonts_Flag   = 1 << 2,  //!< Surface should render fonts using signed distance fields
+        kDFFonts_Flag   = 1 << 1,  //!< Surface should render fonts using signed distance fields
     };
 
     /**
@@ -61,7 +61,7 @@ public:
     virtual GrRenderTarget* accessRenderTarget() SK_OVERRIDE;
 
     virtual SkImageInfo imageInfo() const SK_OVERRIDE {
-        return fRenderTarget ? fRenderTarget->info() : SkImageInfo::MakeUnknown();
+        return fRenderTarget ? fRenderTarget->surfacePriv().info() : SkImageInfo::MakeUnknown();
     }
 
     virtual void clear(SkColor color) SK_OVERRIDE;
@@ -90,8 +90,8 @@ public:
     virtual void drawText(const SkDraw&, const void* text, size_t len,
                           SkScalar x, SkScalar y, const SkPaint&) SK_OVERRIDE;
     virtual void drawPosText(const SkDraw&, const void* text, size_t len,
-                             const SkScalar pos[], SkScalar constY,
-                             int scalarsPerPos, const SkPaint&) SK_OVERRIDE;
+                             const SkScalar pos[], int scalarsPerPos,
+                             const SkPoint& offset, const SkPaint&) SK_OVERRIDE;
     virtual void drawTextOnPath(const SkDraw&, const void* text, size_t len,
                                 const SkPath& path, const SkMatrix* matrix,
                                 const SkPaint&) SK_OVERRIDE;
@@ -116,9 +116,6 @@ public:
                              const SkImageFilter::Context&,
                              SkBitmap*, SkIPoint*) SK_OVERRIDE;
 
-    class SkAutoCachedTexture; // used internally
-
-
 protected:
     virtual bool onReadPixels(const SkImageInfo&, void*, size_t, int, int) SK_OVERRIDE;
     virtual bool onWritePixels(const SkImageInfo&, const void*, size_t, int, int) SK_OVERRIDE;
@@ -136,8 +133,7 @@ private:
 
     GrClipData      fClipData;
 
-    GrTextContext*  fMainTextContext;
-    GrTextContext*  fFallbackTextContext;
+    GrTextContext*  fTextContext;
 
     // state for our render-target
     GrRenderTarget*     fRenderTarget;

@@ -11,6 +11,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
+#include "content/renderer/pepper/v8_var_converter.h"
 #include "gin/handle.h"
 #include "gin/interceptor.h"
 #include "gin/wrappable.h"
@@ -60,7 +61,7 @@ class MessageChannel :
   static MessageChannel* Create(PepperPluginInstanceImpl* instance,
                                 v8::Persistent<v8::Object>* result);
 
-  virtual ~MessageChannel();
+  ~MessageChannel() override;
 
   // Called when the instance is deleted. The MessageChannel might outlive the
   // plugin instance because it is garbage collected.
@@ -92,22 +93,21 @@ class MessageChannel :
   explicit MessageChannel(PepperPluginInstanceImpl* instance);
 
   // gin::NamedPropertyInterceptor
-  virtual v8::Local<v8::Value> GetNamedProperty(
-      v8::Isolate* isolate,
-      const std::string& property) OVERRIDE;
-  virtual bool SetNamedProperty(v8::Isolate* isolate,
-                                const std::string& property,
-                                v8::Local<v8::Value> value) OVERRIDE;
-  virtual std::vector<std::string> EnumerateNamedProperties(
-      v8::Isolate* isolate) OVERRIDE;
+  v8::Local<v8::Value> GetNamedProperty(v8::Isolate* isolate,
+                                        const std::string& property) override;
+  bool SetNamedProperty(v8::Isolate* isolate,
+                        const std::string& property,
+                        v8::Local<v8::Value> value) override;
+  std::vector<std::string> EnumerateNamedProperties(
+      v8::Isolate* isolate) override;
 
   // gin::Wrappable
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   // ppapi::proxy::HostDispatcher::SyncMessageStatusObserver
-  virtual void BeginBlockOnSyncMessage() OVERRIDE;
-  virtual void EndBlockOnSyncMessage() OVERRIDE;
+  void BeginBlockOnSyncMessage() override;
+  void EndBlockOnSyncMessage() override;
 
   // Post a message to the plugin's HandleMessage function for this channel's
   // instance.
@@ -179,6 +179,8 @@ class MessageChannel :
   MessageQueueState plugin_message_queue_state_;
 
   std::map<std::string, ppapi::ScopedPPVar> internal_named_properties_;
+
+  V8VarConverter var_converter_;
 
   // A callback to invoke at shutdown to ensure we unregister ourselves as
   // Observers for sync messages.

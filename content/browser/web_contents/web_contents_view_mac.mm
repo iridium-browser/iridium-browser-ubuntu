@@ -8,7 +8,9 @@
 
 #include <string>
 
+#import "base/mac/mac_util.h"
 #import "base/mac/scoped_sending_event.h"
+#include "base/mac/sdk_forward_declarations.h"
 #include "base/message_loop/message_loop.h"
 #import "base/message_loop/message_pump_mac.h"
 #include "content/browser/frame_host/popup_menu_helper_mac.h"
@@ -158,9 +160,18 @@ void WebContentsViewMac::SizeContents(const gfx::Size& size) {
   // previous implementation.
 }
 
+gfx::NativeView WebContentsViewMac::GetNativeViewForFocus() const {
+  RenderWidgetHostView* rwhv =
+      web_contents_->GetFullscreenRenderWidgetHostView();
+  if (!rwhv)
+    rwhv = web_contents_->GetRenderWidgetHostView();
+  return rwhv ? rwhv->GetNativeView() : nil;
+}
+
 void WebContentsViewMac::Focus() {
-  NSWindow* window = [cocoa_view_.get() window];
-  [window makeFirstResponder:GetContentNativeView()];
+  gfx::NativeView native_view = GetNativeViewForFocus();
+  NSWindow* window = [native_view window];
+  [window makeFirstResponder:native_view];
   if (![window isVisible])
     return;
   [window makeKeyAndOrderFront:nil];
@@ -170,21 +181,23 @@ void WebContentsViewMac::SetInitialFocus() {
   if (web_contents_->FocusLocationBarByDefault())
     web_contents_->SetFocusToLocationBar(false);
   else
-    [[cocoa_view_.get() window] makeFirstResponder:GetContentNativeView()];
+    Focus();
 }
 
 void WebContentsViewMac::StoreFocus() {
+  gfx::NativeView native_view = GetNativeViewForFocus();
   // We're explicitly being asked to store focus, so don't worry if there's
   // already a view saved.
   focus_tracker_.reset(
-      [[FocusTracker alloc] initWithWindow:[cocoa_view_ window]]);
+      [[FocusTracker alloc] initWithWindow:[native_view window]]);
 }
 
 void WebContentsViewMac::RestoreFocus() {
+  gfx::NativeView native_view = GetNativeViewForFocus();
   // TODO(avi): Could we be restoring a view that's no longer in the key view
   // chain?
   if (!(focus_tracker_.get() &&
-        [focus_tracker_ restoreFocusInWindow:[cocoa_view_ window]])) {
+        [focus_tracker_ restoreFocusInWindow:[native_view window]])) {
     // Fall back to the default focus behavior if we could not restore focus.
     // TODO(shess): If location-bar gets focus by default, this will
     // select-all in the field.  If there was a specific selection in
@@ -284,7 +297,7 @@ void WebContentsViewMac::CreateView(
 }
 
 RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host) {
+    RenderWidgetHost* render_widget_host, bool is_guest_view_hack) {
   if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
@@ -297,7 +310,7 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
   }
 
   RenderWidgetHostViewMac* view = new RenderWidgetHostViewMac(
-      render_widget_host);
+      render_widget_host, is_guest_view_hack);
   if (delegate()) {
     base::scoped_nsobject<NSObject<RenderWidgetHostViewMacDelegate> >
         rw_delegate(
@@ -331,7 +344,7 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
 
 RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForPopupWidget(
     RenderWidgetHost* render_widget_host) {
-  return new RenderWidgetHostViewMac(render_widget_host);
+  return new RenderWidgetHostViewMac(render_widget_host, false);
 }
 
 void WebContentsViewMac::SetPageTitle(const base::string16& title) {
@@ -581,6 +594,53 @@ void WebContentsViewMac::CloseTab() {
 - (void)resizeSubviewsWithOldSize:(NSSize)oldBoundsSize {
   for (NSView* subview in self.subviews)
     [subview setFrame:self.bounds];
+}
+
+- (void)viewWillMoveToWindow:(NSWindow*)newWindow {
+  NSWindow* oldWindow = [self window];
+
+  NSNotificationCenter* notificationCenter =
+      [NSNotificationCenter defaultCenter];
+
+  // Occlusion notification APIs are new in Mavericks.
+  bool supportsOcclusionAPIs = base::mac::IsOSMavericksOrLater();
+
+  // Use of occlusion APIs is causing bugs:
+  // http://crbug.com/430968: focus set incorrectly.
+  // http://crbug.com/431272: flashes of incorrect content.
+  // http://crbug.com/310374: white flashes (comment 22).
+  supportsOcclusionAPIs = false;
+
+  if (supportsOcclusionAPIs) {
+    if (oldWindow) {
+      [notificationCenter
+          removeObserver:self
+                    name:NSWindowDidChangeOcclusionStateNotification
+                  object:oldWindow];
+    }
+    if (newWindow) {
+      [notificationCenter
+          addObserver:self
+             selector:@selector(windowChangedOcclusionState:)
+                 name:NSWindowDidChangeOcclusionStateNotification
+               object:newWindow];
+    }
+  }
+}
+
+- (void)windowChangedOcclusionState:(NSNotification*)notification {
+  DCHECK(base::mac::IsOSMavericksOrLater());
+  NSWindow* window = [notification object];
+  WebContentsImpl* webContents = [self webContents];
+  if (window && webContents) {
+    if ([window occlusionState] & NSWindowOcclusionStateVisible) {
+      if (!webContents->should_normally_be_visible())
+        webContents->WasShown();
+    } else {
+      if (webContents->should_normally_be_visible())
+        webContents->WasHidden();
+    }
+  }
 }
 
 @end

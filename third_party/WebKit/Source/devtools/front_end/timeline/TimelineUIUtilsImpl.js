@@ -226,7 +226,6 @@ WebInspector.TimelineUIUtils._initRecordStyles = function()
     recordStyles[recordTypes.FunctionCall] = { title: WebInspector.UIString("Function Call"), category: categories["scripting"] };
     recordStyles[recordTypes.ResourceReceivedData] = { title: WebInspector.UIString("Receive Data"), category: categories["loading"] };
     recordStyles[recordTypes.GCEvent] = { title: WebInspector.UIString("GC Event"), category: categories["scripting"] };
-    recordStyles[recordTypes.JSFrame] = { title: WebInspector.UIString("JS Frame"), category: categories["scripting"] };
     recordStyles[recordTypes.MarkDOMContent] = { title: WebInspector.UIString("DOMContentLoaded event"), category: categories["scripting"] };
     recordStyles[recordTypes.MarkLoad] = { title: WebInspector.UIString("Load event"), category: categories["scripting"] };
     recordStyles[recordTypes.MarkFirstPaint] = { title: WebInspector.UIString("First paint"), category: categories["painting"] };
@@ -274,8 +273,6 @@ WebInspector.TimelineUIUtilsImpl._recordTitle = function(record)
     var title = WebInspector.TimelineUIUtilsImpl.recordStyle(record).title;
     if (record.type() === WebInspector.TimelineModel.RecordType.TimeStamp || record.type() === WebInspector.TimelineModel.RecordType.ConsoleTime)
         return WebInspector.UIString("%s: %s", title, recordData["message"]);
-    if (record.type() === WebInspector.TimelineModel.RecordType.JSFrame)
-        return recordData["functionName"];
     if (WebInspector.TimelineUIUtilsImpl.isEventDivider(record)) {
         var startTime = Number.millisToString(record.startTime() - record._model.minimumRecordTime());
         return WebInspector.UIString("%s at %s", title, startTime);
@@ -394,7 +391,7 @@ WebInspector.TimelineUIUtilsImpl.buildDetailsNode = function(record, linkifier)
     }
 
     if (!details && detailsText)
-        details = document.createTextNode(detailsText);
+        details = createTextNode(detailsText);
     return details;
 
     /**
@@ -499,14 +496,7 @@ WebInspector.TimelineUIUtilsImpl.generateDetailsContent = function(record, model
  */
 WebInspector.TimelineUIUtilsImpl._generateDetailsContentSynchronously = function(record, model, linkifier, imagePreviewElement, relatedNode)
 {
-    var fragment = document.createDocumentFragment();
-    var aggregatedStats = {};
-    WebInspector.TimelineUIUtilsImpl.aggregateTimeForRecord(aggregatedStats, record);
-    if (record.children().length)
-        fragment.appendChild(WebInspector.TimelineUIUtils.generatePieChart(aggregatedStats, WebInspector.TimelineUIUtilsImpl.recordStyle(record).category, record.selfTime()));
-    else
-        fragment.appendChild(WebInspector.TimelineUIUtils.generatePieChart(aggregatedStats));
-
+    var fragment = createDocumentFragment();
     const recordTypes = WebInspector.TimelineModel.RecordType;
 
     // The messages may vary per record.type();
@@ -646,12 +636,20 @@ WebInspector.TimelineUIUtilsImpl._generateDetailsContentSynchronously = function
         contentHelper.appendStackTrace(callStackLabel || WebInspector.UIString("Call Stack"), recordStackTrace);
 
     if (record.warnings()) {
-        var ul = document.createElement("ul");
+        var ul = createElement("ul");
         for (var i = 0; i < record.warnings().length; ++i)
             ul.createChild("li").textContent = record.warnings()[i];
         contentHelper.appendElementRow(WebInspector.UIString("Warning"), ul);
     }
     fragment.appendChild(contentHelper.element);
+
+    var aggregatedStats = {};
+    WebInspector.TimelineUIUtilsImpl.aggregateTimeForRecord(aggregatedStats, record);
+    if (record.children().length)
+        fragment.appendChild(WebInspector.TimelineUIUtils.generatePieChart(aggregatedStats, WebInspector.TimelineUIUtilsImpl.recordStyle(record).category, record.selfTime()));
+    else
+        fragment.appendChild(WebInspector.TimelineUIUtils.generatePieChart(aggregatedStats));
+
     return fragment;
 }
 
@@ -662,7 +660,7 @@ WebInspector.TimelineUIUtilsImpl._generateDetailsContentSynchronously = function
  */
 WebInspector.TimelineUIUtilsImpl._createEventDivider = function(recordType, title)
 {
-    var eventDivider = document.createElement("div");
+    var eventDivider = createElement("div");
     eventDivider.className = "resources-event-divider";
     var recordTypes = WebInspector.TimelineModel.RecordType;
 

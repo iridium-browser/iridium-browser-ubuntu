@@ -37,7 +37,7 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
     LEARN_MORE_INTERRUPTED,// Show information about interrupted downloads.
   };
 
-  virtual ~DownloadShelfContextMenu();
+  ~DownloadShelfContextMenu() override;
 
   content::DownloadItem* download_item() const { return download_item_; }
 
@@ -50,15 +50,14 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   ui::SimpleMenuModel* GetMenuModel();
 
   // ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdVisible(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
-  virtual base::string16 GetLabelForCommandId(int command_id) const OVERRIDE;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdVisible(int command_id) const override;
+  void ExecuteCommand(int command_id, int event_flags) override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  bool IsItemForCommandIdDynamic(int command_id) const override;
+  base::string16 GetLabelForCommandId(int command_id) const override;
 
  private:
   // Detaches self from |download_item_|. Called when the DownloadItem is
@@ -66,7 +65,7 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   void DetachFromDownloadItem();
 
   // content::DownloadItem::Observer
-  virtual void OnDownloadDestroyed(content::DownloadItem* download) OVERRIDE;
+  void OnDownloadDestroyed(content::DownloadItem* download) override;
 
   ui::SimpleMenuModel* GetInProgressMenuModel();
   ui::SimpleMenuModel* GetFinishedMenuModel();
@@ -76,9 +75,10 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
 
   int GetAlwaysOpenStringId() const;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX) || \
+    (defined(OS_MACOSX) && !defined(OS_IOS))
   bool IsDownloadPdf() const;
-  bool CanOpenPdfInReader() const;
+  bool CanOpenPdfInSystemViewer() const;
 #endif
 
   // We show slightly different menus if the download is in progress vs. if the
@@ -96,7 +96,7 @@ class DownloadShelfContextMenu : public ui::SimpleMenuModel::Delegate,
   content::PageNavigator* navigator_;
 
 #if defined(OS_WIN)
-  bool is_pdf_reader_up_to_date_;
+  bool is_adobe_pdf_reader_up_to_date_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(DownloadShelfContextMenu);

@@ -33,10 +33,8 @@
 
 #include "core/dom/Document.h"
 #include "core/frame/ConsoleTypes.h"
-#include "modules/websockets/MainThreadWebSocketChannel.h"
-#include "modules/websockets/NewWebSocketChannelImpl.h"
+#include "modules/websockets/DocumentWebSocketChannel.h"
 #include "modules/websockets/WebSocketChannel.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/WebArrayBuffer.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
@@ -57,11 +55,7 @@ WebSocketImpl::WebSocketImpl(const WebDocument& document, WebSocketClient* clien
     , m_bufferedAmountAfterClose(0)
 {
     RefPtrWillBeRawPtr<Document> coreDocument = PassRefPtrWillBeRawPtr<Document>(document);
-    if (RuntimeEnabledFeatures::experimentalWebSocketEnabled()) {
-        m_private = NewWebSocketChannelImpl::create(coreDocument.get(), m_channelProxy.get());
-    } else {
-        m_private = MainThreadWebSocketChannel::create(coreDocument.get(), m_channelProxy.get());
-    }
+    m_private = DocumentWebSocketChannel::create(coreDocument.get(), m_channelProxy.get());
 }
 
 WebSocketImpl::~WebSocketImpl()
@@ -163,24 +157,24 @@ void WebSocketImpl::didConnect(const String& subprotocol, const String& extensio
     m_client->didConnect();
 }
 
-void WebSocketImpl::didReceiveMessage(const String& message)
+void WebSocketImpl::didReceiveTextMessage(const String& payload)
 {
-    m_client->didReceiveMessage(WebString(message));
+    m_client->didReceiveMessage(WebString(payload));
 }
 
-void WebSocketImpl::didReceiveBinaryData(PassOwnPtr<Vector<char> > binaryData)
+void WebSocketImpl::didReceiveBinaryMessage(PassOwnPtr<Vector<char> > payload)
 {
     switch (m_binaryType) {
     case BinaryTypeBlob:
         // FIXME: Handle Blob after supporting WebBlob.
         break;
     case BinaryTypeArrayBuffer:
-        m_client->didReceiveArrayBuffer(WebArrayBuffer(ArrayBuffer::create(binaryData->data(), binaryData->size())));
+        m_client->didReceiveArrayBuffer(WebArrayBuffer(ArrayBuffer::create(payload->data(), payload->size())));
         break;
     }
 }
 
-void WebSocketImpl::didReceiveMessageError()
+void WebSocketImpl::didError()
 {
     m_client->didReceiveMessageError();
 }

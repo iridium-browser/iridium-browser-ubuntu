@@ -36,11 +36,11 @@
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_multiprocess_test.h"
 #include "ipc/ipc_switches.h"
@@ -89,9 +89,7 @@ void ShutdownTask() {
 
 class TestStartupClientChannelListener : public IPC::Listener {
  public:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    return false;
-  }
+  bool OnMessageReceived(const IPC::Message& message) override { return false; }
 };
 
 }  // namespace
@@ -99,7 +97,7 @@ class TestStartupClientChannelListener : public IPC::Listener {
 class TestServiceProcess : public ServiceProcess {
  public:
   TestServiceProcess() { }
-  virtual ~TestServiceProcess() { }
+  ~TestServiceProcess() override {}
 
   bool Initialize(base::MessageLoopForUI* message_loop,
                   ServiceProcessState* state);
@@ -302,10 +300,10 @@ class CloudPrintProxyPolicyStartupTest : public base::MultiProcessTest,
                                          public IPC::Listener {
  public:
   CloudPrintProxyPolicyStartupTest();
-  virtual ~CloudPrintProxyPolicyStartupTest();
+  ~CloudPrintProxyPolicyStartupTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   scoped_refptr<base::MessageLoopProxy> IOMessageLoopProxy() {
     return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
@@ -316,13 +314,11 @@ class CloudPrintProxyPolicyStartupTest : public base::MultiProcessTest,
   void ShutdownAndWaitForExitWithTimeout(base::ProcessHandle handle);
 
   // IPC::Listener implementation
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    return false;
-  }
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override { return false; }
+  void OnChannelConnected(int32 peer_pid) override;
 
   // MultiProcessTest implementation.
-  virtual CommandLine MakeCmdLine(const std::string& procname) OVERRIDE;
+  CommandLine MakeCmdLine(const std::string& procname) override;
 
   bool LaunchBrowser(const CommandLine& command_line, Profile* profile) {
     int return_code = 0;
@@ -450,7 +446,7 @@ base::ProcessHandle CloudPrintProxyPolicyStartupTest::Launch(
 #if defined(OS_POSIX)
   base::FileHandleMappingVector ipc_file_list;
   ipc_file_list.push_back(std::make_pair(
-      startup_channel_->TakeClientFileDescriptor(),
+      startup_channel_->TakeClientFileDescriptor().release(),
       kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
   base::LaunchOptions options;
   options.fds_to_remap = &ipc_file_list;

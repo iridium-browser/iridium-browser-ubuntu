@@ -68,7 +68,7 @@ class SecureTextTimer;
 typedef HashMap<RenderText*, SecureTextTimer*> SecureTextTimerMap;
 static SecureTextTimerMap* gSecureTextTimers = 0;
 
-class SecureTextTimer FINAL : public TimerBase {
+class SecureTextTimer final : public TimerBase {
 public:
     SecureTextTimer(RenderText* renderText)
         : m_renderText(renderText)
@@ -86,7 +86,7 @@ public:
     unsigned lastTypedCharacterOffset() { return m_lastTypedCharacterOffset; }
 
 private:
-    virtual void fired() OVERRIDE
+    virtual void fired() override
     {
         ASSERT(gSecureTextTimers->contains(m_renderText));
         m_renderText->setText(m_renderText->text().impl(), true /* forcing setting text as it may be masked later */);
@@ -603,7 +603,7 @@ PositionWithAffinity RenderText::positionForPoint(const LayoutPoint& point)
 
     LayoutUnit pointLineDirection = firstTextBox()->isHorizontal() ? point.x() : point.y();
     LayoutUnit pointBlockDirection = firstTextBox()->isHorizontal() ? point.y() : point.x();
-    bool blocksAreFlipped = style()->isFlippedBlocksWritingMode();
+    bool blocksAreFlipped = style()->slowIsFlippedBlocksWritingMode();
 
     InlineTextBox* lastBox = 0;
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox()) {
@@ -756,6 +756,7 @@ ALWAYS_INLINE float RenderText::widthFromCache(const Font& f, int start, int len
     ASSERT(run.charactersLength() >= run.length());
 
     run.setCharacterScanForCodePath(!canUseSimpleFontCodePath());
+    run.setUseComplexCodePath(!canUseSimpleFontCodePath());
     run.setTabSize(!style()->collapseWhiteSpace(), style()->tabSize());
     run.setXPos(xPos);
     FontCachePurgePreventer fontCachePurgePreventer;
@@ -808,7 +809,9 @@ void RenderText::trimmedPrefWidths(float leadWidth,
         const Font& font = style()->font(); // FIXME: This ignores first-line.
         if (stripFrontSpaces) {
             const UChar spaceChar = space;
-            float spaceWidth = font.width(constructTextRun(this, font, &spaceChar, 1, style(), direction));
+            TextRun run = constructTextRun(this, font, &spaceChar, 1, style(), direction);
+            run.setUseComplexCodePath(!canUseSimpleFontCodePath());
+            float spaceWidth = font.width(run);
             maxWidth -= spaceWidth;
         } else {
             maxWidth += font.fontDescription().wordSpacing();
@@ -1286,7 +1289,7 @@ void RenderText::setTextWithOffset(PassRefPtr<StringImpl> text, unsigned offset,
     }
     for (RootInlineBox* curr = firstRootBox; curr && curr != lastRootBox; curr = curr->nextRootBox()) {
         if (curr->lineBreakObj() == this && curr->lineBreakPos() > end)
-            curr->setLineBreakPos(clampToInteger(curr->lineBreakPos() + delta));
+            curr->setLineBreakPos(clampTo<int>(curr->lineBreakPos() + delta));
     }
 
     // If the text node is empty, dirty the line where new text will be inserted.
@@ -1436,14 +1439,14 @@ void RenderText::dirtyLineBoxes(bool fullLayout)
     m_linesDirty = false;
 }
 
-InlineTextBox* RenderText::createTextBox()
+InlineTextBox* RenderText::createTextBox(int start, unsigned short length)
 {
-    return new InlineTextBox(*this);
+    return new InlineTextBox(*this, start, length);
 }
 
-InlineTextBox* RenderText::createInlineTextBox()
+InlineTextBox* RenderText::createInlineTextBox(int start, unsigned short length)
 {
-    InlineTextBox* textBox = createTextBox();
+    InlineTextBox* textBox = createTextBox(start, length);
     if (!m_firstTextBox)
         m_firstTextBox = m_lastTextBox = textBox;
     else {
@@ -1451,7 +1454,6 @@ InlineTextBox* RenderText::createInlineTextBox()
         textBox->setPreviousTextBox(m_lastTextBox);
         m_lastTextBox = textBox;
     }
-    textBox->setIsText(true);
     return textBox;
 }
 
@@ -1520,6 +1522,7 @@ float RenderText::width(unsigned from, unsigned len, const Font& f, float xPos, 
         ASSERT(run.charactersLength() >= run.length());
 
         run.setCharacterScanForCodePath(!canUseSimpleFontCodePath());
+        run.setUseComplexCodePath(!canUseSimpleFontCodePath());
         run.setTabSize(!style()->collapseWhiteSpace(), style()->tabSize());
         run.setXPos(xPos);
         w = f.width(run, fallbackFonts, glyphOverflow);
@@ -1582,9 +1585,12 @@ LayoutRect RenderText::linesVisualOverflowBoundingBox() const
 
 LayoutRect RenderText::clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState) const
 {
-    // This method doesn't support paintInvalidationState, but invalidateTreeIfNeeded() never reaches RenderText.
-    ASSERT(!paintInvalidationState);
-    return parent()->clippedOverflowRectForPaintInvalidation(paintInvalidationContainer);
+    if (style()->visibility() != VISIBLE)
+        return LayoutRect();
+
+    LayoutRect paintInvalidationRect(linesVisualOverflowBoundingBox());
+    mapRectToPaintInvalidationBacking(paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
+    return paintInvalidationRect;
 }
 
 LayoutRect RenderText::selectionRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer) const

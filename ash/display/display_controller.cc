@@ -134,6 +134,10 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
         base::TimeDelta::FromMicroseconds(
             base::Time::kMicrosecondsPerSecond / mode.refresh_rate));
   }
+
+  // Just movnig the display requires the full redraw.
+  // chrome-os-partner:33558.
+  host->compositor()->ScheduleFullRedraw();
 }
 
 aura::Window* GetWindow(AshWindowTreeHost* ash_host) {
@@ -602,8 +606,9 @@ void DisplayController::OnDisplayRemoved(const gfx::Display& display) {
       primary_tree_host_for_replace_ = host_to_delete;
       return;
     }
-    DCHECK_EQ(1U, window_tree_hosts_.size());
-    primary_display_id = ScreenUtil::GetSecondaryDisplay().id();
+    primary_display_id = window_tree_hosts_.begin()->first;
+    CHECK_NE(gfx::Display::kInvalidDisplayID, primary_display_id);
+
     AshWindowTreeHost* primary_host = host_to_delete;
 
     // Delete the other host instead.
@@ -746,7 +751,7 @@ AshWindowTreeHost* DisplayController::AddWindowTreeHostForDisplay(
 
 #if defined(OS_CHROMEOS)
   static bool force_constrain_pointer_to_root =
-      CommandLine::ForCurrentProcess()->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAshConstrainPointerToRoot);
   if (base::SysInfo::IsRunningOnChromeOS() || force_constrain_pointer_to_root)
     ash_host->ConfineCursorToRootWindow();

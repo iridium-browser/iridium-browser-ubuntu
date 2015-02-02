@@ -35,17 +35,18 @@ namespace blink {
 struct GridCoordinate;
 struct GridSpan;
 class GridTrack;
+class GridItemWithSpan;
 
-class RenderGrid FINAL : public RenderBlock {
+class RenderGrid final : public RenderBlock {
 public:
     RenderGrid(Element*);
     virtual ~RenderGrid();
 
-    virtual const char* renderName() const OVERRIDE;
+    virtual const char* renderName() const override;
 
-    virtual void layoutBlock(bool relayoutChildren) OVERRIDE;
+    virtual void layoutBlock(bool relayoutChildren) override;
 
-    virtual bool canCollapseAnonymousBlockChild() const OVERRIDE { return false; }
+    virtual bool canCollapseAnonymousBlockChild() const override { return false; }
 
     void dirtyGrid();
 
@@ -60,15 +61,15 @@ public:
     bool gridIsDirty() const { return m_gridIsDirty; }
 
 private:
-    virtual bool isRenderGrid() const OVERRIDE { return true; }
-    virtual void computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const OVERRIDE;
-    virtual void computePreferredLogicalWidths() OVERRIDE;
+    virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectRenderGrid || RenderBlock::isOfType(type); }
+    virtual void computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const override;
+    virtual void computePreferredLogicalWidths() override;
 
-    virtual void addChild(RenderObject* newChild, RenderObject* beforeChild = 0) OVERRIDE;
+    virtual void addChild(RenderObject* newChild, RenderObject* beforeChild = 0) override;
     void addChildToIndexesMap(RenderBox&);
-    virtual void removeChild(RenderObject*) OVERRIDE;
+    virtual void removeChild(RenderObject*) override;
 
-    virtual void styleDidChange(StyleDifference, const RenderStyle*) OVERRIDE;
+    virtual void styleDidChange(StyleDifference, const RenderStyle*) override;
 
     bool explicitGridDidResize(const RenderStyle*) const;
     bool namedGridLinesDefinitionDidChange(const RenderStyle*) const;
@@ -101,8 +102,8 @@ private:
     typedef LayoutUnit (GridTrack::* AccumulatorGetter)() const;
     typedef void (GridTrack::* AccumulatorGrowFunction)(LayoutUnit);
     typedef bool (GridTrackSize::* FilterFunction)() const;
-    void resolveContentBasedTrackSizingFunctionsForItems(GridTrackSizingDirection, GridSizingData&, RenderBox&, FilterFunction, SizingFunction, AccumulatorGetter, AccumulatorGrowFunction);
-    void distributeSpaceToTracks(Vector<GridTrack*>&, Vector<GridTrack*>* tracksForGrowthAboveMaxBreadth, AccumulatorGetter, AccumulatorGrowFunction, GridSizingData&, LayoutUnit& availableLogicalSpace);
+    void resolveContentBasedTrackSizingFunctionsForItems(GridTrackSizingDirection, GridSizingData&, GridItemWithSpan&, FilterFunction, SizingFunction, AccumulatorGetter, AccumulatorGrowFunction, FilterFunction growAboveMaxBreadthFilterFunction = nullptr);
+    void distributeSpaceToTracks(Vector<GridTrack*>&, Vector<size_t>* tracksForGrowthAboveMaxBreadth, AccumulatorGetter, AccumulatorGrowFunction, GridSizingData&, LayoutUnit& availableLogicalSpace);
 
     double computeNormalizedFractionBreadth(Vector<GridTrack>&, const GridSpan& tracksSpan, GridTrackSizingDirection, LayoutUnit availableLogicalSpace) const;
 
@@ -126,13 +127,21 @@ private:
 
     LayoutUnit gridAreaBreadthForChild(const RenderBox& child, GridTrackSizingDirection, const Vector<GridTrack>&) const;
 
-    virtual void paintChildren(PaintInfo&, const LayoutPoint&) OVERRIDE;
+    virtual void paintChildren(PaintInfo&, const LayoutPoint&) override;
+    bool needToStretchChildLogicalHeight(const RenderBox&) const;
+    LayoutUnit childIntrinsicHeight(const RenderBox&) const;
+    LayoutUnit childIntrinsicWidth(const RenderBox&) const;
+    LayoutUnit intrinsicLogicalHeightForChild(const RenderBox&) const;
+    LayoutUnit marginLogicalHeightForChild(const RenderBox&) const;
+    LayoutUnit availableAlignmentSpaceForChildBeforeStretching(LayoutUnit gridAreaBreadthForChild, const RenderBox&) const;
+    void applyStretchAlignmentToChildIfNeeded(RenderBox&, LayoutUnit gridAreaBreadthForChild);
 
 #if ENABLE(ASSERT)
     bool tracksAreWiderThanMinTrackBreadth(GridTrackSizingDirection, const Vector<GridTrack>&);
 #endif
 
     size_t gridItemSpan(const RenderBox&, GridTrackSizingDirection);
+    bool spanningItemCrossesFlexibleSizedTracks(const GridCoordinate&, GridTrackSizingDirection) const;
 
     size_t gridColumnCount() const
     {

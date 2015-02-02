@@ -46,6 +46,8 @@ WebInspector.ObjectPopoverHelper = function(panelElement, getAnchor, queryObject
     panelElement.addEventListener("scroll", this.hidePopover.bind(this), true);
 };
 
+WebInspector.ObjectPopoverHelper.MaxPopoverTextLength = 10000;
+
 WebInspector.ObjectPopoverHelper.prototype = {
     /**
      * @param {function(!WebInspector.RemoteObject):string} formatter
@@ -73,7 +75,7 @@ WebInspector.ObjectPopoverHelper.prototype = {
             if (!response)
                 return;
 
-            var container = document.createElement("div");
+            var container = createElement("div");
             container.className = "inline-block";
 
             var title = container.createChild("div", "function-popover-title source-code");
@@ -109,10 +111,10 @@ WebInspector.ObjectPopoverHelper.prototype = {
             this._objectTarget = result.target();
             var anchorElement = anchorOverride || element;
             var description = (this._remoteObjectFormatter && this._remoteObjectFormatter(result)) || result.description;
-
+            description = description.trimEnd(WebInspector.ObjectPopoverHelper.MaxPopoverTextLength);
             var popoverContentElement = null;
             if (result.type !== "object") {
-                popoverContentElement = document.createElement("span");
+                popoverContentElement = createElement("span");
                 popoverContentElement.className = "monospace console-formatted-" + result.type;
                 popoverContentElement.style.whiteSpace = "pre";
                 if (result.type === "string")
@@ -129,8 +131,8 @@ WebInspector.ObjectPopoverHelper.prototype = {
                     result.highlightAsDOMNode();
                     this._resultHighlightedAsDOM = result;
                 }
-                popoverContentElement = document.createElement("div");
-                this._titleElement = document.createElement("div");
+                popoverContentElement = createElement("div");
+                this._titleElement = createElement("div");
                 this._titleElement.className = "source-frame-popover-title monospace";
                 this._titleElement.textContent = description;
                 popoverContentElement.appendChild(this._titleElement);

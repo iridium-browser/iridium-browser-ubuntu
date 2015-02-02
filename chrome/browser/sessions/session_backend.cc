@@ -52,7 +52,7 @@ class SessionFileReader {
   // true on success. It is up to the caller to free all SessionCommands
   // added to commands.
   bool Read(BaseSessionService::SessionType type,
-            std::vector<SessionCommand*>* commands);
+            ScopedVector<SessionCommand>* commands);
 
  private:
   // Reads a single command, returning it. A return value of NULL indicates
@@ -86,7 +86,7 @@ class SessionFileReader {
 };
 
 bool SessionFileReader::Read(BaseSessionService::SessionType type,
-                             std::vector<SessionCommand*>* commands) {
+                             ScopedVector<SessionCommand>* commands) {
   if (!file_->IsValid())
     return false;
   FileHeader header;
@@ -221,7 +221,7 @@ void SessionBackend::Init() {
 }
 
 void SessionBackend::AppendCommands(
-    std::vector<SessionCommand*>* commands,
+    ScopedVector<SessionCommand> commands,
     bool reset_first) {
   Init();
   // Make sure and check current_session_file_, if opening the file failed
@@ -232,29 +232,27 @@ void SessionBackend::AppendCommands(
   }
   // Need to check current_session_file_ again, ResetFile may fail.
   if (current_session_file_.get() && current_session_file_->IsValid() &&
-      !AppendCommandsToFile(current_session_file_.get(), *commands)) {
+      !AppendCommandsToFile(current_session_file_.get(), commands)) {
     current_session_file_.reset(NULL);
   }
   empty_file_ = false;
-  STLDeleteElements(commands);
-  delete commands;
 }
 
 void SessionBackend::ReadLastSessionCommands(
     const base::CancelableTaskTracker::IsCanceledCallback& is_canceled,
-    const BaseSessionService::InternalGetCommandsCallback& callback) {
+    const BaseSessionService::GetCommandsCallback& callback) {
   if (is_canceled.Run())
     return;
 
   Init();
 
   ScopedVector<SessionCommand> commands;
-  ReadLastSessionCommandsImpl(&(commands.get()));
+  ReadLastSessionCommandsImpl(&commands);
   callback.Run(commands.Pass());
 }
 
 bool SessionBackend::ReadLastSessionCommandsImpl(
-    std::vector<SessionCommand*>* commands) {
+    ScopedVector<SessionCommand>* commands) {
   Init();
   SessionFileReader file_reader(GetLastSessionPath());
   return file_reader.Read(type_, commands);
@@ -295,15 +293,15 @@ void SessionBackend::MoveCurrentSessionToLastSession() {
 }
 
 bool SessionBackend::ReadCurrentSessionCommandsImpl(
-    std::vector<SessionCommand*>* commands) {
+    ScopedVector<SessionCommand>* commands) {
   Init();
   SessionFileReader file_reader(GetCurrentSessionPath());
   return file_reader.Read(type_, commands);
 }
 
 bool SessionBackend::AppendCommandsToFile(base::File* file,
-    const std::vector<SessionCommand*>& commands) {
-  for (std::vector<SessionCommand*>::const_iterator i = commands.begin();
+    const ScopedVector<SessionCommand>& commands) {
+  for (ScopedVector<SessionCommand>::const_iterator i = commands.begin();
        i != commands.end(); ++i) {
     int wrote;
     const size_type content_size = static_cast<size_type>((*i)->size());

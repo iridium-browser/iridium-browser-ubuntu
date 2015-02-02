@@ -12,7 +12,6 @@
 #include "base/basictypes.h"
 #include "base/cancelable_callback.h"
 #include "base/time/time.h"
-#include "base/timer/timer.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_bindings.h"
@@ -51,6 +50,10 @@ struct RenderingHelperParams {
 
   // The rendering FPS.
   int rendering_fps;
+
+  // The number of empty frames rendered when the rendering helper is
+  // initialized.
+  int warm_up_iterations;
 
   // The desired size of each window. We play each stream in its own window
   // on the screen.
@@ -125,17 +128,14 @@ class RenderingHelper {
     // The rect on the screen where the video will be rendered.
     gfx::Rect render_area;
 
-    // True if the last (and the only one) frame in pending_frames has
-    // been rendered. We keep the last remaining frame in pending_frames even
-    // after it has been rendered, so that we have something to display if the
-    // client is falling behind on providing us with new frames during
-    // timer-driven playback.
-    bool last_frame_rendered;
-
     // True if there won't be any new video frames comming.
     bool is_flushing;
 
-    // The number of frames need to be dropped to catch up the rendering.
+    // The number of frames need to be dropped to catch up the rendering. We
+    // always keep the last remaining frame in pending_frames even after it
+    // has been rendered, so that we have something to display if the client
+    // is falling behind on providing us with new frames during timer-driven
+    // playback.
     int frames_to_drop;
 
     // The video frames pending for rendering.
@@ -149,7 +149,16 @@ class RenderingHelper {
 
   void RenderContent();
 
+  void WarmUpRendering(int warm_up_iterations);
+
   void LayoutRenderingAreas(const std::vector<gfx::Size>& window_sizes);
+
+  void UpdateVSyncParameters(base::WaitableEvent* done,
+                             const base::TimeTicks timebase,
+                             const base::TimeDelta interval);
+
+  void DropOneFrameForAllVideos();
+  void ScheduleNextRenderContent();
 
   // Render |texture_id| to the current view port of the screen using target
   // |texture_target|.
@@ -176,6 +185,8 @@ class RenderingHelper {
   base::TimeDelta frame_duration_;
   base::TimeTicks scheduled_render_time_;
   base::CancelableClosure render_task_;
+  base::TimeTicks vsync_timebase_;
+  base::TimeDelta vsync_interval_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderingHelper);
 };

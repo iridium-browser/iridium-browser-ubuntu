@@ -17,13 +17,12 @@ class BrowserContentSettingBubbleModelDelegate
     : public ContentSettingBubbleModelDelegate {
  public:
   explicit BrowserContentSettingBubbleModelDelegate(Browser* browser);
-  virtual ~BrowserContentSettingBubbleModelDelegate();
+  ~BrowserContentSettingBubbleModelDelegate() override;
 
   // ContentSettingBubbleModelDelegate implementation:
-  virtual void ShowCollectedCookiesDialog(
-      content::WebContents* web_contents) OVERRIDE;
-  virtual void ShowContentSettingsPage(ContentSettingsType type) OVERRIDE;
-  virtual void ShowLearnMorePage(ContentSettingsType type) OVERRIDE;
+  void ShowCollectedCookiesDialog(content::WebContents* web_contents) override;
+  void ShowContentSettingsPage(ContentSettingsType type) override;
+  void ShowLearnMorePage(ContentSettingsType type) override;
 
  private:
   Browser* browser_;

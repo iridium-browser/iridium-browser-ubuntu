@@ -38,7 +38,7 @@ class Surface;
 class Display : private gpu::GpuControl {
  public:
   explicit Display(EGLNativeDisplayType display_id);
-  virtual ~Display();
+  ~Display() override;
 
   void SetCreateOffscreen(int width, int height) {
     create_offscreen_ = true;
@@ -74,23 +74,24 @@ class Display : private gpu::GpuControl {
   bool MakeCurrent(EGLSurface draw, EGLSurface read, EGLContext ctx);
 
   // GpuControl implementation.
-  virtual gpu::Capabilities GetCapabilities() OVERRIDE;
-  virtual gfx::GpuMemoryBuffer* CreateGpuMemoryBuffer(size_t width,
-                                                      size_t height,
-                                                      unsigned internalformat,
-                                                      unsigned usage,
-                                                      int32* id) OVERRIDE;
-  virtual void DestroyGpuMemoryBuffer(int32 id) OVERRIDE;
-  virtual uint32 InsertSyncPoint() OVERRIDE;
-  virtual uint32 InsertFutureSyncPoint() OVERRIDE;
-  virtual void RetireSyncPoint(uint32 sync_point) OVERRIDE;
-  virtual void SignalSyncPoint(uint32 sync_point,
-                               const base::Closure& callback) OVERRIDE;
-  virtual void SignalQuery(uint32 query,
-                           const base::Closure& callback) OVERRIDE;
-  virtual void SetSurfaceVisible(bool visible) OVERRIDE;
-  virtual void Echo(const base::Closure& callback) OVERRIDE;
-  virtual uint32 CreateStreamTexture(uint32 texture_id) OVERRIDE;
+  gpu::Capabilities GetCapabilities() override;
+  int32_t CreateImage(ClientBuffer buffer,
+                      size_t width,
+                      size_t height,
+                      unsigned internalformat) override;
+  void DestroyImage(int32_t id) override;
+  int32_t CreateGpuMemoryBufferImage(size_t width,
+                                     size_t height,
+                                     unsigned internalformat,
+                                     unsigned usage) override;
+  uint32 InsertSyncPoint() override;
+  uint32 InsertFutureSyncPoint() override;
+  void RetireSyncPoint(uint32 sync_point) override;
+  void SignalSyncPoint(uint32 sync_point,
+                       const base::Closure& callback) override;
+  void SignalQuery(uint32 query, const base::Closure& callback) override;
+  void SetSurfaceVisible(bool visible) override;
+  uint32 CreateStreamTexture(uint32 texture_id) override;
 
  private:
   EGLNativeDisplayType display_id_;

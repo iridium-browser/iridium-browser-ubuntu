@@ -14,6 +14,7 @@
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/services/gcm/push_messaging_application_id.h"
+#include "chrome/browser/services/gcm/push_messaging_constants.h"
 #include "chrome/browser/services/gcm/push_messaging_permission_context.h"
 #include "chrome/browser/services/gcm/push_messaging_permission_context_factory.h"
 #include "chrome/common/chrome_switches.h"
@@ -29,6 +30,21 @@ namespace gcm {
 
 namespace {
 const int kMaxRegistrations = 1000000;
+
+blink::WebPushPermissionStatus ToPushPermission(ContentSetting setting) {
+  switch (setting) {
+    case CONTENT_SETTING_ALLOW:
+      return blink::WebPushPermissionStatusGranted;
+    case CONTENT_SETTING_BLOCK:
+      return blink::WebPushPermissionStatusDenied;
+    case CONTENT_SETTING_ASK:
+      return blink::WebPushPermissionStatusDefault;
+    default:
+      NOTREACHED();
+      return blink::WebPushPermissionStatusDenied;
+  }
+}
+
 }  // namespace
 
 // static
@@ -129,10 +145,14 @@ void PushMessagingServiceImpl::OnMessage(
   }
 }
 
+void PushMessagingServiceImpl::SetProfileForTesting(Profile* profile) {
+  profile_ = profile;
+}
+
 void PushMessagingServiceImpl::DeliverMessageCallback(
     const PushMessagingApplicationId& application_id,
     const GCMClient::IncomingMessage& message,
-    content::PushMessagingStatus status) {
+    content::PushDeliveryStatus status) {
   // TODO(mvanouwerkerk): UMA logging.
   // TODO(mvanouwerkerk): Is there a way to recover from failure?
 }
@@ -172,10 +192,9 @@ void PushMessagingServiceImpl::Register(
 
   if (profile_->GetPrefs()->GetInteger(
           prefs::kPushMessagingRegistrationCount) >= kMaxRegistrations) {
-    RegisterEnd(
-        callback,
-        std::string(),
-        content::PUSH_MESSAGING_STATUS_REGISTRATION_FAILED_LIMIT_REACHED);
+    RegisterEnd(callback,
+                std::string(),
+                content::PUSH_REGISTRATION_STATUS_LIMIT_REACHED);
     return;
   }
 
@@ -212,10 +231,9 @@ void PushMessagingServiceImpl::Register(
       gcm::PushMessagingPermissionContextFactory::GetForProfile(profile_);
 
   if (permission_context == NULL) {
-    RegisterEnd(
-        callback,
-        std::string(),
-        content::PUSH_MESSAGING_STATUS_REGISTRATION_FAILED_PERMISSION_DENIED);
+    RegisterEnd(callback,
+                std::string(),
+                content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
     return;
   }
 
@@ -231,13 +249,39 @@ void PushMessagingServiceImpl::Register(
                  callback));
 }
 
+blink::WebPushPermissionStatus PushMessagingServiceImpl::GetPermissionStatus(
+    const GURL& requesting_origin,
+    int renderer_id,
+    int render_frame_id) {
+  content::RenderFrameHost* render_frame_host =
+      content::RenderFrameHost::FromID(renderer_id, render_frame_id);
+
+  // The frame doesn't exist any more, or we received a bad frame id.
+  if (!render_frame_host)
+    return blink::WebPushPermissionStatusDenied;
+
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
+
+  // The page doesn't exist any more or we got a bad render frame host.
+  if (!web_contents)
+    return blink::WebPushPermissionStatusDenied;
+
+  GURL embedder_origin = web_contents->GetLastCommittedURL().GetOrigin();
+  gcm::PushMessagingPermissionContext* permission_context =
+      gcm::PushMessagingPermissionContextFactory::GetForProfile(profile_);
+  return ToPushPermission(
+      permission_context->GetPermissionStatus(
+          requesting_origin, embedder_origin));
+}
+
 void PushMessagingServiceImpl::RegisterEnd(
     const content::PushMessagingService::RegisterCallback& callback,
     const std::string& registration_id,
-    content::PushMessagingStatus status) {
-  GURL endpoint = GURL("https://android.googleapis.com/gcm/send");
+    content::PushRegistrationStatus status) {
+  GURL endpoint = GURL(std::string(kPushMessagingEndpoint));
   callback.Run(endpoint, registration_id, status);
-  if (status == content::PUSH_MESSAGING_STATUS_OK) {
+  if (status == content::PUSH_REGISTRATION_STATUS_SUCCESS) {
     // TODO(johnme): Make sure the pref doesn't get out of sync after crashes.
     int registration_count = profile_->GetPrefs()->GetInteger(
         prefs::kPushMessagingRegistrationCount);
@@ -250,10 +294,10 @@ void PushMessagingServiceImpl::DidRegister(
     const content::PushMessagingService::RegisterCallback& callback,
     const std::string& registration_id,
     GCMClient::Result result) {
-  content::PushMessagingStatus status =
+  content::PushRegistrationStatus status =
       result == GCMClient::SUCCESS
-          ? content::PUSH_MESSAGING_STATUS_OK
-          : content::PUSH_MESSAGING_STATUS_REGISTRATION_FAILED_SERVICE_ERROR;
+          ? content::PUSH_REGISTRATION_STATUS_SUCCESS
+          : content::PUSH_REGISTRATION_STATUS_SERVICE_ERROR;
   RegisterEnd(callback, registration_id, status);
 }
 
@@ -263,10 +307,9 @@ void PushMessagingServiceImpl::DidRequestPermission(
     const content::PushMessagingService::RegisterCallback& register_callback,
     bool allow) {
   if (!allow) {
-    RegisterEnd(
-        register_callback,
-        std::string(),
-        content::PUSH_MESSAGING_STATUS_REGISTRATION_FAILED_PERMISSION_DENIED);
+    RegisterEnd(register_callback,
+                std::string(),
+                content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
     return;
   }
 

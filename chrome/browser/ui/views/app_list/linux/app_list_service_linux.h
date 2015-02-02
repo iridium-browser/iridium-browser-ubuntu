@@ -15,24 +15,24 @@ template <typename T> struct DefaultSingletonTraits;
 class AppListServiceLinux : public AppListServiceViews,
                             public app_list::AppListViewObserver {
  public:
-  virtual ~AppListServiceLinux();
+  ~AppListServiceLinux() override;
 
   static AppListServiceLinux* GetInstance();
 
   // AppListService overrides:
-  virtual void CreateShortcut() OVERRIDE;
+  void CreateShortcut() override;
 
   // app_list::AppListViewObserver overrides:
-  virtual void OnActivationChanged(views::Widget* widget, bool active) OVERRIDE;
+  void OnActivationChanged(views::Widget* widget, bool active) override;
 
  private:
   friend struct DefaultSingletonTraits<AppListServiceLinux>;
 
   // AppListShowerDelegate overrides:
-  virtual void OnViewCreated() OVERRIDE;
-  virtual void OnViewBeingDestroyed() OVERRIDE;
-  virtual void OnViewDismissed() OVERRIDE;
-  virtual void MoveNearCursor(app_list::AppListView* view) OVERRIDE;
+  void OnViewCreated() override;
+  void OnViewBeingDestroyed() override;
+  void OnViewDismissed() override;
+  void MoveNearCursor(app_list::AppListView* view) override;
 
   AppListServiceLinux();
 

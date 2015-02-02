@@ -10,6 +10,7 @@
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/core/keyed_service.h"
 
 namespace {
 
@@ -20,7 +21,7 @@ class Service : public KeyedService {
 
   ChromeSSLHostStateDelegate* decisions() { return decisions_.get(); }
 
-  virtual void Shutdown() OVERRIDE {}
+  void Shutdown() override {}
 
  private:
   scoped_ptr<ChromeSSLHostStateDelegate> decisions_;

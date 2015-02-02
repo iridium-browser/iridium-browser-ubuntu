@@ -20,7 +20,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_custom_extension_provider.h"
 #include "chrome/browser/content_settings/content_settings_internal_extension_provider.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
@@ -29,7 +28,6 @@
 #include "chrome/browser/extensions/extension_assets_manager.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
 #include "chrome/browser/extensions/extension_error_controller.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -42,8 +40,6 @@
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/chrome_extension_downloader_factory.h"
-#include "chrome/browser/extensions/updater/extension_cache.h"
-#include "chrome/browser/extensions/updater/extension_downloader.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/profiles/profile.h"
@@ -55,8 +51,8 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/features/feature_channel.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/url_constants.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/crx_file/id_util.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -68,16 +64,20 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/browser/update_observer.h"
+#include "extensions/browser/updater/extension_cache.h"
+#include "extensions/browser/updater/extension_downloader.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/one_shot_event.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -185,7 +185,8 @@ bool ExtensionService::OnExternalExtensionUpdateUrlFound(
 
   if (Manifest::IsExternalLocation(location)) {
     // All extensions that are not user specific can be cached.
-    extensions::ExtensionCache::GetInstance()->AllowCaching(id);
+    extensions::ExtensionsBrowserClient::Get()->GetExtensionCache()
+        ->AllowCaching(id);
   }
 
   const Extension* extension = GetExtensionById(id, true);
@@ -307,7 +308,7 @@ ExtensionService::ExtensionService(Profile* profile,
         profile->GetPrefs(),
         profile,
         update_frequency,
-        extensions::ExtensionCache::GetInstance(),
+        extensions::ExtensionsBrowserClient::Get()->GetExtensionCache(),
         base::Bind(ChromeExtensionDownloaderFactory::CreateForProfile,
                    profile)));
   }
@@ -505,20 +506,13 @@ bool ExtensionService::UpdateExtension(const std::string& id,
     return false;
   }
 
-  // We want a silent install only for non-pending extensions and
-  // pending extensions that have install_silently set.
-  scoped_ptr<ExtensionInstallPrompt> client;
-  if (pending_extension_info && !pending_extension_info->install_silently())
-    client.reset(ExtensionInstallUI::CreateInstallPromptWithProfile(profile_));
-
   scoped_refptr<CrxInstaller> installer(
-      CrxInstaller::Create(this, client.Pass()));
+      CrxInstaller::Create(this, scoped_ptr<ExtensionInstallPrompt>()));
   installer->set_expected_id(id);
   int creation_flags = Extension::NO_FLAGS;
   if (pending_extension_info) {
     installer->set_install_source(pending_extension_info->install_source());
-    if (pending_extension_info->install_silently())
-      installer->set_allow_silent_install(true);
+    installer->set_allow_silent_install(true);
     if (pending_extension_info->remote_install())
       installer->set_grant_permissions(false);
     creation_flags = pending_extension_info->creation_flags();
@@ -604,7 +598,8 @@ void ExtensionService::ReloadExtensionImpl(
     // the inspector and hang onto a cookie for it, so that we can reattach
     // later.
     // TODO(yoz): this is not incognito-safe!
-    extensions::ProcessManager* manager = system_->process_manager();
+    extensions::ProcessManager* manager =
+        extensions::ProcessManager::Get(profile_);
     extensions::ExtensionHost* host =
         manager->GetBackgroundHostForExtension(extension_id);
     if (host && DevToolsAgentHost::HasFor(host->host_contents())) {
@@ -687,6 +682,7 @@ bool ExtensionService::UninstallExtension(
   // Callers should not send us nonexistent extensions.
   CHECK(extension.get());
 
+  ManagementPolicy* by_policy = system_->management_policy();
   // Policy change which triggers an uninstall will always set
   // |external_uninstall| to true so this is the only way to uninstall
   // managed extensions.
@@ -704,8 +700,8 @@ bool ExtensionService::UninstallExtension(
       (reason == extensions::UNINSTALL_REASON_SYNC &&
            extension->was_installed_by_custodian());
   if (!external_uninstall &&
-      !system_->management_policy()->UserMayModifySettings(
-        extension.get(), error)) {
+      (!by_policy->UserMayModifySettings(extension.get(), error) ||
+       by_policy->MustRemainInstalled(extension.get(), error))) {
     content::NotificationService::current()->Notify(
         extensions::NOTIFICATION_EXTENSION_UNINSTALL_NOT_ALLOWED,
         content::Source<Profile>(profile_),
@@ -1007,7 +1003,7 @@ void ExtensionService::NotifyExtensionLoaded(const Extension* extension) {
   // TODO(kalman): Convert ExtensionSpecialStoragePolicy to a
   // BrowserContextKeyedService and use ExtensionRegistryObserver.
   profile_->GetExtensionSpecialStoragePolicy()->
-      GrantRightsForExtension(extension);
+      GrantRightsForExtension(extension, profile_);
 
   // TODO(kalman): This is broken. The crash reporter is process-wide so doesn't
   // work properly multi-profile. Besides which, it should be using
@@ -1713,6 +1709,23 @@ void ExtensionService::OnExtensionInstalled(
 
 void ExtensionService::OnExtensionManagementSettingsChanged() {
   error_controller_->ShowErrorIfNeeded();
+
+  // Revokes blocked permissions from active_permissions for all extensions.
+  extensions::ExtensionManagement* settings =
+      extensions::ExtensionManagementFactory::GetForBrowserContext(profile());
+  CHECK(settings);
+  scoped_ptr<ExtensionSet> all_extensions(
+      registry_->GenerateInstalledExtensionsSet());
+  for (const auto& extension : *all_extensions.get()) {
+    if (!settings->IsPermissionSetAllowed(
+            extension.get(),
+            extension->permissions_data()->active_permissions())) {
+      extensions::PermissionsUpdater(profile()).RemovePermissions(
+          extension.get(),
+          settings->GetBlockedPermissions(extension.get()).get());
+    }
+  }
+
   CheckManagementPolicy();
 }
 
@@ -1901,6 +1914,7 @@ const Extension* ExtensionService::GetPendingExtensionUpdate(
 
 void ExtensionService::RegisterContentSettings(
     HostContentSettingsMap* host_content_settings_map) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   host_content_settings_map->RegisterProvider(
       HostContentSettingsMap::INTERNAL_EXTENSION_PROVIDER,
       scoped_ptr<content_settings::ObservableProvider>(
@@ -2081,6 +2095,26 @@ void ExtensionService::Observe(int type,
         // app or extension becoming idle.
         std::set<std::string> extension_ids =
             process_map->GetExtensionsInProcess(process->GetID());
+        // In addition to the extensions listed in the process map, one of those
+        // extensions could be referencing a shared module which is waiting for
+        // idle to update.  Check all imports of these extensions, too.
+        std::set<std::string> import_ids;
+        for (std::set<std::string>::const_iterator it = extension_ids.begin();
+             it != extension_ids.end();
+             ++it) {
+          const Extension* extension = GetExtensionById(*it, true);
+          if (!extension)
+            continue;
+          const std::vector<SharedModuleInfo::ImportInfo>& imports =
+              SharedModuleInfo::GetImports(extension);
+          std::vector<SharedModuleInfo::ImportInfo>::const_iterator import_it;
+          for (import_it = imports.begin(); import_it != imports.end();
+               import_it++) {
+            import_ids.insert((*import_it).extension_id);
+          }
+        }
+        extension_ids.insert(import_ids.begin(), import_ids.end());
+
         for (std::set<std::string>::const_iterator it = extension_ids.begin();
              it != extension_ids.end(); ++it) {
           if (delayed_installs_.Contains(*it)) {

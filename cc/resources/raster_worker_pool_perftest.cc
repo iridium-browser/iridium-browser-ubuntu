@@ -21,6 +21,7 @@
 #include "cc/test/fake_output_surface.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/test_context_support.h"
+#include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -32,31 +33,31 @@ namespace {
 
 class PerfGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   // Overridden from gpu::gles2::GLES2Interface:
-  virtual GLuint CreateImageCHROMIUM(GLsizei width,
-                                     GLsizei height,
-                                     GLenum internalformat,
-                                     GLenum usage) OVERRIDE {
+  GLuint CreateImageCHROMIUM(ClientBuffer buffer,
+                             GLsizei width,
+                             GLsizei height,
+                             GLenum internalformat) override {
     return 1u;
   }
-  virtual void GenBuffers(GLsizei n, GLuint* buffers) OVERRIDE {
+  void GenBuffers(GLsizei n, GLuint* buffers) override {
     for (GLsizei i = 0; i < n; ++i)
       buffers[i] = 1u;
   }
-  virtual void GenTextures(GLsizei n, GLuint* textures) OVERRIDE {
+  void GenTextures(GLsizei n, GLuint* textures) override {
     for (GLsizei i = 0; i < n; ++i)
       textures[i] = 1u;
   }
-  virtual void GetIntegerv(GLenum pname, GLint* params) OVERRIDE {
+  void GetIntegerv(GLenum pname, GLint* params) override {
     if (pname == GL_MAX_TEXTURE_SIZE)
       *params = INT_MAX;
   }
-  virtual void GenQueriesEXT(GLsizei n, GLuint* queries) OVERRIDE {
+  void GenQueriesEXT(GLsizei n, GLuint* queries) override {
     for (GLsizei i = 0; i < n; ++i)
       queries[i] = 1u;
   }
-  virtual void GetQueryObjectuivEXT(GLuint query,
-                                    GLenum pname,
-                                    GLuint* params) OVERRIDE {
+  void GetQueryObjectuivEXT(GLuint query,
+                            GLenum pname,
+                            GLuint* params) override {
     if (pname == GL_QUERY_RESULT_AVAILABLE_EXT)
       *params = 1;
   }
@@ -66,28 +67,28 @@ class PerfContextProvider : public ContextProvider {
  public:
   PerfContextProvider() : context_gl_(new PerfGLES2Interface) {}
 
-  virtual bool BindToCurrentThread() OVERRIDE { return true; }
-  virtual Capabilities ContextCapabilities() OVERRIDE {
+  bool BindToCurrentThread() override { return true; }
+  Capabilities ContextCapabilities() override {
     Capabilities capabilities;
-    capabilities.gpu.map_image = true;
+    capabilities.gpu.image = true;
     capabilities.gpu.sync_query = true;
     return capabilities;
   }
-  virtual gpu::gles2::GLES2Interface* ContextGL() OVERRIDE {
-    return context_gl_.get();
+  gpu::gles2::GLES2Interface* ContextGL() override { return context_gl_.get(); }
+  gpu::ContextSupport* ContextSupport() override { return &support_; }
+  class GrContext* GrContext() override {
+    return NULL;
   }
-  virtual gpu::ContextSupport* ContextSupport() OVERRIDE { return &support_; }
-  virtual class GrContext* GrContext() OVERRIDE { return NULL; }
-  virtual bool IsContextLost() OVERRIDE { return false; }
-  virtual void VerifyContexts() OVERRIDE {}
-  virtual void DeleteCachedResources() OVERRIDE {}
-  virtual bool DestroyedOnMainThread() OVERRIDE { return false; }
-  virtual void SetLostContextCallback(const LostContextCallback& cb) OVERRIDE {}
-  virtual void SetMemoryPolicyChangedCallback(
-      const MemoryPolicyChangedCallback& cb) OVERRIDE {}
+  bool IsContextLost() override { return false; }
+  void VerifyContexts() override {}
+  void DeleteCachedResources() override {}
+  bool DestroyedOnMainThread() override { return false; }
+  void SetLostContextCallback(const LostContextCallback& cb) override {}
+  void SetMemoryPolicyChangedCallback(
+      const MemoryPolicyChangedCallback& cb) override {}
 
  private:
-  virtual ~PerfContextProvider() {}
+  ~PerfContextProvider() override {}
 
   scoped_ptr<PerfGLES2Interface> context_gl_;
   TestContextSupport support_;
@@ -110,12 +111,12 @@ class PerfImageDecodeTaskImpl : public ImageDecodeTask {
   PerfImageDecodeTaskImpl() {}
 
   // Overridden from Task:
-  virtual void RunOnWorkerThread() OVERRIDE {}
+  void RunOnWorkerThread() override {}
 
   // Overridden from RasterizerTask:
-  virtual void ScheduleOnOriginThread(RasterizerTaskClient* client) OVERRIDE {}
-  virtual void CompleteOnOriginThread(RasterizerTaskClient* client) OVERRIDE {}
-  virtual void RunReplyOnOriginThread() OVERRIDE { Reset(); }
+  void ScheduleOnOriginThread(RasterizerTaskClient* client) override {}
+  void CompleteOnOriginThread(RasterizerTaskClient* client) override {}
+  void RunReplyOnOriginThread() override { Reset(); }
 
   void Reset() {
     did_run_ = false;
@@ -123,7 +124,7 @@ class PerfImageDecodeTaskImpl : public ImageDecodeTask {
   }
 
  protected:
-  virtual ~PerfImageDecodeTaskImpl() {}
+  ~PerfImageDecodeTaskImpl() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PerfImageDecodeTaskImpl);
@@ -136,16 +137,16 @@ class PerfRasterTaskImpl : public RasterTask {
       : RasterTask(resource.get(), dependencies), resource_(resource.Pass()) {}
 
   // Overridden from Task:
-  virtual void RunOnWorkerThread() OVERRIDE {}
+  void RunOnWorkerThread() override {}
 
   // Overridden from RasterizerTask:
-  virtual void ScheduleOnOriginThread(RasterizerTaskClient* client) OVERRIDE {
+  void ScheduleOnOriginThread(RasterizerTaskClient* client) override {
     raster_buffer_ = client->AcquireBufferForRaster(resource());
   }
-  virtual void CompleteOnOriginThread(RasterizerTaskClient* client) OVERRIDE {
+  void CompleteOnOriginThread(RasterizerTaskClient* client) override {
     client->ReleaseBufferForRaster(raster_buffer_.Pass());
   }
-  virtual void RunReplyOnOriginThread() OVERRIDE { Reset(); }
+  void RunReplyOnOriginThread() override { Reset(); }
 
   void Reset() {
     did_run_ = false;
@@ -153,7 +154,7 @@ class PerfRasterTaskImpl : public RasterTask {
   }
 
  protected:
-  virtual ~PerfRasterTaskImpl() {}
+  ~PerfRasterTaskImpl() override {}
 
  private:
   scoped_ptr<ScopedResource> resource_;
@@ -164,7 +165,7 @@ class PerfRasterTaskImpl : public RasterTask {
 
 class RasterWorkerPoolPerfTestBase {
  public:
-  typedef std::vector<scoped_refptr<RasterTask> > RasterTaskVector;
+  typedef std::vector<scoped_refptr<RasterTask>> RasterTaskVector;
 
   enum NamedTaskSet { REQUIRED_FOR_ACTIVATION = 0, ALL = 1 };
 
@@ -227,7 +228,7 @@ class RasterWorkerPoolPerfTest
       public RasterizerClient {
  public:
   // Overridden from testing::Test:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     switch (GetParam()) {
       case RASTER_WORKER_POOL_TYPE_PIXEL_BUFFER:
         Create3dOutputSurfaceAndResourceProvider();
@@ -261,7 +262,8 @@ class RasterWorkerPoolPerfTest
         raster_worker_pool_ =
             GpuRasterWorkerPool::Create(task_runner_.get(),
                                         context_provider_.get(),
-                                        resource_provider_.get());
+                                        resource_provider_.get(),
+                                        false);
         break;
       case RASTER_WORKER_POOL_TYPE_BITMAP:
         CreateSoftwareOutputSurfaceAndResourceProvider();
@@ -275,16 +277,16 @@ class RasterWorkerPoolPerfTest
     DCHECK(raster_worker_pool_);
     raster_worker_pool_->AsRasterizer()->SetClient(this);
   }
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     raster_worker_pool_->AsRasterizer()->Shutdown();
     raster_worker_pool_->AsRasterizer()->CheckForCompletedTasks();
   }
 
   // Overriden from RasterizerClient:
-  virtual void DidFinishRunningTasks(TaskSet task_set) OVERRIDE {
+  void DidFinishRunningTasks(TaskSet task_set) override {
     raster_worker_pool_->AsRasterizer()->CheckForCompletedTasks();
   }
-  virtual TaskSetCollection TasksThatShouldBeForcedToComplete() const OVERRIDE {
+  TaskSetCollection TasksThatShouldBeForcedToComplete() const override {
     return TaskSetCollection();
   }
 
@@ -399,9 +401,13 @@ class RasterWorkerPoolPerfTest
   void Create3dOutputSurfaceAndResourceProvider() {
     output_surface_ = FakeOutputSurface::Create3d(context_provider_).Pass();
     CHECK(output_surface_->BindToClient(&output_surface_client_));
-    resource_provider_ =
-        ResourceProvider::Create(
-            output_surface_.get(), NULL, NULL, 0, false, 1, false).Pass();
+    resource_provider_ = ResourceProvider::Create(output_surface_.get(),
+                                                  NULL,
+                                                  &gpu_memory_buffer_manager_,
+                                                  NULL,
+                                                  0,
+                                                  false,
+                                                  1).Pass();
   }
 
   void CreateSoftwareOutputSurfaceAndResourceProvider() {
@@ -411,10 +417,10 @@ class RasterWorkerPoolPerfTest
     resource_provider_ = ResourceProvider::Create(output_surface_.get(),
                                                   &shared_bitmap_manager_,
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false).Pass();
+                                                  1).Pass();
   }
 
   std::string TestModifierString() const {
@@ -436,6 +442,7 @@ class RasterWorkerPoolPerfTest
 
   scoped_ptr<ResourcePool> staging_resource_pool_;
   scoped_ptr<RasterWorkerPool> raster_worker_pool_;
+  TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   TestSharedBitmapManager shared_bitmap_manager_;
 };
 
@@ -478,12 +485,12 @@ class RasterWorkerPoolCommonPerfTest : public RasterWorkerPoolPerfTestBase,
                                        public testing::Test {
  public:
   // Overridden from testing::Test:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     output_surface_ = FakeOutputSurface::Create3d(context_provider_).Pass();
     CHECK(output_surface_->BindToClient(&output_surface_client_));
     resource_provider_ =
         ResourceProvider::Create(
-            output_surface_.get(), NULL, NULL, 0, false, 1, false).Pass();
+            output_surface_.get(), NULL, NULL, NULL, 0, false, 1).Pass();
   }
 
   void RunBuildRasterTaskQueueTest(const std::string& test_name,

@@ -108,7 +108,7 @@ WebInspector.CSSMetadata.InheritedProperties = [
     "empty-cells", "font-family", "font-size", "font-style", "font-variant", "font-weight", "font", "letter-spacing",
     "line-height", "list-style-image", "list-style-position", "list-style-type", "list-style", "orphans", "overflow-wrap", "pitch-range",
     "pitch", "quotes", "resize", "richness", "speak-header", "speak-numeral", "speak-punctuation", "speak", "speech-rate", "stress",
-    "text-align", "text-indent", "text-transform", "text-shadow", "visibility", "voice-family", "volume", "white-space", "widows",
+    "text-align", "text-indent", "text-transform", "text-shadow", "-webkit-user-select", "visibility", "voice-family", "volume", "white-space", "widows",
     "word-spacing", "word-wrap", "zoom"
 ].keySet();
 
@@ -207,9 +207,6 @@ WebInspector.CSSMetadata._propertyDataMap = {
     "border-bottom-width": { values: [
         "medium", "thick", "thin"
     ] },
-    "marquee-speed": { values: [
-        "normal", "slow", "fast"
-    ] },
     "margin-top-collapse": { values: [
         "collapse", "separate", "discard"
     ] },
@@ -272,9 +269,6 @@ WebInspector.CSSMetadata._propertyDataMap = {
     ] },
     "direction": { values: [
         "ltr", "rtl"
-    ] },
-    "marquee-direction": { values: [
-        "left", "right", "auto", "reverse", "forwards", "backwards", "ahead", "up", "down"
     ] },
     "enable-background": { values: [
         "accumulate", "new"
@@ -487,9 +481,6 @@ WebInspector.CSSMetadata._propertyDataMap = {
     "vertical-align": { values: [
         "baseline", "middle", "sub", "super", "text-top", "text-bottom", "top", "bottom", "-webkit-baseline-middle"
     ] },
-    "marquee-style": { values: [
-        "none", "scroll", "slide", "alternate"
-    ] },
     "white-space": { values: [
         "normal", "nowrap", "pre", "pre-line", "pre-wrap"
     ] },
@@ -504,9 +495,6 @@ WebInspector.CSSMetadata._propertyDataMap = {
     ] },
     "margin": { values: [
         "auto"
-    ] },
-    "marquee-repetition": { values: [
-        "infinite"
     ] },
     "margin-right": { values: [
         "auto"
@@ -528,7 +516,7 @@ WebInspector.CSSMetadata._propertyDataMap = {
         "from-image", "snap"
     ] },
     "box-sizing": { values: [
-        "content-box", "padding-box", "border-box"
+        "content-box", "border-box"
     ] },
     "clip": { values: [
         "auto"

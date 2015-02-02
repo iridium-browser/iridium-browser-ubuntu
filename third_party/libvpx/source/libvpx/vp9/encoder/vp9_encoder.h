@@ -14,12 +14,10 @@
 #include <stdio.h>
 
 #include "./vpx_config.h"
-#include "vpx_ports/mem.h"
 #include "vpx/internal/vpx_codec_internal.h"
 #include "vpx/vp8cx.h"
 
 #include "vp9/common/vp9_ppflags.h"
-#include "vp9/common/vp9_entropy.h"
 #include "vp9/common/vp9_entropymode.h"
 #include "vp9/common/vp9_onyxc_int.h"
 
@@ -241,7 +239,8 @@ typedef struct VP9_COMP {
   YV12_BUFFER_CONFIG *unscaled_last_source;
   YV12_BUFFER_CONFIG scaled_last_source;
 
-  int skippable_frame;
+  // For a still frame, this flag is set to 1 to skip partition search.
+  int partition_search_skippable_frame;
 
   int scaled_ref_idx[3];
   int lst_fb_idx;
@@ -482,7 +481,21 @@ static INLINE int get_token_alloc(int mb_rows, int mb_cols) {
   return mb_rows * mb_cols * (16 * 16 * 3 + 4);
 }
 
+// Get the allocated token size for a tile. It does the same calculation as in
+// the frame token allocation.
+static INLINE int allocated_tokens(TileInfo tile) {
+  int tile_mb_rows = (tile.mi_row_end - tile.mi_row_start + 1) >> 1;
+  int tile_mb_cols = (tile.mi_col_end - tile.mi_col_start + 1) >> 1;
+
+  return get_token_alloc(tile_mb_rows, tile_mb_cols);
+}
+
 int vp9_get_y_sse(const YV12_BUFFER_CONFIG *a, const YV12_BUFFER_CONFIG *b);
+#if CONFIG_VP9_HIGHBITDEPTH
+int vp9_highbd_get_y_sse(const YV12_BUFFER_CONFIG *a,
+                         const YV12_BUFFER_CONFIG *b,
+                         vpx_bit_depth_t bit_depth);
+#endif  // CONFIG_VP9_HIGHBITDEPTH
 
 void vp9_alloc_compressor_data(VP9_COMP *cpi);
 
@@ -525,8 +538,8 @@ static INLINE int get_chessboard_index(const int frame_index) {
   return frame_index & 0x1;
 }
 
-static INLINE int *cond_sad_list(const struct VP9_COMP *cpi, int *sad_list) {
-  return cpi->sf.mv.subpel_search_method != SUBPEL_TREE ? sad_list : NULL;
+static INLINE int *cond_cost_list(const struct VP9_COMP *cpi, int *cost_list) {
+  return cpi->sf.mv.subpel_search_method != SUBPEL_TREE ? cost_list : NULL;
 }
 
 #ifdef __cplusplus

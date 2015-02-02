@@ -16,6 +16,7 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
@@ -103,15 +104,8 @@ void EntryMetadata::SetLastUsedTime(const base::Time& last_used_time) {
     return;
   }
 
-  const base::TimeDelta since_unix_epoch =
-      last_used_time - base::Time::UnixEpoch();
-  const int64 seconds_since_unix_epoch = since_unix_epoch.InSeconds();
-  DCHECK_LE(implicit_cast<int64>(std::numeric_limits<uint32>::min()),
-            seconds_since_unix_epoch);
-  DCHECK_GE(implicit_cast<int64>(std::numeric_limits<uint32>::max()),
-            seconds_since_unix_epoch);
-
-  last_used_time_seconds_since_epoch_ = seconds_since_unix_epoch;
+  last_used_time_seconds_since_epoch_ = base::checked_cast<uint32>(
+      (last_used_time - base::Time::UnixEpoch()).InSeconds());
   // Avoid accidental nullity.
   if (last_used_time_seconds_since_epoch_ == 0)
     last_used_time_seconds_since_epoch_ = 1;
@@ -476,7 +470,7 @@ void SimpleIndex::WriteToDisk() {
   last_write_to_disk_ = start;
 
   index_file_->WriteToDisk(entries_set_, cache_size_,
-                           start, app_on_background_);
+                           start, app_on_background_, base::Closure());
 }
 
 }  // namespace disk_cache

@@ -33,19 +33,9 @@ class ASH_EXPORT FrameCaptionButtonContainerView
  public:
   static const char kViewClassName[];
 
-  // Whether the frame can be minimized (either via the maximize/restore button
-  // or via a dedicated button).
-  enum MinimizeAllowed {
-    MINIMIZE_ALLOWED,
-    MINIMIZE_DISALLOWED
-  };
-
   // |frame| is the views::Widget that the caption buttons act on.
-  // |minimize_allowed| indicates whether the frame can be minimized (either via
-  // the maximize/restore button or via a dedicated button).
-  FrameCaptionButtonContainerView(views::Widget* frame,
-                                  MinimizeAllowed minimize_allowed);
-  virtual ~FrameCaptionButtonContainerView();
+  explicit FrameCaptionButtonContainerView(views::Widget* frame);
+  ~FrameCaptionButtonContainerView() override;
 
   // For testing.
   class ASH_EXPORT TestApi {
@@ -101,13 +91,13 @@ class ASH_EXPORT FrameCaptionButtonContainerView
   void UpdateSizeButtonVisibility();
 
   // views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void Layout() override;
+  const char* GetClassName() const override;
 
   // Overridden from gfx::AnimationDelegate:
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void AnimationProgressed(const gfx::Animation* animation) override;
 
  private:
   friend class FrameCaptionButtonContainerViewTest;
@@ -139,20 +129,18 @@ class ASH_EXPORT FrameCaptionButtonContainerView
   bool ShouldSizeButtonBeVisible() const;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // FrameSizeButtonDelegate:
-  virtual bool IsMinimizeButtonVisible() const OVERRIDE;
-  virtual void SetButtonsToNormal(Animate animate) OVERRIDE;
-  virtual void SetButtonIcons(CaptionButtonIcon minimize_button_icon,
-                              CaptionButtonIcon close_button_icon,
-                              Animate animate) OVERRIDE;
-  virtual const FrameCaptionButton* GetButtonClosestTo(
-      const gfx::Point& position_in_screen) const OVERRIDE;
-  virtual void SetHoveredAndPressedButtons(
-      const FrameCaptionButton* to_hover,
-      const FrameCaptionButton* to_press) OVERRIDE;
+  bool IsMinimizeButtonVisible() const override;
+  void SetButtonsToNormal(Animate animate) override;
+  void SetButtonIcons(CaptionButtonIcon minimize_button_icon,
+                      CaptionButtonIcon close_button_icon,
+                      Animate animate) override;
+  const FrameCaptionButton* GetButtonClosestTo(
+      const gfx::Point& position_in_screen) const override;
+  void SetHoveredAndPressedButtons(const FrameCaptionButton* to_hover,
+                                   const FrameCaptionButton* to_press) override;
 
   // The widget that the buttons act on.
   views::Widget* frame_;

@@ -40,14 +40,14 @@ class HTMLElement;
 class HTMLSpanElement;
 class Text;
 
-class EditCommandComposition FINAL : public UndoStep {
+class EditCommandComposition final : public UndoStep {
 public:
     static PassRefPtrWillBeRawPtr<EditCommandComposition> create(Document*, const VisibleSelection&, const VisibleSelection&, EditAction);
 
-    virtual bool belongsTo(const LocalFrame&) const OVERRIDE;
-    virtual void unapply() OVERRIDE;
-    virtual void reapply() OVERRIDE;
-    virtual EditAction editingAction() const OVERRIDE { return m_editAction; }
+    virtual bool belongsTo(const LocalFrame&) const override;
+    virtual void unapply() override;
+    virtual void reapply() override;
+    virtual EditAction editingAction() const override { return m_editAction; }
     void append(SimpleEditCommand*);
     bool wasCreateLinkCommand() const { return m_editAction == EditActionCreateLink; }
 
@@ -58,7 +58,7 @@ public:
     Element* startingRootEditableElement() const { return m_startingRootEditableElement.get(); }
     Element* endingRootEditableElement() const { return m_endingRootEditableElement.get(); }
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     EditCommandComposition(Document*, const VisibleSelection& startingSelection, const VisibleSelection& endingSelection, EditAction);
@@ -66,7 +66,7 @@ private:
     RefPtrWillBeMember<Document> m_document;
     VisibleSelection m_startingSelection;
     VisibleSelection m_endingSelection;
-    WillBeHeapVector<RefPtrWillBeMember<SimpleEditCommand> > m_commands;
+    WillBeHeapVector<RefPtrWillBeMember<SimpleEditCommand>> m_commands;
     RefPtrWillBeMember<Element> m_startingRootEditableElement;
     RefPtrWillBeMember<Element> m_endingRootEditableElement;
     EditAction m_editAction;
@@ -86,7 +86,7 @@ public:
     virtual void setShouldRetainAutocorrectionIndicator(bool);
     virtual bool shouldStopCaretBlinking() const { return false; }
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 protected:
     explicit CompositeEditCommand(Document&);
@@ -125,10 +125,10 @@ protected:
     virtual void removeNode(PassRefPtrWillBeRawPtr<Node>, ShouldAssumeContentIsAlwaysEditable = DoNotAssumeContentIsAlwaysEditable);
     HTMLSpanElement* replaceElementWithSpanPreservingChildrenAndAttributes(PassRefPtrWillBeRawPtr<HTMLElement>);
     void removeNodePreservingChildren(PassRefPtrWillBeRawPtr<Node>, ShouldAssumeContentIsAlwaysEditable = DoNotAssumeContentIsAlwaysEditable);
-    void removeNodeAndPruneAncestors(PassRefPtrWillBeRawPtr<Node>, Node* excludeNode = 0);
+    void removeNodeAndPruneAncestors(PassRefPtrWillBeRawPtr<Node>, Node* excludeNode = nullptr);
     void moveRemainingSiblingsToNewParent(Node*, Node* pastLastNodeToMove, PassRefPtrWillBeRawPtr<Element> prpNewParent);
     void updatePositionForNodeRemovalPreservingChildren(Position&, Node&);
-    void prune(PassRefPtrWillBeRawPtr<Node>, Node* excludeNode = 0);
+    void prune(PassRefPtrWillBeRawPtr<Node>, Node* excludeNode = nullptr);
     void replaceTextInNode(PassRefPtrWillBeRawPtr<Text>, unsigned offset, unsigned count, const String& replacementText);
     Position replaceSelectedTextInNode(const String&);
     void replaceTextInNodePreservingMarkers(PassRefPtrWillBeRawPtr<Text>, unsigned offset, unsigned count, const String& replacementText);
@@ -155,8 +155,8 @@ protected:
     void pushAnchorElementDown(Element*);
 
     // FIXME: preserveSelection and preserveStyle should be enums
-    void moveParagraph(const VisiblePosition&, const VisiblePosition&, const VisiblePosition&, bool preserveSelection = false, bool preserveStyle = true, Node* constrainingAncestor = 0);
-    void moveParagraphs(const VisiblePosition&, const VisiblePosition&, const VisiblePosition&, bool preserveSelection = false, bool preserveStyle = true, Node* constrainingAncestor = 0);
+    void moveParagraph(const VisiblePosition&, const VisiblePosition&, const VisiblePosition&, bool preserveSelection = false, bool preserveStyle = true, Node* constrainingAncestor = nullptr);
+    void moveParagraphs(const VisiblePosition&, const VisiblePosition&, const VisiblePosition&, bool preserveSelection = false, bool preserveStyle = true, Node* constrainingAncestor = nullptr);
     void moveParagraphWithClones(const VisiblePosition& startOfParagraphToMove, const VisiblePosition& endOfParagraphToMove, HTMLElement* blockElement, Node* outerNode);
     void cloneParagraphUnderNewElement(const Position& start, const Position& end, Node* outerNode, Element* blockElement);
     void cleanupAfterDeletion(VisiblePosition destination = VisiblePosition());
@@ -168,10 +168,10 @@ protected:
 
     PassRefPtrWillBeRawPtr<Node> splitTreeToNode(Node*, Node*, bool splitAncestor = false);
 
-    WillBeHeapVector<RefPtrWillBeMember<EditCommand> > m_commands;
+    WillBeHeapVector<RefPtrWillBeMember<EditCommand>> m_commands;
 
 private:
-    virtual bool isCompositeEditCommand() const OVERRIDE FINAL { return true; }
+    virtual bool isCompositeEditCommand() const override final { return true; }
 
     RefPtrWillBeMember<EditCommandComposition> m_composition;
 };

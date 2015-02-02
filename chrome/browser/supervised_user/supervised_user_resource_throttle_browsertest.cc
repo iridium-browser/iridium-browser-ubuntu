@@ -16,7 +16,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_type.h"
@@ -30,11 +29,11 @@ using content::WebContents;
 class SupervisedUserResourceThrottleTest : public InProcessBrowserTest {
  protected:
   SupervisedUserResourceThrottleTest() : supervised_user_service_(NULL) {}
-  virtual ~SupervisedUserResourceThrottleTest() {}
+  ~SupervisedUserResourceThrottleTest() override {}
 
  private:
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
+  void SetUpOnMainThread() override;
+  void SetUpCommandLine(CommandLine* command_line) override;
 
   SupervisedUserService* supervised_user_service_;
 };

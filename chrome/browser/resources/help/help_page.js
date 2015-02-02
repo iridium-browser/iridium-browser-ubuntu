@@ -52,6 +52,12 @@ cr.define('help', function() {
      */
     message_: null,
 
+    /**
+     * True if user is allowed to change channels, false otherwise.
+     * @private
+     */
+    can_change_channel_: false,
+
     /** @override */
     initializePage: function() {
       Page.prototype.initializePage.call(this);
@@ -149,7 +155,21 @@ cr.define('help', function() {
                                  $('help-container'),
                                  cr.ui.ArrowLocation.TOP_END);
         };
+
+        // Unhide the product label if/when the image loads.
+        var productLabel = $('product-label');
+        var show = function() { $('product-label-container').hidden = false; };
+        if (productLabel.naturalWidth)
+          show();
+        else
+          productLabel.onload = show;
       }
+
+      var logo = $('product-logo');
+      logo.onclick = function(e) {
+        logo.classList.remove('spin');
+        setTimeout(function() { logo.classList.add('spin'); }, 0);
+      };
 
       // Attempt to update.
       chrome.send('onPageLoaded');
@@ -313,6 +333,12 @@ cr.define('help', function() {
       } else if (status == 'failed') {
         this.setUpdateImage_('failed');
         $('update-status-message').innerHTML = message;
+      }
+
+      if (cr.isChromeOS) {
+        $('change-channel').disabled = !this.can_change_channel_ ||
+            status == 'nearly_updated';
+        $('channel-change-disallowed-icon').hidden = this.can_change_channel_;
       }
 
       // Following invariant must be established at the end of this function:
@@ -495,8 +521,8 @@ cr.define('help', function() {
      */
     updateEnableReleaseChannel_: function(enabled) {
       this.updateChannelChangerContainerVisibility_(enabled);
-      $('change-channel').disabled = !enabled;
-      $('channel-change-disallowed-icon').hidden = enabled;
+      this.can_change_channel_ = enabled;
+      this.updateUI_();
     },
 
     /**
@@ -550,6 +576,15 @@ cr.define('help', function() {
         return;
       }
       $('channel-changer').hidden = !visible;
+    },
+
+    /**
+     * Sets the product label's alt text.
+     * @param {string} text The text to use for the image.
+     * @private
+     */
+    setProductLabelText_: function(text) {
+      $('product-label').setAttribute('alt', text);
     },
   };
 
@@ -618,6 +653,10 @@ cr.define('help', function() {
 
   HelpPage.setBuildDate = function(buildDate) {
     HelpPage.getInstance().setBuildDate_(buildDate);
+  };
+
+  HelpPage.setProductLabelText = function(text) {
+    HelpPage.getInstance().setProductLabelText_(text);
   };
 
   // Export

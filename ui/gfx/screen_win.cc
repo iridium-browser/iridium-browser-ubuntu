@@ -29,7 +29,7 @@ gfx::Display GetDisplay(MONITORINFOEX& monitor_info) {
   gfx::Rect bounds = gfx::Rect(monitor_info.rcMonitor);
   gfx::Display display(id, bounds);
   display.set_work_area(gfx::Rect(monitor_info.rcWork));
-  display.SetScaleAndBounds(gfx::win::GetDeviceScaleFactor(), bounds);
+  display.SetScaleAndBounds(gfx::GetDPIScale(), bounds);
 
   DEVMODE mode;
   memset(&mode, 0, sizeof(DEVMODE));
@@ -91,10 +91,6 @@ ScreenWin::ScreenWin()
 
 ScreenWin::~ScreenWin() {
   SingletonHwnd::GetInstance()->RemoveObserver(this);
-}
-
-bool ScreenWin::IsDIPEnabled() {
-  return IsInHighDPIMode();
 }
 
 gfx::Point ScreenWin::GetCursorScreenPoint() {
@@ -164,7 +160,7 @@ gfx::Display ScreenWin::GetPrimaryDisplay() const {
   gfx::Display display = GetDisplay(mi);
   // TODO(kevers|girard): Test if these checks can be reintroduced for high-DIP
   // once more of the app is DIP-aware.
-  if (!(IsInHighDPIMode() || IsHighDPIEnabled())) {
+  if (GetDPIScale() == 1.0) {
     DCHECK_EQ(GetSystemMetrics(SM_CXSCREEN), display.size().width());
     DCHECK_EQ(GetSystemMetrics(SM_CYSCREEN), display.size().height());
   }

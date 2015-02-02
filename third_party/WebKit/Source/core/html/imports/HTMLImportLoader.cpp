@@ -80,8 +80,9 @@ void HTMLImportLoader::startLoading(const ResourcePtr<RawResource>& resource)
     setResource(resource);
 }
 
-void HTMLImportLoader::responseReceived(Resource* resource, const ResourceResponse& response)
+void HTMLImportLoader::responseReceived(Resource* resource, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
+    ASSERT_UNUSED(handle, !handle);
     // Resource may already have been loaded with the import loader
     // being added as a client later & now being notified. Fail early.
     if (resource->loadFailedOrCanceled() || response.httpStatusCode() >= 400) {
@@ -91,7 +92,7 @@ void HTMLImportLoader::responseReceived(Resource* resource, const ResourceRespon
     setState(startWritingAndParsing(response));
 }
 
-void HTMLImportLoader::dataReceived(Resource*, const char* data, int length)
+void HTMLImportLoader::dataReceived(Resource*, const char* data, unsigned length)
 {
     RefPtrWillBeRawPtr<DocumentWriter> protectingWriter(m_writer.get());
     m_writer->addData(data, length);
@@ -233,6 +234,7 @@ void HTMLImportLoader::trace(Visitor* visitor)
     visitor->trace(m_document);
     visitor->trace(m_writer);
     visitor->trace(m_microtaskQueue);
+    DocumentParserClient::trace(visitor);
 }
 
 } // namespace blink

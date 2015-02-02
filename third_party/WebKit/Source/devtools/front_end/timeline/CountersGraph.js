@@ -56,7 +56,7 @@ WebInspector.CountersGraph = function(title, delegate, model)
 
     this._canvasContainer.addEventListener("mouseover", this._onMouseMove.bind(this), true);
     this._canvasContainer.addEventListener("mousemove", this._onMouseMove.bind(this), true);
-    this._canvasContainer.addEventListener("mouseout", this._onMouseOut.bind(this), true);
+    this._canvasContainer.addEventListener("mouseleave", this._onMouseLeave.bind(this), true);
     this._canvasContainer.addEventListener("click", this._onClick.bind(this), true);
     // We create extra timeline grid here to reuse its event dividers.
     this._timelineGrid = new WebInspector.TimelineGrid();
@@ -201,7 +201,7 @@ WebInspector.CountersGraph.prototype = {
     /**
      * @param {!Event} event
      */
-    _onMouseOut: function(event)
+    _onMouseLeave: function(event)
     {
         delete this._markerXPosition;
         this._clearCurrentValueAndMarker();
@@ -525,7 +525,7 @@ WebInspector.CountersGraph.CounterUI.prototype = {
  */
 WebInspector.SwatchCheckbox = function(title, color)
 {
-    this.element = document.createElement("div");
+    this.element = createElement("div");
     this._swatch = this.element.createChild("div", "swatch");
     this.element.createChild("span", "title").textContent = title;
     this._color = color;

@@ -26,6 +26,9 @@ namespace content {
 
 namespace {
 
+// Do not limit number of resources, so use an unrealistically high value.
+const size_t kNumResourcesLimit = 10 * 1000 * 1000;
+
 void DidActivatePendingTree(int routing_id) {
   SynchronousCompositorOutputSurfaceDelegate* delegate =
       SynchronousCompositorImpl::FromRoutingID(routing_id);
@@ -42,10 +45,10 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
     : surface_(surface) {
   }
   virtual void Resize(const gfx::Size& pixel_size,
-                      float scale_factor) OVERRIDE {
+                      float scale_factor) override {
     // Intentional no-op: canvas size is controlled by the embedder.
   }
-  virtual SkCanvas* BeginPaint(const gfx::Rect& damage_rect) OVERRIDE {
+  virtual SkCanvas* BeginPaint(const gfx::Rect& damage_rect) override {
     if (!surface_->current_sw_canvas_) {
       NOTREACHED() << "BeginPaint with no canvas set";
       return &null_canvas_;
@@ -54,9 +57,9 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
         << "Mutliple calls to BeginPaint per frame";
     return surface_->current_sw_canvas_;
   }
-  virtual void EndPaint(cc::SoftwareFrameData* frame_data) OVERRIDE {
+  virtual void EndPaint(cc::SoftwareFrameData* frame_data) override {
   }
-  virtual void CopyToPixels(const gfx::Rect& rect, void* pixels) OVERRIDE {
+  virtual void CopyToPixels(const gfx::Rect& rect, void* pixels) override {
     NOTIMPLEMENTED();
   }
 
@@ -150,7 +153,7 @@ bool SynchronousCompositorOutputSurface::InitializeHwDraw(
     scoped_refptr<cc::ContextProvider> onscreen_context_provider) {
   DCHECK(CalledOnValidThread());
   DCHECK(HasClient());
-  DCHECK(!context_provider_);
+  DCHECK(!context_provider_.get());
 
   return InitializeAndSetContext3d(onscreen_context_provider);
 }
@@ -170,7 +173,7 @@ SynchronousCompositorOutputSurface::DemandDrawHw(
     const gfx::Transform& transform_for_tile_priority) {
   DCHECK(CalledOnValidThread());
   DCHECK(HasClient());
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
 
   surface_size_ = surface_size;
   InvokeComposite(transform,
@@ -268,11 +271,10 @@ void SynchronousCompositorOutputSurface::ReturnResources(
   ReclaimResources(&frame_ack);
 }
 
-void SynchronousCompositorOutputSurface::SetMemoryPolicy(
-    const SynchronousCompositorMemoryPolicy& policy) {
+void SynchronousCompositorOutputSurface::SetMemoryPolicy(size_t bytes_limit) {
   DCHECK(CalledOnValidThread());
-  memory_policy_.bytes_limit_when_visible = policy.bytes_limit;
-  memory_policy_.num_resources_limit = policy.num_resources_limit;
+  memory_policy_.bytes_limit_when_visible = bytes_limit;
+  memory_policy_.num_resources_limit = kNumResourcesLimit;
 
   if (output_surface_client_)
     output_surface_client_->SetMemoryPolicy(memory_policy_);

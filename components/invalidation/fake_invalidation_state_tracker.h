@@ -17,17 +17,16 @@ class FakeInvalidationStateTracker
       public base::SupportsWeakPtr<FakeInvalidationStateTracker> {
  public:
   FakeInvalidationStateTracker();
-  virtual ~FakeInvalidationStateTracker();
+  ~FakeInvalidationStateTracker() override;
 
   // InvalidationStateTracker implementation.
-  virtual void ClearAndSetNewClientId(const std::string& client_id) OVERRIDE;
-  virtual std::string GetInvalidatorClientId() const OVERRIDE;
-  virtual void SetBootstrapData(const std::string& data) OVERRIDE;
-  virtual std::string GetBootstrapData() const OVERRIDE;
-  virtual void SetSavedInvalidations(
-      const UnackedInvalidationsMap& states) OVERRIDE;
-  virtual UnackedInvalidationsMap GetSavedInvalidations() const OVERRIDE;
-  virtual void Clear() OVERRIDE;
+  void ClearAndSetNewClientId(const std::string& client_id) override;
+  std::string GetInvalidatorClientId() const override;
+  void SetBootstrapData(const std::string& data) override;
+  std::string GetBootstrapData() const override;
+  void SetSavedInvalidations(const UnackedInvalidationsMap& states) override;
+  UnackedInvalidationsMap GetSavedInvalidations() const override;
+  void Clear() override;
 
   static const int64 kMinVersion;
 

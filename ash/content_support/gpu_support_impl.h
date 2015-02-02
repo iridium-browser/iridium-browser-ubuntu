@@ -14,14 +14,14 @@ namespace ash {
 class ASH_WITH_CONTENT_EXPORT GPUSupportImpl : public GPUSupport {
  public:
   GPUSupportImpl();
-  virtual ~GPUSupportImpl();
+  ~GPUSupportImpl() override;
 
  private:
   // Overridden from GPUSupport:
-  virtual bool IsPanelFittingDisabled() const OVERRIDE;
-  virtual void DisableGpuWatchdog() OVERRIDE;
-  virtual void GetGpuProcessHandles(
-      const GetGpuProcessHandlesCallback& callback) const OVERRIDE;
+  bool IsPanelFittingDisabled() const override;
+  void DisableGpuWatchdog() override;
+  void GetGpuProcessHandles(
+      const GetGpuProcessHandlesCallback& callback) const override;
 
   DISALLOW_COPY_AND_ASSIGN(GPUSupportImpl);
 };

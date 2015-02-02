@@ -4,6 +4,7 @@
 
 #include "components/autofill/core/browser/autofill_external_delegate.h"
 
+#include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
@@ -12,6 +13,7 @@
 #include "components/autofill/core/browser/autofill_driver.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -42,6 +44,16 @@ void EmitHistogram(AccessAddressBookEventType type) {
 
 namespace autofill {
 
+namespace {
+
+bool ShouldAutofill(const FormFieldData& form_field) {
+  return form_field.should_autocomplete ||
+         base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kIgnoreAutocompleteOffForAutofill);
+}
+
+}  // namespace
+
 AutofillExternalDelegate::AutofillExternalDelegate(AutofillManager* manager,
                                                    AutofillDriver* driver)
     : manager_(manager),
@@ -50,8 +62,8 @@ AutofillExternalDelegate::AutofillExternalDelegate(AutofillManager* manager,
       display_warning_if_disabled_(false),
       has_suggestion_(false),
       has_shown_popup_for_current_edit_(false),
-      weak_ptr_factory_(this),
-      has_shown_address_book_prompt(false) {
+      has_shown_address_book_prompt(false),
+      weak_ptr_factory_(this) {
   DCHECK(manager);
 }
 
@@ -307,7 +319,7 @@ void AutofillExternalDelegate::ApplyAutofillWarnings(
     std::vector<base::string16>* labels,
     std::vector<base::string16>* icons,
     std::vector<int>* unique_ids) {
-  if (!query_field_.should_autocomplete) {
+  if (!ShouldAutofill(query_field_)) {
     // Autofill is disabled.  If there were some profile or credit card
     // suggestions to show, show a warning instead.  Otherwise, clear out the
     // list of suggestions.

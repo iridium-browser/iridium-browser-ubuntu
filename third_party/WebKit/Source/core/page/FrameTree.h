@@ -28,7 +28,7 @@ namespace blink {
 class Frame;
 class TreeScope;
 
-class FrameTree FINAL {
+class FrameTree final {
     WTF_MAKE_NONCOPYABLE(FrameTree);
     DISALLOW_ALLOCATION();
 public:
@@ -50,7 +50,7 @@ public:
 
     bool isDescendantOf(const Frame* ancestor) const;
     Frame* traversePreviousWithWrap(bool) const;
-    Frame* traverseNext(const Frame* stayWithin = 0) const;
+    Frame* traverseNext(const Frame* stayWithin = nullptr) const;
     Frame* traverseNextWithWrap(bool) const;
 
     Frame* child(const AtomicString& name) const;

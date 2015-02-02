@@ -25,22 +25,22 @@ class ImmersiveModeControllerAsh
       public content::NotificationObserver {
  public:
   ImmersiveModeControllerAsh();
-  virtual ~ImmersiveModeControllerAsh();
+  ~ImmersiveModeControllerAsh() override;
 
   // ImmersiveModeController overrides:
-  virtual void Init(BrowserView* browser_view) OVERRIDE;
-  virtual void SetEnabled(bool enabled) OVERRIDE;
-  virtual bool IsEnabled() const OVERRIDE;
-  virtual bool ShouldHideTabIndicators() const OVERRIDE;
-  virtual bool ShouldHideTopViews() const OVERRIDE;
-  virtual bool IsRevealed() const OVERRIDE;
-  virtual int GetTopContainerVerticalOffset(
-      const gfx::Size& top_container_size) const OVERRIDE;
-  virtual ImmersiveRevealedLock* GetRevealedLock(
-      AnimateReveal animate_reveal) OVERRIDE WARN_UNUSED_RESULT;
-  virtual void OnFindBarVisibleBoundsChanged(
-      const gfx::Rect& new_visible_bounds_in_screen) OVERRIDE;
-  virtual void SetupForTest() OVERRIDE;
+  void Init(BrowserView* browser_view) override;
+  void SetEnabled(bool enabled) override;
+  bool IsEnabled() const override;
+  bool ShouldHideTabIndicators() const override;
+  bool ShouldHideTopViews() const override;
+  bool IsRevealed() const override;
+  int GetTopContainerVerticalOffset(
+      const gfx::Size& top_container_size) const override;
+  ImmersiveRevealedLock* GetRevealedLock(AnimateReveal animate_reveal) override
+      WARN_UNUSED_RESULT;
+  void OnFindBarVisibleBoundsChanged(
+      const gfx::Rect& new_visible_bounds_in_screen) override;
+  void SetupForTest() override;
 
  private:
   // Enables or disables observers for window restore and entering / exiting
@@ -55,21 +55,20 @@ class ImmersiveModeControllerAsh
   bool UpdateTabIndicators();
 
   // ImmersiveFullscreenController::Delegate overrides:
-  virtual void OnImmersiveRevealStarted() OVERRIDE;
-  virtual void OnImmersiveRevealEnded() OVERRIDE;
-  virtual void OnImmersiveFullscreenExited() OVERRIDE;
-  virtual void SetVisibleFraction(double visible_fraction) OVERRIDE;
-  virtual std::vector<gfx::Rect> GetVisibleBoundsInScreen() const OVERRIDE;
+  void OnImmersiveRevealStarted() override;
+  void OnImmersiveRevealEnded() override;
+  void OnImmersiveFullscreenExited() override;
+  void SetVisibleFraction(double visible_fraction) override;
+  std::vector<gfx::Rect> GetVisibleBoundsInScreen() const override;
 
   // ash::wm::WindowStateObserver override:
-  virtual void OnPostWindowStateTypeChange(
-      ash::wm::WindowState* window_state,
-      ash::wm::WindowStateType old_type) OVERRIDE;
+  void OnPostWindowStateTypeChange(ash::wm::WindowState* window_state,
+                                   ash::wm::WindowStateType old_type) override;
 
   // content::NotificationObserver override:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   scoped_ptr<ash::ImmersiveFullscreenController> controller_;
 

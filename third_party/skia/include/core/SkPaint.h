@@ -1,12 +1,9 @@
-
-
 /*
  * Copyright 2006 The Android Open Source Project
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 
 #ifndef SkPaint_DEFINED
 #define SkPaint_DEFINED
@@ -64,6 +61,11 @@ public:
     friend bool operator!=(const SkPaint& a, const SkPaint& b) {
         return !(a == b);
     }
+
+    /** getHash() is a shallow hash, with the same limitations as operator==.
+     *  If operator== returns true for two paints, getHash() returns the same value for each.
+     */
+    uint32_t getHash() const;
 
     void flatten(SkWriteBuffer&) const;
     void unflatten(SkReadBuffer&);
@@ -878,19 +880,6 @@ public:
         return this->measureText(text, length, NULL);
     }
 
-    /** Specify the direction the text buffer should be processed in breakText()
-    */
-    enum TextBufferDirection {
-        /** When measuring text for breakText(), begin at the start of the text
-            buffer and proceed forward through the data. This is the default.
-        */
-        kForward_TextBufferDirection,
-        /** When measuring text for breakText(), begin at the end of the text
-            buffer and proceed backwards through the data.
-        */
-        kBackward_TextBufferDirection
-    };
-
     /** Return the number of bytes of text that were measured. If
      *  isVerticalText() is true, then the vertical advances are used for
      *  the measurement.
@@ -901,15 +890,11 @@ public:
      *                  widths are <= maxWidth are measured.
      *  @param measuredWidth Optional. If non-null, this returns the actual
      *                  width of the measured text.
-     *  @param tbd      Optional. The direction the text buffer should be
-     *                  traversed during measuring.
      *  @return         The number of bytes of text that were measured. Will be
      *                  <= length.
      */
     size_t  breakText(const void* text, size_t length, SkScalar maxWidth,
-                      SkScalar* measuredWidth = NULL,
-                      TextBufferDirection tbd = kForward_TextBufferDirection)
-                      const;
+                      SkScalar* measuredWidth = NULL) const;
 
     /** Return the advances for the text. These will be vertical advances if
      *  isVerticalText() returns true.
@@ -935,11 +920,6 @@ public:
 
     void getPosTextPath(const void* text, size_t length,
                         const SkPoint pos[], SkPath* path) const;
-
-#ifdef SK_BUILD_FOR_ANDROID
-    uint32_t getGenerationID() const;
-    void setGenerationID(uint32_t generationID);
-#endif
 
     // returns true if the paint's settings (e.g. xfermode + alpha) resolve to
     // mean that we need not draw at all (e.g. SrcOver + 0-alpha)
@@ -1024,11 +1004,6 @@ public:
 
     SK_TO_STRING_NONVIRT()
 
-    struct FlatteningTraits {
-        static void Flatten(SkWriteBuffer& buffer, const SkPaint& paint);
-        static void Unflatten(SkReadBuffer& buffer, SkPaint* paint);
-    };
-
 private:
     SkTypeface*     fTypeface;
     SkPathEffect*   fPathEffect;
@@ -1062,11 +1037,9 @@ private:
         } fBitfields;
         uint32_t fBitfieldsUInt;
     };
-    uint32_t fDirtyBits;
 
     SkDrawCacheProc    getDrawCacheProc() const;
-    SkMeasureCacheProc getMeasureCacheProc(TextBufferDirection dir,
-                                           bool needFullMetrics) const;
+    SkMeasureCacheProc getMeasureCacheProc(bool needFullMetrics) const;
 
     SkScalar measure_text(SkGlyphCache*, const char* text, size_t length,
                           int* count, SkRect* bounds) const;
@@ -1131,12 +1104,6 @@ private:
     friend class GrGLPathRendering;
     friend class SkTextToPathIter;
     friend class SkCanonicalizePaint;
-
-#ifdef SK_BUILD_FOR_ANDROID
-    // In order for the == operator to work properly this must be the last field
-    // in the struct so that we can do a memcmp to this field's offset.
-    uint32_t        fGenerationID;
-#endif
 };
 
 #endif

@@ -10,6 +10,7 @@ from telemetry.core import util
 from telemetry.results import buildbot_output_formatter
 from telemetry.results import chart_json_output_formatter
 from telemetry.results import csv_output_formatter
+from telemetry.results import csv_pivot_table_output_formatter
 from telemetry.results import gtest_progress_reporter
 from telemetry.results import html_output_formatter
 from telemetry.results import json_output_formatter
@@ -17,8 +18,18 @@ from telemetry.results import page_test_results
 from telemetry.results import progress_reporter
 
 # Allowed output formats. The default is the first item in the list.
-_OUTPUT_FORMAT_CHOICES = ('html', 'buildbot', 'block', 'csv', 'gtest', 'json',
-    'chartjson', 'none')
+_OUTPUT_FORMAT_CHOICES = ('html', 'buildbot', 'csv', 'gtest', 'json',
+    'chartjson', 'csv-pivot-table', 'none')
+
+
+# Filenames to use for given output formats.
+_OUTPUT_FILENAME_LOOKUP = {
+    'html': 'results.html',
+    'csv': 'results.csv',
+    'json': 'results.json',
+    'chartjson': 'results-chart.json',
+    'csv-pivot-table': 'results-pivot-table.csv'
+}
 
 
 def AddResultsOptions(parser):
@@ -33,9 +44,12 @@ def AddResultsOptions(parser):
                     dest='output_file',
                     default=None,
                     help='Redirects output to a file. Defaults to stdout.')
+  group.add_option('--output-dir', default=util.GetBaseDir(),
+                    help='Where to save output data after the run.')
   group.add_option('--output-trace-tag',
                     default='',
-                    help='Append a tag to the key of each result trace.')
+                    help='Append a tag to the key of each result trace. Use '
+                    'with html, buildbot, csv-pivot-table output formats.')
   group.add_option('--reset-results', action='store_true',
                     help='Delete all stored results.')
   group.add_option('--upload-results', action='store_true',
@@ -49,17 +63,33 @@ def AddResultsOptions(parser):
   parser.add_option_group(group)
 
 
-def _GetOutputStream(output_format, output_file):
+def ProcessCommandLineArgs(parser, args):
+  # TODO(ariblue): Delete this flag entirely at some future data, when the
+  # existence of such a flag has been long forgotten.
+  if args.output_file:
+    parser.error('This flag is deprecated. Please use --output-dir instead.')
+
+  try:
+    os.makedirs(args.output_dir)
+  except OSError:
+    # Do nothing if the output directory already exists. Existing files will
+    # get overwritten.
+    pass
+
+  args.output_dir = os.path.expanduser(args.output_dir)
+
+
+def _GetOutputStream(output_format, output_dir):
   assert output_format in _OUTPUT_FORMAT_CHOICES, 'Must specify a valid format.'
   assert output_format not in ('gtest', 'none'), (
       'Cannot set stream for \'gtest\' or \'none\' output formats.')
 
-  if output_file is None:
-    if output_format != 'html' and output_format != 'json':
-      return sys.stdout
-    output_file = os.path.join(util.GetBaseDir(), 'results.' + output_format)
+  if output_format == 'buildbot':
+    return sys.stdout
 
-  output_file = os.path.expanduser(output_file)
+  assert output_format in _OUTPUT_FILENAME_LOOKUP, (
+      'No known filename for the \'%s\' output format' % output_format)
+  output_file = os.path.join(output_dir, _OUTPUT_FILENAME_LOOKUP[output_format])
   open(output_file, 'a').close()  # Create file if it doesn't exist.
   return open(output_file, 'r+')
 
@@ -80,23 +110,19 @@ def CreateResults(benchmark_metadata, options):
   if not options.output_formats:
     options.output_formats = [_OUTPUT_FORMAT_CHOICES[0]]
 
-  # TODO(chrishenry): It doesn't make sense to have a single output_file flag
-  # with multiple output formatters. We should explore other possible options:
-  #   - Have an output_file per output formatter
-  #   - Have --output-dir instead of --output-file
-  if len(options.output_formats) != 1 and options.output_file:
-    raise Exception('Cannot specify output_file flag with multiple output '
-                    'formats.')
-
   output_formatters = []
   for output_format in options.output_formats:
     if output_format == 'none' or output_format == "gtest" or options.chartjson:
       continue
 
-    output_stream = _GetOutputStream(output_format, options.output_file)
+    output_stream = _GetOutputStream(output_format, options.output_dir)
     if output_format == 'csv':
       output_formatters.append(csv_output_formatter.CsvOutputFormatter(
           output_stream))
+    elif output_format == 'csv-pivot-table':
+      output_formatters.append(
+          csv_pivot_table_output_formatter.CsvPivotTableOutputFormatter(
+              output_stream, trace_tag=options.output_trace_tag))
     elif output_format == 'buildbot':
       output_formatters.append(
           buildbot_output_formatter.BuildbotOutputFormatter(
@@ -116,7 +142,7 @@ def CreateResults(benchmark_metadata, options):
           options.results_label, trace_tag=options.output_trace_tag))
     elif output_format == 'json':
       output_formatters.append(json_output_formatter.JsonOutputFormatter(
-          output_stream, benchmark_metadata))
+          output_stream, options.output_dir, benchmark_metadata))
     elif output_format == 'chartjson':
       output_formatters.append(
           chart_json_output_formatter.ChartJsonOutputFormatter(

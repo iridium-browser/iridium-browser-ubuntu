@@ -44,7 +44,7 @@ class FetchUrlTest : public testing::Test,
     event.Wait();
   }
 
-  virtual ~FetchUrlTest() {
+  ~FetchUrlTest() override {
     base::WaitableEvent event(false, false);
     io_thread_.message_loop_proxy()->PostTask(
         FROM_HERE,
@@ -70,10 +70,10 @@ class FetchUrlTest : public testing::Test,
   }
 
   // Overridden from net::HttpServer::Delegate:
-  virtual void OnConnect(int connection_id) OVERRIDE {}
+  void OnConnect(int connection_id) override {}
 
-  virtual void OnHttpRequest(int connection_id,
-                             const net::HttpServerRequestInfo& info) OVERRIDE {
+  void OnHttpRequest(int connection_id,
+                     const net::HttpServerRequestInfo& info) override {
     switch (response_) {
       case kSendHello:
         server_->Send200(connection_id, "hello", "text/plain");
@@ -89,12 +89,11 @@ class FetchUrlTest : public testing::Test,
     }
   }
 
-  virtual void OnWebSocketRequest(
-      int connection_id,
-      const net::HttpServerRequestInfo& info) OVERRIDE {}
-  virtual void OnWebSocketMessage(int connection_id,
-                                  const std::string& data) OVERRIDE {}
-  virtual void OnClose(int connection_id) OVERRIDE {}
+  void OnWebSocketRequest(int connection_id,
+                          const net::HttpServerRequestInfo& info) override {}
+  void OnWebSocketMessage(int connection_id, const std::string& data) override {
+  }
+  void OnClose(int connection_id) override {}
 
  protected:
   enum ServerResponse {

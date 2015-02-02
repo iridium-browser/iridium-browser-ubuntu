@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
@@ -46,7 +47,6 @@
 #endif
 
 #if defined(OS_WIN)
-#include "ui/base/win/dpi_setup.h"
 #include "ui/gfx/win/dpi.h"
 #endif
 
@@ -124,10 +124,10 @@ class ResourceBundle::ResourceBundleImageSource : public gfx::ImageSkiaSource {
  public:
   ResourceBundleImageSource(ResourceBundle* rb, int resource_id)
       : rb_(rb), resource_id_(resource_id) {}
-  virtual ~ResourceBundleImageSource() {}
+  ~ResourceBundleImageSource() override {}
 
   // gfx::ImageSkiaSource overrides:
-  virtual gfx::ImageSkiaRep GetImageForScale(float scale) OVERRIDE {
+  gfx::ImageSkiaRep GetImageForScale(float scale) override {
     SkBitmap image;
     bool fell_back_to_1x = false;
     ScaleFactor scale_factor = GetSupportedScaleFactor(scale);
@@ -454,23 +454,41 @@ base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) const {
 base::StringPiece ResourceBundle::GetRawDataResourceForScale(
     int resource_id,
     ScaleFactor scale_factor) const {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422489 ResourceBundle::GetRawDataResourceForScale 1"));
+
   base::StringPiece data;
   if (delegate_ &&
       delegate_->GetRawDataResource(resource_id, scale_factor, &data))
     return data;
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422489 ResourceBundle::GetRawDataResourceForScale 2"));
+
   if (scale_factor != ui::SCALE_FACTOR_100P) {
     for (size_t i = 0; i < data_packs_.size(); i++) {
       if (data_packs_[i]->GetScaleFactor() == scale_factor &&
-          data_packs_[i]->GetStringPiece(resource_id, &data))
+          data_packs_[i]->GetStringPiece(static_cast<uint16>(resource_id),
+                                         &data))
         return data;
     }
   }
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422489 ResourceBundle::GetRawDataResourceForScale 3"));
+
   for (size_t i = 0; i < data_packs_.size(); i++) {
     if ((data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_100P ||
          data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_200P ||
+         data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_300P ||
          data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_NONE) &&
-        data_packs_[i]->GetStringPiece(resource_id, &data))
+        data_packs_[i]->GetStringPiece(static_cast<uint16>(resource_id),
+                                       &data))
       return data;
   }
 
@@ -499,7 +517,8 @@ base::string16 ResourceBundle::GetLocalizedString(int message_id) {
   }
 
   base::StringPiece data;
-  if (!locale_resources_data_->GetStringPiece(message_id, &data)) {
+  if (!locale_resources_data_->GetStringPiece(static_cast<uint16>(message_id),
+                                              &data)) {
     // Fall back on the main data pack (shouldn't be any strings here except in
     // unittests).
     data = GetRawDataResource(message_id);
@@ -627,14 +646,12 @@ void ResourceBundle::InitSharedInstance(Delegate* delegate) {
   supported_scale_factors.push_back(SCALE_FACTOR_200P);
 #elif defined(OS_WIN)
   bool default_to_100P = true;
-  if (gfx::IsHighDPIEnabled()) {
-    // On Windows if the dpi scale is greater than 1.25 on high dpi machines
-    // downscaling from 200 percent looks better than scaling up from 100
-    // percent.
-    if (gfx::GetDPIScale() > 1.25) {
-      supported_scale_factors.push_back(SCALE_FACTOR_200P);
-      default_to_100P = false;
-    }
+  // On Windows if the dpi scale is greater than 1.25 on high dpi machines
+  // downscaling from 200 percent looks better than scaling up from 100
+  // percent.
+  if (gfx::GetDPIScale() > 1.25) {
+    supported_scale_factors.push_back(SCALE_FACTOR_200P);
+    default_to_100P = false;
   }
   if (default_to_100P)
     supported_scale_factors.push_back(SCALE_FACTOR_100P);
@@ -643,10 +660,7 @@ void ResourceBundle::InitSharedInstance(Delegate* delegate) {
 #if defined(OS_WIN)
   // Must be called _after_ supported scale factors are set since it
   // uses them.
-  // Don't initialize the device scale factor if it has already been
-  // initialized.
-  if (!gfx::win::IsDeviceScaleFactorSet())
-    ui::win::InitDeviceScaleFactor();
+  gfx::InitDeviceScaleFactor(gfx::GetDPIScale());
 #endif
 }
 
@@ -763,7 +777,7 @@ bool ResourceBundle::LoadBitmap(const ResourceHandle& data_handle,
                                 bool* fell_back_to_1x) const {
   DCHECK(fell_back_to_1x);
   scoped_refptr<base::RefCountedMemory> memory(
-      data_handle.GetStaticMemory(resource_id));
+      data_handle.GetStaticMemory(static_cast<uint16>(resource_id)));
   if (!memory.get())
     return false;
 

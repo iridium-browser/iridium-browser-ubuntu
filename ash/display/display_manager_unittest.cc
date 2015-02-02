@@ -50,14 +50,14 @@ class DisplayManagerTest : public test::AshTestBase,
       : removed_count_(0U),
         root_window_destroyed_(false) {
   }
-  virtual ~DisplayManagerTest() {}
+  ~DisplayManagerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AshTestBase::SetUp();
     Shell::GetScreen()->AddObserver(this);
     Shell::GetPrimaryRootWindow()->AddObserver(this);
   }
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     Shell::GetPrimaryRootWindow()->RemoveObserver(this);
     Shell::GetScreen()->RemoveObserver(this);
     AshTestBase::TearDown();
@@ -102,19 +102,18 @@ class DisplayManagerTest : public test::AshTestBase,
   }
 
   // aura::DisplayObserver overrides:
-  virtual void OnDisplayMetricsChanged(const gfx::Display& display,
-                                       uint32_t) OVERRIDE {
+  void OnDisplayMetricsChanged(const gfx::Display& display, uint32_t) override {
     changed_.push_back(display);
   }
-  virtual void OnDisplayAdded(const gfx::Display& new_display) OVERRIDE {
+  void OnDisplayAdded(const gfx::Display& new_display) override {
     added_.push_back(new_display);
   }
-  virtual void OnDisplayRemoved(const gfx::Display& old_display) OVERRIDE {
+  void OnDisplayRemoved(const gfx::Display& old_display) override {
     ++removed_count_;
   }
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+  void OnWindowDestroying(aura::Window* window) override {
     ASSERT_EQ(Shell::GetPrimaryRootWindow(), window);
     root_window_destroyed_ = true;
   }
@@ -1182,17 +1181,17 @@ TEST_F(DisplayManagerTest, MAYBE_UpdateMouseCursorAfterRotateZoom) {
 class TestDisplayObserver : public gfx::DisplayObserver {
  public:
   TestDisplayObserver() : changed_(false) {}
-  virtual ~TestDisplayObserver() {}
+  ~TestDisplayObserver() override {}
 
   // gfx::DisplayObserver overrides:
-  virtual void OnDisplayMetricsChanged(const gfx::Display&,uint32_t) OVERRIDE {}
-  virtual void OnDisplayAdded(const gfx::Display& new_display) OVERRIDE {
+  void OnDisplayMetricsChanged(const gfx::Display&, uint32_t) override {}
+  void OnDisplayAdded(const gfx::Display& new_display) override {
     // Mirror window should already be delete before restoring
     // the external display.
     EXPECT_FALSE(test_api.GetHost());
     changed_ = true;
   }
-  virtual void OnDisplayRemoved(const gfx::Display& old_display) OVERRIDE {
+  void OnDisplayRemoved(const gfx::Display& old_display) override {
     // Mirror window should not be created until the external display
     // is removed.
     EXPECT_FALSE(test_api.GetHost());
@@ -1417,9 +1416,9 @@ class ScreenShutdownTest : public test::AshTestBase {
  public:
   ScreenShutdownTest() {
   }
-  virtual ~ScreenShutdownTest() {}
+  ~ScreenShutdownTest() override {}
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     gfx::Screen* orig_screen =
         gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_ALTERNATE);
     AshTestBase::TearDown();
@@ -1474,7 +1473,7 @@ class FontTestHelper : public test::AshTestBase {
   }
 
   // test::AshTestBase:
-  virtual void TestBody() OVERRIDE {
+  virtual void TestBody() override {
     NOTREACHED();
   }
 

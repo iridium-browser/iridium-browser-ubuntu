@@ -19,10 +19,10 @@ namespace {
 // avoid losing them both within the same loss episode. On the other hand,
 // we expect to be able to recover from any loss in about an RTT.
 // We resolve this tradeoff by sending an FEC packet atmost half an RTT,
-// or equivalently, half a cwnd, after the first protected packet. Since we
-// don't want to delay an FEC packet past half an RTT, we set the max FEC
-// group size to be half the current congestion window.
-const float kCongestionWindowMultiplierForFecGroupSize = 0.5;
+// or equivalently, half the max number of in-flight packets,  the first
+// protected packet. Since we don't want to delay an FEC packet past half an
+// RTT, we set the max FEC group size to be half the current congestion window.
+const float kMaxPacketsInFlightMultiplierForFecGroupSize = 0.5;
 
 }  // namespace
 
@@ -33,14 +33,13 @@ QuicPacketGenerator::QuicPacketGenerator(QuicConnectionId connection_id,
                                          QuicRandom* random_generator,
                                          DelegateInterface* delegate)
     : delegate_(delegate),
-      debug_delegate_(NULL),
+      debug_delegate_(nullptr),
       packet_creator_(connection_id, framer, random_generator),
       batch_mode_(false),
       should_fec_protect_(false),
       should_send_ack_(false),
       should_send_feedback_(false),
-      should_send_stop_waiting_(false) {
-}
+      should_send_stop_waiting_(false) {}
 
 QuicPacketGenerator::~QuicPacketGenerator() {
   for (QuicFrames::iterator it = queued_control_frames_.begin();
@@ -85,12 +84,11 @@ QuicPacketGenerator::~QuicPacketGenerator() {
   }
 }
 
-// NetworkChangeVisitor method.
 void QuicPacketGenerator::OnCongestionWindowChange(
-    QuicByteCount congestion_window) {
+    QuicPacketCount max_packets_in_flight) {
   packet_creator_.set_max_packets_per_fec_group(
-      static_cast<size_t>(kCongestionWindowMultiplierForFecGroupSize *
-                          congestion_window / kDefaultTCPMSS));
+      static_cast<size_t>(kMaxPacketsInFlightMultiplierForFecGroupSize *
+                          max_packets_in_flight));
 }
 
 void QuicPacketGenerator::SetShouldSendAck(bool also_send_feedback,
@@ -141,7 +139,7 @@ QuicConsumedData QuicPacketGenerator::ConsumeData(QuicStreamId id,
                                          HAS_RETRANSMITTABLE_DATA, handshake)) {
     QuicFrame frame;
     size_t bytes_consumed;
-    if (notifier != NULL) {
+    if (notifier != nullptr) {
       // We want to track which packet this stream frame ends up in.
       bytes_consumed = packet_creator_.CreateStreamFrameWithNotifier(
           id, data, offset + total_bytes_consumed, fin, notifier, &frame);
@@ -380,10 +378,23 @@ SerializedPacket QuicPacketGenerator::ReserializeAllFrames(
 
 void QuicPacketGenerator::UpdateSequenceNumberLength(
       QuicPacketSequenceNumber least_packet_awaited_by_peer,
-      QuicByteCount congestion_window) {
+      QuicPacketCount max_packets_in_flight) {
   return packet_creator_.UpdateSequenceNumberLength(
-      least_packet_awaited_by_peer, congestion_window);
+      least_packet_awaited_by_peer, max_packets_in_flight);
 }
+
+void QuicPacketGenerator::SetConnectionIdLength(uint32 length) {
+  if (length == 0) {
+    packet_creator_.set_connection_id_length(PACKET_0BYTE_CONNECTION_ID);
+  } else if (length == 1) {
+    packet_creator_.set_connection_id_length(PACKET_1BYTE_CONNECTION_ID);
+  } else if (length <= 4) {
+    packet_creator_.set_connection_id_length(PACKET_4BYTE_CONNECTION_ID);
+  } else {
+    packet_creator_.set_connection_id_length(PACKET_8BYTE_CONNECTION_ID);
+  }
+}
+
 
 void QuicPacketGenerator::set_encryption_level(EncryptionLevel level) {
   packet_creator_.set_encryption_level(level);

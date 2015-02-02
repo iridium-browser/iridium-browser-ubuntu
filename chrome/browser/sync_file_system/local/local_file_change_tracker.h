@@ -48,22 +48,21 @@ class LocalFileChangeTracker : public storage::FileUpdateObserver,
   LocalFileChangeTracker(const base::FilePath& base_path,
                          leveldb::Env* env_override,
                          base::SequencedTaskRunner* file_task_runner);
-  virtual ~LocalFileChangeTracker();
+  ~LocalFileChangeTracker() override;
 
   // FileUpdateObserver overrides.
-  virtual void OnStartUpdate(const storage::FileSystemURL& url) OVERRIDE;
-  virtual void OnUpdate(const storage::FileSystemURL& url,
-                        int64 delta) OVERRIDE {}
-  virtual void OnEndUpdate(const storage::FileSystemURL& url) OVERRIDE;
+  void OnStartUpdate(const storage::FileSystemURL& url) override;
+  void OnUpdate(const storage::FileSystemURL& url, int64 delta) override {}
+  void OnEndUpdate(const storage::FileSystemURL& url) override;
 
   // FileChangeObserver overrides.
-  virtual void OnCreateFile(const storage::FileSystemURL& url) OVERRIDE;
-  virtual void OnCreateFileFrom(const storage::FileSystemURL& url,
-                                const storage::FileSystemURL& src) OVERRIDE;
-  virtual void OnRemoveFile(const storage::FileSystemURL& url) OVERRIDE;
-  virtual void OnModifyFile(const storage::FileSystemURL& url) OVERRIDE;
-  virtual void OnCreateDirectory(const storage::FileSystemURL& url) OVERRIDE;
-  virtual void OnRemoveDirectory(const storage::FileSystemURL& url) OVERRIDE;
+  void OnCreateFile(const storage::FileSystemURL& url) override;
+  void OnCreateFileFrom(const storage::FileSystemURL& url,
+                        const storage::FileSystemURL& src) override;
+  void OnRemoveFile(const storage::FileSystemURL& url) override;
+  void OnModifyFile(const storage::FileSystemURL& url) override;
+  void OnCreateDirectory(const storage::FileSystemURL& url) override;
+  void OnRemoveDirectory(const storage::FileSystemURL& url) override;
 
   // Retrieves an array of |url| which have more than one pending changes.
   // If |max_urls| is non-zero (recommended in production code) this

@@ -38,17 +38,17 @@ namespace {
 class BoundsSetter : public aura::LayoutManager {
  public:
   BoundsSetter() {}
-  virtual ~BoundsSetter() {}
+  ~BoundsSetter() override {}
 
   // aura::LayoutManager overrides:
-  virtual void OnWindowResized() OVERRIDE {}
-  virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE {}
-  virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE {}
-  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE {}
-  virtual void OnChildWindowVisibilityChanged(
-      aura::Window* child, bool visible) OVERRIDE {}
-  virtual void SetChildBounds(
-      aura::Window* child, const gfx::Rect& requested_bounds) OVERRIDE {}
+  void OnWindowResized() override {}
+  void OnWindowAddedToLayout(aura::Window* child) override {}
+  void OnWillRemoveWindowFromLayout(aura::Window* child) override {}
+  void OnWindowRemovedFromLayout(aura::Window* child) override {}
+  void OnChildWindowVisibilityChanged(aura::Window* child,
+                                      bool visible) override {}
+  void SetChildBounds(aura::Window* child,
+                      const gfx::Rect& requested_bounds) override {}
 
   void SetBounds(aura::Window* window, const gfx::Rect& bounds) {
     SetChildBoundsDirect(window, bounds);
@@ -101,7 +101,8 @@ WindowStateType WindowState::GetStateType() const {
 }
 
 bool WindowState::IsMinimized() const {
-  return GetStateType() == WINDOW_STATE_TYPE_MINIMIZED;
+  return GetStateType() == WINDOW_STATE_TYPE_MINIMIZED ||
+         GetStateType() == WINDOW_STATE_TYPE_DOCKED_MINIMIZED;
 }
 
 bool WindowState::IsMaximized() const {
@@ -136,8 +137,8 @@ bool WindowState::IsActive() const {
 }
 
 bool WindowState::IsDocked() const {
-  return window_->parent() &&
-         window_->parent()->id() == kShellWindowId_DockedContainer;
+  return GetStateType() == WINDOW_STATE_TYPE_DOCKED ||
+         GetStateType() == WINDOW_STATE_TYPE_DOCKED_MINIMIZED;
 }
 
 bool WindowState::CanMaximize() const {
@@ -153,15 +154,7 @@ bool WindowState::CanMaximize() const {
 }
 
 bool WindowState::CanMinimize() const {
-  RootWindowController* controller = RootWindowController::ForWindow(window_);
-  if (!controller)
-    return false;
-  aura::Window* lockscreen =
-      controller->GetContainer(kShellWindowId_LockScreenContainersContainer);
-  if (lockscreen->Contains(window_))
-    return false;
-
-  return true;
+  return window()->GetProperty(aura::client::kCanMinimizeKey);
 }
 
 bool WindowState::CanResize() const {

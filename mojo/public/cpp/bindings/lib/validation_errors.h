@@ -44,12 +44,15 @@ enum ValidationError {
   // |flags| in the message header indicates that a request ID is required but
   // there isn't one.
   VALIDATION_ERROR_MESSAGE_HEADER_MISSING_REQUEST_ID,
+  // Two parallel arrays which are supposed to represent a map have different
+  // lengths.
+  VALIDATION_ERROR_DIFFERENT_SIZED_ARRAYS_IN_MAP
 };
 
 const char* ValidationErrorToString(ValidationError error);
 
 void ReportValidationError(ValidationError error,
-                           const char* description = NULL);
+                           const char* description = nullptr);
 
 // Only used by validation tests and when there is only one thread doing message
 // validation.
@@ -101,11 +104,11 @@ class SerializationWarningObserverForTesting {
 // of the serialzation result.
 //
 // In non-debug build, does nothing (not even compiling |condition|).
-#define MOJO_INTERNAL_DLOG_SERIALIZATION_WARNING( \
-    condition, error, description) \
+#define MOJO_INTERNAL_DLOG_SERIALIZATION_WARNING(                        \
+    condition, error, description)                                       \
   MOJO_DLOG_IF(FATAL, (condition) && !ReportSerializationWarning(error)) \
-      << "The outgoing message will trigger " \
-      << ValidationErrorToString(error) << " at the receiving side (" \
+      << "The outgoing message will trigger "                            \
+      << ValidationErrorToString(error) << " at the receiving side ("    \
       << description << ").";
 
 #endif  // MOJO_PUBLIC_CPP_BINDINGS_LIB_VALIDATION_ERRORS_H_

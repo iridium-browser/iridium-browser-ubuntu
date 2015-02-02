@@ -12,8 +12,8 @@
  */
 
 #include "vpx/vpx_integer.h"
+#include "vp9/common/vp9_common.h"
 #include "vp9/common/vp9_enums.h"
-#include "vp9/common/vp9_idct.h"
 
 struct macroblockd;
 
@@ -28,6 +28,9 @@ struct yv12_buffer_config;
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+unsigned int vp9_avg_8x8_c(const uint8_t *, int p);
+#define vp9_avg_8x8 vp9_avg_8x8_c
 
 int64_t vp9_block_error_c(const tran_low_t *coeff, const tran_low_t *dqcoeff, intptr_t block_size, int64_t *ssz);
 #define vp9_block_error vp9_block_error_c

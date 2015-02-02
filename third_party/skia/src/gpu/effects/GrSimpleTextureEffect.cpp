@@ -19,14 +19,14 @@ public:
         : INHERITED (factory) {
     }
 
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor& fp,
                           const GrProcessorKey& key,
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray& coords,
                           const TextureSamplerArray& samplers) SK_OVERRIDE {
-        GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+        GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
         fsBuilder->codeAppendf("\t%s = ", outputColor);
         fsBuilder->appendTextureLookupAndModulate(inputColor,
                                                   samplers[0],
@@ -41,8 +41,8 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void GrSimpleTextureEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    this->updateConstantColorComponentsForModulation(color, validFlags);
+void GrSimpleTextureEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    this->updateInvariantOutputForModulation(inout);
 }
 
 const GrBackendFragmentProcessorFactory& GrSimpleTextureEffect::getFactory() const {

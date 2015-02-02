@@ -33,10 +33,10 @@ class StandardManagementPolicyProvider;
 class TestExtensionSystem : public ExtensionSystem {
  public:
   explicit TestExtensionSystem(Profile* profile);
-  virtual ~TestExtensionSystem();
+  ~TestExtensionSystem() override;
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Creates an ExtensionPrefs with the testing profile and returns it.
   // Useful for tests that need to modify prefs before creating the
@@ -51,41 +51,30 @@ class TestExtensionSystem : public ExtensionSystem {
       const base::FilePath& install_directory,
       bool autoupdate_enabled);
 
-  // Creates a ProcessManager. If not invoked, the ProcessManager is NULL.
-  void CreateProcessManager();
-
-  // Allows the ProcessManager to be overriden, for example by a stub
-  // implementation. Takes ownership of |manager|.
-  void SetProcessManager(ProcessManager* manager);
-
   void CreateSocketManager();
 
-  virtual void InitForRegularProfile(bool extensions_enabled) OVERRIDE {}
+  void InitForRegularProfile(bool extensions_enabled) override {}
   void SetExtensionService(ExtensionService* service);
-  virtual ExtensionService* extension_service() OVERRIDE;
-  virtual RuntimeData* runtime_data() OVERRIDE;
-  virtual ManagementPolicy* management_policy() OVERRIDE;
-  virtual SharedUserScriptMaster* shared_user_script_master() OVERRIDE;
-  virtual ProcessManager* process_manager() OVERRIDE;
-  virtual StateStore* state_store() OVERRIDE;
-  virtual StateStore* rules_store() OVERRIDE;
+  ExtensionService* extension_service() override;
+  RuntimeData* runtime_data() override;
+  ManagementPolicy* management_policy() override;
+  SharedUserScriptMaster* shared_user_script_master() override;
+  StateStore* state_store() override;
+  StateStore* rules_store() override;
   TestingValueStore* value_store() { return value_store_; }
-  virtual InfoMap* info_map() OVERRIDE;
-  virtual LazyBackgroundTaskQueue* lazy_background_task_queue() OVERRIDE;
+  InfoMap* info_map() override;
+  LazyBackgroundTaskQueue* lazy_background_task_queue() override;
   void SetEventRouter(scoped_ptr<EventRouter> event_router);
-  virtual EventRouter* event_router() OVERRIDE;
-  virtual WarningService* warning_service() OVERRIDE;
-  virtual Blacklist* blacklist() OVERRIDE;
-  virtual ErrorConsole* error_console() OVERRIDE;
-  virtual InstallVerifier* install_verifier() OVERRIDE;
-  virtual QuotaService* quota_service() OVERRIDE;
-  virtual const OneShotEvent& ready() const OVERRIDE;
-  virtual ContentVerifier* content_verifier() OVERRIDE;
-  virtual scoped_ptr<ExtensionSet> GetDependentExtensions(
-      const Extension* extension) OVERRIDE;
-  virtual DeclarativeUserScriptMaster*
-      GetDeclarativeUserScriptMasterByExtension(
-          const ExtensionId& extension_id) OVERRIDE;
+  EventRouter* event_router() override;
+  ErrorConsole* error_console() override;
+  InstallVerifier* install_verifier() override;
+  QuotaService* quota_service() override;
+  const OneShotEvent& ready() const override;
+  ContentVerifier* content_verifier() override;
+  scoped_ptr<ExtensionSet> GetDependentExtensions(
+      const Extension* extension) override;
+  DeclarativeUserScriptMaster* GetDeclarativeUserScriptMasterByExtension(
+      const ExtensionId& extension_id) override;
 
   // Note that you probably want to use base::RunLoop().RunUntilIdle() right
   // after this to run all the accumulated tasks.
@@ -102,11 +91,9 @@ class TestExtensionSystem : public ExtensionSystem {
   // A pointer to the TestingValueStore owned by |state_store_|.
   TestingValueStore* value_store_;
   ScopedVector<DeclarativeUserScriptMaster> declarative_user_script_masters_;
-  scoped_ptr<Blacklist> blacklist_;
   scoped_ptr<ManagementPolicy> management_policy_;
   scoped_ptr<RuntimeData> runtime_data_;
   scoped_ptr<ExtensionService> extension_service_;
-  scoped_ptr<ProcessManager> process_manager_;
   scoped_refptr<InfoMap> info_map_;
   scoped_ptr<EventRouter> event_router_;
   scoped_ptr<ErrorConsole> error_console_;

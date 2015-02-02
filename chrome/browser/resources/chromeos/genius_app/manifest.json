@@ -48,6 +48,8 @@
     "client_id": "929143421683.apps.googleusercontent.com",
     "scopes": [
         "https://www.googleapis.com/auth/supportcontent",
+        "https://www.googleapis.com/auth/cases",
+        "https://www.googleapis.com/auth/cases.readonly",
         "https://www.google.com/accounts/OAuthLogin"
     ]
   },

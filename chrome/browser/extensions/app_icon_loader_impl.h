@@ -23,16 +23,15 @@ class AppIconLoaderImpl : public AppIconLoader,
  public:
   AppIconLoaderImpl(Profile* profile, int icon_size,
                     AppIconLoader::Delegate* delegate);
-  virtual ~AppIconLoaderImpl();
+  ~AppIconLoaderImpl() override;
 
   // AppIconLoader overrides:
-  virtual void FetchImage(const std::string& id) OVERRIDE;
-  virtual void ClearImage(const std::string& id) OVERRIDE;
-  virtual void UpdateImage(const std::string& id) OVERRIDE;
+  void FetchImage(const std::string& id) override;
+  void ClearImage(const std::string& id) override;
+  void UpdateImage(const std::string& id) override;
 
   // extensions::IconImage::Observer overrides:
-  virtual void OnExtensionIconImageChanged(
-      extensions::IconImage* image) OVERRIDE;
+  void OnExtensionIconImageChanged(extensions::IconImage* image) override;
 
  private:
   typedef std::map<extensions::IconImage*, std::string> ImageToExtensionIDMap;

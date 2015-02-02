@@ -32,7 +32,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
@@ -76,9 +76,7 @@ class ShelfAnimationWaiter : views::WidgetObserver {
     GetShelfWidget()->AddObserver(this);
   }
 
-  virtual ~ShelfAnimationWaiter() {
-    GetShelfWidget()->RemoveObserver(this);
-  }
+  ~ShelfAnimationWaiter() override { GetShelfWidget()->RemoveObserver(this); }
 
   // Wait till the shelf finishes animating to its expected bounds.
   void WaitTillDoneAnimating() {
@@ -106,8 +104,8 @@ class ShelfAnimationWaiter : views::WidgetObserver {
   }
 
   // views::WidgetObserver override.
-  virtual void OnWidgetBoundsChanged(views::Widget* widget,
-                                     const gfx::Rect& new_bounds) OVERRIDE {
+  void OnWidgetBoundsChanged(views::Widget* widget,
+                             const gfx::Rect& new_bounds) override {
     if (done_waiting_)
       return;
 
@@ -236,13 +234,12 @@ class ShelfLayoutObserverTest : public ShelfLayoutManagerObserver {
       : changed_auto_hide_state_(false) {
   }
 
-  virtual ~ShelfLayoutObserverTest() {}
+  ~ShelfLayoutObserverTest() override {}
 
   bool changed_auto_hide_state() const { return changed_auto_hide_state_; }
 
  private:
-  virtual void OnAutoHideStateChanged(
-      ShelfAutoHideState new_state) OVERRIDE {
+  void OnAutoHideStateChanged(ShelfAutoHideState new_state) override {
     changed_auto_hide_state_ = true;
   }
 
@@ -261,7 +258,7 @@ class TestItem : public SystemTrayItem {
         detailed_view_(NULL),
         notification_view_(NULL) {}
 
-  virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE {
+  views::View* CreateTrayView(user::LoginStatus status) override {
     tray_view_ = new views::View;
     // Add a label so it has non-zero width.
     tray_view_->SetLayoutManager(new views::FillLayout);
@@ -269,14 +266,14 @@ class TestItem : public SystemTrayItem {
     return tray_view_;
   }
 
-  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE {
+  views::View* CreateDefaultView(user::LoginStatus status) override {
     default_view_ = new views::View;
     default_view_->SetLayoutManager(new views::FillLayout);
     default_view_->AddChildView(new views::Label(base::UTF8ToUTF16("Default")));
     return default_view_;
   }
 
-  virtual views::View* CreateDetailedView(user::LoginStatus status) OVERRIDE {
+  views::View* CreateDetailedView(user::LoginStatus status) override {
     detailed_view_ = new views::View;
     detailed_view_->SetLayoutManager(new views::FillLayout);
     detailed_view_->AddChildView(
@@ -284,30 +281,20 @@ class TestItem : public SystemTrayItem {
     return detailed_view_;
   }
 
-  virtual views::View* CreateNotificationView(
-      user::LoginStatus status) OVERRIDE {
+  views::View* CreateNotificationView(user::LoginStatus status) override {
     notification_view_ = new views::View;
     return notification_view_;
   }
 
-  virtual void DestroyTrayView() OVERRIDE {
-    tray_view_ = NULL;
-  }
+  void DestroyTrayView() override { tray_view_ = NULL; }
 
-  virtual void DestroyDefaultView() OVERRIDE {
-    default_view_ = NULL;
-  }
+  void DestroyDefaultView() override { default_view_ = NULL; }
 
-  virtual void DestroyDetailedView() OVERRIDE {
-    detailed_view_ = NULL;
-  }
+  void DestroyDetailedView() override { detailed_view_ = NULL; }
 
-  virtual void DestroyNotificationView() OVERRIDE {
-    notification_view_ = NULL;
-  }
+  void DestroyNotificationView() override { notification_view_ = NULL; }
 
-  virtual void UpdateAfterLoginStatusChange(
-      user::LoginStatus status) OVERRIDE {}
+  void UpdateAfterLoginStatusChange(user::LoginStatus status) override {}
 
   views::View* tray_view() const { return tray_view_; }
   views::View* default_view() const { return default_view_; }
@@ -365,8 +352,8 @@ class ShelfLayoutManagerTest : public ash::test::AshTestBase {
   }
 
   // Overridden from AshTestBase:
-  virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
+  void SetUp() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
         ash::switches::kAshEnableTrayDragging);
     test::AshTestBase::SetUp();
   }
@@ -1586,7 +1573,8 @@ TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipe) {
 TEST_F(ShelfLayoutManagerTest, MAYBE_GestureDrag) {
   // Slop is an implementation detail of gesture recognition, and complicates
   // these tests. Ignore it.
-  ui::GestureConfiguration::set_max_touch_move_in_pixels_for_click(0);
+  ui::GestureConfiguration::GetInstance()
+      ->set_max_touch_move_in_pixels_for_click(0);
   ShelfLayoutManager* shelf = GetShelfLayoutManager();
   {
     SCOPED_TRACE("BOTTOM");

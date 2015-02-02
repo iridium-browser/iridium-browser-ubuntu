@@ -15,11 +15,11 @@ class FakeHostStatusMonitor
     : public base::SupportsWeakPtr<FakeHostStatusMonitor>,
       public HostStatusMonitor {
  public:
-  virtual ~FakeHostStatusMonitor() {}
+  ~FakeHostStatusMonitor() override {}
 
   // HostStatusMonitor interface.
-  virtual void AddStatusObserver(HostStatusObserver* observer) OVERRIDE {}
-  virtual void RemoveStatusObserver(HostStatusObserver* observer) OVERRIDE {}
+  void AddStatusObserver(HostStatusObserver* observer) override {}
+  void RemoveStatusObserver(HostStatusObserver* observer) override {}
 };
 
 }  // namespace remoting

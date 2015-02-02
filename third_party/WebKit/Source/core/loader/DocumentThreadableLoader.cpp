@@ -46,6 +46,7 @@
 #include "core/loader/CrossOriginPreflightResultCache.h"
 #include "core/loader/DocumentThreadableLoaderClient.h"
 #include "core/loader/FrameLoader.h"
+#include "core/loader/FrameLoaderClient.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "platform/SharedBuffer.h"
 #include "platform/network/ResourceRequest.h"
@@ -88,6 +89,11 @@ DocumentThreadableLoader::DocumentThreadableLoader(Document& document, Threadabl
     // Setting an outgoing referer is only supported in the async code path.
     ASSERT(m_async || request.httpReferrer().isEmpty());
 
+    if (!m_sameOriginRequest && m_options.crossOriginRequestPolicy == DenyCrossOriginRequests) {
+        m_client->didFail(ResourceError(errorDomainBlinkInternal, 0, request.url().string(), "Cross origin requests are not supported."));
+        return;
+    }
+
     m_requestStartedSeconds = monotonicallyIncreasingTime();
 
     // Save any CORS simple headers on the request here. If this request redirects cross-origin, we cancel the old request
@@ -99,15 +105,43 @@ DocumentThreadableLoader::DocumentThreadableLoader(Document& document, Threadabl
             m_simpleRequestHeaders.add(it->key, it->value);
     }
 
+    // If the fetch request will be handled by the ServiceWorker, the
+    // FetchRequestMode of the request must be FetchRequestModeCORS or
+    // FetchRequestModeCORSWithForcedPreflight. Otherwise the ServiceWorker can
+    // return a opaque response which is from the other origin site and the
+    // script in the page can read the content.
+    //
+    // We assume that ServiceWorker is skipped for sync requests by content/
+    // code.
+    if (m_async && !request.skipServiceWorker() && m_document.fetcher()->isControlledByServiceWorker()) {
+        ResourceRequest newRequest(request);
+        // FetchRequestMode should be set by the caller. But the expected value
+        // of FetchRequestMode is not speced yet except for XHR. So we set here.
+        // FIXME: When we support fetch API in document, this value should not
+        // be overridden here.
+        if (options.preflightPolicy == ForcePreflight)
+            newRequest.setFetchRequestMode(WebURLRequest::FetchRequestModeCORSWithForcedPreflight);
+        else
+            newRequest.setFetchRequestMode(WebURLRequest::FetchRequestModeCORS);
+
+        m_fallbackRequestForServiceWorker = adoptPtr(new ResourceRequest(request));
+        m_fallbackRequestForServiceWorker->setSkipServiceWorker(true);
+
+        loadRequest(newRequest, m_resourceLoaderOptions);
+        return;
+    }
+
+    dispatchInitialRequest(request);
+}
+
+void DocumentThreadableLoader::dispatchInitialRequest(const ResourceRequest& request)
+{
     if (m_sameOriginRequest || m_options.crossOriginRequestPolicy == AllowCrossOriginRequests) {
         loadRequest(request, m_resourceLoaderOptions);
         return;
     }
 
-    if (m_options.crossOriginRequestPolicy == DenyCrossOriginRequests) {
-        m_client->didFail(ResourceError(errorDomainBlinkInternal, 0, request.url().string(), "Cross origin requests are not supported."));
-        return;
-    }
+    ASSERT(m_options.crossOriginRequestPolicy == UseAccessControl);
 
     makeCrossOriginAccessRequest(request);
 }
@@ -125,6 +159,10 @@ void DocumentThreadableLoader::makeCrossOriginAccessRequest(const ResourceReques
         return;
     }
 
+    // We use isSimpleOrForbiddenRequest() here since |request| may have been
+    // modified in the process of loading (not from the user's input). For
+    // example, referrer. We need to accept them. For security, we must reject
+    // forbidden headers/methods at the point we accept user's input. Not here.
     if ((m_options.preflightPolicy == ConsiderPreflight && FetchUtils::isSimpleOrForbiddenRequest(request.httpMethod(), request.httpHeaderFields())) || m_options.preflightPolicy == PreventPreflight) {
         ResourceRequest crossOriginRequest(request);
         ResourceLoaderOptions crossOriginOptions(m_resourceLoaderOptions);
@@ -212,6 +250,7 @@ void DocumentThreadableLoader::redirectReceived(Resource* resource, ResourceRequ
 {
     ASSERT(m_client);
     ASSERT_UNUSED(resource, resource == this->resource());
+    ASSERT(m_async);
 
     RefPtr<DocumentThreadableLoader> protect(this);
 
@@ -222,7 +261,7 @@ void DocumentThreadableLoader::redirectReceived(Resource* resource, ResourceRequ
         return;
     }
 
-    if (!isAllowedByPolicy(request.url())) {
+    if (!isAllowedByContentSecurityPolicy(request.url())) {
         m_client->didFailRedirectCheck();
         request = ResourceRequest();
         m_requestStartedSeconds = 0.0;
@@ -232,7 +271,7 @@ void DocumentThreadableLoader::redirectReceived(Resource* resource, ResourceRequ
     // Allow same origin requests to continue after allowing clients to audit the redirect.
     if (isAllowedRedirect(request.url())) {
         if (m_client->isDocumentThreadableLoaderClient())
-            static_cast<DocumentThreadableLoaderClient*>(m_client)->willSendRequest(request, redirectResponse);
+            static_cast<DocumentThreadableLoaderClient*>(m_client)->willFollowRedirect(request, redirectResponse);
         return;
     }
 
@@ -299,6 +338,8 @@ void DocumentThreadableLoader::dataSent(Resource* resource, unsigned long long b
 {
     ASSERT(m_client);
     ASSERT_UNUSED(resource, resource == this->resource());
+    ASSERT(m_async);
+
     m_client->didSendData(bytesSent, totalBytesToBeSent);
 }
 
@@ -307,14 +348,17 @@ void DocumentThreadableLoader::dataDownloaded(Resource* resource, int dataLength
     ASSERT(m_client);
     ASSERT_UNUSED(resource, resource == this->resource());
     ASSERT(!m_actualRequest);
+    ASSERT(m_async);
 
     m_client->didDownloadData(dataLength);
 }
 
-void DocumentThreadableLoader::responseReceived(Resource* resource, const ResourceResponse& response)
+void DocumentThreadableLoader::responseReceived(Resource* resource, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
     ASSERT_UNUSED(resource, resource == this->resource());
-    handleResponse(resource->identifier(), response);
+    ASSERT(m_async);
+
+    handleResponse(resource->identifier(), response, handle);
 }
 
 void DocumentThreadableLoader::handlePreflightResponse(const ResourceResponse& response)
@@ -342,7 +386,7 @@ void DocumentThreadableLoader::handlePreflightResponse(const ResourceResponse& r
     CrossOriginPreflightResultCache::shared().appendEntry(securityOrigin()->toString(), m_actualRequest->url(), preflightResult.release());
 }
 
-void DocumentThreadableLoader::notifyResponseReceived(unsigned long identifier, const ResourceResponse& response)
+void DocumentThreadableLoader::reportResponseReceived(unsigned long identifier, const ResourceResponse& response)
 {
     DocumentLoader* loader = m_document.frame()->loader().documentLoader();
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceReceiveResponse", "data", InspectorReceiveResponseEvent::data(identifier, m_document.frame(), response));
@@ -352,68 +396,67 @@ void DocumentThreadableLoader::notifyResponseReceived(unsigned long identifier, 
     frame->console().reportResourceResponseReceived(loader, identifier, response);
 }
 
-void DocumentThreadableLoader::handleResponse(unsigned long identifier, const ResourceResponse& response)
+void DocumentThreadableLoader::handleResponse(unsigned long identifier, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
     ASSERT(m_client);
 
     if (m_actualRequest) {
-        notifyResponseReceived(identifier, response);
+        reportResponseReceived(identifier, response);
         handlePreflightResponse(response);
         return;
     }
 
-    // If the response is fetched via ServiceWorker, the original URL of the response could be different from the URL of the request.
-    bool isCrossOriginResponse = false;
     if (response.wasFetchedViaServiceWorker()) {
-        if (!isAllowedByPolicy(response.url())) {
-            notifyResponseReceived(identifier, response);
-            m_client->didFailRedirectCheck();
+        ASSERT(m_fallbackRequestForServiceWorker);
+        if (response.wasFallbackRequiredByServiceWorker()) {
+            loadFallbackRequestForServiceWorker();
             return;
         }
-        isCrossOriginResponse = !securityOrigin()->canRequest(response.url());
-        if (m_options.crossOriginRequestPolicy == DenyCrossOriginRequests && isCrossOriginResponse) {
-            notifyResponseReceived(identifier, response);
-            m_client->didFail(ResourceError(errorDomainBlinkInternal, 0, response.url().string(), "Cross origin requests are not supported."));
-            return;
-        }
-        if (isCrossOriginResponse && m_resourceLoaderOptions.credentialsRequested == ClientDidNotRequestCredentials) {
-            // Since the request is no longer same-origin, if the user didn't request credentials in
-            // the first place, update our state so we neither request them nor expect they must be allowed.
-            m_forceDoNotAllowStoredCredentials = true;
-        }
-    } else {
-        isCrossOriginResponse = !m_sameOriginRequest;
+        m_fallbackRequestForServiceWorker = nullptr;
+        m_client->didReceiveResponse(identifier, response, handle);
+        return;
     }
-    if (isCrossOriginResponse && m_options.crossOriginRequestPolicy == UseAccessControl) {
+
+    ASSERT(!m_fallbackRequestForServiceWorker);
+
+    if (!m_sameOriginRequest && m_options.crossOriginRequestPolicy == UseAccessControl) {
         String accessControlErrorDescription;
         if (!passesAccessControlCheck(response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
-            notifyResponseReceived(identifier, response);
+            reportResponseReceived(identifier, response);
             m_client->didFailAccessControlCheck(ResourceError(errorDomainBlinkInternal, 0, response.url().string(), accessControlErrorDescription));
             return;
         }
     }
 
-    m_client->didReceiveResponse(identifier, response);
+    m_client->didReceiveResponse(identifier, response, handle);
 }
 
-void DocumentThreadableLoader::dataReceived(Resource* resource, const char* data, int dataLength)
+void DocumentThreadableLoader::dataReceived(Resource* resource, const char* data, unsigned dataLength)
 {
     ASSERT_UNUSED(resource, resource == this->resource());
+    ASSERT(m_async);
+
     handleReceivedData(data, dataLength);
 }
 
-void DocumentThreadableLoader::handleReceivedData(const char* data, int dataLength)
+void DocumentThreadableLoader::handleReceivedData(const char* data, unsigned dataLength)
 {
     ASSERT(m_client);
+
     // Preflight data should be invisible to clients.
-    if (!m_actualRequest)
-        m_client->didReceiveData(data, dataLength);
+    if (m_actualRequest)
+        return;
+
+    ASSERT(!m_fallbackRequestForServiceWorker);
+
+    m_client->didReceiveData(data, dataLength);
 }
 
 void DocumentThreadableLoader::notifyFinished(Resource* resource)
 {
     ASSERT(m_client);
     ASSERT(resource == this->resource());
+    ASSERT(m_async);
 
     m_timeoutTimer.stop();
 
@@ -425,6 +468,8 @@ void DocumentThreadableLoader::notifyFinished(Resource* resource)
 
 void DocumentThreadableLoader::handleSuccessfulFinish(unsigned long identifier, double finishTime)
 {
+    ASSERT(!m_fallbackRequestForServiceWorker);
+
     if (m_actualRequest) {
         ASSERT(!m_sameOriginRequest);
         ASSERT(m_options.crossOriginRequestPolicy == UseAccessControl);
@@ -446,6 +491,13 @@ void DocumentThreadableLoader::didTimeout(Timer<DocumentThreadableLoader>* timer
     ResourceError error("net", timeoutError, resource()->url(), String());
     error.setIsTimeout(true);
     cancelWithError(error);
+}
+
+void DocumentThreadableLoader::loadFallbackRequestForServiceWorker()
+{
+    clearResource();
+    OwnPtr<ResourceRequest> fallbackRequest(m_fallbackRequestForServiceWorker.release());
+    dispatchInitialRequest(*fallbackRequest);
 }
 
 void DocumentThreadableLoader::loadActualRequest()
@@ -532,12 +584,12 @@ void DocumentThreadableLoader::loadRequest(const ResourceRequest& request, Resou
     // FIXME: A synchronous request does not tell us whether a redirect happened or not, so we guess by comparing the
     // request and response URLs. This isn't a perfect test though, since a server can serve a redirect to the same URL that was
     // requested. Also comparing the request and response URLs as strings will fail if the requestURL still has its credentials.
-    if (requestURL != response.url() && (!isAllowedByPolicy(response.url()) || !isAllowedRedirect(response.url()))) {
+    if (requestURL != response.url() && (!isAllowedByContentSecurityPolicy(response.url()) || !isAllowedRedirect(response.url()))) {
         m_client->didFailRedirectCheck();
         return;
     }
 
-    handleResponse(identifier, response);
+    handleResponse(identifier, response, nullptr);
 
     SharedBuffer* data = resource->resourceBuffer();
     if (data)
@@ -554,7 +606,7 @@ bool DocumentThreadableLoader::isAllowedRedirect(const KURL& url) const
     return m_sameOriginRequest && securityOrigin()->canRequest(url);
 }
 
-bool DocumentThreadableLoader::isAllowedByPolicy(const KURL& url) const
+bool DocumentThreadableLoader::isAllowedByContentSecurityPolicy(const KURL& url) const
 {
     if (m_options.contentSecurityPolicyEnforcement != EnforceConnectSrcDirective)
         return true;

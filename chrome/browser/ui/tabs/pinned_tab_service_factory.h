@@ -26,13 +26,13 @@ class PinnedTabServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<PinnedTabServiceFactory>;
 
   PinnedTabServiceFactory();
-  virtual ~PinnedTabServiceFactory();
+  ~PinnedTabServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  bool ServiceIsNULLWhileTesting() const override;
 };
 
 #endif  // CHROME_BROWSER_UI_TABS_PINNED_TAB_SERVICE_FACTORY_H_

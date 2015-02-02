@@ -32,7 +32,6 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ui::DisplaySnapshot_Params)
   IPC_STRUCT_TRAITS_MEMBER(display_id)
-  IPC_STRUCT_TRAITS_MEMBER(has_proper_display_id)
   IPC_STRUCT_TRAITS_MEMBER(origin)
   IPC_STRUCT_TRAITS_MEMBER(physical_size)
   IPC_STRUCT_TRAITS_MEMBER(type)
@@ -76,7 +75,6 @@ IPC_MESSAGE_CONTROL2(OzoneGpuMsg_WindowBoundsChanged,
                      gfx::AcceleratedWidget /* widget */,
                      gfx::Rect /* bounds */)
 
-#if defined(OS_CHROMEOS)
 // Force the DPMS state of the display to on.
 IPC_MESSAGE_CONTROL0(OzoneGpuMsg_ForceDPMSOn)
 
@@ -95,6 +93,12 @@ IPC_MESSAGE_CONTROL3(OzoneGpuMsg_ConfigureNativeDisplay,
 IPC_MESSAGE_CONTROL1(OzoneGpuMsg_DisableNativeDisplay,
                      int64_t)  // display ID
 
+// Take control of the display
+IPC_MESSAGE_CONTROL0(OzoneGpuMsg_TakeDisplayControl)
+
+// Let other entity control the display
+IPC_MESSAGE_CONTROL0(OzoneGpuMsg_RelinquishDisplayControl)
+
 //------------------------------------------------------------------------------
 // Browser Messages
 // These messages are from the GPU to the browser process.
@@ -102,4 +106,3 @@ IPC_MESSAGE_CONTROL1(OzoneGpuMsg_DisableNativeDisplay,
 // Updates the list of active displays.
 IPC_MESSAGE_CONTROL1(OzoneHostMsg_UpdateNativeDisplays,
                      std::vector<ui::DisplaySnapshot_Params>)
-#endif

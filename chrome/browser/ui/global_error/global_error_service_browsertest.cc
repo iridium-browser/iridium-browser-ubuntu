@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/global_error/global_error_bubble_view_base.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 
 namespace {
 
@@ -21,36 +21,34 @@ class BubbleViewError : public GlobalErrorWithStandardBubble {
 
   int bubble_view_close_count() { return bubble_view_close_count_; }
 
-  virtual bool HasMenuItem() OVERRIDE { return false; }
-  virtual int MenuItemCommandID() OVERRIDE {
+  bool HasMenuItem() override { return false; }
+  int MenuItemCommandID() override {
     ADD_FAILURE();
     return 0;
   }
-  virtual base::string16 MenuItemLabel() OVERRIDE {
+  base::string16 MenuItemLabel() override {
     ADD_FAILURE();
     return base::string16();
   }
-  virtual void ExecuteMenuItem(Browser* browser) OVERRIDE { ADD_FAILURE(); }
+  void ExecuteMenuItem(Browser* browser) override { ADD_FAILURE(); }
 
-  virtual bool HasBubbleView() OVERRIDE { return true; }
-  virtual base::string16 GetBubbleViewTitle() OVERRIDE {
-    return base::string16();
-  }
-  virtual std::vector<base::string16> GetBubbleViewMessages() OVERRIDE {
+  bool HasBubbleView() override { return true; }
+  base::string16 GetBubbleViewTitle() override { return base::string16(); }
+  std::vector<base::string16> GetBubbleViewMessages() override {
     return std::vector<base::string16>();
   }
-  virtual base::string16 GetBubbleViewAcceptButtonLabel() OVERRIDE {
+  base::string16 GetBubbleViewAcceptButtonLabel() override {
     return base::string16();
   }
-  virtual base::string16 GetBubbleViewCancelButtonLabel() OVERRIDE {
+  base::string16 GetBubbleViewCancelButtonLabel() override {
     return base::string16();
   }
-  virtual void OnBubbleViewDidClose(Browser* browser) OVERRIDE {
+  void OnBubbleViewDidClose(Browser* browser) override {
     EXPECT_TRUE(browser);
     ++bubble_view_close_count_;
   }
-  virtual void BubbleViewAcceptButtonPressed(Browser* browser) OVERRIDE {}
-  virtual void BubbleViewCancelButtonPressed(Browser* browser) OVERRIDE {}
+  void BubbleViewAcceptButtonPressed(Browser* browser) override {}
+  void BubbleViewCancelButtonPressed(Browser* browser) override {}
 
  private:
   int bubble_view_close_count_;

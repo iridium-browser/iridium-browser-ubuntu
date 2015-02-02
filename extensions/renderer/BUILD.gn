@@ -2,11 +2,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/features.gni")
+
+assert(enable_extensions)
+
 # GYP version: extensions/extensions.gyp:extensions_renderer
 source_set("renderer") {
   sources = [
     "activity_log_converter_strategy.cc",
     "activity_log_converter_strategy.h",
+    "api/automation/automation_api_helper.cc",
+    "api/automation/automation_api_helper.h",
     "api_activity_logger.cc",
     "api_activity_logger.h",
     "api_definitions_natives.cc",
@@ -47,10 +53,14 @@ source_set("renderer") {
     "extensions_renderer_client.h",
     "file_system_natives.cc",
     "file_system_natives.h",
+    "guest_view/extensions_guest_view_container.cc",
+    "guest_view/extensions_guest_view_container.h",
     "guest_view/guest_view_container.cc",
     "guest_view/guest_view_container.h",
     "guest_view/guest_view_internal_custom_bindings.cc",
     "guest_view/guest_view_internal_custom_bindings.h",
+    "guest_view/mime_handler_view_container.cc",
+    "guest_view/mime_handler_view_container.h",
     "i18n_custom_bindings.cc",
     "i18n_custom_bindings.h",
     "id_generator_custom_bindings.cc",
@@ -107,6 +117,9 @@ source_set("renderer") {
     "resources/uncaught_exception_handler.js",
     "resources/unload_event.js",
     "resources/utils.js",
+    "resources/web_view.js",
+    "resources/web_view_events.js",
+    "resources/web_view_experimental.js",
     "resources/web_request_custom_bindings.js",
     "resources/web_request_internal_custom_bindings.js",
     "runtime_custom_bindings.cc",
@@ -129,8 +142,8 @@ source_set("renderer") {
     "send_request_natives.h",
     "set_icon_natives.cc",
     "set_icon_natives.h",
-    "static_v8_external_ascii_string_resource.cc",
-    "static_v8_external_ascii_string_resource.h",
+    "static_v8_external_one_byte_string_resource.cc",
+    "static_v8_external_one_byte_string_resource.h",
     "test_features_native_handler.cc",
     "test_features_native_handler.h",
     "user_gestures_native_handler.cc",
@@ -154,7 +167,7 @@ source_set("renderer") {
     "//content:resources",
     "//extensions:extensions_resources",
     "//gin",
-    "//mojo/bindings/js",
+    "//mojo/edk/js",
     "//skia",
     "//third_party/WebKit/public:blink",
   ]

@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.shell;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.drawable.ClipDrawable;
@@ -24,6 +25,7 @@ import org.chromium.base.CommandLine;
 import org.chromium.chrome.browser.EmptyTabObserver;
 import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.TabObserver;
+import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
 import org.chromium.chrome.browser.appmenu.AppMenuHandler;
 import org.chromium.chrome.shell.omnibox.SuggestionPopup;
@@ -47,9 +49,10 @@ public class ChromeShellToolbar extends LinearLayout {
         public void run() {
             mProgressDrawable.setLevel(100 * mProgress);
             if (mLoading) {
-                mStopReloadButton.setImageResource(R.drawable.btn_stop_normal);
+                mStopReloadButton.setImageResource(
+                        R.drawable.btn_toolbar_stop);
             } else {
-                mStopReloadButton.setImageResource(R.drawable.btn_reload_normal);
+                mStopReloadButton.setImageResource(R.drawable.btn_toolbar_reload);
                 ApiCompatibilityUtils.postOnAnimationDelayed(ChromeShellToolbar.this,
                         mClearProgressRunnable, COMPLETED_PROGRESS_TIMEOUT_MS);
             }
@@ -64,6 +67,8 @@ public class ChromeShellToolbar extends LinearLayout {
 
     private AppMenuHandler mMenuHandler;
     private AppMenuButtonHelper mAppMenuButtonHelper;
+
+    private TabManager mTabManager;
 
     private SuggestionPopup mSuggestionPopup;
 
@@ -94,9 +99,21 @@ public class ChromeShellToolbar extends LinearLayout {
      */
     public void showTab(ChromeShellTab tab) {
         if (mTab != null) mTab.removeObserver(mTabObserver);
+
         mTab = tab;
-        mTab.addObserver(mTabObserver);
-        mUrlTextView.setText(mTab.getWebContents().getUrl());
+
+        if (mTab != null) {
+            mTab.addObserver(mTabObserver);
+            mUrlTextView.setText(mTab.getWebContents().getUrl());
+        }
+    }
+
+    /**
+     * Set the TabManager responsible for activating the tab switcher.
+     * @param tabManager The active TabManager.
+     */
+    public void setTabManager(TabManager tabManager) {
+        mTabManager = tabManager;
     }
 
     private void onUpdateUrl(String url) {
@@ -124,14 +141,14 @@ public class ChromeShellToolbar extends LinearLayout {
 
         mProgressDrawable = (ClipDrawable) findViewById(R.id.toolbar).getBackground();
         initializeUrlField();
+        initializeTabSwitcherButton();
         initializeMenuButton();
         initializeStopReloadButton();
     }
 
     void setMenuHandler(AppMenuHandler menuHandler) {
         mMenuHandler = menuHandler;
-        ImageButton menuButton = (ImageButton) findViewById(R.id.menu_button);
-        mAppMenuButtonHelper = new AppMenuButtonHelper(menuButton, mMenuHandler);
+        mAppMenuButtonHelper = new AppMenuButtonHelper(mMenuHandler);
     }
 
     private void initializeUrlField() {
@@ -139,16 +156,22 @@ public class ChromeShellToolbar extends LinearLayout {
         mUrlTextView.setOnEditorActionListener(new OnEditorActionListener() {
             @Override
             public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
-                if ((actionId != EditorInfo.IME_ACTION_GO) && (event == null ||
-                        event.getKeyCode() != KeyEvent.KEYCODE_ENTER ||
-                        event.getAction() != KeyEvent.ACTION_DOWN)) {
+                if ((actionId != EditorInfo.IME_ACTION_GO) && (event == null
+                        || event.getKeyCode() != KeyEvent.KEYCODE_ENTER
+                        || event.getAction() != KeyEvent.ACTION_DOWN)) {
                     return false;
                 }
+                if (mTabManager.isTabSwitcherVisible()) {
+                    mTabManager.hideTabSwitcher();
+                }
 
-                mTab.loadUrlWithSanitization(mUrlTextView.getText().toString());
+                // This will set |mTab| by calling showTab().
+                // TODO(aurimas): Factor out initial tab creation to the activity level.
+                Tab tab = mTabManager.openUrl(
+                        UrlUtilities.fixupUrl(mUrlTextView.getText().toString()));
                 mUrlTextView.clearFocus();
                 setKeyboardVisibilityForUrl(false);
-                mTab.getView().requestFocus();
+                tab.getView().requestFocus();
                 return true;
             }
         });
@@ -156,7 +179,8 @@ public class ChromeShellToolbar extends LinearLayout {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 setKeyboardVisibilityForUrl(hasFocus);
-                if (!hasFocus) {
+                mStopReloadButton.setVisibility(hasFocus ? GONE : VISIBLE);
+                if (!hasFocus && mTab != null) {
                     mUrlTextView.setText(mTab.getWebContents().getUrl());
                     mSuggestionPopup.dismissPopup();
                 }
@@ -180,6 +204,16 @@ public class ChromeShellToolbar extends LinearLayout {
         mUrlTextView.addTextChangedListener(mSuggestionPopup);
     }
 
+    private void initializeTabSwitcherButton() {
+        ImageButton tabSwitcherButton = (ImageButton) findViewById(R.id.tab_switcher);
+        tabSwitcherButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (mTabManager != null) mTabManager.toggleTabSwitcher();
+            }
+        });
+    }
+
     private void initializeMenuButton() {
         ImageButton menuButton = (ImageButton) findViewById(R.id.menu_button);
         menuButton.setOnClickListener(new OnClickListener() {
@@ -189,6 +223,7 @@ public class ChromeShellToolbar extends LinearLayout {
             }
         });
         menuButton.setOnTouchListener(new OnTouchListener() {
+            @SuppressLint("ClickableViewAccessibility")
             @Override
             public boolean onTouch(View view, MotionEvent event) {
                 return mAppMenuButtonHelper != null && mAppMenuButtonHelper.onTouch(view, event);
@@ -201,6 +236,7 @@ public class ChromeShellToolbar extends LinearLayout {
         mStopReloadButton.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (mTab == null) return;
                 if (mLoading) {
                     mTab.getWebContents().stop();
                 } else {

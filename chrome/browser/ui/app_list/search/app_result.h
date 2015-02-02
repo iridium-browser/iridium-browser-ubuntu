@@ -9,10 +9,10 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/app_list/app_context_menu_delegate.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
 #include "extensions/browser/extension_icon_image.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "ui/app_list/search_result.h"
 
 class AppListControllerDelegate;
 class ExtensionEnableFlow;
@@ -32,7 +32,7 @@ class AppContextMenu;
 class TokenizedString;
 class TokenizedStringMatch;
 
-class AppResult : public ChromeSearchResult,
+class AppResult : public SearchResult,
                   public extensions::IconImage::Observer,
                   public AppContextMenuDelegate,
                   public ExtensionEnableFlowDelegate,
@@ -41,7 +41,7 @@ class AppResult : public ChromeSearchResult,
   AppResult(Profile* profile,
             const std::string& app_id,
             AppListControllerDelegate* controller);
-  virtual ~AppResult();
+  ~AppResult() override;
 
   void UpdateFromMatch(const TokenizedString& title,
                        const TokenizedStringMatch& match);
@@ -49,12 +49,10 @@ class AppResult : public ChromeSearchResult,
   void UpdateFromLastLaunched(const base::Time& current_time,
                               const base::Time& last_launched);
 
-  // ChromeSearchResult overides:
-  virtual void Open(int event_flags) OVERRIDE;
-  virtual void InvokeAction(int action_index, int event_flags) OVERRIDE;
-  virtual scoped_ptr<ChromeSearchResult> Duplicate() OVERRIDE;
-  virtual ui::MenuModel* GetContextMenuModel() OVERRIDE;
-  virtual ChromeSearchResultType GetType() OVERRIDE;
+  // SearchResult overrides:
+  void Open(int event_flags) override;
+  scoped_ptr<SearchResult> Duplicate() override;
+  ui::MenuModel* GetContextMenuModel() override;
 
  private:
   void StartObservingExtensionRegistry();
@@ -69,25 +67,22 @@ class AppResult : public ChromeSearchResult,
   void UpdateIcon();
 
   // extensions::IconImage::Observer overrides:
-  virtual void OnExtensionIconImageChanged(
-      extensions::IconImage* image) OVERRIDE;
+  void OnExtensionIconImageChanged(extensions::IconImage* image) override;
 
   // AppContextMenuDelegate overrides:
-  virtual void ExecuteLaunchCommand(int event_flags) OVERRIDE;
+  void ExecuteLaunchCommand(int event_flags) override;
 
   // ExtensionEnableFlowDelegate overrides:
-  virtual void ExtensionEnableFlowFinished() OVERRIDE;
-  virtual void ExtensionEnableFlowAborted(bool user_initiated) OVERRIDE;
+  void ExtensionEnableFlowFinished() override;
+  void ExtensionEnableFlowAborted(bool user_initiated) override;
 
   // extensions::ExtensionRegistryObserver override:
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
-  virtual void OnShutdown(extensions::ExtensionRegistry* registry) OVERRIDE;
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
+  void OnShutdown(extensions::ExtensionRegistry* registry) override;
 
   Profile* profile_;
   const std::string app_id_;

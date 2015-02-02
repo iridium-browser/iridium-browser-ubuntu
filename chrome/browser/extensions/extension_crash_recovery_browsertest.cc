@@ -53,8 +53,7 @@ class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
   }
 
   extensions::ProcessManager* GetProcessManager() {
-    return extensions::ExtensionSystem::Get(browser()->profile())->
-        process_manager();
+    return extensions::ProcessManager::Get(browser()->profile());
   }
 
   ExtensionRegistry* GetExtensionRegistry() {
@@ -130,7 +129,7 @@ class ExtensionCrashRecoveryTestBase : public ExtensionBrowserTest {
 
 class MAYBE_ExtensionCrashRecoveryTest : public ExtensionCrashRecoveryTestBase {
  protected:
-  virtual void AcceptNotification(size_t index) OVERRIDE {
+  void AcceptNotification(size_t index) override {
     message_center::MessageCenter* message_center =
         message_center::MessageCenter::Get();
     ASSERT_GT(message_center->NotificationCount(), index);
@@ -143,7 +142,7 @@ class MAYBE_ExtensionCrashRecoveryTest : public ExtensionCrashRecoveryTestBase {
     WaitForExtensionLoad();
   }
 
-  virtual void CancelNotification(size_t index) OVERRIDE {
+  void CancelNotification(size_t index) override {
     message_center::MessageCenter* message_center =
         message_center::MessageCenter::Get();
     ASSERT_GT(message_center->NotificationCount(), index);
@@ -151,11 +150,12 @@ class MAYBE_ExtensionCrashRecoveryTest : public ExtensionCrashRecoveryTestBase {
         message_center->GetVisibleNotifications().rbegin();
     for (size_t i = 0; i < index; ++i)
       ++it;
-    ASSERT_TRUE(g_browser_process->notification_ui_manager()->
-        CancelById((*it)->id()));
+    ASSERT_TRUE(g_browser_process->notification_ui_manager()->CancelById(
+        (*it)->id(),
+        NotificationUIManager::GetProfileID(browser()->profile())));
   }
 
-  virtual size_t CountBalloons() OVERRIDE {
+  size_t CountBalloons() override {
     return message_center::MessageCenter::Get()->NotificationCount();
   }
 };

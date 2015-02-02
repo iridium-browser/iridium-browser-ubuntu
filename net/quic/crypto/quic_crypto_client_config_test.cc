@@ -18,10 +18,10 @@ namespace test {
 namespace {
 
 class TestProofVerifyDetails : public ProofVerifyDetails {
-  virtual ~TestProofVerifyDetails() {}
+  ~TestProofVerifyDetails() override {}
 
   // ProofVerifyDetails implementation
-  virtual ProofVerifyDetails* Clone() const OVERRIDE {
+  ProofVerifyDetails* Clone() const override {
     return new TestProofVerifyDetails;
   }
 };
@@ -47,7 +47,7 @@ TEST(QuicCryptoClientConfigTest, CachedState_GenerationCounter) {
 
 TEST(QuicCryptoClientConfigTest, CachedState_SetProofVerifyDetails) {
   QuicCryptoClientConfig::CachedState state;
-  EXPECT_TRUE(state.proof_verify_details() == NULL);
+  EXPECT_TRUE(state.proof_verify_details() == nullptr);
   ProofVerifyDetails* details = new TestProofVerifyDetails;
   state.SetProofVerifyDetails(details);
   EXPECT_EQ(details, state.proof_verify_details());
@@ -81,7 +81,6 @@ TEST(QuicCryptoClientConfigTest, InchoateChlo) {
 
 TEST(QuicCryptoClientConfigTest, PreferAesGcm) {
   QuicCryptoClientConfig config;
-  config.SetDefaults();
   if (config.aead.size() > 1)
     EXPECT_NE(kAESG, config.aead[0]);
   config.PreferAesGcm();
@@ -132,7 +131,7 @@ TEST(QuicCryptoClientConfigTest, FillClientHello) {
                          &state,
                          QuicWallTime::Zero(),
                          &rand,
-                         NULL,  // channel_id_key
+                         nullptr,  // channel_id_key
                          &params,
                          &chlo,
                          &error_details);

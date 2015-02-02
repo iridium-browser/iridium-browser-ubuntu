@@ -11,8 +11,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/net/url_request_mock_util.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
-#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -20,6 +18,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/app_modal_dialogs/javascript_app_modal_dialog.h"
+#include "components/app_modal_dialogs/native_app_modal_dialog.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
@@ -113,7 +113,7 @@ const std::string CLOSE_TAB_WHEN_OTHER_TAB_HAS_LISTENER =
 
 class UnloadTest : public InProcessBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     const testing::TestInfo* const test_info =
         testing::UnitTest::GetInstance()->current_test_info();
     if (strcmp(test_info->name(),
@@ -126,7 +126,7 @@ class UnloadTest : public InProcessBrowserTest {
     }
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
@@ -416,18 +416,16 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseTabWhenOtherTabHasListener) {
 
 class FastUnloadTest : public UnloadTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     UnloadTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableFastUnload);
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     ASSERT_TRUE(test_server()->Start());
   }
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
-    test_server()->Stop();
-  }
+  void TearDownInProcessBrowserTestFixture() override { test_server()->Stop(); }
 
   GURL GetUrl(const std::string& name) {
     return GURL(test_server()->GetURL(
@@ -462,13 +460,12 @@ class FastTabCloseTabStripModelObserver : public TabStripModelObserver {
     model_->AddObserver(this);
   }
 
-  virtual ~FastTabCloseTabStripModelObserver() {
+  ~FastTabCloseTabStripModelObserver() override {
     model_->RemoveObserver(this);
   }
 
   // TabStripModelObserver:
-  virtual void TabDetachedAt(content::WebContents* contents,
-                             int index) OVERRIDE {
+  void TabDetachedAt(content::WebContents* contents, int index) override {
     run_loop_->Quit();
   }
 

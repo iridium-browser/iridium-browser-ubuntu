@@ -18,16 +18,16 @@ class WrenchToolbarButton : public views::MenuButton,
                             public WrenchIconPainter::Delegate {
  public:
   explicit WrenchToolbarButton(ToolbarView* toolbar_view);
-  virtual ~WrenchToolbarButton();
+  ~WrenchToolbarButton() override;
 
   void SetSeverity(WrenchIconPainter::Severity severity, bool animate);
 
   // views::MenuButton:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // WrenchIconPainter::Delegate:
-  virtual void ScheduleWrenchIconPaint() OVERRIDE;
+  void ScheduleWrenchIconPaint() override;
 
   // Opens the wrench menu immediately during a drag-and-drop operation.
   // Used only in testing.
@@ -35,14 +35,15 @@ class WrenchToolbarButton : public views::MenuButton,
 
  private:
   // views::View:
-  virtual bool GetDropFormats(int* formats,
-      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
-  virtual bool AreDropTypesRequired() OVERRIDE;
-  virtual bool CanDrop(const ui::OSExchangeData& data) OVERRIDE;
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
+  bool GetDropFormats(
+      int* formats,
+      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) override;
+  bool AreDropTypesRequired() override;
+  bool CanDrop(const ui::OSExchangeData& data) override;
+  void OnDragEntered(const ui::DropTargetEvent& event) override;
+  int OnDragUpdated(const ui::DropTargetEvent& event) override;
+  void OnDragExited() override;
+  int OnPerformDrop(const ui::DropTargetEvent& event) override;
 
   // Show the extension action overflow menu (which is in the app menu).
   void ShowOverflowMenu();

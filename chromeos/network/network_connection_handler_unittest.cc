@@ -23,7 +23,6 @@
 #include "chromeos/network/network_profile_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_utils.h"
-#include "chromeos/tpm_token_loader.h"
 #include "components/onc/onc_constants.h"
 #include "crypto/nss_util_internal.h"
 #include "crypto/scoped_test_nss_chromeos_user.h"
@@ -34,6 +33,9 @@
 #include "net/test/cert_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
+
+// http://crbug.com/418369
+#ifdef NDEBUG
 
 namespace {
 
@@ -60,7 +62,7 @@ class NetworkConnectionHandlerTest : public testing::Test {
   virtual ~NetworkConnectionHandlerTest() {
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(user_.constructed_successfully());
     user_.FinishInit();
 
@@ -71,11 +73,8 @@ class NetworkConnectionHandlerTest : public testing::Test {
             base::Callback<void(crypto::ScopedPK11Slot)>())));
     test_nssdb_->SetSlowTaskRunnerForTest(message_loop_.message_loop_proxy());
 
-    TPMTokenLoader::InitializeForTest();
-
     CertLoader::Initialize();
-    CertLoader* cert_loader = CertLoader::Get();
-    cert_loader->force_hardware_backed_for_test();
+    CertLoader::ForceHardwareBackedForTesting();
 
     DBusThreadManager::Initialize();
     DBusThreadManager* dbus_manager = DBusThreadManager::Get();
@@ -118,14 +117,13 @@ class NetworkConnectionHandlerTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     managed_config_handler_.reset();
     network_profile_handler_.reset();
     network_connection_handler_.reset();
     network_config_handler_.reset();
     network_state_handler_.reset();
     CertLoader::Shutdown();
-    TPMTokenLoader::Shutdown();
     LoginState::Shutdown();
     DBusThreadManager::Shutdown();
   }
@@ -428,86 +426,6 @@ TEST_F(NetworkConnectionHandlerTest,
   EXPECT_EQ(NetworkConnectionHandler::kErrorNotConnected, GetResultAndReset());
 }
 
-namespace {
-
-const char* kConfigUnmanagedSharedConnected =
-    "{ \"GUID\": \"wifi0\", \"Type\": \"wifi\", \"State\": \"online\" }";
-const char* kConfigManagedSharedConnectable =
-    "{ \"GUID\": \"wifi1\", \"Type\": \"wifi\", \"State\": \"idle\", "
-    "  \"Connectable\": true }";
-
-const char* kPolicy =
-    "[ { \"GUID\": \"wifi1\","
-    "    \"Name\": \"wifi1\","
-    "    \"Type\": \"WiFi\","
-    "    \"WiFi\": {"
-    "      \"Security\": \"WPA-PSK\","
-    "      \"SSID\": \"wifi1\","
-    "      \"Passphrase\": \"passphrase\""
-    "    }"
-    "} ]";
-
-}  // namespace
-
-TEST_F(NetworkConnectionHandlerTest, ReconnectOnLoginEarlyPolicyLoading) {
-  EXPECT_TRUE(Configure(kConfigUnmanagedSharedConnected));
-  EXPECT_TRUE(Configure(kConfigManagedSharedConnectable));
-  test_manager_client_->SetBestServiceToConnect("wifi1");
-
-  // User login shouldn't trigger any change because policy is not loaded yet.
-  LoginToRegularUser();
-  EXPECT_EQ(shill::kStateOnline,
-            GetServiceStringProperty("wifi0", shill::kStateProperty));
-  EXPECT_EQ(shill::kStateIdle,
-            GetServiceStringProperty("wifi1", shill::kStateProperty));
-
-  // Applying the policy which restricts autoconnect should disconnect from the
-  // shared, unmanaged network.
-  base::DictionaryValue global_config;
-  global_config.SetBooleanWithoutPathExpansion(
-      ::onc::global_network_config::kAllowOnlyPolicyNetworksToAutoconnect,
-      true);
-
-  SetupPolicy(kPolicy, global_config, false /* load as device policy */);
-  EXPECT_EQ(shill::kStateIdle,
-            GetServiceStringProperty("wifi0", shill::kStateProperty));
-  EXPECT_EQ(shill::kStateIdle,
-            GetServiceStringProperty("wifi1", shill::kStateProperty));
-
-  // Certificate loading should trigger connecting to the 'best' network.
-  StartCertLoader();
-  EXPECT_EQ(shill::kStateIdle,
-            GetServiceStringProperty("wifi0", shill::kStateProperty));
-  EXPECT_EQ(shill::kStateOnline,
-            GetServiceStringProperty("wifi1", shill::kStateProperty));
-}
-
-TEST_F(NetworkConnectionHandlerTest, ReconnectOnLoginLatePolicyLoading) {
-  EXPECT_TRUE(Configure(kConfigUnmanagedSharedConnected));
-  EXPECT_TRUE(Configure(kConfigManagedSharedConnectable));
-  test_manager_client_->SetBestServiceToConnect("wifi1");
-
-  // User login and certificate loading shouldn't trigger any change until the
-  // policy is loaded.
-  LoginToRegularUser();
-  StartCertLoader();
-  EXPECT_EQ(shill::kStateOnline,
-            GetServiceStringProperty("wifi0", shill::kStateProperty));
-  EXPECT_EQ(shill::kStateIdle,
-            GetServiceStringProperty("wifi1", shill::kStateProperty));
-
-  // Applying the policy which restricts autoconnect should disconnect from the
-  // shared, unmanaged network.
-  base::DictionaryValue global_config;
-  global_config.SetBooleanWithoutPathExpansion(
-      ::onc::global_network_config::kAllowOnlyPolicyNetworksToAutoconnect,
-      true);
-
-  SetupPolicy(kPolicy, global_config, false /* load as device policy */);
-  EXPECT_EQ(shill::kStateIdle,
-            GetServiceStringProperty("wifi0", shill::kStateProperty));
-  EXPECT_EQ(shill::kStateOnline,
-            GetServiceStringProperty("wifi1", shill::kStateProperty));
-}
-
 }  // namespace chromeos
+
+#endif

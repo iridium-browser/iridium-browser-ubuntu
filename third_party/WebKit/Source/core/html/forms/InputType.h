@@ -42,13 +42,10 @@
 namespace blink {
 
 class Chrome;
-class DateComponents;
 class DragData;
 class ExceptionState;
 class FileList;
 class FormDataList;
-class HTMLElement;
-class Node;
 
 // An InputType object represents the type-specific part of an HTMLInputElement.
 // Do not expose instances of InputType and classes derived from it to classes
@@ -112,6 +109,7 @@ public:
     virtual bool hasBadInput() const;
     virtual bool patternMismatch(const String&) const;
     virtual bool tooLong(const String&, HTMLTextFormControlElement::NeedsToCheckDirtyFlag) const;
+    virtual bool tooShort(const String&, HTMLTextFormControlElement::NeedsToCheckDirtyFlag) const;
     bool rangeUnderflow(const String&) const;
     bool rangeOverflow(const String&) const;
     bool isInRange(const String&) const;
@@ -152,7 +150,7 @@ public:
     virtual void sanitizeValueInResponseToMinOrMaxAttributeChange();
     virtual bool shouldRespectAlignAttribute();
     virtual FileList* files();
-    virtual void setFiles(PassRefPtrWillBeRawPtr<FileList>);
+    virtual void setFiles(FileList*);
     // Should return true if the given DragData has more than one dropped files.
     virtual bool receiveDroppedFiles(const DragData*);
     virtual String droppedFileSystemId();
@@ -169,6 +167,7 @@ public:
     virtual bool isSteppable() const;
     virtual bool shouldRespectHeightAndWidthAttributes();
     virtual int maxLength() const;
+    virtual int minLength() const;
     virtual bool supportsPlaceholder() const;
     virtual bool supportsReadOnly() const;
     virtual String defaultToolTip() const;
@@ -204,8 +203,8 @@ public:
     void dispatchSimulatedClickIfActive(KeyboardEvent*) const;
 
     // InputTypeView override
-    virtual bool shouldSubmitImplicitly(Event*) OVERRIDE;
-    virtual bool hasCustomFocusLogic() const OVERRIDE;
+    virtual bool shouldSubmitImplicitly(Event*) override;
+    virtual bool hasCustomFocusLogic() const override;
 
     virtual bool shouldDispatchFormControlChangeEvent(String&, String&);
 

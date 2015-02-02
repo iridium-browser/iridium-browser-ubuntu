@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="settings/margin_settings.css">
   <link rel="stylesheet" href="settings/media_size_settings.css">
   <link rel="stylesheet" href="settings/layout_settings.css">
+  <link rel="stylesheet" href="settings/dpi_settings.css">
   <link rel="stylesheet" href="settings/other_options_settings.css">
   <link rel="stylesheet" href="settings/advanced_options_settings.css">
   <link rel="stylesheet" href="settings/advanced_settings/advanced_settings.css">
@@ -35,11 +36,13 @@
   <link rel="stylesheet" href="search/destination_search.css">
   <link rel="stylesheet" href="search/fedex_tos.css">
 
+  <script src="chrome://resources/js/action_link.js"></script>
   <script src="chrome://resources/js/cr.js"></script>
   <script src="chrome://resources/js/cr/event_target.js"></script>
   <script src="chrome://resources/js/cr/ui.js"></script>
   <script src="chrome://resources/js/cr/ui/focus_manager.js"></script>
   <script src="chrome://resources/js/cr/ui/focus_outline_manager.js"></script>
+  <script src="chrome://resources/js/cr/ui/node_utils.js"></script>
   <script src="chrome://resources/js/event_tracker.js"></script>
   <script src="chrome://resources/js/load_time_data.js"></script>
   <script src="chrome://resources/js/util.js"></script>
@@ -62,28 +65,26 @@
         <include src="settings/color_settings.html">
         <include src="settings/media_size_settings.html">
         <include src="settings/margin_settings.html">
+        <include src="settings/dpi_settings.html">
         <include src="settings/other_options_settings.html">
         <include src="settings/advanced_options_settings.html">
         <include src="settings/more_settings.html">
       </div>
       <div id="link-container">
+<if expr="not chromeos">
         <div>
-          <button id="system-dialog-link" class="link-button navbar-link"
-              i18n-content="systemDialogOption"></button>
+          <a is="action-link" id="system-dialog-link" class="navbar-link"
+              i18n-content="systemDialogOption"></a>
           <div id="system-dialog-throbber" hidden class="throbber"></div>
         </div>
+</if>
 <if expr="is_macosx">
         <div>
-          <button id="open-pdf-in-preview-link" class="link-button navbar-link"
-              i18n-content="openPdfInPreviewOption"></button>
+          <a is="action-link" id="open-pdf-in-preview-link" class="navbar-link"
+              i18n-content="openPdfInPreviewOption"></a>
           <div id="open-preview-app-throbber" hidden class="throbber"></div>
         </div>
 </if>
-        <div>
-          <button id="cloud-print-dialog-link" class="link-button navbar-link"
-              hidden i18n-content="cloudPrintDialogOption"></button>
-          <div id="cloud-print-dialog-throbber" hidden class="throbber"></div>
-        </div>
       </div>
     </div>
   </div>

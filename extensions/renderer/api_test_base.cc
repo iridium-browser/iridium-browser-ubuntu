@@ -12,9 +12,9 @@
 #include "extensions/renderer/process_info_native_handler.h"
 #include "gin/converter.h"
 #include "gin/dictionary.h"
-#include "mojo/bindings/js/core.h"
-#include "mojo/bindings/js/handle.h"
-#include "mojo/bindings/js/support.h"
+#include "mojo/edk/js/core.h"
+#include "mojo/edk/js/handle.h"
+#include "mojo/edk/js/support.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/public/cpp/system/core.h"
 
@@ -30,8 +30,8 @@ class TestNatives : public gin::Wrappable<TestNatives> {
     return gin::CreateHandle(isolate, new TestNatives(quit_closure));
   }
 
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE {
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override {
     return Wrappable<TestNatives>::GetObjectTemplateBuilder(isolate)
         .SetMethod("Log", &TestNatives::Log)
         .SetMethod("NotifyPass", &TestNatives::NotifyPass)
@@ -94,6 +94,10 @@ mojo::Handle TestServiceProvider::ConnectToService(
 }
 
 TestServiceProvider::TestServiceProvider() {
+}
+
+// static
+void TestServiceProvider::IgnoreHandle(mojo::ScopedMessagePipeHandle handle) {
 }
 
 ApiTestBase::ApiTestBase() {

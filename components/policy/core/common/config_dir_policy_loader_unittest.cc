@@ -28,29 +28,27 @@ const base::FilePath::CharType kMandatoryPath[] = FILE_PATH_LITERAL("managed");
 class TestHarness : public PolicyProviderTestHarness {
  public:
   TestHarness();
-  virtual ~TestHarness();
+  ~TestHarness() override;
 
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
-  virtual ConfigurationPolicyProvider* CreateProvider(
+  ConfigurationPolicyProvider* CreateProvider(
       SchemaRegistry* registry,
-      scoped_refptr<base::SequencedTaskRunner> task_runner) OVERRIDE;
+      scoped_refptr<base::SequencedTaskRunner> task_runner) override;
 
-  virtual void InstallEmptyPolicy() OVERRIDE;
-  virtual void InstallStringPolicy(const std::string& policy_name,
-                                   const std::string& policy_value) OVERRIDE;
-  virtual void InstallIntegerPolicy(const std::string& policy_name,
-                                    int policy_value) OVERRIDE;
-  virtual void InstallBooleanPolicy(const std::string& policy_name,
-                                    bool policy_value) OVERRIDE;
-  virtual void InstallStringListPolicy(
+  void InstallEmptyPolicy() override;
+  void InstallStringPolicy(const std::string& policy_name,
+                           const std::string& policy_value) override;
+  void InstallIntegerPolicy(const std::string& policy_name,
+                            int policy_value) override;
+  void InstallBooleanPolicy(const std::string& policy_name,
+                            bool policy_value) override;
+  void InstallStringListPolicy(const std::string& policy_name,
+                               const base::ListValue* policy_value) override;
+  void InstallDictionaryPolicy(
       const std::string& policy_name,
-      const base::ListValue* policy_value) OVERRIDE;
-  virtual void InstallDictionaryPolicy(
-      const std::string& policy_name,
-      const base::DictionaryValue* policy_value) OVERRIDE;
-  virtual void Install3rdPartyPolicy(
-      const base::DictionaryValue* policies) OVERRIDE;
+      const base::DictionaryValue* policy_value) override;
+  void Install3rdPartyPolicy(const base::DictionaryValue* policies) override;
 
   const base::FilePath& test_dir() { return test_dir_.path(); }
 
@@ -175,7 +173,7 @@ INSTANTIATE_TEST_CASE_P(
 // Some tests that exercise special functionality in ConfigDirPolicyLoader.
 class ConfigDirPolicyLoaderTest : public PolicyTestBase {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     PolicyTestBase::SetUp();
     harness_.SetUp();
   }

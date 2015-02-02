@@ -42,7 +42,7 @@ class ExtensionAppModelBuilder : public extensions::InstallObserver,
                                  public app_list::AppListItemListObserver {
  public:
   explicit ExtensionAppModelBuilder(AppListControllerDelegate* controller);
-  virtual ~ExtensionAppModelBuilder();
+  ~ExtensionAppModelBuilder() override;
 
   // Initialize to use app-list sync and sets |service_| to |service|.
   void InitializeWithService(app_list::AppListSyncableService* service);
@@ -58,35 +58,30 @@ class ExtensionAppModelBuilder : public extensions::InstallObserver,
   void BuildModel();
 
   // extensions::InstallObserver.
-  virtual void OnBeginExtensionInstall(
-      const ExtensionInstallParams& params) OVERRIDE;
-  virtual void OnDownloadProgress(const std::string& extension_id,
-                                  int percent_downloaded) OVERRIDE;
-  virtual void OnInstallFailure(const std::string& extension_id) OVERRIDE;
-  virtual void OnDisabledExtensionUpdated(
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnAppInstalledToAppList(
-      const std::string& extension_id) OVERRIDE;
-  virtual void OnShutdown() OVERRIDE;
+  void OnBeginExtensionInstall(const ExtensionInstallParams& params) override;
+  void OnDownloadProgress(const std::string& extension_id,
+                          int percent_downloaded) override;
+  void OnInstallFailure(const std::string& extension_id) override;
+  void OnDisabledExtensionUpdated(
+      const extensions::Extension* extension) override;
+  void OnShutdown() override;
 
   // extensions::ExtensionRegistryObserver.
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
-  virtual void OnExtensionUninstalled(
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
-  virtual void OnShutdown(extensions::ExtensionRegistry* registry) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
+  void OnShutdown(extensions::ExtensionRegistry* registry) override;
 
   // AppListItemListObserver.
-  virtual void OnListItemMoved(size_t from_index,
-                               size_t to_index,
-                               app_list::AppListItem* item) OVERRIDE;
+  void OnListItemMoved(size_t from_index,
+                       size_t to_index,
+                       app_list::AppListItem* item) override;
 
   scoped_ptr<ExtensionAppItem> CreateAppItem(
       const std::string& extension_id,
@@ -99,16 +94,6 @@ class ExtensionAppModelBuilder : public extensions::InstallObserver,
 
   // Inserts an app based on app ordinal prefs.
   void InsertApp(scoped_ptr<ExtensionAppItem> app);
-
-  // Sets which app is intended to be highlighted. Will remove the highlight
-  // from a currently highlighted app.
-  void SetHighlightedApp(const std::string& extension_id);
-
-  // Sets the application app with |highlight_app_id_| in |model_| as
-  // highlighted if |highlighted_app_pending_| is true. If such an app is found,
-  // reset |highlighted_app_pending_| so that won't be highlighted again until
-  // another call to SetHighlightedApp() is made.
-  void UpdateHighlight();
 
   // Returns app instance matching |extension_id| or NULL.
   ExtensionAppItem* GetExtensionAppItem(const std::string& extension_id);
@@ -140,12 +125,6 @@ class ExtensionAppModelBuilder : public extensions::InstallObserver,
 
   // Unowned pointer to the app list model.
   app_list::AppListModel* model_;
-
-  std::string highlight_app_id_;
-
-  // True if we haven't set |highlight_app_id_| to be highlighted. This happens
-  // if we try to highlight an app that doesn't exist in the list yet.
-  bool highlighted_app_pending_;
 
   // We listen to this to show app installing progress.
   extensions::InstallTracker* tracker_;

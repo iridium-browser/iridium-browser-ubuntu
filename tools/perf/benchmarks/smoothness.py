@@ -21,7 +21,7 @@ class SmoothnessToughFiltersCases(benchmark.Benchmark):
   page_set = page_sets.ToughFiltersCasesPageSet
 
 
-@benchmark.Disabled('mac', 'win')  # crbug.com/388877, crbug.com/396127
+@benchmark.Disabled('mac')  # crbug.com/388877
 class SmoothnessToughCanvasCases(benchmark.Benchmark):
   test = smoothness.Smoothness
   page_set = page_sets.ToughCanvasCasesPageSet
@@ -48,7 +48,6 @@ class SmoothnessKeyMobileSites(benchmark.Benchmark):
   page_set = page_sets.KeyMobileSitesPageSet
 
 
-@benchmark.Disabled('android')  # crbug.com/350692
 class SmoothnessToughAnimationCases(benchmark.Benchmark):
   test = smoothness.Smoothness
   page_set = page_sets.ToughAnimationCasesPageSet
@@ -64,18 +63,6 @@ class SmoothnessKeySilkCases(benchmark.Benchmark):
 
 
 @benchmark.Enabled('android')
-class SmoothnessFastPathKeySilkCases(benchmark.Benchmark):
-  """Measures rendering statistics for the key silk cases without GPU
-  rasterization using bleeding edge rendering fast paths.
-  """
-  tag = 'fast_path'
-  test = smoothness.Smoothness
-  page_set = page_sets.KeySilkCasesPageSet
-  def CustomizeBrowserOptions(self, options):
-    silk_flags.CustomizeBrowserOptionsForFastPath(options)
-
-
-@benchmark.Enabled('android')  # crbug.com/399125
 class SmoothnessGpuRasterizationTop25(benchmark.Benchmark):
   """Measures rendering statistics for the top 25 with GPU rasterization
   """
@@ -86,7 +73,7 @@ class SmoothnessGpuRasterizationTop25(benchmark.Benchmark):
     silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
 
 
-@benchmark.Enabled('android')  # crbug.com/399125
+@benchmark.Enabled('android')
 class SmoothnessGpuRasterizationKeyMobileSites(benchmark.Benchmark):
   """Measures rendering statistics for the key mobile sites with GPU
   rasterization
@@ -98,37 +85,20 @@ class SmoothnessGpuRasterizationKeyMobileSites(benchmark.Benchmark):
     silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
 
 
-@benchmark.Disabled  # crbug.com/399125
-class SmoothnessGpuRasterizationKeySilkCases(benchmark.Benchmark):
-  """Measures rendering statistics for the key silk cases with GPU rasterization
+@benchmark.Enabled('android')
+class SmoothnessSyncScrollKeyMobileSites(benchmark.Benchmark):
+  """Measures rendering statistics for the key mobile sites with synchronous
+  (main thread) scrolling.
   """
-  tag = 'gpu_rasterization'
+  tag = 'sync_scroll'
   test = smoothness.Smoothness
-  page_set = page_sets.KeySilkCasesPageSet
+  page_set = page_sets.KeyMobileSitesPageSet
   def CustomizeBrowserOptions(self, options):
-    silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
+    silk_flags.CustomizeBrowserOptionsForSyncScrolling(options)
 
-
-@benchmark.Disabled  # crbug.com/399125
-class SmoothnessFastPathGpuRasterizationKeySilkCases(
-    SmoothnessGpuRasterizationKeySilkCases):
-  """Measures rendering statistics for the key silk cases with GPU rasterization
-  using bleeding edge rendering fast paths.
-  """
-  tag = 'fast_path_gpu_rasterization'
-  test = smoothness.Smoothness
-  page_set = page_sets.KeySilkCasesPageSet
-  def CustomizeBrowserOptions(self, options):
-    super(SmoothnessFastPathGpuRasterizationKeySilkCases, self). \
-        CustomizeBrowserOptions(options)
-    silk_flags.CustomizeBrowserOptionsForFastPath(options)
-
-
-@benchmark.Disabled  # crbug.com/402885
+@benchmark.Enabled('android')
 class SmoothnessSimpleMobilePages(benchmark.Benchmark):
-  """Measures rendering statistics for pinch-zooming into the tough pinch zoom
-  cases
-  """
+  """Measures rendering statistics for simple mobile sites page set """
   test = smoothness.Smoothness
   page_set = page_sets.SimpleMobileSitesPageSet
 
@@ -151,17 +121,6 @@ class SmoothnessPolymer(benchmark.Benchmark):
 
 
 @benchmark.Enabled('android')
-class SmoothnessFastPathPolymer(benchmark.Benchmark):
-  """Measures rendering statistics for the Polymer cases without GPU
-  rasterization using bleeding edge rendering fast paths.
-  """
-  tag = 'fast_path'
-  test = smoothness.Smoothness
-  page_set = page_sets.PolymerPageSet
-  def CustomizeBrowserOptions(self, options):
-    silk_flags.CustomizeBrowserOptionsForFastPath(options)
-
-@benchmark.Enabled('android')  # crbug.com/399125
 class SmoothnessGpuRasterizationPolymer(benchmark.Benchmark):
   """Measures rendering statistics for the Polymer cases with GPU rasterization
   """
@@ -171,17 +130,7 @@ class SmoothnessGpuRasterizationPolymer(benchmark.Benchmark):
   def CustomizeBrowserOptions(self, options):
     silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
 
-
-@benchmark.Disabled  # crbug.com/399125
-class SmoothnessFastPathGpuRasterizationPolymer(
-    SmoothnessGpuRasterizationPolymer):
-  """Measures rendering statistics for the Polymer cases with GPU rasterization
-  using bleeding edge rendering fast paths.
-  """
-  tag = 'fast_path_gpu_rasterization'
+class SmoothnessToughFastScrollingCases(benchmark.Benchmark):
   test = smoothness.Smoothness
-  page_set = page_sets.PolymerPageSet
-  def CustomizeBrowserOptions(self, options):
-    super(SmoothnessFastPathGpuRasterizationPolymer, self). \
-        CustomizeBrowserOptions(options)
-    silk_flags.CustomizeBrowserOptionsForFastPath(options)
+  page_set = page_sets.ToughScrollingCasesPageSet
+  options = {'page_label_filter' : 'fastscrolling'}

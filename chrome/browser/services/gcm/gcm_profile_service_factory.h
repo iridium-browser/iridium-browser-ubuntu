@@ -10,8 +10,6 @@
 #include "components/gcm_driver/system_encryptor.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
-class Profile;
-
 namespace gcm {
 
 class GCMProfileService;
@@ -20,20 +18,20 @@ class GCMProfileService;
 // Profiles.
 class GCMProfileServiceFactory : public BrowserContextKeyedServiceFactory {
  public:
-  static GCMProfileService* GetForProfile(Profile* profile);
+  static GCMProfileService* GetForProfile(content::BrowserContext* profile);
   static GCMProfileServiceFactory* GetInstance();
 
  private:
   friend struct DefaultSingletonTraits<GCMProfileServiceFactory>;
 
   GCMProfileServiceFactory();
-  virtual ~GCMProfileServiceFactory();
+  ~GCMProfileServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(GCMProfileServiceFactory);
 };

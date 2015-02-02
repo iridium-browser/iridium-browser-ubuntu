@@ -195,6 +195,9 @@ bool GLSurface::OnMakeCurrent(GLContext* context) {
   return true;
 }
 
+void GLSurface::NotifyWasBound() {
+}
+
 bool GLSurface::SetBackbufferAllocation(bool allocated) {
   return true;
 }
@@ -263,6 +266,9 @@ bool GLSurface::ExtensionsContain(const char* c_extensions, const char* name) {
   delimited_name += " ";
 
   return extensions.find(delimited_name) != std::string::npos;
+}
+
+void GLSurface::SetSwapInterval(int interval) {
 }
 
 GLSurfaceAdapter::GLSurfaceAdapter(GLSurface* surface) : surface_(surface) {}

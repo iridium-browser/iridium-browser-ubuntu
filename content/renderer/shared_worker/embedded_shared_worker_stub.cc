@@ -40,7 +40,7 @@ class SharedWorkerWebApplicationCacheHostImpl
       const blink::WebApplicationCacheHost*) {}
   virtual void didReceiveResponseForMainResource(const blink::WebURLResponse&) {
   }
-  virtual void didReceiveDataForMainResource(const char* data, int len) {}
+  virtual void didReceiveDataForMainResource(const char* data, unsigned len) {}
   virtual void didFinishLoadingMainResource(bool success) {}
 
   // Cache selection is also different for workers. We know at construction
@@ -51,7 +51,8 @@ class SharedWorkerWebApplicationCacheHostImpl
     return true;
   }
 };
-}
+
+}  // namespace
 
 EmbeddedSharedWorkerStub::EmbeddedSharedWorkerStub(
     const GURL& url,
@@ -60,7 +61,11 @@ EmbeddedSharedWorkerStub::EmbeddedSharedWorkerStub(
     blink::WebContentSecurityPolicyType security_policy_type,
     bool pause_on_start,
     int route_id)
-    : route_id_(route_id), name_(name), runing_(false), url_(url) {
+    : route_id_(route_id),
+      name_(name),
+      runing_(false),
+      url_(url),
+      app_cache_host_(nullptr) {
   RenderThreadImpl::current()->AddEmbeddedWorkerRoute(route_id_, this);
   impl_ = blink::WebSharedWorker::create(this);
   if (pause_on_start) {

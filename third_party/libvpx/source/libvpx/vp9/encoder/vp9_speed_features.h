@@ -34,6 +34,9 @@ enum {
 enum {
   INTER_ALL = (1 << NEARESTMV) | (1 << NEARMV) | (1 << ZEROMV) | (1 << NEWMV),
   INTER_NEAREST = (1 << NEARESTMV),
+  INTER_NEAREST_NEW = (1 << NEARESTMV) | (1 << NEWMV),
+  INTER_NEAREST_ZERO = (1 << NEARESTMV) | (1 << ZEROMV),
+  INTER_NEAREST_NEW_ZERO = (1 << NEARESTMV) | (1 << ZEROMV) | (1 << NEWMV),
   INTER_NEAREST_NEAR_NEW = (1 << NEARESTMV) | (1 << NEARMV) | (1 << NEWMV),
   INTER_NEAREST_NEAR_ZERO = (1 << NEARESTMV) | (1 << NEARMV) | (1 << ZEROMV),
 };
@@ -78,7 +81,9 @@ typedef enum {
 
 typedef enum {
   SUBPEL_TREE = 0,
-  SUBPEL_TREE_PRUNED = 1,
+  SUBPEL_TREE_PRUNED = 1,           // Prunes 1/2-pel searches
+  SUBPEL_TREE_PRUNED_MORE = 2,      // Prunes 1/2-pel searches more aggressively
+  SUBPEL_TREE_PRUNED_EVENMORE = 3,  // Prunes 1/2- and 1/4-pel searches
   // Other methods to come
 } SUBPEL_SEARCH_METHODS;
 
@@ -144,16 +149,12 @@ typedef enum {
 
 typedef enum {
   // Search partitions using RD/NONRD criterion
-  SEARCH_PARTITION = 0,
+  SEARCH_PARTITION,
 
   // Always use a fixed size partition
-  FIXED_PARTITION = 1,
+  FIXED_PARTITION,
 
-  // Use a fixed size partition in every 64X64 SB, where the size is
-  // determined based on source variance
-  VAR_BASED_FIXED_PARTITION = 2,
-
-  REFERENCE_PARTITION = 3,
+  REFERENCE_PARTITION,
 
   // Use an arbitrary partitioning scheme based on source variance within
   // a 64X64 SB
@@ -435,6 +436,9 @@ typedef struct SPEED_FEATURES {
   // Partition search early breakout thresholds.
   int64_t partition_search_breakout_dist_thr;
   int partition_search_breakout_rate_thr;
+
+  // Allow skipping partition search for still image frame
+  int allow_partition_search_skip;
 } SPEED_FEATURES;
 
 struct VP9_COMP;

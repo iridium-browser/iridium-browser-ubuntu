@@ -74,12 +74,12 @@ void HTMLFrameSetElement::parseAttribute(const QualifiedName& name, const Atomic
     if (name == rowsAttr) {
         if (!value.isNull()) {
             m_rowLengths = parseListOfDimensions(value.string());
-            setNeedsStyleRecalc(SubtreeStyleChange);
+            setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::fromAttribute(name));
         }
     } else if (name == colsAttr) {
         if (!value.isNull()) {
             m_colLengths = parseListOfDimensions(value.string());
-            setNeedsStyleRecalc(SubtreeStyleChange);
+            setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::fromAttribute(name));
         }
     } else if (name == frameborderAttr) {
         if (!value.isNull()) {
@@ -214,10 +214,10 @@ LocalDOMWindow* HTMLFrameSetElement::anonymousNamedGetter(const AtomicString& na
 {
     Element* frameElement = children()->namedItem(name);
     if (!isHTMLFrameElement(frameElement))
-        return 0;
+        return nullptr;
     Document* document = toHTMLFrameElement(frameElement)->contentDocument();
     if (!document || !document->frame())
-        return 0;
+        return nullptr;
     return document->domWindow();
 }
 

@@ -22,8 +22,8 @@ namespace test {
 class WebstoreProviderTest;
 }
 
-class ChromeSearchResult;
 class JSONResponseFetcher;
+class SearchResult;
 
 // WebstoreProvider fetches search results from the web store server.
 // A "Search in web store" result will be returned if the server does not
@@ -31,11 +31,11 @@ class JSONResponseFetcher;
 class WebstoreProvider : public WebserviceSearchProvider{
  public:
   WebstoreProvider(Profile* profile, AppListControllerDelegate* controller);
-  virtual ~WebstoreProvider();
+  ~WebstoreProvider() override;
 
   // SearchProvider overrides:
-  virtual void Start(const base::string16& query) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void Start(const base::string16& query) override;
+  void Stop() override;
 
  private:
   friend class app_list::test::WebstoreProviderTest;
@@ -45,8 +45,7 @@ class WebstoreProvider : public WebserviceSearchProvider{
 
   void OnWebstoreSearchFetched(scoped_ptr<base::DictionaryValue> json);
   void ProcessWebstoreSearchResults(const base::DictionaryValue* json);
-  scoped_ptr<ChromeSearchResult> CreateResult(
-      const base::DictionaryValue& dict);
+  scoped_ptr<SearchResult> CreateResult(const base::DictionaryValue& dict);
 
   void set_webstore_search_fetched_callback(const base::Closure& callback) {
     webstore_search_fetched_callback_ = callback;

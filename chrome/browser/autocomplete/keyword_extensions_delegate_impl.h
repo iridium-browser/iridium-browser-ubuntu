@@ -29,24 +29,23 @@ class KeywordExtensionsDelegateImpl : public KeywordExtensionsDelegate,
                                       public content::NotificationObserver {
  public:
   KeywordExtensionsDelegateImpl(Profile* profile, KeywordProvider* provider);
-  virtual ~KeywordExtensionsDelegateImpl();
+  ~KeywordExtensionsDelegateImpl() override;
 
  private:
   // KeywordExtensionsDelegate:
-  virtual void IncrementInputId() OVERRIDE;
-  virtual bool IsEnabledExtension(const std::string& extension_id) OVERRIDE;
-  virtual bool Start(const AutocompleteInput& input,
-                     bool minimal_changes,
-                     const TemplateURL* template_url,
-                     const base::string16& remaining_input) OVERRIDE;
-  virtual void EnterExtensionKeywordMode(
-      const std::string& extension_id) OVERRIDE;
-  virtual void MaybeEndExtensionKeywordMode() OVERRIDE;
+  void IncrementInputId() override;
+  bool IsEnabledExtension(const std::string& extension_id) override;
+  bool Start(const AutocompleteInput& input,
+             bool minimal_changes,
+             const TemplateURL* template_url,
+             const base::string16& remaining_input) override;
+  void EnterExtensionKeywordMode(const std::string& extension_id) override;
+  void MaybeEndExtensionKeywordMode() override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   ACMatches* matches() { return &provider_->matches_; }
   void set_done(bool done) {

@@ -45,6 +45,7 @@
 #include "core/rendering/RenderLayerReflectionInfo.h"
 
 #include "core/frame/UseCounter.h"
+#include "core/paint/LayerPainter.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderReplica.h"
 #include "core/rendering/style/RenderStyle.h"
@@ -141,13 +142,8 @@ void RenderLayerReflectionInfo::paint(GraphicsContext* context, const LayerPaint
 
     // Mark that we are now inside replica painting.
     m_isPaintingInsideReflection = true;
-    reflectionLayer()->paintLayer(context, paintingInfo, flags);
+    LayerPainter(*reflectionLayer()).paintLayer(context, paintingInfo, flags);
     m_isPaintingInsideReflection = false;
-}
-
-String RenderLayerReflectionInfo::debugName() const
-{
-    return box().debugName() + " (reflection)";
 }
 
 } // namespace blink

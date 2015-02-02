@@ -228,6 +228,7 @@ EGLContext Display::CreateContext(EGLConfig config,
 
   bool bind_generates_resources = true;
   bool lose_context_when_out_of_memory = false;
+  bool support_client_side_arrays = true;
 
   context_.reset(
       new gpu::gles2::GLES2Implementation(gles2_cmd_helper_.get(),
@@ -235,6 +236,7 @@ EGLContext Display::CreateContext(EGLConfig config,
                                           transfer_buffer_.get(),
                                           bind_generates_resources,
                                           lose_context_when_out_of_memory,
+                                          support_client_side_arrays,
                                           this));
 
   if (!context_->Initialize(
@@ -273,18 +275,24 @@ gpu::Capabilities Display::GetCapabilities() {
   return decoder_->GetCapabilities();
 }
 
-gfx::GpuMemoryBuffer* Display::CreateGpuMemoryBuffer(
-    size_t width,
-    size_t height,
-    unsigned internalformat,
-    unsigned usage,
-    int32* id) {
+int32_t Display::CreateImage(ClientBuffer buffer,
+                             size_t width,
+                             size_t height,
+                             unsigned internalformat) {
   NOTIMPLEMENTED();
-  return NULL;
+  return -1;
 }
 
-void Display::DestroyGpuMemoryBuffer(int32 id) {
+void Display::DestroyImage(int32 id) {
   NOTIMPLEMENTED();
+}
+
+int32_t Display::CreateGpuMemoryBufferImage(size_t width,
+                                            size_t height,
+                                            unsigned internalformat,
+                                            unsigned usage) {
+  NOTIMPLEMENTED();
+  return -1;
 }
 
 uint32 Display::InsertSyncPoint() {
@@ -311,10 +319,6 @@ void Display::SignalQuery(uint32 query, const base::Closure& callback) {
 }
 
 void Display::SetSurfaceVisible(bool visible) {
-  NOTIMPLEMENTED();
-}
-
-void Display::Echo(const base::Closure& callback) {
   NOTIMPLEMENTED();
 }
 

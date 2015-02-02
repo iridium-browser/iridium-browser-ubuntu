@@ -214,7 +214,22 @@ Curves:
 		c.sendAlert(alertInternalError)
 		return false, err
 	}
-	hs.hello.secureRenegotiation = hs.clientHello.secureRenegotiation
+
+	if !bytes.Equal(c.clientVerify, hs.clientHello.secureRenegotiation) {
+		c.sendAlert(alertHandshakeFailure)
+		return false, errors.New("tls: renegotiation mismatch")
+	}
+
+	if len(c.clientVerify) > 0 && !c.config.Bugs.EmptyRenegotiationInfo {
+		hs.hello.secureRenegotiation = append(hs.hello.secureRenegotiation, c.clientVerify...)
+		hs.hello.secureRenegotiation = append(hs.hello.secureRenegotiation, c.serverVerify...)
+		if c.config.Bugs.BadRenegotiationInfo {
+			hs.hello.secureRenegotiation[0] ^= 0x80
+		}
+	} else {
+		hs.hello.secureRenegotiation = hs.clientHello.secureRenegotiation
+	}
+
 	hs.hello.compressionMethod = compressionNone
 	hs.hello.duplicateExtension = c.config.Bugs.DuplicateExtension
 	if len(hs.clientHello.serverName) > 0 {
@@ -237,6 +252,7 @@ Curves:
 			hs.hello.nextProtos = config.NextProtos
 		}
 	}
+	hs.hello.extendedMasterSecret = c.vers >= VersionTLS10 && hs.clientHello.extendedMasterSecret && !c.config.Bugs.NoExtendedMasterSecret
 
 	if len(config.Certificates) == 0 {
 		c.sendAlert(alertInternalError)
@@ -373,6 +389,7 @@ func (hs *serverHandshakeState) doResumeHandshake() error {
 	}
 
 	hs.masterSecret = hs.sessionState.masterSecret
+	c.extendedMasterSecret = hs.sessionState.extendedMasterSecret
 
 	return nil
 }
@@ -381,12 +398,14 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 	config := hs.c.config
 	c := hs.c
 
-	if hs.clientHello.ocspStapling && len(hs.cert.OCSPStaple) > 0 {
+	isPSK := hs.suite.flags&suitePSK != 0
+	if !isPSK && hs.clientHello.ocspStapling && len(hs.cert.OCSPStaple) > 0 {
 		hs.hello.ocspStapling = true
 	}
 
 	hs.hello.ticketSupported = hs.clientHello.ticketSupported && !config.SessionTicketsDisabled
 	hs.hello.cipherSuite = hs.suite.id
+	c.extendedMasterSecret = hs.hello.extendedMasterSecret
 
 	hs.finishedHash = newFinishedHash(c.vers, hs.suite)
 	hs.writeClientHash(hs.clientHello.marshal())
@@ -394,11 +413,13 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 
 	c.writeRecord(recordTypeHandshake, hs.hello.marshal())
 
-	certMsg := new(certificateMsg)
-	certMsg.certificates = hs.cert.Certificate
-	if !config.Bugs.UnauthenticatedECDH {
-		hs.writeServerHash(certMsg.marshal())
-		c.writeRecord(recordTypeHandshake, certMsg.marshal())
+	if !isPSK {
+		certMsg := new(certificateMsg)
+		certMsg.certificates = hs.cert.Certificate
+		if !config.Bugs.UnauthenticatedECDH {
+			hs.writeServerHash(certMsg.marshal())
+			c.writeRecord(recordTypeHandshake, certMsg.marshal())
+		}
 	}
 
 	if hs.hello.ocspStapling {
@@ -463,6 +484,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 	// If we requested a client certificate, then the client must send a
 	// certificate message, even if it's empty.
 	if config.ClientAuth >= RequestClientCert {
+		var certMsg *certificateMsg
 		if certMsg, ok = msg.(*certificateMsg); !ok {
 			c.sendAlert(alertUnexpectedMessage)
 			return unexpectedMessageError(certMsg, msg)
@@ -502,7 +524,14 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		c.sendAlert(alertHandshakeFailure)
 		return err
 	}
-	hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.clientHello.random, hs.hello.random)
+	if c.extendedMasterSecret {
+		hs.masterSecret = extendedMasterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.finishedHash)
+	} else {
+		if c.config.Bugs.RequireExtendedMasterSecret {
+			return errors.New("tls: extended master secret required but not supported by peer")
+		}
+		hs.masterSecret = masterFromPreMasterSecret(c.vers, hs.suite, preMasterSecret, hs.clientHello.random, hs.hello.random)
+	}
 
 	// If we received a client cert in response to our certificate request message,
 	// the client will send us a certificateVerifyMsg immediately after the
@@ -679,6 +708,7 @@ func (hs *serverHandshakeState) readFinished(isResume bool) error {
 		c.sendAlert(alertHandshakeFailure)
 		return errors.New("tls: client's Finished message is incorrect")
 	}
+	c.clientVerify = append(c.clientVerify[:0], clientFinished.verifyData...)
 
 	hs.writeClientHash(clientFinished.marshal())
 	return nil
@@ -716,6 +746,7 @@ func (hs *serverHandshakeState) sendFinished() error {
 
 	finished := new(finishedMsg)
 	finished.verifyData = hs.finishedHash.serverSum(hs.masterSecret)
+	c.serverVerify = append(c.serverVerify[:0], finished.verifyData...)
 	postCCSBytes := finished.marshal()
 	hs.writeServerHash(postCCSBytes)
 

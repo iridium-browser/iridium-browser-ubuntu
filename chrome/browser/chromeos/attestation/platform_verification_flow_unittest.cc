@@ -14,7 +14,6 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/renderer_host/pepper/device_id_fetcher.h"
 #include "chrome/common/pref_names.h"
@@ -23,6 +22,7 @@
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -76,30 +76,30 @@ class FakeDelegate : public PlatformVerificationFlow::Delegate {
   virtual void ShowConsentPrompt(
       content::WebContents* web_contents,
       const PlatformVerificationFlow::Delegate::ConsentCallback& callback)
-      OVERRIDE {
+      override {
     num_consent_calls_++;
     callback.Run(response_);
   }
 
-  virtual PrefService* GetPrefs(content::WebContents* web_contents) OVERRIDE {
+  virtual PrefService* GetPrefs(content::WebContents* web_contents) override {
     return &pref_service_;
   }
 
-  virtual const GURL& GetURL(content::WebContents* web_contents) OVERRIDE {
+  virtual const GURL& GetURL(content::WebContents* web_contents) override {
     return url_;
   }
 
   virtual user_manager::User* GetUser(
-      content::WebContents* web_contents) OVERRIDE {
+      content::WebContents* web_contents) override {
     return mock_user_manager_.GetActiveUser();
   }
 
   virtual HostContentSettingsMap* GetContentSettings(
-      content::WebContents* web_contents) OVERRIDE {
+      content::WebContents* web_contents) override {
     return content_settings_.get();
   }
 
-  virtual bool IsGuestOrIncognito(content::WebContents* web_contents) OVERRIDE {
+  virtual bool IsGuestOrIncognito(content::WebContents* web_contents) override {
     return is_incognito_;
   }
 
@@ -141,7 +141,7 @@ class CustomFakeCryptohomeClient : public FakeCryptohomeClient {
                                  attestation_enrolled_(true),
                                  attestation_prepared_(true) {}
   virtual void TpmAttestationIsEnrolled(
-      const BoolDBusMethodCallback& callback) OVERRIDE {
+      const BoolDBusMethodCallback& callback) override {
     base::MessageLoop::current()->PostTask(FROM_HERE,
                                            base::Bind(callback,
                                                       call_status_,
@@ -149,7 +149,7 @@ class CustomFakeCryptohomeClient : public FakeCryptohomeClient {
   }
 
   virtual void TpmAttestationIsPrepared(
-      const BoolDBusMethodCallback& callback) OVERRIDE {
+      const BoolDBusMethodCallback& callback) override {
     base::MessageLoop::current()->PostTask(FROM_HERE,
                                            base::Bind(callback,
                                                       call_status_,
@@ -472,6 +472,15 @@ TEST_F(PlatformVerificationFlowTest, ExpiredCert) {
 
 TEST_F(PlatformVerificationFlowTest, IncognitoMode) {
   fake_delegate_.set_is_incognito(true);
+  verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(PlatformVerificationFlow::PLATFORM_NOT_VERIFIED, result_);
+}
+
+TEST_F(PlatformVerificationFlowTest, AttestationNotPrepared) {
+  fake_delegate_.set_response(PlatformVerificationFlow::CONSENT_RESPONSE_DENY);
+  fake_cryptohome_client_.set_attestation_enrolled(false);
+  fake_cryptohome_client_.set_attestation_prepared(false);
   verifier_->ChallengePlatformKey(NULL, kTestID, kTestChallenge, callback_);
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(PlatformVerificationFlow::PLATFORM_NOT_VERIFIED, result_);

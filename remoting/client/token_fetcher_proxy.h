@@ -22,13 +22,13 @@ class TokenFetcherProxy
 
   TokenFetcherProxy(const TokenFetcherCallback& token_fetcher_impl,
                     const std::string& host_public_key);
-  virtual ~TokenFetcherProxy();
+  ~TokenFetcherProxy() override;
 
   // protocol::TokenClientAuthenticator::TokenFetcher interface.
-  virtual void FetchThirdPartyToken(
+  void FetchThirdPartyToken(
       const GURL& token_url,
       const std::string& scope,
-      const TokenFetchedCallback& token_fetched_callback) OVERRIDE;
+      const TokenFetchedCallback& token_fetched_callback) override;
 
   // Called by the token fetching implementation when the token is fetched.
   void OnTokenFetched(const std::string& token,

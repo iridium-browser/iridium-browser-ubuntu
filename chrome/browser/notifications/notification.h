@@ -22,18 +22,12 @@ class Image;
 }
 
 // Representation of a notification to be shown to the user.
-// On non-Ash platforms these are rendered as HTML, sometimes described by a
-// data url converted from text + icon data. On Ash they are rendered as
-// formated text and icon data.
 class Notification : public message_center::Notification {
  public:
-  // Initializes a notification with text content. On non-ash platforms, this
-  // creates an HTML representation using a data: URL for display.
   Notification(const GURL& origin_url,
-               const GURL& icon_url,
                const base::string16& title,
                const base::string16& body,
-               blink::WebTextDirection dir,
+               const gfx::Image& icon,
                const base::string16& display_source,
                const base::string16& replace_id,
                NotificationDelegate* delegate);
@@ -51,25 +45,17 @@ class Notification : public message_center::Notification {
       const message_center::RichNotificationData& rich_notification_data,
       NotificationDelegate* delegate);
 
+  Notification(const std::string& id, const Notification& notification);
+
   Notification(const Notification& notification);
-  virtual ~Notification();
+  ~Notification() override;
   Notification& operator=(const Notification& notification);
 
   // The origin URL of the script which requested the notification.
   const GURL& origin_url() const { return origin_url_; }
 
-  // A url for the icon to be shown (optional).
-  const GURL& icon_url() const { return icon_url_; }
-
   // A unique identifier used to update (replace) or remove a notification.
   const base::string16& replace_id() const { return replace_id_; }
-
-  // A url for the button icons to be shown (optional).
-  const GURL& button_one_icon_url() const { return button_one_icon_url_; }
-  const GURL& button_two_icon_url() const { return button_two_icon_url_; }
-
-  // A url for the image to be shown (optional).
-  const GURL& image_url() const { return image_url_; }
 
   // Id of the delegate embedded inside this instance.
   std::string delegate_id() const { return delegate()->id(); }
@@ -79,17 +65,6 @@ class Notification : public message_center::Notification {
  private:
   // The Origin of the page/worker which created this notification.
   GURL origin_url_;
-
-  // URL for the icon associated with the notification. Requires delegate_
-  // to have a non NULL RenderViewHost.
-  GURL icon_url_;
-
-  // The URLs of the button images for a rich notification.
-  GURL button_one_icon_url_;
-  GURL button_two_icon_url_;
-
-  // The URL of a large image to be displayed for a a rich notification.
-  GURL image_url_;
 
   // The user-supplied replace ID for the notification.
   base::string16 replace_id_;

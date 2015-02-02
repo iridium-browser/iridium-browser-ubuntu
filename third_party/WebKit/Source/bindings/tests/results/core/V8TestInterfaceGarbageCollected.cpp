@@ -22,7 +22,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceGarbageCollected::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceGarbageCollected::domTemplate, V8TestInterfaceGarbageCollected::refObject, V8TestInterfaceGarbageCollected::derefObject, V8TestInterfaceGarbageCollected::createPersistentHandle, 0, V8TestInterfaceGarbageCollected::toEventTarget, 0, V8TestInterfaceGarbageCollected::installConditionallyEnabledMethods, V8TestInterfaceGarbageCollected::installConditionallyEnabledProperties, &V8EventTarget::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::GarbageCollectedObject };
+const WrapperTypeInfo V8TestInterfaceGarbageCollected::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceGarbageCollected::domTemplate, V8TestInterfaceGarbageCollected::refObject, V8TestInterfaceGarbageCollected::derefObject, V8TestInterfaceGarbageCollected::trace, 0, V8TestInterfaceGarbageCollected::toEventTarget, 0, V8TestInterfaceGarbageCollected::installConditionallyEnabledMethods, V8TestInterfaceGarbageCollected::installConditionallyEnabledProperties, &V8EventTarget::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::GarbageCollectedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceGarbageCollected.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -30,8 +30,6 @@ const WrapperTypeInfo V8TestInterfaceGarbageCollected::wrapperTypeInfo = { gin::
 const WrapperTypeInfo& TestInterfaceGarbageCollected::s_wrapperTypeInfo = V8TestInterfaceGarbageCollected::wrapperTypeInfo;
 
 namespace TestInterfaceGarbageCollectedV8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void attr1AttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
@@ -65,7 +63,7 @@ static void attr1AttributeSetterCallback(v8::Local<v8::String>, v8::Local<v8::Va
 static void funcMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwException(createMinimumArityTypeErrorForMethod("func", "TestInterfaceGarbageCollected", 1, info.Length(), info.GetIsolate()), info.GetIsolate());
+        V8ThrowException::throwException(createMinimumArityTypeErrorForMethod(info.GetIsolate(), "func", "TestInterfaceGarbageCollected", 1, info.Length()), info.GetIsolate());
         return;
     }
     TestInterfaceGarbageCollected* impl = V8TestInterfaceGarbageCollected::toImpl(info.Holder());
@@ -86,7 +84,7 @@ static void funcMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwException(createMinimumArityTypeErrorForConstructor("TestInterfaceGarbageCollected", 1, info.Length(), info.GetIsolate()), info.GetIsolate());
+        V8ThrowException::throwException(createMinimumArityTypeErrorForConstructor(info.GetIsolate(), "TestInterfaceGarbageCollected", 1, info.Length()), info.GetIsolate());
         return;
     }
     V8StringResource<> str;
@@ -113,7 +111,7 @@ void V8TestInterfaceGarbageCollected::constructorCallback(const v8::FunctionCall
 {
     TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "DOMConstructor");
     if (!info.IsConstructCall()) {
-        V8ThrowException::throwTypeError(ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceGarbageCollected"), info.GetIsolate());
+        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceGarbageCollected"));
         return;
     }
 
@@ -137,8 +135,10 @@ static void installV8TestInterfaceGarbageCollectedTemplate(v8::Handle<v8::Functi
         isolate);
     functionTemplate->SetCallHandler(V8TestInterfaceGarbageCollected::constructorCallback);
     functionTemplate->SetLength(1);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
     // Custom toString template
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
@@ -169,18 +169,12 @@ EventTarget* V8TestInterfaceGarbageCollected::toEventTarget(v8::Handle<v8::Objec
     return toImpl(object);
 }
 
-
-void V8TestInterfaceGarbageCollected::refObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceGarbageCollected::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
 }
 
-void V8TestInterfaceGarbageCollected::derefObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceGarbageCollected::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-}
-
-WrapperPersistentNode* V8TestInterfaceGarbageCollected::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    return WrapperPersistent<TestInterfaceGarbageCollected>::create(internalPointer->toImpl<TestInterfaceGarbageCollected>());
 }
 
 template<>

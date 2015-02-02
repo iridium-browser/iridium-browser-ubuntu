@@ -201,7 +201,7 @@ TEST_F(VideoSendStreamTest, SupportsTransmissionTimeOffset) {
 
     virtual void PerformTest() OVERRIDE {
       EXPECT_EQ(kEventSignaled, Wait())
-          << "Timed out while waiting single RTP packet.";
+          << "Timed out while waiting for a single RTP packet.";
     }
 
     class DelayedEncoder : public test::FakeEncoder {
@@ -962,8 +962,8 @@ TEST_F(VideoSendStreamTest, ProducesStats) {
                 config_.rtp.ssrcs.begin(), config_.rtp.ssrcs.end(), ssrc));
         // Check for data populated by various sources. RTCP excluded as this
         // data is received from remote side. Tested in call tests instead.
-        const StreamStats& entry = stats.substreams[ssrc];
-        if (entry.key_frames > 0u && entry.bitrate_bps > 0 &&
+        const SsrcStats& entry = stats.substreams[ssrc];
+        if (entry.key_frames > 0u && entry.total_bitrate_bps > 0 &&
             entry.rtp_stats.packets > 0u && entry.avg_delay_ms > 0 &&
             entry.max_delay_ms > 0) {
           return true;
@@ -1045,20 +1045,20 @@ TEST_F(VideoSendStreamTest, MinTransmitBitrateRespectsRemb) {
       VideoSendStream::Stats stats = stream_->GetStats();
       if (!stats.substreams.empty()) {
         EXPECT_EQ(1u, stats.substreams.size());
-        int bitrate_bps = stats.substreams.begin()->second.bitrate_bps;
-        test::PrintResult(
-            "bitrate_stats_",
-            "min_transmit_bitrate_low_remb",
-            "bitrate_bps",
-            static_cast<size_t>(bitrate_bps),
-            "bps",
-            false);
-        if (bitrate_bps > kHighBitrateBps) {
+        int total_bitrate_bps =
+            stats.substreams.begin()->second.total_bitrate_bps;
+        test::PrintResult("bitrate_stats_",
+                          "min_transmit_bitrate_low_remb",
+                          "bitrate_bps",
+                          static_cast<size_t>(total_bitrate_bps),
+                          "bps",
+                          false);
+        if (total_bitrate_bps > kHighBitrateBps) {
           rtp_rtcp_->SetREMBData(kRembBitrateBps, 1, &header.ssrc);
           rtp_rtcp_->Process();
           bitrate_capped_ = true;
         } else if (bitrate_capped_ &&
-                   bitrate_bps < kRembRespectedBitrateBps) {
+                   total_bitrate_bps < kRembRespectedBitrateBps) {
           observation_complete_->Set();
         }
       }
@@ -1075,7 +1075,7 @@ TEST_F(VideoSendStreamTest, MinTransmitBitrateRespectsRemb) {
         VideoSendStream::Config* send_config,
         std::vector<VideoReceiveStream::Config>* receive_configs,
         VideoEncoderConfig* encoder_config) OVERRIDE {
-      send_config->rtp.min_transmit_bitrate_bps = kMinTransmitBitrateBps;
+      encoder_config->min_transmit_bitrate_bps = kMinTransmitBitrateBps;
     }
 
     virtual void PerformTest() OVERRIDE {
@@ -1440,8 +1440,8 @@ TEST_F(VideoSendStreamTest, EncoderSetupPropagatesVp8Config) {
       send_config->encoder_settings.payload_name = "VP8";
 
       for (size_t i = 0; i < encoder_config->streams.size(); ++i) {
-        encoder_config->streams[i].temporal_layers.resize(
-            kNumberOfTemporalLayers);
+        encoder_config->streams[i].temporal_layer_thresholds_bps.resize(
+            kNumberOfTemporalLayers - 1);
       }
 
       encoder_config->encoder_specific_settings = &vp8_settings_;
@@ -1550,4 +1550,44 @@ TEST_F(VideoSendStreamTest, RtcpSenderReportContainsMediaBytesSent) {
   RunBaseTest(&test);
 }
 
+TEST_F(VideoSendStreamTest, TranslatesTwoLayerScreencastToTargetBitrate) {
+  static const int kScreencastTargetBitrateKbps = 200;
+  class ScreencastTargetBitrateTest : public test::SendTest,
+                                      public test::FakeEncoder {
+   public:
+    ScreencastTargetBitrateTest()
+        : SendTest(kDefaultTimeoutMs),
+          test::FakeEncoder(Clock::GetRealTimeClock()) {}
+
+   private:
+    virtual int32_t InitEncode(const VideoCodec* config,
+                               int32_t number_of_cores,
+                               uint32_t max_payload_size) {
+      EXPECT_EQ(static_cast<unsigned int>(kScreencastTargetBitrateKbps),
+                config->targetBitrate);
+      observation_complete_->Set();
+      return test::FakeEncoder::InitEncode(
+          config, number_of_cores, max_payload_size);
+    }
+    virtual void ModifyConfigs(
+        VideoSendStream::Config* send_config,
+        std::vector<VideoReceiveStream::Config>* receive_configs,
+        VideoEncoderConfig* encoder_config) OVERRIDE {
+      send_config->encoder_settings.encoder = this;
+      EXPECT_EQ(1u, encoder_config->streams.size());
+      EXPECT_TRUE(
+          encoder_config->streams[0].temporal_layer_thresholds_bps.empty());
+      encoder_config->streams[0].temporal_layer_thresholds_bps.push_back(
+          kScreencastTargetBitrateKbps * 1000);
+      encoder_config->content_type = VideoEncoderConfig::kScreenshare;
+    }
+
+    virtual void PerformTest() OVERRIDE {
+      EXPECT_EQ(kEventSignaled, Wait())
+          << "Timed out while waiting for the encoder to be initialized.";
+    }
+  } test;
+
+  RunBaseTest(&test);
+}
 }  // namespace webrtc

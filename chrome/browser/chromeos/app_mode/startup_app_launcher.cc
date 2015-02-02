@@ -26,7 +26,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "components/crx_file/id_util.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -37,6 +36,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_handlers/kiosk_mode_info.h"
 #include "extensions/common/manifest_handlers/offline_enabled_info.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "net/base/load_flags.h"
@@ -358,11 +358,6 @@ void StartupAppLauncher::OnLaunchFailure(KioskAppLaunchError::Error error) {
   delegate_->OnLaunchFailed(error);
 }
 
-void StartupAppLauncher::OnUpdateCheckFinished() {
-  OnReadyToLaunch();
-  UpdateAppData();
-}
-
 void StartupAppLauncher::BeginInstall() {
   KioskAppManager::Get()->InstallFromCache(app_id_);
   if (extensions::ExtensionSystem::Get(profile_)
@@ -390,6 +385,7 @@ void StartupAppLauncher::BeginInstall() {
 
 void StartupAppLauncher::OnReadyToLaunch() {
   ready_to_launch_ = true;
+  UpdateAppData();
   delegate_->OnReadyToLaunch();
 }
 

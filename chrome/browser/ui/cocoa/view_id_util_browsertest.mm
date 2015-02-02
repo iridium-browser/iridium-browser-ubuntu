@@ -14,7 +14,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/view_id_util.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -58,7 +57,7 @@ class ViewIDTest : public InProcessBrowserTest {
         BookmarkModelFactory::GetForProfile(browser()->profile());
     if (bookmark_model) {
       if (!bookmark_model->loaded())
-        test::WaitForBookmarkModelToLoad(bookmark_model);
+        bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
 
       bookmarks::AddIfNotBookmarked(bookmark_model,
                                     GURL(url::kAboutBlankURL),

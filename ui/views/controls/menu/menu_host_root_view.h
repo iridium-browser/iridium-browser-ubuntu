@@ -25,15 +25,15 @@ class MenuHostRootView : public internal::RootView {
   void ClearSubmenu() { submenu_ = NULL; }
 
   // Overridden from View:
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnMouseMoved(const ui::MouseEvent& event) override;
+  bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
 
  private:
   // ui::EventProcessor:
-  virtual ui::EventDispatchDetails OnEventFromSource(ui::Event* event) OVERRIDE;
+  void OnEventProcessingFinished(ui::Event* event) override;
 
   // Returns the MenuController for this MenuHostRootView.
   MenuController* GetMenuController();

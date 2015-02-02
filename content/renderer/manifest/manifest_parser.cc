@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/public/common/manifest.h"
+#include "content/renderer/manifest/manifest_uma_util.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace content {
@@ -94,7 +95,6 @@ GURL ParseStartURL(const base::DictionaryValue& dictionary,
 // parsing failed.
 Manifest::DisplayMode ParseDisplay(const base::DictionaryValue& dictionary) {
   base::NullableString16 display = ParseString(dictionary, "display", Trim);
-
   if (display.is_null())
     return Manifest::DISPLAY_MODE_UNSPECIFIED;
 
@@ -275,6 +275,14 @@ std::vector<Manifest::Icon> ParseIcons(const base::DictionaryValue& dictionary,
   return icons;
 }
 
+// Parses the 'gcm_sender_id' field of the manifest.
+// This is a proprietary extension of the Web Manifest specification.
+// Returns the parsed string if any, a null string if the parsing failed.
+base::NullableString16 ParseGCMSenderID(
+    const base::DictionaryValue& dictionary)  {
+  return ParseString(dictionary, "gcm_sender_id", Trim);
+}
+
 } // anonymous namespace
 
 Manifest ManifestParser::Parse(const base::StringPiece& json,
@@ -284,11 +292,13 @@ Manifest ManifestParser::Parse(const base::StringPiece& json,
   if (!value) {
     // TODO(mlamouri): get the JSON parsing error and report it to the developer
     // console.
+    ManifestUmaUtil::ParseFailed();
     return Manifest();
   }
 
   if (value->GetType() != base::Value::TYPE_DICTIONARY) {
     // TODO(mlamouri): provide a custom message to the developer console.
+    ManifestUmaUtil::ParseFailed();
     return Manifest();
   }
 
@@ -296,6 +306,7 @@ Manifest ManifestParser::Parse(const base::StringPiece& json,
   value->GetAsDictionary(&dictionary);
   if (!dictionary) {
     // TODO(mlamouri): provide a custom message to the developer console.
+    ManifestUmaUtil::ParseFailed();
     return Manifest();
   }
 
@@ -307,6 +318,9 @@ Manifest ManifestParser::Parse(const base::StringPiece& json,
   manifest.display = ParseDisplay(*dictionary);
   manifest.orientation = ParseOrientation(*dictionary);
   manifest.icons = ParseIcons(*dictionary, manifest_url);
+  manifest.gcm_sender_id = ParseGCMSenderID(*dictionary);
+
+  ManifestUmaUtil::ParseSucceeded(manifest);
 
   return manifest;
 }

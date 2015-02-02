@@ -28,10 +28,10 @@ class BrailleDisplayPrivateAPI::DefaultEventDelegate
     : public BrailleDisplayPrivateAPI::EventDelegate {
  public:
   DefaultEventDelegate(EventRouter::Observer* observer, Profile* profile);
-  virtual ~DefaultEventDelegate();
+  ~DefaultEventDelegate() override;
 
-  virtual void BroadcastEvent(scoped_ptr<Event> event) OVERRIDE;
-  virtual bool HasListener() OVERRIDE;
+  void BroadcastEvent(scoped_ptr<Event> event) override;
+  bool HasListener() override;
 
  private:
   EventRouter::Observer* observer_;

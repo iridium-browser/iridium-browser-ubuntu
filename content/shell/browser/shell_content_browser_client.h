@@ -17,7 +17,6 @@ namespace content {
 
 class ShellBrowserContext;
 class ShellBrowserMainParts;
-class ShellNotificationManager;
 class ShellResourceDispatcherHostDelegate;
 
 class ShellContentBrowserClient : public ContentBrowserClient {
@@ -28,64 +27,51 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   static void SetSwapProcessesForRedirect(bool swap);
 
   ShellContentBrowserClient();
-  virtual ~ShellContentBrowserClient();
-
-  // Will be lazily created when running layout tests.
-  ShellNotificationManager* GetShellNotificationManager();
+  ~ShellContentBrowserClient() override;
 
   // ContentBrowserClient overrides.
-  virtual BrowserMainParts* CreateBrowserMainParts(
-      const MainFunctionParams& parameters) OVERRIDE;
-  virtual void RenderProcessWillLaunch(RenderProcessHost* host) OVERRIDE;
-  virtual net::URLRequestContextGetter* CreateRequestContext(
+  BrowserMainParts* CreateBrowserMainParts(
+      const MainFunctionParams& parameters) override;
+  void RenderProcessWillLaunch(RenderProcessHost* host) override;
+  net::URLRequestContextGetter* CreateRequestContext(
       BrowserContext* browser_context,
       ProtocolHandlerMap* protocol_handlers,
-      URLRequestInterceptorScopedVector request_interceptors) OVERRIDE;
-  virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
+      URLRequestInterceptorScopedVector request_interceptors) override;
+  net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
       BrowserContext* browser_context,
       const base::FilePath& partition_path,
       bool in_memory,
       ProtocolHandlerMap* protocol_handlers,
-      URLRequestInterceptorScopedVector request_interceptors) OVERRIDE;
-  virtual bool IsHandledURL(const GURL& url) OVERRIDE;
-  virtual void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
-                                              int child_process_id) OVERRIDE;
-  virtual void OverrideWebkitPrefs(RenderViewHost* render_view_host,
-                                   const GURL& url,
-                                   WebPreferences* prefs) OVERRIDE;
-  virtual void ResourceDispatcherHostCreated() OVERRIDE;
-  virtual AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
-  virtual std::string GetDefaultDownloadName() OVERRIDE;
-  virtual WebContentsViewDelegate* GetWebContentsViewDelegate(
-      WebContents* web_contents) OVERRIDE;
-  virtual QuotaPermissionContext* CreateQuotaPermissionContext() OVERRIDE;
-  virtual void RequestDesktopNotificationPermission(
-      const GURL& source_origin,
-      RenderFrameHost* render_frame_host,
-      const base::Callback<void(blink::WebNotificationPermission)>& callback)
-          OVERRIDE;
-  virtual blink::WebNotificationPermission
-      CheckDesktopNotificationPermission(
-          const GURL& source_url,
-          ResourceContext* context,
-          int render_process_id) OVERRIDE;
-  virtual SpeechRecognitionManagerDelegate*
-      GetSpeechRecognitionManagerDelegate() OVERRIDE;
-  virtual net::NetLog* GetNetLog() OVERRIDE;
-  virtual bool ShouldSwapProcessesForRedirect(ResourceContext* resource_context,
-                                              const GURL& current_url,
-                                              const GURL& new_url) OVERRIDE;
-  virtual DevToolsManagerDelegate* GetDevToolsManagerDelegate() OVERRIDE;
+      URLRequestInterceptorScopedVector request_interceptors) override;
+  bool IsHandledURL(const GURL& url) override;
+  void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
+                                      int child_process_id) override;
+  void OverrideWebkitPrefs(RenderViewHost* render_view_host,
+                           const GURL& url,
+                           WebPreferences* prefs) override;
+  void ResourceDispatcherHostCreated() override;
+  AccessTokenStore* CreateAccessTokenStore() override;
+  std::string GetDefaultDownloadName() override;
+  WebContentsViewDelegate* GetWebContentsViewDelegate(
+      WebContents* web_contents) override;
+  QuotaPermissionContext* CreateQuotaPermissionContext() override;
+  SpeechRecognitionManagerDelegate* GetSpeechRecognitionManagerDelegate()
+      override;
+  net::NetLog* GetNetLog() override;
+  bool ShouldSwapProcessesForRedirect(ResourceContext* resource_context,
+                                      const GURL& current_url,
+                                      const GURL& new_url) override;
+  DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  virtual void GetAdditionalMappedFilesForChildProcess(
+  void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      std::vector<FileDescriptorInfo>* mappings) OVERRIDE;
+      FileDescriptorInfo* mappings) override;
 #endif
 #if defined(OS_WIN)
   virtual void PreSpawnRenderer(sandbox::TargetPolicy* policy,
-                                bool* success) OVERRIDE;
+                                bool* success) override;
 #endif
 
   ShellBrowserContext* browser_context();
@@ -101,12 +87,8 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   ShellBrowserContext* ShellBrowserContextForBrowserContext(
       BrowserContext* content_browser_context);
 
-  scoped_ptr<ShellNotificationManager> shell_notification_manager_;
-
   scoped_ptr<ShellResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
-
-  base::FilePath webkit_source_dir_;
 
   ShellBrowserMainParts* shell_browser_main_parts_;
 };

@@ -36,32 +36,31 @@ class TestConfigurator : public Configurator {
   TestConfigurator(
       const scoped_refptr<base::SequencedTaskRunner>& worker_task_runner,
       const scoped_refptr<base::SingleThreadTaskRunner>& network_task_runner);
-  virtual ~TestConfigurator();
+  ~TestConfigurator() override;
 
   // Overrrides for Configurator.
-  virtual int InitialDelay() const OVERRIDE;
-  virtual int NextCheckDelay() OVERRIDE;
-  virtual int StepDelay() const OVERRIDE;
-  virtual int StepDelayMedium() OVERRIDE;
-  virtual int MinimumReCheckWait() const OVERRIDE;
-  virtual int OnDemandDelay() const OVERRIDE;
-  virtual std::vector<GURL> UpdateUrl() const OVERRIDE;
-  virtual std::vector<GURL> PingUrl() const OVERRIDE;
-  virtual base::Version GetBrowserVersion() const OVERRIDE;
-  virtual std::string GetChannel() const OVERRIDE;
-  virtual std::string GetLang() const OVERRIDE;
-  virtual std::string GetOSLongName() const OVERRIDE;
-  virtual std::string ExtraRequestParams() const OVERRIDE;
-  virtual size_t UrlSizeLimit() const OVERRIDE;
-  virtual net::URLRequestContextGetter* RequestContext() const OVERRIDE;
-  virtual scoped_refptr<OutOfProcessPatcher> CreateOutOfProcessPatcher()
-      const OVERRIDE;
-  virtual bool DeltasEnabled() const OVERRIDE;
-  virtual bool UseBackgroundDownloader() const OVERRIDE;
-  virtual scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner()
-      const OVERRIDE;
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-      GetSingleThreadTaskRunner() const OVERRIDE;
+  int InitialDelay() const override;
+  int NextCheckDelay() override;
+  int StepDelay() const override;
+  int StepDelayMedium() override;
+  int MinimumReCheckWait() const override;
+  int OnDemandDelay() const override;
+  std::vector<GURL> UpdateUrl() const override;
+  std::vector<GURL> PingUrl() const override;
+  base::Version GetBrowserVersion() const override;
+  std::string GetChannel() const override;
+  std::string GetLang() const override;
+  std::string GetOSLongName() const override;
+  std::string ExtraRequestParams() const override;
+  size_t UrlSizeLimit() const override;
+  net::URLRequestContextGetter* RequestContext() const override;
+  scoped_refptr<OutOfProcessPatcher> CreateOutOfProcessPatcher() const override;
+  bool DeltasEnabled() const override;
+  bool UseBackgroundDownloader() const override;
+  scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner()
+      const override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetSingleThreadTaskRunner()
+      const override;
 
   void SetLoopCount(int times);
   void SetRecheckTime(int seconds);

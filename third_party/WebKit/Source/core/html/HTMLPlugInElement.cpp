@@ -42,11 +42,12 @@
 #include "core/page/EventHandler.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
+#include "core/plugins/PluginPlaceholder.h"
 #include "core/plugins/PluginView.h"
 #include "core/rendering/RenderBlockFlow.h"
 #include "core/rendering/RenderEmbeddedObject.h"
 #include "core/rendering/RenderImage.h"
-#include "core/rendering/RenderWidget.h"
+#include "core/rendering/RenderPart.h"
 #include "platform/Logging.h"
 #include "platform/MIMETypeFromURL.h"
 #include "platform/MIMETypeRegistry.h"
@@ -68,9 +69,7 @@ HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tagName, Document& doc
     // the same codepath in this class.
     , m_needsWidgetUpdate(!createdByParser)
     , m_shouldPreferPlugInsForImages(preferPlugInsForImagesOption == ShouldPreferPlugInsForImages)
-    , m_usePlaceholderContent(false)
 {
-    setHasCustomStyleCallbacks();
 }
 
 HTMLPlugInElement::~HTMLPlugInElement()
@@ -87,7 +86,45 @@ HTMLPlugInElement::~HTMLPlugInElement()
 void HTMLPlugInElement::trace(Visitor* visitor)
 {
     visitor->trace(m_imageLoader);
+    visitor->trace(m_placeholder);
+    visitor->trace(m_persistedPluginWidget);
     HTMLFrameOwnerElement::trace(visitor);
+}
+
+#if ENABLE(OILPAN)
+void HTMLPlugInElement::disconnectContentFrame()
+{
+    if (m_persistedPluginWidget) {
+        m_persistedPluginWidget->dispose();
+        m_persistedPluginWidget = nullptr;
+    }
+    HTMLFrameOwnerElement::disconnectContentFrame();
+}
+
+void HTMLPlugInElement::shouldDisposePlugin()
+{
+    if (m_persistedPluginWidget && m_persistedPluginWidget->isPluginView())
+        toPluginView(m_persistedPluginWidget.get())->shouldDisposePlugin();
+}
+#endif
+
+void HTMLPlugInElement::setPersistedPluginWidget(Widget* widget)
+{
+    if (m_persistedPluginWidget == widget)
+        return;
+#if ENABLE(OILPAN)
+    if (m_persistedPluginWidget && m_persistedPluginWidget->isPluginView()) {
+        LocalFrame* frame = toPluginView(m_persistedPluginWidget.get())->pluginFrame();
+        ASSERT(frame);
+        frame->unregisterPluginElement(this);
+    }
+    if (widget && widget->isPluginView()) {
+        LocalFrame* frame = toPluginView(widget)->pluginFrame();
+        ASSERT(frame);
+        frame->registerPluginElement(this);
+    }
+#endif
+    m_persistedPluginWidget = widget;
 }
 
 bool HTMLPlugInElement::canProcessDrag() const
@@ -100,13 +137,13 @@ bool HTMLPlugInElement::willRespondToMouseClickEvents()
     if (isDisabledFormControl())
         return false;
     RenderObject* r = renderer();
-    return r && (r->isEmbeddedObject() || r->isWidget());
+    return r && (r->isEmbeddedObject() || r->isRenderPart());
 }
 
 void HTMLPlugInElement::removeAllEventListeners()
 {
     HTMLFrameOwnerElement::removeAllEventListeners();
-    if (RenderWidget* renderer = existingRenderWidget()) {
+    if (RenderPart* renderer = existingRenderPart()) {
         if (Widget* widget = renderer->widget())
             widget->eventListenersRemoved();
     }
@@ -160,7 +197,7 @@ void HTMLPlugInElement::requestPluginCreationWithoutRendererIfPossible()
         || !document().frame()->loader().client()->canCreatePluginWithoutRenderer(m_serviceType))
         return;
 
-    if (renderer() && renderer()->isWidget())
+    if (renderer() && renderer()->isRenderPart())
         return;
 
     createPluginWithoutRenderer();
@@ -202,13 +239,10 @@ void HTMLPlugInElement::detach(const AttachContext& context)
     // Only try to persist a plugin widget we actually own.
     Widget* plugin = ownedWidget();
     if (plugin && plugin->pluginShouldPersist())
-        m_persistedPluginWidget = plugin;
-#if ENABLE(OILPAN)
-    else if (plugin)
-        plugin->detach();
-#endif
+        setPersistedPluginWidget(plugin);
+
     resetInstance();
-    // FIXME - is this next line necessary?
+    // Clear the widget; will trigger disposal of it with Oilpan.
     setWidget(nullptr);
 
     if (m_isCapturingMouseEvents) {
@@ -228,8 +262,8 @@ void HTMLPlugInElement::detach(const AttachContext& context)
 RenderObject* HTMLPlugInElement::createRenderer(RenderStyle* style)
 {
     // Fallback content breaks the DOM->Renderer class relationship of this
-    // class and all superclasses because createObject won't necessarily
-    // return a RenderEmbeddedObject, RenderPart or even RenderWidget.
+    // class and all superclasses because createObject won't necessarily return
+    // a RenderEmbeddedObject or RenderPart.
     if (useFallbackContent())
         return RenderObject::createObject(this, style);
 
@@ -245,13 +279,6 @@ RenderObject* HTMLPlugInElement::createRenderer(RenderStyle* style)
     return new RenderEmbeddedObject(this);
 }
 
-void HTMLPlugInElement::willRecalcStyle(StyleRecalcChange)
-{
-    // FIXME: Why is this necessary? Manual re-attach is almost always wrong.
-    if (!useFallbackContent() && !usePlaceholderContent() && needsWidgetUpdate() && renderer() && !isImageType())
-        reattach();
-}
-
 void HTMLPlugInElement::finishParsingChildren()
 {
     HTMLFrameOwnerElement::finishParsingChildren();
@@ -260,7 +287,7 @@ void HTMLPlugInElement::finishParsingChildren()
 
     setNeedsWidgetUpdate(true);
     if (inDocument())
-        setNeedsStyleRecalc(SubtreeStyleChange);
+        lazyReattachIfNeeded();
 }
 
 void HTMLPlugInElement::resetInstance()
@@ -272,7 +299,7 @@ SharedPersistent<v8::Object>* HTMLPlugInElement::pluginWrapper()
 {
     LocalFrame* frame = document().frame();
     if (!frame)
-        return 0;
+        return nullptr;
 
     // If the host dynamically turns off JavaScript (or Java) we will still
     // return the cached allocated Bindings::Instance. Not supporting this
@@ -293,9 +320,9 @@ SharedPersistent<v8::Object>* HTMLPlugInElement::pluginWrapper()
 
 Widget* HTMLPlugInElement::pluginWidget() const
 {
-    if (RenderWidget* renderWidget = renderWidgetForJSBindings())
-        return renderWidget->widget();
-    return 0;
+    if (RenderPart* renderPart = renderPartForJSBindings())
+        return renderPart->widget();
+    return nullptr;
 }
 
 bool HTMLPlugInElement::isPresentationAttribute(const QualifiedName& name) const
@@ -337,13 +364,13 @@ void HTMLPlugInElement::defaultEventHandler(Event* event)
     // code in EventHandler; these code paths should be united.
 
     RenderObject* r = renderer();
-    if (!r || !r->isWidget())
+    if (!r || !r->isRenderPart())
         return;
     if (r->isEmbeddedObject()) {
         if (toRenderEmbeddedObject(r)->showsUnavailablePluginIndicator())
             return;
     }
-    RefPtr<Widget> widget = toRenderWidget(r)->widget();
+    RefPtrWillBeRawPtr<Widget> widget = toRenderPart(r)->widget();
     if (!widget)
         return;
     widget->handleEvent(event);
@@ -352,13 +379,13 @@ void HTMLPlugInElement::defaultEventHandler(Event* event)
     HTMLFrameOwnerElement::defaultEventHandler(event);
 }
 
-RenderWidget* HTMLPlugInElement::renderWidgetForJSBindings() const
+RenderPart* HTMLPlugInElement::renderPartForJSBindings() const
 {
     // Needs to load the plugin immediatedly because this function is called
     // when JavaScript code accesses the plugin.
     // FIXME: Check if dispatching events here is safe.
     document().updateLayoutIgnorePendingStylesheets(Document::RunPostLayoutTasksSynchronously);
-    return existingRenderWidget();
+    return existingRenderPart();
 }
 
 bool HTMLPlugInElement::isKeyboardFocusable() const
@@ -414,7 +441,7 @@ RenderEmbeddedObject* HTMLPlugInElement::renderEmbeddedObject() const
     // HTMLObjectElement and HTMLEmbedElement may return arbitrary renderers
     // when using fallback content.
     if (!renderer() || !renderer()->isEmbeddedObject())
-        return 0;
+        return nullptr;
     return toRenderEmbeddedObject(renderer());
 }
 
@@ -443,6 +470,9 @@ bool HTMLPlugInElement::wouldLoadAsNetscapePlugin(const String& url, const Strin
 bool HTMLPlugInElement::requestObject(const String& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues)
 {
     if (url.isEmpty() && mimeType.isEmpty())
+        return false;
+
+    if (protocolIsJavaScript(url))
         return false;
 
     // FIXME: None of this code should use renderers!
@@ -483,25 +513,36 @@ bool HTMLPlugInElement::loadPlugin(const KURL& url, const String& mimeType, cons
     WTF_LOG(Plugins, "   Loaded URL: %s", url.string().utf8().data());
     m_loadedUrl = url;
 
-    RefPtr<Widget> widget = m_persistedPluginWidget;
+    OwnPtrWillBeRawPtr<PluginPlaceholder> placeholder = nullptr;
+    RefPtrWillBeRawPtr<Widget> widget = m_persistedPluginWidget;
     if (!widget) {
         bool loadManually = document().isPluginDocument() && !document().containsPlugins();
-        FrameLoaderClient::DetachedPluginPolicy policy = requireRenderer ? FrameLoaderClient::FailOnDetachedPlugin : FrameLoaderClient::AllowDetachedPlugin;
-        widget = frame->loader().client()->createPlugin(this, url, paramNames, paramValues, mimeType, loadManually, policy);
+        placeholder = frame->loader().client()->createPluginPlaceholder(document(), url, paramNames, paramValues, mimeType, loadManually);
+        if (!placeholder) {
+            FrameLoaderClient::DetachedPluginPolicy policy = requireRenderer ? FrameLoaderClient::FailOnDetachedPlugin : FrameLoaderClient::AllowDetachedPlugin;
+            widget = frame->loader().client()->createPlugin(this, url, paramNames, paramValues, mimeType, loadManually, policy);
+        }
     }
 
-    if (!widget) {
+    if (!placeholder && !widget) {
         if (renderer && !renderer->showsUnavailablePluginIndicator())
             renderer->setPluginUnavailabilityReason(RenderEmbeddedObject::PluginMissing);
+        setPlaceholder(nullptr);
         return false;
+    }
+
+    if (placeholder) {
+        setPlaceholder(placeholder.release());
+        return true;
     }
 
     if (renderer) {
         setWidget(widget);
-        m_persistedPluginWidget = nullptr;
-    } else if (widget != m_persistedPluginWidget) {
-        m_persistedPluginWidget = widget;
+        setPersistedPluginWidget(nullptr);
+    } else {
+        setPersistedPluginWidget(widget.get());
     }
+    setPlaceholder(nullptr);
     document().setContainsPlugins();
     scheduleSVGFilterLayerUpdateHack();
     // Make sure any input event handlers introduced by the plugin are taken into account.
@@ -529,7 +570,22 @@ bool HTMLPlugInElement::shouldUsePlugin(const KURL& url, const String& mimeType,
     // it be handled as a plugin to show the broken plugin icon.
     useFallback = objectType == ObjectContentNone && hasFallback;
     return objectType == ObjectContentNone || objectType == ObjectContentNetscapePlugin || objectType == ObjectContentOtherPlugin;
+}
 
+void HTMLPlugInElement::setPlaceholder(PassOwnPtrWillBeRawPtr<PluginPlaceholder> placeholder)
+{
+    bool needsLazyReattach = (!placeholder) != (!m_placeholder);
+    if (placeholder) {
+        placeholder->loadIntoContainer(ensureUserAgentShadowRoot());
+        m_placeholder = placeholder;
+    } else {
+        ShadowRoot& shadowRoot = ensureUserAgentShadowRoot();
+        shadowRoot.removeChildren();
+        shadowRoot.appendChild(HTMLContentElement::create(document()));
+        m_placeholder.clear();
+    }
+    if (needsLazyReattach)
+        lazyReattachIfAttached();
 }
 
 void HTMLPlugInElement::dispatchErrorEvent()
@@ -590,12 +646,10 @@ bool HTMLPlugInElement::useFallbackContent() const
     return hasAuthorShadowRoot();
 }
 
-void HTMLPlugInElement::setUsePlaceholderContent(bool use)
+void HTMLPlugInElement::lazyReattachIfNeeded()
 {
-    if (use != m_usePlaceholderContent) {
-        m_usePlaceholderContent = use;
+    if (!useFallbackContent() && !usePlaceholderContent() && needsWidgetUpdate() && renderer() && !isImageType())
         lazyReattachIfAttached();
-    }
 }
 
 }

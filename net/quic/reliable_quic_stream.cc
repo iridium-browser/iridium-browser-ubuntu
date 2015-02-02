@@ -76,12 +76,11 @@ class ReliableQuicStream::ProxyAckNotifierDelegate
         num_retransmitted_bytes_(0) {
   }
 
-  virtual void OnAckNotification(int num_original_packets,
-                                 int num_original_bytes,
-                                 int num_retransmitted_packets,
-                                 int num_retransmitted_bytes,
-                                 QuicTime::Delta delta_largest_observed)
-      OVERRIDE {
+  void OnAckNotification(int num_original_packets,
+                         int num_original_bytes,
+                         int num_retransmitted_packets,
+                         int num_retransmitted_bytes,
+                         QuicTime::Delta delta_largest_observed) override {
     DCHECK_LT(0, pending_acks_);
     --pending_acks_;
     num_original_packets_ += num_original_packets;
@@ -106,8 +105,7 @@ class ReliableQuicStream::ProxyAckNotifierDelegate
 
  protected:
   // Delegates are ref counted.
-  virtual ~ProxyAckNotifierDelegate() OVERRIDE {
-  }
+  ~ProxyAckNotifierDelegate() override {}
 
  private:
   // Original delegate.  delegate_->OnAckNotification will be called when:
@@ -274,7 +272,7 @@ void ReliableQuicStream::WriteOrBufferData(
   }
 
   scoped_refptr<ProxyAckNotifierDelegate> proxy_delegate;
-  if (ack_notifier_delegate != NULL) {
+  if (ack_notifier_delegate != nullptr) {
     proxy_delegate = new ProxyAckNotifierDelegate(ack_notifier_delegate);
   }
 
@@ -298,7 +296,7 @@ void ReliableQuicStream::WriteOrBufferData(
     write_completed = true;
   }
 
-  if ((proxy_delegate.get() != NULL) &&
+  if ((proxy_delegate.get() != nullptr) &&
       (consumed_data.bytes_consumed > 0 || consumed_data.fin_consumed)) {
     proxy_delegate->WroteData(write_completed);
   }
@@ -317,13 +315,13 @@ void ReliableQuicStream::OnCanWrite() {
     if (consumed_data.bytes_consumed == pending_data->data.size() &&
         fin == consumed_data.fin_consumed) {
       queued_data_.pop_front();
-      if (delegate != NULL) {
+      if (delegate != nullptr) {
         delegate->WroteData(true);
       }
     } else {
       if (consumed_data.bytes_consumed > 0) {
         pending_data->data.erase(0, consumed_data.bytes_consumed);
-        if (delegate != NULL) {
+        if (delegate != nullptr) {
           delegate->WroteData(false);
         }
       }
@@ -459,7 +457,7 @@ void ReliableQuicStream::OnClose() {
     // written on this stream before termination. Done here if needed, using a
     // RST frame.
     DVLOG(1) << ENDPOINT << "Sending RST in OnClose: " << id();
-    session_->SendRstStream(id(), QUIC_RST_FLOW_CONTROL_ACCOUNTING,
+    session_->SendRstStream(id(), QUIC_RST_ACKNOWLEDGEMENT,
                             stream_bytes_written_);
     rst_sent_ = true;
   }

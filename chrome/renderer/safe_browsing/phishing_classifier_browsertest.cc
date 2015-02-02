@@ -51,7 +51,7 @@ class PhishingClassifierTest : public InProcessBrowserTest {
         page_term_login_(features::kPageTerm + std::string("login")) {
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
 #if defined(OS_WIN)
     // Don't want to try to create a GPU process.
@@ -59,7 +59,7 @@ class PhishingClassifierTest : public InProcessBrowserTest {
 #endif
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Construct a model to test with.  We include one feature from each of
     // the feature extractors, which allows us to verify that they all ran.
     ClientSideModel model;
@@ -105,7 +105,7 @@ class PhishingClassifierTest : public InProcessBrowserTest {
         clock_));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     content::RunAllPendingInMessageLoop();
   }
 
@@ -192,7 +192,7 @@ class PhishingClassifierTest : public InProcessBrowserTest {
     http_response->set_code(net::HTTP_OK);
     http_response->set_content_type("text/html");
     http_response->set_content(response_content_);
-    return http_response.PassAs<net::test_server::HttpResponse>();
+    return http_response.Pass();
   }
 
   std::string response_content_;

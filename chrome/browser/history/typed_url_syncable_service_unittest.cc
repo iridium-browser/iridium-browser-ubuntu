@@ -41,14 +41,13 @@ class TestHistoryBackend : public HistoryBackend {
   TestHistoryBackend() : HistoryBackend(base::FilePath(), NULL, NULL) {}
 
   // HistoryBackend test implementation.
-  virtual bool IsExpiredVisitTime(const base::Time& time) OVERRIDE {
+  bool IsExpiredVisitTime(const base::Time& time) override {
     return time.ToInternalValue() == EXPIRED_VISIT;
   }
 
-  virtual bool GetMostRecentVisitsForURL(
-      URLID id,
-      int max_visits,
-      VisitVector* visits) OVERRIDE {
+  bool GetMostRecentVisitsForURL(URLID id,
+                                 int max_visits,
+                                 VisitVector* visits) override {
     if (local_db_visits_[id].empty())
       return false;
 
@@ -74,7 +73,7 @@ class TestHistoryBackend : public HistoryBackend {
   }
 
  private:
-  virtual ~TestHistoryBackend() {}
+  ~TestHistoryBackend() override {}
 
   // Mock of visit table in local db.
   std::map<URLID, VisitVector> local_db_visits_;
@@ -127,9 +126,9 @@ class TypedUrlSyncableServiceTest : public testing::Test {
  protected:
   TypedUrlSyncableServiceTest() {}
 
-  virtual ~TypedUrlSyncableServiceTest() {}
+  ~TypedUrlSyncableServiceTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     fake_history_backend_ = new TestHistoryBackend();
     typed_url_sync_service_.reset(
         new TypedUrlSyncableService(fake_history_backend_.get()));

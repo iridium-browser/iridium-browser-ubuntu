@@ -25,12 +25,21 @@
           '<(PRODUCT_DIR)/android_webview_apk/assets/asset_file.html',
           '<(PRODUCT_DIR)/android_webview_apk/assets/cookie_test.html',
           '<(PRODUCT_DIR)/android_webview_apk/assets/asset_icon.png',
+          '<(PRODUCT_DIR)/android_webview_apk/assets/full_screen_video.js',
           '<(PRODUCT_DIR)/android_webview_apk/assets/full_screen_video_test.html',
+          '<(PRODUCT_DIR)/android_webview_apk/assets/full_screen_video_inside_div_test.html',
+          '<(PRODUCT_DIR)/android_webview_apk/assets/video.mp4',
         ],
         'conditions': [
           ['icu_use_data_file_flag==1', {
             'additional_input_paths': [
               '<(PRODUCT_DIR)/icudtl.dat',
+            ],
+          }],
+          ['v8_use_external_startup_data==1', {
+            'additional_input_paths': [
+              '<(PRODUCT_DIR)/natives_blob.bin',
+              '<(PRODUCT_DIR)/snapshot_blob.bin',
             ],
           }],
         ],
@@ -44,14 +53,23 @@
             '<(java_in_dir)/assets/asset_file.html',
             '<(java_in_dir)/assets/asset_icon.png',
             '<(java_in_dir)/assets/cookie_test.html',
+            '<(java_in_dir)/assets/full_screen_video.js',
             '<(java_in_dir)/assets/full_screen_video_test.html',
+            '<(java_in_dir)/assets/full_screen_video_inside_div_test.html',
+            '<(java_in_dir)/assets/video.mp4',
           ],
 	  'conditions': [
             ['icu_use_data_file_flag==1', {
               'files': [
                 '<(PRODUCT_DIR)/icudtl.dat',
               ],
-	    }],
+            }],
+            ['v8_use_external_startup_data==1', {
+              'files': [
+                '<(PRODUCT_DIR)/natives_blob.bin',
+                '<(PRODUCT_DIR)/snapshot_blob.bin',
+              ],
+            }],
           ],
         },
       ],
@@ -106,7 +124,6 @@
       'sources': [
         'browser/aw_static_cookie_policy_unittest.cc',
         'browser/aw_form_database_service_unittest.cc',
-        'browser/global_tile_manager_unittest.cc',
         'browser/net/android_stream_reader_url_request_job_unittest.cc',
         'browser/net/input_stream_reader_unittest.cc',
         'lib/main/webview_tests.cc',

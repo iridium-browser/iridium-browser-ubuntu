@@ -16,12 +16,12 @@ class LocationBarViewMac;
 class SearchButtonDecoration : public ButtonDecoration {
  public:
   explicit SearchButtonDecoration(LocationBarViewMac* owner);
-  virtual ~SearchButtonDecoration();
+  ~SearchButtonDecoration() override;
 
   // Implement |LocationBarDecoration|.
-  virtual CGFloat GetWidthForSpace(CGFloat width) OVERRIDE;
-  virtual void DrawInFrame(NSRect frame, NSView* control_view) OVERRIDE;
-  virtual bool OnMousePressed(NSRect frame, NSPoint location) OVERRIDE;
+  CGFloat GetWidthForSpace(CGFloat width) override;
+  void DrawInFrame(NSRect frame, NSView* control_view) override;
+  bool OnMousePressed(NSRect frame, NSPoint location) override;
 
  private:
   // The control view that owns this. Weak.

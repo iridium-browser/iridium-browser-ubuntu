@@ -16,31 +16,30 @@ class TtsApiControllerTest : public testing::Test {
 class DummyTtsPlatformImpl : public TtsPlatformImpl {
  public:
   DummyTtsPlatformImpl() {}
-  virtual ~DummyTtsPlatformImpl() {}
-  virtual bool PlatformImplAvailable() OVERRIDE { return true; }
-  virtual bool Speak(
-      int utterance_id,
-      const std::string& utterance,
-      const std::string& lang,
-      const VoiceData& voice,
-      const UtteranceContinuousParameters& params) OVERRIDE {
+  ~DummyTtsPlatformImpl() override {}
+  bool PlatformImplAvailable() override { return true; }
+  bool Speak(int utterance_id,
+             const std::string& utterance,
+             const std::string& lang,
+             const VoiceData& voice,
+             const UtteranceContinuousParameters& params) override {
     return true;
   }
-  virtual bool IsSpeaking() OVERRIDE { return false; }
-  virtual bool StopSpeaking() OVERRIDE { return true; }
-  virtual void Pause() OVERRIDE {}
-  virtual void Resume() OVERRIDE {}
-  virtual void GetVoices(std::vector<VoiceData>* out_voices) OVERRIDE {}
-  virtual std::string error() OVERRIDE { return std::string(); }
-  virtual void clear_error() OVERRIDE {}
-  virtual void set_error(const std::string& error) OVERRIDE {}
+  bool IsSpeaking() override { return false; }
+  bool StopSpeaking() override { return true; }
+  void Pause() override {}
+  void Resume() override {}
+  void GetVoices(std::vector<VoiceData>* out_voices) override {}
+  std::string error() override { return std::string(); }
+  void clear_error() override {}
+  void set_error(const std::string& error) override {}
 };
 
 // Subclass of TtsController with a public ctor and dtor.
 class TestableTtsController : public TtsControllerImpl {
  public:
   TestableTtsController() {}
-  virtual ~TestableTtsController() {}
+  ~TestableTtsController() override {}
 };
 
 TEST_F(TtsApiControllerTest, TestTtsControllerShutdown) {

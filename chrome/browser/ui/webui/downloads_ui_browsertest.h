@@ -11,7 +11,7 @@
 class DownloadsUIBrowserTest : public WebUIBrowserTest {
  public:
   DownloadsUIBrowserTest();
-  virtual ~DownloadsUIBrowserTest();
+  ~DownloadsUIBrowserTest() override;
 
  protected:
   // Sets the pref to allow or prohibit deleting history entries.
@@ -19,12 +19,6 @@ class DownloadsUIBrowserTest : public WebUIBrowserTest {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsUIBrowserTest);
-};
-
-class DownloadsWebUIForSupervisedUsersTest : public DownloadsUIBrowserTest {
- public:
-  // InProcessBrowserTest overrides:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_DOWNLOADS_UI_BROWSERTEST_H_

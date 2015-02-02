@@ -25,21 +25,21 @@ class ASH_EXPORT ModeIndicatorView : public views::BubbleDelegateView {
   ModeIndicatorView(gfx::NativeView parent,
                     const gfx::Rect& cursor_bounds,
                     const base::string16& label);
-  virtual ~ModeIndicatorView();
+  ~ModeIndicatorView() override;
 
   // Show the mode indicator then hide with fading animation.
   void ShowAndFadeOut();
 
   // views::BubbleDelegateView override:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
 
  protected:
   // views::BubbleDelegateView override:
-  virtual void Init() OVERRIDE;
+  void Init() override;
 
   // views::WidgetDelegateView overrides:
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
+  views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) override;
 
  private:
   gfx::Rect cursor_bounds_;

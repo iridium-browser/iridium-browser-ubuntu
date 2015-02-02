@@ -60,29 +60,32 @@ bool IsParentUnignoredOf(WebAXObject ancestor,
   return parent.equals(ancestor);
 }
 
-bool IsTrue(std::string html_value) {
-  return LowerCaseEqualsASCII(html_value, "true");
-}
-
 std::string GetEquivalentAriaRoleString(const ui::AXRole role) {
   switch (role) {
     case ui::AX_ROLE_ARTICLE:
       return "article";
     case ui::AX_ROLE_BANNER:
       return "banner";
+    case ui::AX_ROLE_BUTTON:
+      return "button";
     case ui::AX_ROLE_COMPLEMENTARY:
       return "complementary";
-    case ui::AX_ROLE_CONTENT_INFO:
     case ui::AX_ROLE_FOOTER:
       return "contentinfo";
+    case ui::AX_ROLE_HORIZONTAL_RULE:
+      return "separator";
     case ui::AX_ROLE_IMAGE:
       return "img";
     case ui::AX_ROLE_MAIN:
       return "main";
     case ui::AX_ROLE_NAVIGATION:
       return "navigation";
+    case ui::AX_ROLE_RADIO_BUTTON:
+      return "radio";
     case ui::AX_ROLE_REGION:
       return "region";
+    case ui::AX_ROLE_SLIDER:
+      return "slider";
     default:
       break;
   }
@@ -105,7 +108,8 @@ void AddIntListAttributeFromWebObjects(ui::AXIntListAttribute attr,
 BlinkAXTreeSource::BlinkAXTreeSource(RenderFrameImpl* render_frame)
     : render_frame_(render_frame),
       node_to_frame_routing_id_map_(NULL),
-      node_to_browser_plugin_instance_id_map_(NULL) {
+      node_to_browser_plugin_instance_id_map_(NULL),
+      accessibility_focus_id_(-1) {
 }
 
 BlinkAXTreeSource::~BlinkAXTreeSource() {
@@ -144,6 +148,17 @@ int32 BlinkAXTreeSource::GetId(blink::WebAXObject node) const {
 void BlinkAXTreeSource::GetChildren(
     blink::WebAXObject parent,
     std::vector<blink::WebAXObject>* out_children) const {
+  if (parent.role() == blink::WebAXRoleStaticText) {
+    blink::WebAXObject ancestor = parent;
+    while (!ancestor.isDetached()) {
+      if (ancestor.axID() == accessibility_focus_id_) {
+        parent.loadInlineTextBoxes();
+        break;
+      }
+      ancestor = ancestor.parentObject();
+    }
+  }
+
   bool is_iframe = false;
   WebNode node = parent.node();
   if (!node.isNull() && node.isElementNode()) {
@@ -304,17 +319,10 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
 
   WebNode node = src.node();
   bool is_iframe = false;
-  std::string live_atomic;
-  std::string live_busy;
-  std::string live_status;
-  std::string live_relevant;
 
   if (!node.isNull() && node.isElementNode()) {
     WebElement element = node.to<WebElement>();
     is_iframe = (element.tagName() == ASCIIToUTF16("IFRAME"));
-
-    if (LowerCaseEqualsASCII(element.getAttribute("aria-expanded"), "true"))
-      dst->state |= (1 << ui::AX_STATE_EXPANDED);
 
     // TODO(ctguil): The tagName in WebKit is lower cased but
     // HTMLElement::nodeName calls localNameUpper. Consider adding
@@ -344,6 +352,12 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
           line_breaks.push_back(src_line_breaks[i]);
         dst->AddIntListAttribute(ui::AX_ATTR_LINE_BREAKS, line_breaks);
       }
+
+      if (dst->role == ui::AX_ROLE_TEXT_FIELD &&
+          src.textInputType().length()) {
+        dst->AddStringAttribute(ui::AX_ATTR_TEXT_INPUT_TYPE,
+                                UTF16ToUTF8(src.textInputType()));
+      }
     }
 
     // ARIA role.
@@ -356,12 +370,6 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
         dst->AddStringAttribute(ui::AX_ATTR_ROLE, role);
     }
 
-    // Live region attributes
-    live_atomic = UTF16ToUTF8(element.getAttribute("aria-atomic"));
-    live_busy = UTF16ToUTF8(element.getAttribute("aria-busy"));
-    live_status = UTF16ToUTF8(element.getAttribute("aria-live"));
-    live_relevant = UTF16ToUTF8(element.getAttribute("aria-relevant"));
-
     // Browser plugin (used in a <webview>).
     if (node_to_browser_plugin_instance_id_map_) {
       BrowserPlugin* browser_plugin = BrowserPlugin::GetFromNode(element);
@@ -373,64 +381,23 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     }
   }
 
-  // Walk up the parent chain to set live region attributes of containers
-  std::string container_live_atomic;
-  std::string container_live_busy;
-  std::string container_live_status;
-  std::string container_live_relevant;
-  WebAXObject container_accessible = src;
-  while (!container_accessible.isDetached()) {
-    WebNode container_node = container_accessible.node();
-    if (!container_node.isNull() && container_node.isElementNode()) {
-      WebElement container_elem = container_node.to<WebElement>();
-      if (container_elem.hasAttribute("aria-atomic") &&
-          container_live_atomic.empty()) {
-        container_live_atomic =
-            UTF16ToUTF8(container_elem.getAttribute("aria-atomic"));
-      }
-      if (container_elem.hasAttribute("aria-busy") &&
-          container_live_busy.empty()) {
-        container_live_busy =
-            UTF16ToUTF8(container_elem.getAttribute("aria-busy"));
-      }
-      if (container_elem.hasAttribute("aria-live") &&
-          container_live_status.empty()) {
-        container_live_status =
-            UTF16ToUTF8(container_elem.getAttribute("aria-live"));
-      }
-      if (container_elem.hasAttribute("aria-relevant") &&
-          container_live_relevant.empty()) {
-        container_live_relevant =
-            UTF16ToUTF8(container_elem.getAttribute("aria-relevant"));
-      }
+  if (src.isInLiveRegion()) {
+    dst->AddBoolAttribute(ui::AX_ATTR_LIVE_ATOMIC, src.liveRegionAtomic());
+    dst->AddBoolAttribute(ui::AX_ATTR_LIVE_BUSY, src.liveRegionBusy());
+    if (!src.liveRegionStatus().isEmpty()) {
+      dst->AddStringAttribute(ui::AX_ATTR_LIVE_STATUS,
+                              UTF16ToUTF8(src.liveRegionStatus()));
     }
-    container_accessible = container_accessible.parentObject();
-  }
-
-  if (!live_atomic.empty())
-    dst->AddBoolAttribute(ui::AX_ATTR_LIVE_ATOMIC, IsTrue(live_atomic));
-  if (!live_busy.empty())
-    dst->AddBoolAttribute(ui::AX_ATTR_LIVE_BUSY, IsTrue(live_busy));
-  if (!live_status.empty())
-    dst->AddStringAttribute(ui::AX_ATTR_LIVE_STATUS, live_status);
-  if (!live_relevant.empty())
-    dst->AddStringAttribute(ui::AX_ATTR_LIVE_RELEVANT, live_relevant);
-
-  if (!container_live_atomic.empty()) {
+    dst->AddStringAttribute(ui::AX_ATTR_LIVE_RELEVANT,
+                            UTF16ToUTF8(src.liveRegionRelevant()));
     dst->AddBoolAttribute(ui::AX_ATTR_CONTAINER_LIVE_ATOMIC,
-                          IsTrue(container_live_atomic));
-  }
-  if (!container_live_busy.empty()) {
+                          src.containerLiveRegionAtomic());
     dst->AddBoolAttribute(ui::AX_ATTR_CONTAINER_LIVE_BUSY,
-                          IsTrue(container_live_busy));
-  }
-  if (!container_live_status.empty()) {
+                          src.containerLiveRegionBusy());
     dst->AddStringAttribute(ui::AX_ATTR_CONTAINER_LIVE_STATUS,
-                            container_live_status);
-  }
-  if (!container_live_relevant.empty()) {
+                            UTF16ToUTF8(src.containerLiveRegionStatus()));
     dst->AddStringAttribute(ui::AX_ATTR_CONTAINER_LIVE_RELEVANT,
-                            container_live_relevant);
+                            UTF16ToUTF8(src.containerLiveRegionRelevant()));
   }
 
   if (dst->role == ui::AX_ROLE_PROGRESS_INDICATOR ||

@@ -34,7 +34,7 @@
  */
 WebInspector.OverviewGrid = function(prefix)
 {
-    this.element = document.createElement("div");
+    this.element = createElement("div");
     this.element.id = prefix + "-overview-container";
 
     this._grid = new WebInspector.TimelineGrid();
@@ -171,7 +171,7 @@ WebInspector.OverviewGrid.Window = function(parentElement, dividersLabelBarEleme
     this._parentElement.addEventListener("dblclick", this._resizeWindowMaximum.bind(this), true);
 
     this._overviewWindowElement = parentElement.createChild("div", "overview-grid-window");
-    this._overviewWindowElement.appendChild(WebInspector.View.createStyleElement("overviewGrid.css"));
+    this._overviewWindowElement.appendChild(WebInspector.View.createStyleElement("components/overviewGrid.css"));
     this._overviewWindowBordersElement = parentElement.createChild("div", "overview-grid-window-rulers");
     parentElement.createChild("div", "overview-grid-dividers-background");
 
@@ -396,6 +396,8 @@ WebInspector.OverviewGrid.Window.prototype = {
      */
     _onMouseWheel: function(event)
     {
+        if (!this._enabled)
+            return;
         if (typeof event.wheelDeltaY === "number" && event.wheelDeltaY) {
             const zoomFactor = 1.1;
             const mouseWheelZoomSpeed = 1 / 120;
@@ -452,7 +454,7 @@ WebInspector.OverviewGrid.WindowSelector = function(parent, position)
 {
     this._startPosition = position;
     this._width = parent.offsetWidth;
-    this._windowSelector = document.createElement("div");
+    this._windowSelector = createElement("div");
     this._windowSelector.className = "overview-grid-window-selector";
     this._windowSelector.style.left = this._startPosition + "px";
     this._windowSelector.style.right = this._width - this._startPosition + "px";

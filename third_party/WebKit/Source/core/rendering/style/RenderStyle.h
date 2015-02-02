@@ -48,7 +48,6 @@
 #include "core/rendering/style/StyleGridData.h"
 #include "core/rendering/style/StyleGridItemData.h"
 #include "core/rendering/style/StyleInheritedData.h"
-#include "core/rendering/style/StyleMarqueeData.h"
 #include "core/rendering/style/StyleMultiColData.h"
 #include "core/rendering/style/StyleRareInheritedData.h"
 #include "core/rendering/style/StyleRareNonInheritedData.h"
@@ -57,8 +56,10 @@
 #include "core/rendering/style/StyleTransformData.h"
 #include "core/rendering/style/StyleVisualData.h"
 #include "core/rendering/style/StyleWillChangeData.h"
+#include "core/rendering/style/TransformOrigin.h"
 #include "platform/Length.h"
 #include "platform/LengthBox.h"
+#include "platform/LengthPoint.h"
 #include "platform/LengthSize.h"
 #include "platform/ThemeTypes.h"
 #include "platform/fonts/FontBaseline.h"
@@ -343,6 +344,9 @@ public:
 
     // Computes how the style change should be propagated down the tree.
     static StyleRecalcChange stylePropagationDiff(const RenderStyle* oldStyle, const RenderStyle* newStyle);
+
+    static ItemPosition resolveAlignment(const RenderStyle* parentStyle, const RenderStyle* childStyle, ItemPosition resolvedAutoPositionForRenderer);
+    static ItemPosition resolveJustification(const RenderStyle* parentStyle, const RenderStyle* childStyle, ItemPosition resolvedAutoPositionForRenderer);
 
     StyleDifference visualInvalidationDiff(const RenderStyle&) const;
 
@@ -740,11 +744,6 @@ public:
     float opacity() const { return rareNonInheritedData->opacity; }
     bool hasOpacity() const { return opacity() < 1.0f; }
     ControlPart appearance() const { return static_cast<ControlPart>(rareNonInheritedData->m_appearance); }
-    // aspect ratio convenience method
-    bool hasAspectRatio() const { return rareNonInheritedData->m_hasAspectRatio; }
-    float aspectRatio() const { return aspectRatioNumerator() / aspectRatioDenominator(); }
-    float aspectRatioDenominator() const { return rareNonInheritedData->m_aspectRatioDenominator; }
-    float aspectRatioNumerator() const { return rareNonInheritedData->m_aspectRatioNumerator; }
     EBoxAlignment boxAlign() const { return static_cast<EBoxAlignment>(rareNonInheritedData->m_deprecatedFlexibleBox->align); }
     EBoxDirection boxDirection() const { return static_cast<EBoxDirection>(inherited_flags._box_direction); }
     float boxFlex() const { return rareNonInheritedData->m_deprecatedFlexibleBox->flex; }
@@ -768,7 +767,9 @@ public:
     bool isColumnFlexDirection() const { return flexDirection() == FlowColumn || flexDirection() == FlowColumnReverse; }
     bool isReverseFlexDirection() const { return flexDirection() == FlowRowReverse || flexDirection() == FlowColumnReverse; }
     EFlexWrap flexWrap() const { return static_cast<EFlexWrap>(rareNonInheritedData->m_flexibleBox->m_flexWrap); }
-    EJustifyContent justifyContent() const { return static_cast<EJustifyContent>(rareNonInheritedData->m_justifyContent); }
+    ContentPosition justifyContent() const { return static_cast<ContentPosition>(rareNonInheritedData->m_justifyContent); }
+    ContentDistributionType justifyContentDistribution() const { return static_cast<ContentDistributionType>(rareNonInheritedData->m_justifyContentDistribution); }
+    OverflowAlignment justifyContentOverflowAlignment() const { return static_cast<OverflowAlignment>(rareNonInheritedData->m_justifyContentOverflowAlignment); }
     ItemPosition justifyItems() const { return static_cast<ItemPosition>(rareNonInheritedData->m_justifyItems); }
     OverflowAlignment justifyItemsOverflowAlignment() const { return static_cast<OverflowAlignment>(rareNonInheritedData->m_justifyItemsOverflowAlignment); }
     ItemPositionType justifyItemsPositionType() const { return static_cast<ItemPositionType>(rareNonInheritedData->m_justifyItemsPositionType); }
@@ -815,11 +816,6 @@ public:
     bool hasVisualOverflowingEffect() const { return boxShadow() || hasBorderImageOutsets() || hasOutline(); }
 
     EBoxSizing boxSizing() const { return m_box->boxSizing(); }
-    const Length& marqueeIncrement() const { return rareNonInheritedData->m_marquee->increment; }
-    int marqueeSpeed() const { return rareNonInheritedData->m_marquee->speed; }
-    int marqueeLoopCount() const { return rareNonInheritedData->m_marquee->loops; }
-    EMarqueeBehavior marqueeBehavior() const { return static_cast<EMarqueeBehavior>(rareNonInheritedData->m_marquee->behavior); }
-    EMarqueeDirection marqueeDirection() const { return static_cast<EMarqueeDirection>(rareNonInheritedData->m_marquee->direction); }
     EUserModify userModify() const { return static_cast<EUserModify>(rareInheritedData->userModify); }
     EUserDrag userDrag() const { return static_cast<EUserDrag>(rareNonInheritedData->userDrag); }
     EUserSelect userSelect() const { return static_cast<EUserSelect>(rareInheritedData->userSelect); }
@@ -832,8 +828,7 @@ public:
     const AtomicString& highlight() const { return rareInheritedData->highlight; }
     const AtomicString& hyphenationString() const { return rareInheritedData->hyphenationString; }
     const AtomicString& locale() const { return rareInheritedData->locale; }
-    EBorderFit borderFit() const { return static_cast<EBorderFit>(rareNonInheritedData->m_borderFit); }
-    EResize resize() const { return static_cast<EResize>(rareInheritedData->resize); }
+    EResize resize() const { return static_cast<EResize>(rareNonInheritedData->m_resize); }
     bool hasInlinePaginationAxis() const
     {
         // If the pagination axis is parallel with the writing mode inline axis, columns may be laid
@@ -860,9 +855,10 @@ public:
     EPageBreak columnBreakAfter() const { return static_cast<EPageBreak>(rareNonInheritedData->m_multiCol->m_breakAfter); }
     bool hasInlineTransform() const { return rareNonInheritedData->m_hasInlineTransform; }
     const TransformOperations& transform() const { return rareNonInheritedData->m_transform->m_operations; }
-    const Length& transformOriginX() const { return rareNonInheritedData->m_transform->m_x; }
-    const Length& transformOriginY() const { return rareNonInheritedData->m_transform->m_y; }
-    float transformOriginZ() const { return rareNonInheritedData->m_transform->m_z; }
+    const TransformOrigin& transformOrigin() const { return rareNonInheritedData->m_transform->m_origin; }
+    const Length& transformOriginX() const { return transformOrigin().x(); }
+    const Length& transformOriginY() const { return transformOrigin().y(); }
+    float transformOriginZ() const { return transformOrigin().z(); }
     bool hasTransform() const { return !rareNonInheritedData->m_transform->m_operations.operations().isEmpty(); }
     bool transformDataEquivalent(const RenderStyle& otherStyle) const { return rareNonInheritedData->m_transform == otherStyle.rareNonInheritedData->m_transform; }
 
@@ -913,8 +909,9 @@ public:
     EBackfaceVisibility backfaceVisibility() const { return static_cast<EBackfaceVisibility>(rareNonInheritedData->m_backfaceVisibility); }
     float perspective() const { return rareNonInheritedData->m_perspective; }
     bool hasPerspective() const { return rareNonInheritedData->m_perspective > 0; }
-    const Length& perspectiveOriginX() const { return rareNonInheritedData->m_perspectiveOriginX; }
-    const Length& perspectiveOriginY() const { return rareNonInheritedData->m_perspectiveOriginY; }
+    const LengthPoint& perspectiveOrigin() const { return rareNonInheritedData->m_perspectiveOrigin; }
+    const Length& perspectiveOriginX() const { return perspectiveOrigin().x(); }
+    const Length& perspectiveOriginY() const { return perspectiveOrigin().y(); }
     const LengthSize& pageSize() const { return rareNonInheritedData->m_pageSize; }
     PageSizeType pageSizeType() const { return static_cast<PageSizeType>(rareNonInheritedData->m_pageSizeType); }
 
@@ -936,7 +933,7 @@ public:
     WritingMode writingMode() const { return static_cast<WritingMode>(inherited_flags.m_writingMode); }
     bool isHorizontalWritingMode() const { return blink::isHorizontalWritingMode(writingMode()); }
     bool isFlippedLinesWritingMode() const { return blink::isFlippedLinesWritingMode(writingMode()); }
-    bool isFlippedBlocksWritingMode() const { return blink::isFlippedBlocksWritingMode(writingMode()); }
+    bool slowIsFlippedBlocksWritingMode() const { return blink::isFlippedBlocksWritingMode(writingMode()); }
 
     EImageRendering imageRendering() const { return static_cast<EImageRendering>(rareInheritedData->m_imageRendering); }
 
@@ -1194,10 +1191,6 @@ public:
     void setEmptyCells(EEmptyCell v) { inherited_flags._empty_cells = v; }
     void setCaptionSide(ECaptionSide v) { inherited_flags._caption_side = v; }
 
-    void setHasAspectRatio(bool b) { SET_VAR(rareNonInheritedData, m_hasAspectRatio, b); }
-    void setAspectRatioDenominator(float v) { SET_VAR(rareNonInheritedData, m_aspectRatioDenominator, v); }
-    void setAspectRatioNumerator(float v) { SET_VAR(rareNonInheritedData, m_aspectRatioNumerator, v); }
-
     void setListStyleType(EListStyleType v) { inherited_flags._list_style_type = v; }
     void setListStyleImage(PassRefPtr<StyleImage>);
     void setListStylePosition(EListStylePosition v) { inherited_flags._list_style_position = v; }
@@ -1277,7 +1270,9 @@ public:
     void setAlignSelfOverflowAlignment(OverflowAlignment overflowAlignment) { SET_VAR(rareNonInheritedData, m_alignSelfOverflowAlignment, overflowAlignment); }
     void setFlexDirection(EFlexDirection direction) { SET_VAR(rareNonInheritedData.access()->m_flexibleBox, m_flexDirection, direction); }
     void setFlexWrap(EFlexWrap w) { SET_VAR(rareNonInheritedData.access()->m_flexibleBox, m_flexWrap, w); }
-    void setJustifyContent(EJustifyContent p) { SET_VAR(rareNonInheritedData, m_justifyContent, p); }
+    void setJustifyContent(ContentPosition p) { SET_VAR(rareNonInheritedData, m_justifyContent, p); }
+    void setJustifyContentDistribution(ContentDistributionType p) { SET_VAR(rareNonInheritedData, m_justifyContentDistribution, p); }
+    void setJustifyContentOverflowAlignment(OverflowAlignment overflowAlignment) { SET_VAR(rareNonInheritedData, m_justifyContentOverflowAlignment, overflowAlignment); }
     void setJustifyItems(ItemPosition justifyItems) { SET_VAR(rareNonInheritedData, m_justifyItems, justifyItems); }
     void setJustifyItemsOverflowAlignment(OverflowAlignment overflowAlignment) { SET_VAR(rareNonInheritedData, m_justifyItemsOverflowAlignment, overflowAlignment); }
     void setJustifyItemsPositionType(ItemPositionType positionType) { SET_VAR(rareNonInheritedData, m_justifyItemsPositionType, positionType); }
@@ -1301,11 +1296,6 @@ public:
     void setGridRowStart(const GridPosition& rowStartPosition) { SET_VAR(rareNonInheritedData.access()->m_gridItem, m_gridRowStart, rowStartPosition); }
     void setGridRowEnd(const GridPosition& rowEndPosition) { SET_VAR(rareNonInheritedData.access()->m_gridItem, m_gridRowEnd, rowEndPosition); }
 
-    void setMarqueeIncrement(const Length& f) { SET_VAR(rareNonInheritedData.access()->m_marquee, increment, f); }
-    void setMarqueeSpeed(int f) { SET_VAR(rareNonInheritedData.access()->m_marquee, speed, f); }
-    void setMarqueeDirection(EMarqueeDirection d) { SET_VAR(rareNonInheritedData.access()->m_marquee, direction, d); }
-    void setMarqueeBehavior(EMarqueeBehavior b) { SET_VAR(rareNonInheritedData.access()->m_marquee, behavior, b); }
-    void setMarqueeLoopCount(int i) { SET_VAR(rareNonInheritedData.access()->m_marquee, loops, i); }
     void setUserModify(EUserModify u) { SET_VAR(rareInheritedData, userModify, u); }
     void setUserDrag(EUserDrag d) { SET_VAR(rareNonInheritedData, userDrag, d); }
     void setUserSelect(EUserSelect s) { SET_VAR(rareInheritedData, userSelect, s); }
@@ -1319,8 +1309,7 @@ public:
     void setHyphens(Hyphens h) { SET_VAR(rareInheritedData, hyphens, h); }
     void setHyphenationString(const AtomicString& h) { SET_VAR(rareInheritedData, hyphenationString, h); }
     void setLocale(const AtomicString& locale) { SET_VAR(rareInheritedData, locale, locale); }
-    void setBorderFit(EBorderFit b) { SET_VAR(rareNonInheritedData, m_borderFit, b); }
-    void setResize(EResize r) { SET_VAR(rareInheritedData, resize, r); }
+    void setResize(EResize r) { SET_VAR(rareNonInheritedData, m_resize, r); }
     void setColumnWidth(float f) { SET_VAR(rareNonInheritedData.access()->m_multiCol, m_autoWidth, false); SET_VAR(rareNonInheritedData.access()->m_multiCol, m_width, f); }
     void setHasAutoColumnWidth() { SET_VAR(rareNonInheritedData.access()->m_multiCol, m_autoWidth, true); SET_VAR(rareNonInheritedData.access()->m_multiCol, m_width, 0); }
     void setColumnCount(unsigned short c) { SET_VAR(rareNonInheritedData.access()->m_multiCol, m_autoCount, false); SET_VAR(rareNonInheritedData.access()->m_multiCol, m_count, c); }
@@ -1340,9 +1329,10 @@ public:
     void inheritColumnPropertiesFrom(RenderStyle* parent) { rareNonInheritedData.access()->m_multiCol = parent->rareNonInheritedData->m_multiCol; }
     void setHasInlineTransform(bool b) { SET_VAR(rareNonInheritedData, m_hasInlineTransform, b); }
     void setTransform(const TransformOperations& ops) { SET_VAR(rareNonInheritedData.access()->m_transform, m_operations, ops); }
-    void setTransformOriginX(const Length& l) { SET_VAR(rareNonInheritedData.access()->m_transform, m_x, l); }
-    void setTransformOriginY(const Length& l) { SET_VAR(rareNonInheritedData.access()->m_transform, m_y, l); }
-    void setTransformOriginZ(float f) { SET_VAR(rareNonInheritedData.access()->m_transform, m_z, f); }
+    void setTransformOriginX(const Length& v) { setTransformOrigin(TransformOrigin(v, transformOriginY(), transformOriginZ())); }
+    void setTransformOriginY(const Length& v) { setTransformOrigin(TransformOrigin(transformOriginX(), v, transformOriginZ())); }
+    void setTransformOriginZ(float f) { setTransformOrigin(TransformOrigin(transformOriginX(), transformOriginY(), f)); }
+    void setTransformOrigin(const TransformOrigin& o) { SET_VAR(rareNonInheritedData.access()->m_transform, m_origin, o); }
     void setSpeak(ESpeak s) { SET_VAR(rareInheritedData, speak, s); }
     void setTextCombine(TextCombine v) { SET_VAR(rareNonInheritedData, m_textCombine, v); }
     void setTextDecorationColor(const StyleColor& c) { SET_VAR(rareNonInheritedData, m_textDecorationColor, c); }
@@ -1383,8 +1373,9 @@ public:
     void setTransformStyle3D(ETransformStyle3D b) { SET_VAR(rareNonInheritedData, m_transformStyle3D, b); }
     void setBackfaceVisibility(EBackfaceVisibility b) { SET_VAR(rareNonInheritedData, m_backfaceVisibility, b); }
     void setPerspective(float p) { SET_VAR(rareNonInheritedData, m_perspective, p); }
-    void setPerspectiveOriginX(const Length& l) { SET_VAR(rareNonInheritedData, m_perspectiveOriginX, l); }
-    void setPerspectiveOriginY(const Length& l) { SET_VAR(rareNonInheritedData, m_perspectiveOriginY, l); }
+    void setPerspectiveOriginX(const Length& v) { setPerspectiveOrigin(LengthPoint(v, perspectiveOriginY())); }
+    void setPerspectiveOriginY(const Length& v) { setPerspectiveOrigin(LengthPoint(perspectiveOriginX(), v)); }
+    void setPerspectiveOrigin(const LengthPoint& p) { SET_VAR(rareNonInheritedData, m_perspectiveOrigin, p); }
     void setPageSize(const LengthSize& s) { SET_VAR(rareNonInheritedData, m_pageSize, s); }
     void setPageSizeType(PageSizeType t) { SET_VAR(rareNonInheritedData, m_pageSizeType, t); }
     void resetPageSizeType() { SET_VAR(rareNonInheritedData, m_pageSizeType, PAGE_SIZE_AUTO); }
@@ -1504,6 +1495,7 @@ public:
     bool isDisplayInlineType() const { return isDisplayInlineType(display()); }
     bool isOriginalDisplayInlineType() const { return isDisplayInlineType(originalDisplay()); }
     bool isDisplayFlexibleOrGridBox() const { return isDisplayFlexibleBox(display()) || isDisplayGridBox(display()); }
+    bool isDisplayFlexibleBox() const { return isDisplayFlexibleBox(display()); }
 
 
     bool setWritingMode(WritingMode v)
@@ -1535,7 +1527,7 @@ public:
     void setHasExplicitlyInheritedProperties() { noninherited_flags.explicitInheritance = true; }
     bool hasExplicitlyInheritedProperties() const { return noninherited_flags.explicitInheritance; }
 
-    bool hasBoxDecorations() const { return hasBorder() || hasBorderRadius() || hasOutline() || hasAppearance() || boxShadow() || hasFilter(); }
+    bool hasBoxDecorations() const { return hasBorder() || hasBorderRadius() || hasOutline() || hasAppearance() || boxShadow() || hasFilter() || resize() != RESIZE_NONE; }
 
     bool borderObscuresBackground() const;
     void getBorderEdgeInfo(BorderEdge edges[], bool includeLogicalLeftEdge = true, bool includeLogicalRightEdge = true) const;
@@ -1622,17 +1614,14 @@ public:
     static OverflowAlignment initialAlignSelfOverflowAlignment() { return OverflowAlignmentDefault; }
     static EFlexDirection initialFlexDirection() { return FlowRow; }
     static EFlexWrap initialFlexWrap() { return FlexNoWrap; }
-    static EJustifyContent initialJustifyContent() { return JustifyFlexStart; }
+    static ContentPosition initialJustifyContent() { return ContentPositionAuto; }
+    static ContentDistributionType initialJustifyContentDistribution() { return ContentDistributionDefault; }
+    static OverflowAlignment initialJustifyContentOverflowAlignment() { return OverflowAlignmentDefault; }
     static ItemPosition initialJustifyItems() { return ItemPositionAuto; }
     static OverflowAlignment initialJustifyItemsOverflowAlignment() { return OverflowAlignmentDefault; }
     static ItemPositionType initialJustifyItemsPositionType() { return NonLegacyPosition; }
     static ItemPosition initialJustifySelf() { return ItemPositionAuto; }
     static OverflowAlignment initialJustifySelfOverflowAlignment() { return OverflowAlignmentDefault; }
-    static int initialMarqueeLoopCount() { return -1; }
-    static int initialMarqueeSpeed() { return 85; }
-    static Length initialMarqueeIncrement() { return Length(6, Fixed); }
-    static EMarqueeBehavior initialMarqueeBehavior() { return MSCROLL; }
-    static EMarqueeDirection initialMarqueeDirection() { return MAUTO; }
     static EUserModify initialUserModify() { return READ_ONLY; }
     static EUserDrag initialUserDrag() { return DRAG_AUTO; }
     static EUserSelect initialUserSelect() { return SELECT_TEXT; }
@@ -1646,12 +1635,8 @@ public:
     static ESpeak initialSpeak() { return SpeakNormal; }
     static const AtomicString& initialHyphenationString() { return nullAtom; }
     static const AtomicString& initialLocale() { return nullAtom; }
-    static EBorderFit initialBorderFit() { return BorderFitBorder; }
     static EResize initialResize() { return RESIZE_NONE; }
     static ControlPart initialAppearance() { return NoControlPart; }
-    static bool initialHasAspectRatio() { return false; }
-    static float initialAspectRatioDenominator() { return 1; }
-    static float initialAspectRatioNumerator() { return 1; }
     static Order initialRTLOrdering() { return LogicalOrder; }
     static float initialTextStrokeWidth() { return 0; }
     static unsigned short initialColumnCount() { return 1; }
@@ -1660,13 +1645,15 @@ public:
     static const TransformOperations& initialTransform() { DEFINE_STATIC_LOCAL(TransformOperations, ops, ()); return ops; }
     static Length initialTransformOriginX() { return Length(50.0, Percent); }
     static Length initialTransformOriginY() { return Length(50.0, Percent); }
-    static EPointerEvents initialPointerEvents() { return PE_AUTO; }
     static float initialTransformOriginZ() { return 0; }
+    static TransformOrigin initialTransformOrigin() { return TransformOrigin(Length(50.0, Percent), Length(50.0, Percent), 0); }
+    static EPointerEvents initialPointerEvents() { return PE_AUTO; }
     static ETransformStyle3D initialTransformStyle3D() { return TransformStyle3DFlat; }
     static EBackfaceVisibility initialBackfaceVisibility() { return BackfaceVisibilityVisible; }
     static float initialPerspective() { return 0; }
     static Length initialPerspectiveOriginX() { return Length(50.0, Percent); }
     static Length initialPerspectiveOriginY() { return Length(50.0, Percent); }
+    static LengthPoint initialPerspectiveOrigin() { return LengthPoint(Length(50.0, Percent), Length(50.0, Percent)); }
     static Color initialBackgroundColor() { return Color::transparent; }
     static TextEmphasisFill initialTextEmphasisFill() { return TextEmphasisFillFilled; }
     static TextEmphasisMark initialTextEmphasisMark() { return TextEmphasisMarkNone; }
@@ -1856,18 +1843,12 @@ inline LayoutUnit adjustLayoutUnitForAbsoluteZoom(LayoutUnit value, const Render
     return value / style.effectiveZoom();
 }
 
-// Since we don't currently persist fractional scroll offsets (crbug.com/414283),
-// we should round our return value to reflect the actual precision we have under
-// the range of typical zoom values. This avoids surprising issues with scroll
-// values not quite round-tripping exactly.
-inline double adjustScrollForAbsoluteZoom(int scrollOffset, float zoomFactor)
+inline double adjustScrollForAbsoluteZoom(double scrollOffset, float zoomFactor)
 {
-    double result = scrollOffset / zoomFactor;
-    const double kScale = 10000; // 4 decimal places of accuracy
-    return round(result * kScale) / kScale;
+    return scrollOffset / zoomFactor;
 }
 
-inline double adjustScrollForAbsoluteZoom(int scrollOffset, const RenderStyle& style)
+inline double adjustScrollForAbsoluteZoom(double scrollOffset, const RenderStyle& style)
 {
     return adjustScrollForAbsoluteZoom(scrollOffset, style.effectiveZoom());
 }

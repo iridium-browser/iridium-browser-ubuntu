@@ -30,11 +30,9 @@ const int64 kPseudoSleepTime2 = 1888;
 class TestTickClock : public base::TickClock {
  public:
   explicit TestTickClock(base::TimeTicks* ticks_now) : ticks_now_(ticks_now) {}
-  virtual ~TestTickClock() {}
+  ~TestTickClock() override {}
 
-  virtual base::TimeTicks NowTicks() OVERRIDE {
-    return *ticks_now_;
-  }
+  base::TimeTicks NowTicks() override { return *ticks_now_; }
 
  private:
   base::TimeTicks* ticks_now_;
@@ -44,9 +42,9 @@ class TestTickClock : public base::TickClock {
 
 class NetworkTimeTrackerTest : public testing::Test {
  public:
-  virtual ~NetworkTimeTrackerTest() {}
+  ~NetworkTimeTrackerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     NetworkTimeTracker::RegisterPrefs(pref_service_.registry());
 
     now_ = base::Time::NowFromSystemTime();

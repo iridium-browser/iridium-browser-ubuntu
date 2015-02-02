@@ -330,10 +330,10 @@ bool ExtensionMessageBubbleFactory::MaybeShowSuspiciousExtensionsBubble(
   shown_suspicious_extensions_bubble_ = true;
   SuspiciousExtensionBubbleController* weak_controller =
       suspicious_extensions.get();
-  ExtensionMessageBubbleView* bubble_delegate = new ExtensionMessageBubbleView(
-      anchor_view,
-      views::BubbleBorder::TOP_RIGHT,
-      suspicious_extensions.PassAs<ExtensionMessageBubbleController>());
+  ExtensionMessageBubbleView* bubble_delegate =
+      new ExtensionMessageBubbleView(anchor_view,
+                                     views::BubbleBorder::TOP_RIGHT,
+                                     suspicious_extensions.Pass());
 
   views::BubbleDelegateView::CreateBubble(bubble_delegate);
   weak_controller->Show(bubble_delegate);
@@ -359,9 +359,7 @@ bool ExtensionMessageBubbleFactory::MaybeShowStartupOverrideExtensionsBubble(
     return false;
 
   shown_startup_override_extensions_bubble_ = true;
-  PrepareToHighlightExtensions(
-      settings_api_bubble.PassAs<ExtensionMessageBubbleController>(),
-      anchor_view);
+  PrepareToHighlightExtensions(settings_api_bubble.Pass(), anchor_view);
   return true;
 #endif
 }
@@ -383,8 +381,7 @@ bool ExtensionMessageBubbleFactory::MaybeShowProxyOverrideExtensionsBubble(
     return false;
 
   shown_proxy_override_extensions_bubble_ = true;
-  PrepareToHighlightExtensions(
-      proxy_bubble.PassAs<ExtensionMessageBubbleController>(), anchor_view);
+  PrepareToHighlightExtensions(proxy_bubble.Pass(), anchor_view);
   return true;
 #endif
 }
@@ -402,9 +399,7 @@ bool ExtensionMessageBubbleFactory::MaybeShowDevModeExtensionsBubble(
     return false;
 
   shown_dev_mode_extensions_bubble_ = true;
-  PrepareToHighlightExtensions(
-      dev_mode_extensions.PassAs<ExtensionMessageBubbleController>(),
-      anchor_view);
+  PrepareToHighlightExtensions(dev_mode_extensions.Pass(), anchor_view);
   return true;
 }
 
@@ -485,8 +480,8 @@ void ExtensionMessageBubbleFactory::ShowHighlightingBubble() {
   stage_ = STAGE_COMPLETE;
 
   views::View* reference_view = NULL;
-  if (container_->num_browser_actions() > 0u)
-    reference_view = container_->GetBrowserActionViewAt(0);
+  if (container_->num_toolbar_actions() > 0u)
+    reference_view = container_->GetToolbarActionViewAt(0);
   if (reference_view && reference_view->visible())
     anchor_view_ = reference_view;
 

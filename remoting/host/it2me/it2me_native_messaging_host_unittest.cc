@@ -17,7 +17,9 @@
 #include "net/base/net_util.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/native_messaging/native_messaging_pipe.h"
 #include "remoting/host/native_messaging/pipe_messaging_channel.h"
+#include "remoting/host/policy_hack/policy_watcher.h"
 #include "remoting/host/setup/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -66,24 +68,24 @@ void VerifyCommonProperties(scoped_ptr<base::DictionaryValue> response,
 
 class MockIt2MeHost : public It2MeHost {
  public:
-  MockIt2MeHost(ChromotingHostContext* context,
-                scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+  MockIt2MeHost(scoped_ptr<ChromotingHostContext> context,
+                scoped_ptr<policy_hack::PolicyWatcher> policy_watcher,
                 base::WeakPtr<It2MeHost::Observer> observer,
                 const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
                 const std::string& directory_bot_jid)
-      : It2MeHost(context,
-                  task_runner,
+      : It2MeHost(context.Pass(),
+                  policy_watcher.Pass(),
                   observer,
                   xmpp_server_config,
                   directory_bot_jid) {}
 
   // It2MeHost overrides
-  virtual void Connect() OVERRIDE;
-  virtual void Disconnect() OVERRIDE;
-  virtual void RequestNatPolicy() OVERRIDE;
+  void Connect() override;
+  void Disconnect() override;
+  void RequestNatPolicy() override;
 
  private:
-  virtual ~MockIt2MeHost() {}
+  ~MockIt2MeHost() override {}
 
   void RunSetState(It2MeHostState state);
 
@@ -147,15 +149,14 @@ void MockIt2MeHost::RunSetState(It2MeHostState state) {
 
 class MockIt2MeHostFactory : public It2MeHostFactory {
  public:
-  MockIt2MeHostFactory() {}
-  virtual scoped_refptr<It2MeHost> CreateIt2MeHost(
-      ChromotingHostContext* context,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+  MockIt2MeHostFactory() : It2MeHostFactory() {}
+  scoped_refptr<It2MeHost> CreateIt2MeHost(
+      scoped_ptr<ChromotingHostContext> context,
       base::WeakPtr<It2MeHost::Observer> observer,
       const XmppSignalStrategy::XmppServerConfig& xmpp_server_config,
-      const std::string& directory_bot_jid) OVERRIDE {
-    return new MockIt2MeHost(
-        context, task_runner, observer, xmpp_server_config, directory_bot_jid);
+      const std::string& directory_bot_jid) override {
+    return new MockIt2MeHost(context.Pass(), nullptr, observer,
+                             xmpp_server_config, directory_bot_jid);
   }
 
  private:
@@ -165,10 +166,10 @@ class MockIt2MeHostFactory : public It2MeHostFactory {
 class It2MeNativeMessagingHostTest : public testing::Test {
  public:
   It2MeNativeMessagingHostTest() {}
-  virtual ~It2MeNativeMessagingHostTest() {}
+  ~It2MeNativeMessagingHostTest() override {}
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   scoped_ptr<base::DictionaryValue> ReadMessageFromOutputPipe();
@@ -209,7 +210,7 @@ class It2MeNativeMessagingHostTest : public testing::Test {
 
   // Task runner of the host thread.
   scoped_refptr<AutoThreadTaskRunner> host_task_runner_;
-  scoped_ptr<remoting::It2MeNativeMessagingHost> host_;
+  scoped_ptr<remoting::NativeMessagingPipe> pipe_;
 
   DISALLOW_COPY_AND_ASSIGN(It2MeNativeMessagingHostTest);
 };
@@ -261,7 +262,7 @@ It2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
       reinterpret_cast<char*>(&length), sizeof(length));
   if (read_result != sizeof(length)) {
     // The output pipe has been closed, return an empty message.
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
   std::string message_json(length, '\0');
@@ -270,16 +271,16 @@ It2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
   if (read_result != static_cast<int>(length)) {
     LOG(ERROR) << "Message size (" << read_result
                << ") doesn't match the header (" << length << ").";
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
   scoped_ptr<base::Value> message(base::JSONReader::Read(message_json));
   if (!message || !message->IsType(base::Value::TYPE_DICTIONARY)) {
     LOG(ERROR) << "Malformed message:" << message_json;
-    return scoped_ptr<base::DictionaryValue>();
+    return nullptr;
   }
 
-  return scoped_ptr<base::DictionaryValue>(
+  return make_scoped_ptr(
       static_cast<base::DictionaryValue*>(message.release()));
 }
 
@@ -428,18 +429,22 @@ void It2MeNativeMessagingHostTest::StartHost() {
   ASSERT_TRUE(MakePipe(&input_read_file, &input_write_file_));
   ASSERT_TRUE(MakePipe(&output_read_file_, &output_write_file));
 
-  // Creating a native messaging host with a mock It2MeHostFactory.
-  scoped_ptr<It2MeHostFactory> factory(new MockIt2MeHostFactory());
+  pipe_.reset(new NativeMessagingPipe());
 
   scoped_ptr<extensions::NativeMessagingChannel> channel(
       new PipeMessagingChannel(input_read_file.Pass(),
                                output_write_file.Pass()));
 
-  host_.reset(new It2MeNativeMessagingHost(
-      host_task_runner_,
-      channel.Pass(),
-      factory.Pass()));
-  host_->Start(base::Bind(&It2MeNativeMessagingHostTest::StopHost,
+  // Creating a native messaging host with a mock It2MeHostFactory.
+  scoped_ptr<extensions::NativeMessageHost> it2me_host(
+      new It2MeNativeMessagingHost(
+          ChromotingHostContext::Create(host_task_runner_),
+          make_scoped_ptr(new MockIt2MeHostFactory())));
+  it2me_host->Start(pipe_.get());
+
+  pipe_->Start(it2me_host.Pass(),
+               channel.Pass(),
+               base::Bind(&It2MeNativeMessagingHostTest::StopHost,
                           base::Unretained(this)));
 
   // Notify the test that the host has finished starting up.
@@ -450,7 +455,7 @@ void It2MeNativeMessagingHostTest::StartHost() {
 void It2MeNativeMessagingHostTest::StopHost() {
   DCHECK(host_task_runner_->RunsTasksOnCurrentThread());
 
-  host_.reset();
+  pipe_.reset();
 
   // Wait till all shutdown tasks have completed.
   base::RunLoop().RunUntilIdle();

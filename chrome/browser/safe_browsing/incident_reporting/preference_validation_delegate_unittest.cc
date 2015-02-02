@@ -26,7 +26,7 @@ class PreferenceValidationDelegateTest : public testing::Test {
       : kPrefPath_("atomic.pref"),
         null_value_(base::Value::CreateNullValue()) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
     invalid_keys_.push_back(std::string("one"));
     invalid_keys_.push_back(std::string("two"));
@@ -103,7 +103,7 @@ class PreferenceValidationDelegateValues
       public testing::WithParamInterface<
           std::tr1::tuple<base::Value::Type, const char*> > {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     PreferenceValidationDelegateTest::SetUp();
     value_type_ = std::tr1::get<0>(GetParam());
     expected_value_ = std::tr1::get<1>(GetParam());
@@ -126,13 +126,13 @@ class PreferenceValidationDelegateValues
         scoped_ptr<base::DictionaryValue> value(new base::DictionaryValue());
         value->SetInteger("twenty-two", 22);
         value->SetInteger("forty-seven", 47);
-        return value.PassAs<Value>();
+        return value.Pass();
       }
       case Value::TYPE_LIST: {
         scoped_ptr<base::ListValue> value(new base::ListValue());
         value->AppendInteger(22);
         value->AppendInteger(47);
-        return value.PassAs<Value>();
+        return value.Pass();
       }
       default:
         ADD_FAILURE() << "unsupported value type " << value_type;
@@ -183,7 +183,7 @@ class PreferenceValidationDelegateNoIncident
     : public PreferenceValidationDelegateTest,
       public testing::WithParamInterface<PrefHashStoreTransaction::ValueState> {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     PreferenceValidationDelegateTest::SetUp();
     value_state_ = GetParam();
   }
@@ -223,7 +223,7 @@ class PreferenceValidationDelegateWithIncident
           std::tr1::tuple<PrefHashStoreTransaction::ValueState,
                           TrackedPreferenceHelper::ResetAction> > {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     PreferenceValidationDelegateTest::SetUp();
     value_state_ = std::tr1::get<0>(GetParam());
     reset_action_ = std::tr1::get<1>(GetParam());

@@ -451,16 +451,11 @@ TEST_F(CallPerfTest, CaptureNtpTimeWithNetworkJitter) {
 
 TEST_F(CallPerfTest, RegisterCpuOveruseObserver) {
   // Verifies that either a normal or overuse callback is triggered.
-  class OveruseCallbackObserver : public test::SendTest,
-                                  public webrtc::OveruseCallback {
+  class LoadObserver : public test::SendTest, public webrtc::LoadObserver {
    public:
-    OveruseCallbackObserver() : SendTest(kLongTimeoutMs) {}
+    LoadObserver() : SendTest(kLongTimeoutMs) {}
 
-    virtual void OnOveruse() OVERRIDE {
-      observation_complete_->Set();
-    }
-
-    virtual void OnNormalUse() OVERRIDE {
+    virtual void OnLoadUpdate(Load load) OVERRIDE {
       observation_complete_->Set();
     }
 
@@ -507,7 +502,8 @@ void CallPerfTest::TestMinTransmitBitrate(bool pad_to_min_bitrate) {
       VideoSendStream::Stats stats = send_stream_->GetStats();
       if (stats.substreams.size() > 0) {
         assert(stats.substreams.size() == 1);
-        int bitrate_kbps = stats.substreams.begin()->second.bitrate_bps / 1000;
+        int bitrate_kbps =
+            stats.substreams.begin()->second.total_bitrate_bps / 1000;
         if (bitrate_kbps > 0) {
           test::PrintResult(
               "bitrate_stats_",
@@ -548,9 +544,9 @@ void CallPerfTest::TestMinTransmitBitrate(bool pad_to_min_bitrate) {
         std::vector<VideoReceiveStream::Config>* receive_configs,
         VideoEncoderConfig* encoder_config) OVERRIDE {
       if (pad_to_min_bitrate_) {
-        send_config->rtp.min_transmit_bitrate_bps = kMinTransmitBitrateBps;
+        encoder_config->min_transmit_bitrate_bps = kMinTransmitBitrateBps;
       } else {
-        assert(send_config->rtp.min_transmit_bitrate_bps == 0);
+        assert(encoder_config->min_transmit_bitrate_bps == 0);
       }
     }
 
@@ -573,6 +569,94 @@ TEST_F(CallPerfTest, PadsToMinTransmitBitrate) { TestMinTransmitBitrate(true); }
 
 TEST_F(CallPerfTest, NoPadWithoutMinTransmitBitrate) {
   TestMinTransmitBitrate(false);
+}
+
+TEST_F(CallPerfTest, KeepsHighBitrateWhenReconfiguringSender) {
+  static const uint32_t kInitialBitrateKbps = 400;
+  static const uint32_t kReconfigureThresholdKbps = 600;
+  static const uint32_t kPermittedReconfiguredBitrateDiffKbps = 100;
+
+  class BitrateObserver : public test::EndToEndTest, public test::FakeEncoder {
+   public:
+    BitrateObserver()
+        : EndToEndTest(kDefaultTimeoutMs),
+          FakeEncoder(Clock::GetRealTimeClock()),
+          time_to_reconfigure_(webrtc::EventWrapper::Create()),
+          encoder_inits_(0) {}
+
+    virtual int32_t InitEncode(const VideoCodec* config,
+                               int32_t number_of_cores,
+                               uint32_t max_payload_size) OVERRIDE {
+      if (encoder_inits_ == 0) {
+        EXPECT_EQ(kInitialBitrateKbps, config->startBitrate)
+            << "Encoder not initialized at expected bitrate.";
+      }
+      ++encoder_inits_;
+      if (encoder_inits_ == 2) {
+        EXPECT_GE(last_set_bitrate_, kReconfigureThresholdKbps);
+        EXPECT_NEAR(config->startBitrate,
+                    last_set_bitrate_,
+                    kPermittedReconfiguredBitrateDiffKbps)
+            << "Encoder reconfigured with bitrate too far away from last set.";
+        observation_complete_->Set();
+      }
+      return FakeEncoder::InitEncode(config, number_of_cores, max_payload_size);
+    }
+
+    virtual int32_t SetRates(uint32_t new_target_bitrate_kbps,
+                             uint32_t framerate) OVERRIDE {
+      last_set_bitrate_ = new_target_bitrate_kbps;
+      if (encoder_inits_ == 1 &&
+          new_target_bitrate_kbps > kReconfigureThresholdKbps) {
+        time_to_reconfigure_->Set();
+      }
+      return FakeEncoder::SetRates(new_target_bitrate_kbps, framerate);
+    }
+
+    Call::Config GetSenderCallConfig() OVERRIDE {
+      Call::Config config = EndToEndTest::GetSenderCallConfig();
+      config.stream_start_bitrate_bps = kInitialBitrateKbps * 1000;
+      return config;
+    }
+
+    virtual void ModifyConfigs(
+        VideoSendStream::Config* send_config,
+        std::vector<VideoReceiveStream::Config>* receive_configs,
+        VideoEncoderConfig* encoder_config) OVERRIDE {
+      send_config->encoder_settings.encoder = this;
+      encoder_config->streams[0].min_bitrate_bps = 50000;
+      encoder_config->streams[0].target_bitrate_bps =
+          encoder_config->streams[0].max_bitrate_bps = 2000000;
+
+      encoder_config_ = *encoder_config;
+    }
+
+    virtual void OnStreamsCreated(
+        VideoSendStream* send_stream,
+        const std::vector<VideoReceiveStream*>& receive_streams) OVERRIDE {
+      send_stream_ = send_stream;
+    }
+
+    virtual void PerformTest() OVERRIDE {
+      ASSERT_EQ(kEventSignaled, time_to_reconfigure_->Wait(kDefaultTimeoutMs))
+          << "Timed out before receiving an initial high bitrate.";
+      encoder_config_.streams[0].width *= 2;
+      encoder_config_.streams[0].height *= 2;
+      EXPECT_TRUE(send_stream_->ReconfigureVideoEncoder(encoder_config_));
+      EXPECT_EQ(kEventSignaled, Wait())
+          << "Timed out while waiting for a couple of high bitrate estimates "
+             "after reconfiguring the send stream.";
+    }
+
+   private:
+    scoped_ptr<webrtc::EventWrapper> time_to_reconfigure_;
+    int encoder_inits_;
+    uint32_t last_set_bitrate_;
+    VideoSendStream* send_stream_;
+    VideoEncoderConfig encoder_config_;
+  } test;
+
+  RunBaseTest(&test);
 }
 
 }  // namespace webrtc

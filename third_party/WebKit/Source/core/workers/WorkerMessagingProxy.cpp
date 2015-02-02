@@ -49,7 +49,6 @@
 #include "core/workers/WorkerInspectorProxy.h"
 #include "core/workers/WorkerObjectProxy.h"
 #include "core/workers/WorkerThreadStartupData.h"
-#include "platform/NotImplemented.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Functional.h"
 #include "wtf/MainThread.h"
@@ -116,8 +115,9 @@ void WorkerMessagingProxy::startWorkerGlobalScope(const KURL& scriptURL, const S
         return;
     }
     Document* document = toDocument(m_executionContext.get());
+    SecurityOrigin* starterOrigin = document->securityOrigin();
 
-    OwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData = WorkerThreadStartupData::create(scriptURL, userAgent, sourceCode, startMode, document->contentSecurityPolicy()->deprecatedHeader(), document->contentSecurityPolicy()->deprecatedHeaderType(), m_workerClients.release());
+    OwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData = WorkerThreadStartupData::create(scriptURL, userAgent, sourceCode, startMode, document->contentSecurityPolicy()->deprecatedHeader(), document->contentSecurityPolicy()->deprecatedHeaderType(), starterOrigin, m_workerClients.release());
     double originTime = document->loader() ? document->loader()->timing()->referenceMonotonicTime() : monotonicallyIncreasingTime();
 
     RefPtr<DedicatedWorkerThread> thread = DedicatedWorkerThread::create(*this, *m_workerObjectProxy.get(), originTime, startupData.release());
@@ -172,7 +172,7 @@ void WorkerMessagingProxy::reportException(const String& errorMessage, int lineN
     // We don't bother checking the askedToTerminate() flag here, because exceptions should *always* be reported even if the thread is terminated.
     // This is intentionally different than the behavior in MessageWorkerTask, because terminated workers no longer deliver messages (section 4.6 of the WebWorker spec), but they do report exceptions.
 
-    RefPtrWillBeRawPtr<ErrorEvent> event = ErrorEvent::create(errorMessage, sourceURL, lineNumber, columnNumber, 0);
+    RefPtrWillBeRawPtr<ErrorEvent> event = ErrorEvent::create(errorMessage, sourceURL, lineNumber, columnNumber, nullptr);
     bool errorHandled = !m_workerObject->dispatchEvent(event);
     if (!errorHandled)
         m_executionContext->reportException(event, 0, nullptr, NotSharableCrossOrigin);
@@ -199,19 +199,18 @@ void WorkerMessagingProxy::workerThreadCreated(PassRefPtr<DedicatedWorkerThread>
     ASSERT(!m_askedToTerminate);
     m_workerThread = workerThread;
 
-    unsigned taskCount = m_queuedEarlyTasks.size();
     ASSERT(!m_unconfirmedMessageCount);
-    m_unconfirmedMessageCount = taskCount;
+    m_unconfirmedMessageCount = m_queuedEarlyTasks.size();
     m_workerThreadHadPendingActivity = true; // Worker initialization means a pending activity.
 
-    for (unsigned i = 0; i < taskCount; ++i)
-        m_workerThread->postTask(m_queuedEarlyTasks[i].release());
+    for (auto& earlyTasks : m_queuedEarlyTasks)
+        m_workerThread->postTask(earlyTasks.release());
     m_queuedEarlyTasks.clear();
 }
 
 void WorkerMessagingProxy::workerObjectDestroyed()
 {
-    m_workerObject = 0;
+    m_workerObject = nullptr;
     m_executionContext->postTask(createCrossThreadTask(&workerObjectDestroyedInternal, AllowCrossThreadAccess(this)));
 }
 

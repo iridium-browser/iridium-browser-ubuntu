@@ -50,8 +50,20 @@ void WebTransformAnimationCurveImpl::add(const WebTransformKeyframe& keyframe,
   curve_->AddKeyframe(cc::TransformKeyframe::Create(
       keyframe.time(),
       transform_operations,
-      cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2)
-          .PassAs<cc::TimingFunction>()));
+      cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2)));
+}
+
+void WebTransformAnimationCurveImpl::setTimingFunction(
+    TimingFunctionType type) {
+  curve_->SetTimingFunction(CreateTimingFunction(type));
+}
+
+void WebTransformAnimationCurveImpl::setTimingFunction(double x1,
+                                                       double y1,
+                                                       double x2,
+                                                       double y2) {
+  curve_->SetTimingFunction(
+      cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2).Pass());
 }
 
 scoped_ptr<cc::AnimationCurve>

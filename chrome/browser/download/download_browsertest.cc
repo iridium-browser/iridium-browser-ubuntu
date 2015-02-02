@@ -38,6 +38,7 @@
 #include "chrome/browser/download/download_target_determiner.h"
 #include "chrome/browser/download/download_test_file_activity_observer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
+#include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/history/download_row.h"
 #include "chrome/browser/history/history_service.h"
@@ -119,7 +120,7 @@ class CreatedObserver : public content::DownloadManager::Observer {
         waiting_(false) {
     manager->AddObserver(this);
   }
-  virtual ~CreatedObserver() {
+  ~CreatedObserver() override {
     if (manager_)
       manager_->RemoveObserver(this);
   }
@@ -135,8 +136,8 @@ class CreatedObserver : public content::DownloadManager::Observer {
   }
 
  private:
-  virtual void OnDownloadCreated(content::DownloadManager* manager,
-                                 content::DownloadItem* item) OVERRIDE {
+  void OnDownloadCreated(content::DownloadManager* manager,
+                         content::DownloadItem* item) override {
     DCHECK_EQ(manager_, manager);
     if (waiting_)
       base::MessageLoopForUI::current()->Quit();
@@ -157,7 +158,7 @@ class PercentWaiter : public content::DownloadItem::Observer {
       prev_percent_(0) {
     item_->AddObserver(this);
   }
-  virtual ~PercentWaiter() {
+  ~PercentWaiter() override {
     if (item_)
       item_->RemoveObserver(this);
   }
@@ -173,7 +174,7 @@ class PercentWaiter : public content::DownloadItem::Observer {
   }
 
  private:
-  virtual void OnDownloadUpdated(content::DownloadItem* item) OVERRIDE {
+  void OnDownloadUpdated(content::DownloadItem* item) override {
     DCHECK_EQ(item_, item);
     if (!error_ &&
         ((prev_percent_ > item_->PercentComplete()) ||
@@ -187,7 +188,7 @@ class PercentWaiter : public content::DownloadItem::Observer {
       base::MessageLoopForUI::current()->Quit();
   }
 
-  virtual void OnDownloadDestroyed(content::DownloadItem* item) OVERRIDE {
+  void OnDownloadDestroyed(content::DownloadItem* item) override {
     DCHECK_EQ(item_, item);
     item_->RemoveObserver(this);
     item_ = NULL;
@@ -216,10 +217,10 @@ class DownloadTestObserverResumable : public content::DownloadTestObserver {
         transitions_left_(transition_count) {
     Init();
   }
-  virtual ~DownloadTestObserverResumable() {}
+  ~DownloadTestObserverResumable() override {}
 
  private:
-  virtual bool IsDownloadInFinalState(DownloadItem* download) OVERRIDE {
+  bool IsDownloadInFinalState(DownloadItem* download) override {
     bool is_resumable_now = download->CanResume();
     if (!was_previously_resumable_ && is_resumable_now)
       --transitions_left_;
@@ -288,20 +289,15 @@ class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
   }
 
   // Simulate a user abort on an extension installation.
-  virtual void ConfirmInstall(
-      Delegate* delegate,
-      const Extension* extension,
-      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
+  void ConfirmInstall(Delegate* delegate,
+                      const Extension* extension,
+                      const ShowDialogCallback& show_dialog_callback) override {
     delegate->InstallUIAbort(true);
     base::MessageLoopForUI::current()->Quit();
   }
 
-  virtual void OnInstallSuccess(const Extension* extension,
-                                SkBitmap* icon) OVERRIDE {
-  }
-  virtual void OnInstallFailure(
-      const extensions::CrxInstallerError& error) OVERRIDE {
-  }
+  void OnInstallSuccess(const Extension* extension, SkBitmap* icon) override {}
+  void OnInstallFailure(const extensions::CrxInstallerError& error) override {}
 };
 
 // Mock that simulates a permissions dialog where the user allows
@@ -313,19 +309,14 @@ class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
       : ExtensionInstallPrompt(web_contents) {}
 
   // Proceed without confirmation prompt.
-  virtual void ConfirmInstall(
-      Delegate* delegate,
-      const Extension* extension,
-      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
+  void ConfirmInstall(Delegate* delegate,
+                      const Extension* extension,
+                      const ShowDialogCallback& show_dialog_callback) override {
     delegate->InstallUIProceed();
   }
 
-  virtual void OnInstallSuccess(const Extension* extension,
-                                SkBitmap* icon) OVERRIDE {
-  }
-  virtual void OnInstallFailure(
-      const extensions::CrxInstallerError& error) OVERRIDE {
-  }
+  void OnInstallSuccess(const Extension* extension, SkBitmap* icon) override {}
+  void OnInstallFailure(const extensions::CrxInstallerError& error) override {}
 };
 
 static DownloadManager* DownloadManagerForBrowser(Browser* browser) {
@@ -381,7 +372,7 @@ class HistoryObserver : public DownloadHistory::Observer {
       GetDownloadHistory()->AddObserver(this);
   }
 
-  virtual ~HistoryObserver() {
+  ~HistoryObserver() override {
     DownloadService* service = DownloadServiceFactory::GetForBrowserContext(
         profile_);
     if (service && service->GetDownloadHistory())
@@ -392,9 +383,8 @@ class HistoryObserver : public DownloadHistory::Observer {
     callback_ = callback;
   }
 
-  virtual void OnDownloadStored(
-      content::DownloadItem* item,
-      const history::DownloadRow& info) OVERRIDE {
+  void OnDownloadStored(content::DownloadItem* item,
+                        const history::DownloadRow& info) override {
     if (!callback_.is_null() && (!callback_.Run(info)))
         return;
 
@@ -403,7 +393,7 @@ class HistoryObserver : public DownloadHistory::Observer {
       base::MessageLoopForUI::current()->Quit();
   }
 
-  virtual void OnDownloadHistoryDestroyed() OVERRIDE {
+  void OnDownloadHistoryDestroyed() override {
     DownloadServiceFactory::GetForBrowserContext(profile_)->
       GetDownloadHistory()->RemoveObserver(this);
   }
@@ -450,21 +440,21 @@ class DownloadTest : public InProcessBrowserTest {
 
   DownloadTest() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
     ASSERT_TRUE(InitialSetup());
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // Needs to be torn down on the main thread. file_activity_observer_ holds a
     // reference to the ChromeDownloadManagerDelegate which should be destroyed
     // on the UI thread.
     file_activity_observer_.reset();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kDisablePluginsDiscovery);
   }
 
@@ -2472,7 +2462,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadErrorsServer) {
     }
   };
 
-  DownloadFilesCheckErrors(ARRAYSIZE_UNSAFE(download_info), download_info);
+  DownloadFilesCheckErrors(arraysize(download_info), download_info);
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadErrorsFile) {
@@ -2649,7 +2639,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadErrorsFile) {
     }
   };
 
-  DownloadInsertFilesErrorCheckErrors(ARRAYSIZE_UNSAFE(error_info), error_info);
+  DownloadInsertFilesErrorCheckErrors(arraysize(error_info), error_info);
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadErrorReadonlyFolder) {
@@ -2672,7 +2662,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadErrorReadonlyFolder) {
     }
   };
 
-  DownloadFilesToReadonlyFolder(ARRAYSIZE_UNSAFE(download_info), download_info);
+  DownloadFilesToReadonlyFolder(arraysize(download_info), download_info);
 }
 
 // Test that we show a dangerous downloads warning for a dangerous file
@@ -3372,7 +3362,7 @@ class DisableSafeBrowsingOnInProgressDownload
   }
   virtual ~DisableSafeBrowsingOnInProgressDownload() {}
 
-  virtual bool IsDownloadInFinalState(DownloadItem* download) OVERRIDE {
+  virtual bool IsDownloadInFinalState(DownloadItem* download) override {
     if (download->GetState() != DownloadItem::IN_PROGRESS ||
         download->GetTargetFilePath().empty())
       return false;

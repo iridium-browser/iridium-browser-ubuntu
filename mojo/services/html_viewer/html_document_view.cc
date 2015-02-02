@@ -11,7 +11,6 @@
 #include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "mojo/public/cpp/application/connect.h"
-#include "mojo/public/cpp/application/service_provider_impl.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/interfaces/application/shell.mojom.h"
 #include "mojo/services/html_viewer/blink_input_events_type_converters.h"
@@ -25,6 +24,7 @@
 #include "skia/ext/refptr.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebHTTPHeaderVisitor.h"
+#include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
@@ -86,21 +86,18 @@ bool CanNavigateLocally(blink::WebFrame* frame,
 
 HTMLDocumentView::HTMLDocumentView(
     URLResponsePtr response,
-    InterfaceRequest<ServiceProvider> service_provider_request,
-    Shell* shell,
+    ShellPtr shell,
     scoped_refptr<base::MessageLoopProxy> compositor_thread,
     WebMediaPlayerFactory* web_media_player_factory)
-    : shell_(shell),
+    : response_(response.Pass()),
+      shell_(shell.Pass()),
       web_view_(NULL),
       root_(NULL),
-      view_manager_client_factory_(shell, this),
+      view_manager_client_factory_(shell_.get(), this),
       compositor_thread_(compositor_thread),
       web_media_player_factory_(web_media_player_factory),
       weak_factory_(this) {
-  ServiceProviderImpl* exported_services = new ServiceProviderImpl();
-  exported_services->AddService(&view_manager_client_factory_);
-  BindToRequest(exported_services, &service_provider_request);
-  Load(response.Pass());
+  shell_.set_client(this);
 }
 
 HTMLDocumentView::~HTMLDocumentView() {
@@ -108,6 +105,16 @@ HTMLDocumentView::~HTMLDocumentView() {
     web_view_->close();
   if (root_)
     root_->RemoveObserver(this);
+}
+
+void HTMLDocumentView::AcceptConnection(const String& requestor_url,
+                                        ServiceProviderPtr provider) {
+  exported_services_.AddService(&view_manager_client_factory_);
+  WeakBindToPipe(&exported_services_, provider.PassMessagePipe());
+  Load(response_.Pass());
+}
+
+void HTMLDocumentView::Initialize(Array<String> args) {
 }
 
 void HTMLDocumentView::OnEmbed(
@@ -119,8 +126,9 @@ void HTMLDocumentView::OnEmbed(
   embedder_service_provider_ = embedder_service_provider.Pass();
   navigator_host_.set_service_provider(embedder_service_provider_.get());
 
-  web_view_->resize(root_->bounds().size());
-  web_layer_tree_view_impl_->setViewportSize(root_->bounds().size());
+  blink::WebSize root_size(root_->bounds().width, root_->bounds().height);
+  web_view_->resize(root_size);
+  web_layer_tree_view_impl_->setViewportSize(root_size);
   web_layer_tree_view_impl_->set_view(root_);
   root_->AddObserver(this);
 }
@@ -154,16 +162,16 @@ blink::WebStorageNamespace* HTMLDocumentView::createSessionStorageNamespace() {
 
 void HTMLDocumentView::initializeLayerTreeView() {
   ServiceProviderPtr surfaces_service_provider;
-  shell_->ConnectToApplication("mojo:mojo_surfaces_service",
-                               Get(&surfaces_service_provider));
-  InterfacePtr<SurfacesService> surfaces_service;
+  shell_->ConnectToApplication("mojo:surfaces_service",
+                               GetProxy(&surfaces_service_provider));
+  SurfacesServicePtr surfaces_service;
   ConnectToService(surfaces_service_provider.get(), &surfaces_service);
 
   ServiceProviderPtr gpu_service_provider;
-  // TODO(jamesr): Should be mojo:mojo_gpu_service
-  shell_->ConnectToApplication("mojo:mojo_native_viewport_service",
-                               Get(&gpu_service_provider));
-  InterfacePtr<Gpu> gpu_service;
+  // TODO(jamesr): Should be mojo:gpu_service
+  shell_->ConnectToApplication("mojo:native_viewport_service",
+                               GetProxy(&gpu_service_provider));
+  GpuPtr gpu_service;
   ConnectToService(gpu_service_provider.get(), &gpu_service);
   web_layer_tree_view_impl_.reset(new WebLayerTreeViewImpl(
       compositor_thread_, surfaces_service.Pass(), gpu_service.Pass()));
@@ -177,7 +185,8 @@ blink::WebMediaPlayer* HTMLDocumentView::createMediaPlayer(
     blink::WebLocalFrame* frame,
     const blink::WebURL& url,
     blink::WebMediaPlayerClient* client) {
-  return web_media_player_factory_->CreateMediaPlayer(frame, url, client);
+  return web_media_player_factory_->CreateMediaPlayer(
+      frame, url, client, shell_.get());
 }
 
 blink::WebMediaPlayer* HTMLDocumentView::createMediaPlayer(
@@ -238,10 +247,11 @@ void HTMLDocumentView::didNavigateWithinPage(
 }
 
 void HTMLDocumentView::OnViewBoundsChanged(View* view,
-                                           const gfx::Rect& old_bounds,
-                                           const gfx::Rect& new_bounds) {
+                                           const Rect& old_bounds,
+                                           const Rect& new_bounds) {
   DCHECK_EQ(view, root_);
-  web_view_->resize(view->bounds().size());
+  web_view_->resize(
+      blink::WebSize(view->bounds().width, view->bounds().height));
 }
 
 void HTMLDocumentView::OnViewDestroyed(View* view) {

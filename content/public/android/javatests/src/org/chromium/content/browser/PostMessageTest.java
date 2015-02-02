@@ -7,6 +7,7 @@ package org.chromium.content.browser;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * The tests for content postMessage API.
@@ -14,13 +15,13 @@ import org.chromium.base.test.util.Feature;
 public class PostMessageTest extends ContentViewTestBase {
 
     private static final String URL1 =
-        "<!DOCTYPE html><html><body>" +
-            "<script type=\"text/javascript\">" +
-                "onmessage = function (e) {" +
-                    "messageObject.setMessageParams(e.data, e.origin);" +
-                "}" +
-            "</script>" +
-        "</body></html>";
+            "<!DOCTYPE html><html><body>" +
+            "    <script type=\"text/javascript\">" +
+            "        onmessage = function (e) {" +
+            "            messageObject.setMessageParams(e.data, e.origin);" +
+            "       }" +
+            "   </script>" +
+            "</body></html>";
 
     private static final String MESSAGE = "Foo";
     private static final String SOURCE_ORIGIN = "android_webview";
@@ -71,9 +72,9 @@ public class PostMessageTest extends ContentViewTestBase {
     @SmallTest
     @Feature({"AndroidWebView", "Android-PostMessage"})
     public void testPostMessageToMainFrame() throws Throwable {
-        ContentViewCore contentViewCore = getContentViewCore();
-        loadDataSync(contentViewCore, URL1, "text/html", false);
-        contentViewCore.postMessageToFrame(null, MESSAGE, SOURCE_ORIGIN, "*");
+        WebContents webContents = getContentViewCore().getWebContents();
+        loadDataSync(webContents.getNavigationController(), URL1, "text/html", false);
+        webContents.postMessageToFrame(null, MESSAGE, SOURCE_ORIGIN, "*");
         mMessageObject.waitForMessage();
         assertEquals(MESSAGE, mMessageObject.getData());
         assertEquals(SOURCE_ORIGIN, mMessageObject.getOrigin());

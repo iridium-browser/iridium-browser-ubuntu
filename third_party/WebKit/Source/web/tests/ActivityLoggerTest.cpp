@@ -24,17 +24,17 @@ class TestActivityLogger : public V8DOMActivityLogger {
 public:
     virtual ~TestActivityLogger() { }
 
-    void logGetter(const String& apiName) OVERRIDE
+    void logGetter(const String& apiName) override
     {
         m_loggedActivities.append(apiName);
     }
 
-    void logSetter(const String& apiName, const v8::Handle<v8::Value>& newValue) OVERRIDE
+    void logSetter(const String& apiName, const v8::Handle<v8::Value>& newValue) override
     {
         m_loggedActivities.append(apiName + " | " + toCoreStringWithUndefinedOrNullCheck(newValue));
     }
 
-    void logMethod(const String& apiName, int argc, const v8::Handle<v8::Value>* argv) OVERRIDE
+    void logMethod(const String& apiName, int argc, const v8::Handle<v8::Value>* argv) override
     {
         String activityString = apiName;
         for (int i = 0; i  < argc; i++)
@@ -42,7 +42,7 @@ public:
         m_loggedActivities.append(activityString);
     }
 
-    void logEvent(const String& eventName, int argc, const String* argv) OVERRIDE
+    void logEvent(const String& eventName, int argc, const String* argv) override
     {
         String activityString = eventName;
         for (int i = 0; i  < argc; i++) {
@@ -125,22 +125,23 @@ TEST_F(ActivityLoggerTest, EventHandler)
 TEST_F(ActivityLoggerTest, ScriptElement)
 {
     const char* code =
-        "document.body.innerHTML = '<script src=\\\'data:text/html;charset=utf-8,\\\'></script>';"
+        "document.body.innerHTML = '<script src=\\\'data:text/javascript;charset=utf-8,\\\'></script>';"
         "document.body.innerHTML = '<script>console.log(\\\'test\\\')</script>';"
         "var script = document.createElement('script');"
         "document.body.appendChild(script);"
         "script = document.createElement('script');"
-        "script.src = 'data:text/html;charset=utf-8,';"
+        "script.src = 'data:text/javascript;charset=utf-8,';"
         "document.body.appendChild(script);"
-        "document.write('<body><script src=\\\'data:text/html;charset=utf-8,\\\'></script></body>');";
+        "document.write('<body><script src=\\\'data:text/javascript;charset=utf-8,\\\'></script></body>');"
+        "document.close();";
     const char* expectedActivities =
-        "blinkAddElement | script | data:text/html;charset=utf-8,\n"
+        "blinkAddElement | script | data:text/javascript;charset=utf-8,\n"
         "blinkAddElement | script | \n"
         "blinkAddElement | script | \n"
-        "blinkAddElement | script | data:text/html;charset=utf-8,\n"
-        "blinkRequestResource | Script | data:text/html;charset=utf-8,\n"
-        "blinkAddElement | script | data:text/html;charset=utf-8,\n"
-        "blinkRequestResource | Script | data:text/html;charset=utf-8,";
+        "blinkAddElement | script | data:text/javascript;charset=utf-8,\n"
+        "blinkRequestResource | Script | data:text/javascript;charset=utf-8,\n"
+        "blinkAddElement | script | data:text/javascript;charset=utf-8,\n"
+        "blinkRequestResource | Script | data:text/javascript;charset=utf-8,";
     executeScriptInMainWorld(code);
     ASSERT_TRUE(verifyActivities(""));
     executeScriptInIsolatedWorld(code);
@@ -157,7 +158,8 @@ TEST_F(ActivityLoggerTest, IFrameElement)
         "iframe = document.createElement('iframe');"
         "iframe.src = 'data:text/html;charset=utf-8,';"
         "document.body.appendChild(iframe);"
-        "document.write('<body><iframe src=\\\'data:text/html;charset=utf-8,\\\'></iframe></body>');";
+        "document.write('<body><iframe src=\\\'data:text/html;charset=utf-8,\\\'></iframe></body>');"
+        "document.close();";
     const char* expectedActivities =
         "blinkAddElement | iframe | data:text/html;charset=utf-8,\n"
         "blinkRequestResource | Main resource | data:text/html;charset=utf-8,\n"
@@ -183,7 +185,8 @@ TEST_F(ActivityLoggerTest, AnchorElement)
         "a = document.createElement('a');"
         "a.href = 'data:text/css;charset=utf-8,';"
         "document.body.appendChild(a);"
-        "document.write('<body><a href=\\\'data:text/css;charset=utf-8,\\\'></a></body>');";
+        "document.write('<body><a href=\\\'data:text/css;charset=utf-8,\\\'></a></body>');"
+        "document.close();";
     const char* expectedActivities =
         "blinkAddElement | a | data:text/css;charset=utf-8,\n"
         "blinkAddElement | a | \n"
@@ -207,7 +210,8 @@ TEST_F(ActivityLoggerTest, LinkElement)
         "link.rel = 'stylesheet';"
         "link.href = 'data:text/css;charset=utf-8,';"
         "document.body.appendChild(link);"
-        "document.write('<body><link rel=\\\'stylesheet\\\' href=\\\'data:text/css;charset=utf-8,\\\'></link></body>');";
+        "document.write('<body><link rel=\\\'stylesheet\\\' href=\\\'data:text/css;charset=utf-8,\\\'></link></body>');"
+        "document.close();";
     const char* expectedActivities =
         "blinkAddElement | link | stylesheet | data:text/css;charset=utf-8,\n"
         "blinkRequestResource | CSS stylesheet | data:text/css;charset=utf-8,\n"
@@ -234,7 +238,8 @@ TEST_F(ActivityLoggerTest, InputElement)
         "input.type = 'submit';"
         "input.formAction = 'data:text/html;charset=utf-8,';"
         "document.body.appendChild(input);"
-        "document.write('<body><input type=\\\'submit\\\' formaction=\\\'data:text/html;charset=utf-8,\\\'></input></body>');";
+        "document.write('<body><input type=\\\'submit\\\' formaction=\\\'data:text/html;charset=utf-8,\\\'></input></body>');"
+        "document.close();";
     const char* expectedActivities =
         "blinkAddElement | input | submit | data:text/html;charset=utf-8,\n"
         "blinkAddElement | input |  | \n"
@@ -259,7 +264,8 @@ TEST_F(ActivityLoggerTest, ButtonElement)
         "button.formMethod = 'post';"
         "button.formAction = 'data:text/html;charset=utf-8,';"
         "document.body.appendChild(button);"
-        "document.write('<body><button type=\\\'submit\\\' formmethod=\\\'post\\\' formaction=\\\'data:text/html;charset=utf-8,\\\'></button></body>');";
+        "document.write('<body><button type=\\\'submit\\\' formmethod=\\\'post\\\' formaction=\\\'data:text/html;charset=utf-8,\\\'></button></body>');"
+        "document.close();";
     const char* expectedActivities =
         "blinkAddElement | button | submit | post | data:text/html;charset=utf-8,\n"
         "blinkAddElement | button |  |  | \n"
@@ -283,13 +289,40 @@ TEST_F(ActivityLoggerTest, FormElement)
         "form.method = 'post';"
         "form.action = 'data:text/html;charset=utf-8,';"
         "document.body.appendChild(form);"
-        "document.write('<body><form method=\\\'post\\\' action=\\\'data:text/html;charset=utf-8,\\\'></form></body>');";
+        "document.write('<body><form method=\\\'post\\\' action=\\\'data:text/html;charset=utf-8,\\\'></form></body>');"
+        "document.close();";
     const char* expectedActivities =
         "blinkAddElement | form | post | data:text/html;charset=utf-8,\n"
         "blinkAddElement | form |  | \n"
         "blinkAddElement | form |  | \n"
         "blinkAddElement | form | post | data:text/html;charset=utf-8,\n"
         "blinkAddElement | form | post | data:text/html;charset=utf-8,";
+    executeScriptInMainWorld(code);
+    ASSERT_TRUE(verifyActivities(""));
+    executeScriptInIsolatedWorld(code);
+    ASSERT_TRUE(verifyActivities(expectedActivities));
+}
+
+TEST_F(ActivityLoggerTest, ScriptSrcAttribute)
+{
+    const char* code =
+        "document.open();"
+        "document.write('<script src=\\\'data:text/javascript;charset=utf-8,A\\\'></script>');"
+        "document.close();"
+        "var script = document.getElementsByTagName('script')[0];"
+        "script.src = 'data:text/javascript;charset=utf-8,B';"
+        "script.setAttribute('src', 'data:text/javascript;charset=utf-8,C');"
+        "script.setAttributeNS('', 'src', 'data:text/javascript;charset=utf-8,D');"
+        "var attr = document.createAttribute('src');"
+        "attr.value = 'data:text/javascript;charset=utf-8,E';"
+        "script.setAttributeNode(attr);";
+    const char* expectedActivities =
+        "blinkAddElement | script | data:text/javascript;charset=utf-8,A\n"
+        "blinkRequestResource | Script | data:text/javascript;charset=utf-8,A\n"
+        "blinkSetAttribute | script | src | data:text/javascript;charset=utf-8,A | data:text/javascript;charset=utf-8,B\n"
+        "blinkSetAttribute | script | src | data:text/javascript;charset=utf-8,B | data:text/javascript;charset=utf-8,C\n"
+        "blinkSetAttribute | script | src | data:text/javascript;charset=utf-8,C | data:text/javascript;charset=utf-8,D\n"
+        "blinkSetAttribute | script | src | data:text/javascript;charset=utf-8,D | data:text/javascript;charset=utf-8,E";
     executeScriptInMainWorld(code);
     ASSERT_TRUE(verifyActivities(""));
     executeScriptInIsolatedWorld(code);
@@ -473,6 +506,7 @@ TEST_F(ActivityLoggerTest, RequestResource)
         "document.write('<img src=\\\'data:text/html;charset=utf-8,B\\\'></img>');"
         "document.write('<link rel=\\\'stylesheet\\\' href=\\\'data:text/html;charset=utf-8,C\\\'></link>');"
         "document.write('<script src=\\\'data:text/html;charset=utf-8,D\\\'></script>');"
+        "document.close();"
         "var xhr = new XMLHttpRequest(); xhr.open('GET', 'data:text/html;charset=utf-8,E'); xhr.send();";
     const char* expectedActivities =
         "blinkAddElement | iframe | data:text/html;charset=utf-8,A\n"

@@ -56,6 +56,7 @@
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/app_list/views/app_list_item_view.h"
 #include "ui/app_list/views/apps_grid_view.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
@@ -93,7 +94,7 @@ class TestAppWindowRegistryObserver
   }
 
   // Overridden from AppWindowRegistry::Observer:
-  virtual void OnAppWindowIconChanged(AppWindow* app_window) OVERRIDE {
+  virtual void OnAppWindowIconChanged(AppWindow* app_window) override {
     ++icon_updates_;
   }
 
@@ -116,7 +117,7 @@ class LauncherPlatformAppBrowserTest
 
   virtual ~LauncherPlatformAppBrowserTest() {}
 
-  virtual void RunTestOnMainThreadLoop() OVERRIDE {
+  virtual void RunTestOnMainThreadLoop() override {
     shelf_ = ash::Shelf::ForPrimaryDisplay();
     controller_ = ChromeLauncherController::instance();
     return extensions::PlatformAppBrowserTest::RunTestOnMainThreadLoop();
@@ -191,7 +192,7 @@ class ShelfAppBrowserTest : public ExtensionBrowserTest {
 
   virtual ~ShelfAppBrowserTest() {}
 
-  virtual void RunTestOnMainThreadLoop() OVERRIDE {
+  virtual void RunTestOnMainThreadLoop() override {
     shelf_ = ash::Shelf::ForPrimaryDisplay();
     model_ = ash::test::ShellTestApi(ash::Shell::GetInstance()).shelf_model();
     controller_ = ChromeLauncherController::instance();
@@ -311,7 +312,7 @@ class ShelfAppBrowserTestNoDefaultBrowser : public ShelfAppBrowserTest {
   ShelfAppBrowserTestNoDefaultBrowser() {}
   virtual ~ShelfAppBrowserTestNoDefaultBrowser() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     ShelfAppBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kNoStartupWindow);
   }
@@ -328,7 +329,7 @@ class ShelfAppBrowserNoMinimizeOnClick : public LauncherPlatformAppBrowserTest {
   ShelfAppBrowserNoMinimizeOnClick() {}
   virtual ~ShelfAppBrowserNoMinimizeOnClick() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     LauncherPlatformAppBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(
         switches::kDisableMinimizeOnSecondLauncherItemClick);
@@ -1633,7 +1634,8 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, DISABLED_DragAndDrop) {
   ASSERT_TRUE(grid_view->has_drag_and_drop_host_for_test());
 
   // There should be 2 items in our application list.
-  const views::ViewModel* vm_grid = grid_view->view_model_for_test();
+  const views::ViewModelT<app_list::AppListItemView>* vm_grid =
+      grid_view->view_model_for_test();
   EXPECT_EQ(2, vm_grid->view_size());
 
   // Test #1: Drag an app list which does not exist yet item into the
@@ -1733,7 +1735,7 @@ class ShelfAppBrowserTestWithMultiMonitor
   ShelfAppBrowserTestWithMultiMonitor() {}
   virtual ~ShelfAppBrowserTestWithMultiMonitor() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     ShelfAppBrowserTestNoDefaultBrowser::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII("ash-host-window-bounds",
                                     "800x600,801+0-800x600");
@@ -1783,7 +1785,8 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTestWithMultiMonitor,
   ASSERT_TRUE(grid_view->has_drag_and_drop_host_for_test());
 
   // There should be 2 items in our application list.
-  const views::ViewModel* vm_grid = grid_view->view_model_for_test();
+  const views::ViewModelT<app_list::AppListItemView>* vm_grid =
+      grid_view->view_model_for_test();
   EXPECT_EQ(2, vm_grid->view_size());
 
   // Drag an app list item which does not exist yet in the shelf.
@@ -1957,7 +1960,8 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, ClickItem) {
       ash::test::AppListControllerTestApi(ash::Shell::GetInstance()).
           GetRootGridView();
   ASSERT_TRUE(grid_view);
-  const views::ViewModel* vm_grid = grid_view->view_model_for_test();
+  const views::ViewModelT<app_list::AppListItemView>* vm_grid =
+      grid_view->view_model_for_test();
   EXPECT_EQ(2, vm_grid->view_size());
   gfx::Rect bounds_grid_1 = vm_grid->view_at(1)->GetBoundsInScreen();
   // Test now that a click does create a new application tab.

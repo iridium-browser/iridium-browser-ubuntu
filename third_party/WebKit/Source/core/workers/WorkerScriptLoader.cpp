@@ -42,7 +42,7 @@
 namespace blink {
 
 WorkerScriptLoader::WorkerScriptLoader()
-    : m_client(0)
+    : m_client(nullptr)
     , m_failed(false)
     , m_identifier(0)
     , m_finishing(false)
@@ -110,8 +110,9 @@ PassOwnPtr<ResourceRequest> WorkerScriptLoader::createResourceRequest()
     return request.release();
 }
 
-void WorkerScriptLoader::didReceiveResponse(unsigned long identifier, const ResourceResponse& response)
+void WorkerScriptLoader::didReceiveResponse(unsigned long identifier, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
+    ASSERT_UNUSED(handle, !handle);
     if (response.httpStatusCode() / 100 != 2 && response.httpStatusCode()) {
         m_failed = true;
         return;
@@ -122,7 +123,7 @@ void WorkerScriptLoader::didReceiveResponse(unsigned long identifier, const Reso
         m_client->didReceiveResponse(identifier, response);
 }
 
-void WorkerScriptLoader::didReceiveData(const char* data, int len)
+void WorkerScriptLoader::didReceiveData(const char* data, unsigned len)
 {
     if (m_failed)
         return;
@@ -136,9 +137,6 @@ void WorkerScriptLoader::didReceiveData(const char* data, int len)
 
     if (!len)
         return;
-
-    if (len == -1)
-        len = strlen(data);
 
     m_script.append(m_decoder->decode(data, len));
 }

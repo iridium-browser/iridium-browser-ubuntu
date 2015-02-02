@@ -41,8 +41,6 @@
 
 namespace blink {
 
-const RenderSVGResourceType RenderSVGResourceClipper::s_resourceType = ClipperResourceType;
-
 RenderSVGResourceClipper::RenderSVGResourceClipper(SVGClipPathElement* node)
     : RenderSVGResourceContainer(node)
     , m_inClipExpansion(false)
@@ -64,13 +62,6 @@ void RenderSVGResourceClipper::removeClientFromCache(RenderObject* client, bool 
 {
     ASSERT(client);
     markClientForInvalidation(client, markForInvalidation ? BoundariesInvalidation : ParentOnlyInvalidation);
-}
-
-bool RenderSVGResourceClipper::applyResource(RenderObject*, RenderStyle*, GraphicsContext*&, unsigned short)
-{
-    // Clippers are always applied using stateful methods.
-    ASSERT_NOT_REACHED();
-    return false;
 }
 
 bool RenderSVGResourceClipper::applyStatefulResource(RenderObject* object, GraphicsContext*& context, ClipperState& clipperState)
@@ -158,7 +149,7 @@ bool RenderSVGResourceClipper::applyClippingToContext(RenderObject* target, cons
         return false;
     TemporaryChange<bool> inClipExpansionChange(m_inClipExpansion, true);
 
-    AffineTransform animatedLocalTransform = toSVGClipPathElement(element())->animatedLocalTransform();
+    AffineTransform animatedLocalTransform = toSVGClipPathElement(element())->calculateAnimatedLocalTransform();
     // When drawing a clip for non-SVG elements, the CTM does not include the zoom factor.
     // In this case, we need to apply the zoom scale explicitly - but only for clips with
     // userSpaceOnUse units (the zoom is accounted for objectBoundingBox-resolved lengths).
@@ -192,7 +183,7 @@ bool RenderSVGResourceClipper::applyClippingToContext(RenderObject* target, cons
             //   b) pop multiple states if needed (similarly to SkCanvas::restoreToCount())
             // Then we should be able to replace this mess with a single, top-level GCSS.
             maskContentSaver.restore();
-            context->restoreLayer();
+            context->endLayer();
             return false;
         }
 
@@ -206,12 +197,6 @@ bool RenderSVGResourceClipper::applyClippingToContext(RenderObject* target, cons
     context->beginLayer(1, CompositeSourceIn, &paintInvalidationRect);
 
     return true;
-}
-
-void RenderSVGResourceClipper::postApplyResource(RenderObject*, GraphicsContext*&)
-{
-    // Clippers are always applied using stateful methods.
-    ASSERT_NOT_REACHED();
 }
 
 void RenderSVGResourceClipper::postApplyStatefulResource(RenderObject*, GraphicsContext*& context, ClipperState& clipperState)
@@ -242,15 +227,16 @@ void RenderSVGResourceClipper::drawClipMaskContent(GraphicsContext* context, con
         context->concatCTM(contentTransformation);
     }
 
-    if (!m_clipContentDisplayList)
-        createDisplayList(context, contentTransformation);
+    if (!m_clipContentDisplayList) {
+        SubtreeContentTransformScope contentTransformScope(contentTransformation);
+        createDisplayList(context);
+    }
 
     ASSERT(m_clipContentDisplayList);
     context->drawDisplayList(m_clipContentDisplayList.get());
 }
 
-void RenderSVGResourceClipper::createDisplayList(GraphicsContext* context,
-    const AffineTransform& contentTransformation)
+void RenderSVGResourceClipper::createDisplayList(GraphicsContext* context)
 {
     ASSERT(context);
     ASSERT(frame());
@@ -267,7 +253,7 @@ void RenderSVGResourceClipper::createDisplayList(GraphicsContext* context,
     // - fill is set to the initial fill paint server (solid, black)
     // - stroke is set to the initial stroke paint server (none)
     PaintBehavior oldBehavior = frame()->view()->paintBehavior();
-    frame()->view()->setPaintBehavior(oldBehavior | PaintBehaviorRenderingSVGMask);
+    frame()->view()->setPaintBehavior(oldBehavior | PaintBehaviorRenderingClipPathAsMask);
 
     for (SVGElement* childElement = Traversal<SVGElement>::firstChild(*element()); childElement; childElement = Traversal<SVGElement>::nextSibling(*childElement)) {
         RenderObject* renderer = childElement->renderer();
@@ -298,7 +284,7 @@ void RenderSVGResourceClipper::createDisplayList(GraphicsContext* context,
         if (isUseElement)
             renderer = childElement->renderer();
 
-        SVGRenderingContext::renderSubtree(context, renderer, contentTransformation);
+        SVGRenderingContext::renderSubtree(context, renderer);
     }
 
     frame()->view()->setPaintBehavior(oldBehavior);
@@ -320,7 +306,7 @@ void RenderSVGResourceClipper::calculateClipContentPaintInvalidationRect()
              continue;
         m_clipBoundaries.unite(renderer->localToParentTransform().mapRect(renderer->paintInvalidationRectInLocalCoordinates()));
     }
-    m_clipBoundaries = toSVGClipPathElement(element())->animatedLocalTransform().mapRect(m_clipBoundaries);
+    m_clipBoundaries = toSVGClipPathElement(element())->calculateAnimatedLocalTransform().mapRect(m_clipBoundaries);
 }
 
 bool RenderSVGResourceClipper::hitTestClipContent(const FloatRect& objectBoundingBox, const FloatPoint& nodeAtPoint)
@@ -336,7 +322,7 @@ bool RenderSVGResourceClipper::hitTestClipContent(const FloatRect& objectBoundin
         point = transform.inverse().mapPoint(point);
     }
 
-    AffineTransform animatedLocalTransform = toSVGClipPathElement(element())->animatedLocalTransform();
+    AffineTransform animatedLocalTransform = toSVGClipPathElement(element())->calculateAnimatedLocalTransform();
     if (!animatedLocalTransform.isInvertible())
         return false;
 

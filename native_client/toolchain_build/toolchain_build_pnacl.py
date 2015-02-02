@@ -38,6 +38,7 @@ sys.path.insert(0, python_lib_dir)
 import argparse
 
 PNACL_DRIVER_DIR = os.path.join(NACL_DIR, 'pnacl', 'driver')
+NACL_TOOLS_DIR = os.path.join(NACL_DIR, 'tools')
 
 # Scons tests can check this version number to decide whether to enable tests
 # for toolchain bug fixes or new features.  This allows tests to be enabled on
@@ -45,7 +46,7 @@ PNACL_DRIVER_DIR = os.path.join(NACL_DIR, 'pnacl', 'driver')
 # (i.e. before the tests would pass on the main NaCl buildbots/trybots).
 # If you are adding a test that depends on a toolchain change, you can
 # increment this version number manually.
-FEATURE_VERSION = 8
+FEATURE_VERSION = 9
 
 # For backward compatibility, these key names match the directory names
 # previously used with gclient
@@ -89,10 +90,26 @@ CHROME_CLANG = os.path.join(os.path.dirname(NACL_DIR), 'third_party',
                             'llvm-build', 'Release+Asserts', 'bin', 'clang')
 CHROME_CLANGXX = CHROME_CLANG + '++'
 
-ALL_ARCHES = ('x86-32', 'x86-64', 'arm', 'mips32',
-              'x86-32-nonsfi', 'arm-nonsfi')
+# Redirectors are small shims acting like sym links with optional arguments.
+# For mac/linux we simply use a shell script which create small redirector
+# shell scripts. For windows we compile an executable which redirects to
+# the target using a compiled in table.
+REDIRECTOR_SCRIPT = os.path.join(NACL_TOOLS_DIR, 'create_redirector.sh')
+REDIRECTOR_WIN32_SRC = os.path.join(NACL_TOOLS_DIR, 'redirector')
+
+TOOL_X64_I686_REDIRECTS = [
+    #Toolname, Tool Args
+    ('as',     '--32'),
+    ('ld',     '-melf_i386_nacl'),
+    ]
+
+TRANSLATOR_ARCHES = ('x86-32', 'x86-64', 'arm', 'mips32',
+                     'x86-32-nonsfi', 'arm-nonsfi')
 # MIPS32 doesn't use biased bitcode, and nonsfi targets don't need it.
-BITCODE_BIASES = tuple(bias for bias in ('le32', 'x86-32', 'x86-64', 'arm'))
+BITCODE_BIASES = tuple(
+    bias for bias in ('le32', 'i686_bc', 'x86_64_bc', 'arm_bc'))
+
+DIRECT_TO_NACL_ARCHES = ('x86_64', 'i686')
 
 MAKE_DESTDIR_CMD = ['make', 'DESTDIR=%(abs_output)s']
 
@@ -210,15 +227,6 @@ def CmakeHostArchFlags(host, options):
   # undefined.
   cmake_flags.append('-DHAVE_SANITIZER_MSAN_INTERFACE_H=FALSE')
 
-  if pynacl.platform.IsLinux64() and pynacl.platform.PlatformTriple() != host:
-    # Currently the only supported "cross" build is 64-bit Linux to 32-bit
-    # Linux. Enable it.  Also disable libxml and libtinfo because our Ubuntu
-    # doesn't have 32-bit libxml or libtinfo build, and users may not have them
-    # either.
-    cmake_flags.extend(['-DLLVM_BUILD_32_BITS=ON',
-                        '-DLLVM_ENABLE_LIBXML=OFF',
-                        '-DLLVM_ENABLE_TERMINFO=OFF'])
-
   if options.sanitize:
     cmake_flags.extend(['-DCMAKE_%s_FLAGS=-fsanitize=%s' % (c, options.sanitize)
                         for c in ('C', 'CXX')])
@@ -293,17 +301,12 @@ def GetGitSyncCmdsCallback(revisions):
     git_url = GIT_BASE_URL + GIT_REPOS[component]
     git_push_url = GIT_PUSH_URL + GIT_REPOS[component]
 
-    # This replaces build.sh's newlib-nacl-headers-clean step by cleaning the
-    # the newlib repo on checkout (while silently blowing away any local
-    # changes). TODO(dschuff): find a better way to handle nacl newlib headers.
-    is_newlib = component == 'nacl-newlib'
     return (command.SyncGitRepoCmds(git_url, '%(output)s', revisions[component],
-                                    clean=is_newlib,
                                     git_cache='%(git_cache_dir)s',
                                     push_url=git_push_url,
                                     known_mirrors=KNOWN_MIRRORS,
                                     push_mirrors=PUSH_MIRRORS) +
-            [command.Runnable(None,
+            [command.Runnable(lambda opts: opts.IsBot(),
                               pnacl_commands.CmdCheckoutGitBundleForTrybot,
                               component, '%(output)s')])
 
@@ -557,12 +560,12 @@ def HostTools(host, options):
                                 command.path.join('%(output)s', 'bin','clang'),
                                 command.path.join('%(output)s', 'bin',
                                                   arch + '-nacl-clang')])
-               for arch in ['i686', 'x86_64']] +
+               for arch in DIRECT_TO_NACL_ARCHES] +
               [command.Command(['ln', '-f',
                                 command.path.join('%(output)s', 'bin','clang'),
                                 command.path.join('%(output)s', 'bin',
                                                   arch + '-nacl-clang++')])
-               for arch in ['i686', 'x86_64']] +
+               for arch in DIRECT_TO_NACL_ARCHES] +
               CopyWindowsHostLibs(host),
       },
   }
@@ -590,11 +593,11 @@ def TargetLibCompiler(host, options):
       'target_lib_compiler': {
           'type': 'work',
           'output_subdir': 'target_lib_compiler',
-          'dependencies': [ H('binutils_pnacl'), H('llvm') ],
+          'dependencies': [ H('binutils_pnacl'), H('llvm'), H('binutils_x86') ],
           'inputs': { 'driver': PNACL_DRIVER_DIR },
           'commands': [
               command.CopyRecursive('%(' + t + ')s', '%(output)s')
-              for t in [H('llvm'), H('binutils_pnacl')]] + [
+              for t in [H('llvm'), H('binutils_pnacl'), H('binutils_x86')]] + [
               command.Runnable(
                   None, pnacl_commands.InstallDriverScripts,
                   '%(driver)s', os.path.join('%(output)s', 'bin'),
@@ -637,10 +640,68 @@ def Metadata(revisions):
 def HostToolsDirectToNacl(host):
   def H(component_name):
     return GSDJoin(component_name, host)
-  tools = {
+
+  tools = {}
+
+  if TripleIsWindows(host):
+    redirector_table = ''
+    for tool, args in TOOL_X64_I686_REDIRECTS:
+      redirector_table += '  {L"/bin/i686-nacl-%s.exe",' % tool + \
+                          '   L"/bin/x86_64-nacl-%s.exe",' % tool + \
+                          ' L"%s"},\n' % args
+
+    cc, cxx = CompilersForHost(host)
+    tools.update({
+        'redirector_src': {
+            'type': 'source',
+            'inputs': { 'source_directory': REDIRECTOR_WIN32_SRC },
+            'commands': [
+                command.CopyTree('%(source_directory)s', '%(output)s'),
+                command.WriteData(redirector_table,
+                                  os.path.join('%(output)s',
+                                               'redirector_table.txt')),
+            ],
+        },
+        'redirector': {
+            'type': 'build',
+            'dependencies': ['redirector_src'],
+            'commands': [
+                command.Mkdir('%(output)s', parents=True),
+                command.Command([cc, '-O3', '-std=c99',
+                                 '-I',
+                                 os.path.join(NACL_DIR, '..'),
+                                 '-o',
+                                 os.path.join('%(output)s', 'redirector.exe'),
+                                 os.path.join('%(redirector_src)s',
+                                              'redirector.c')]),
+            ],
+        },
+    })
+
+    redirect_deps = ['redirector']
+    redirect_inputs = {}
+    redirect_cmds = [
+        command.Command([
+            'ln', '-f',
+            command.path.join('%(redirector)s', 'redirector.exe'),
+            command.path.join('%(output)s', 'bin', 'i686-nacl-%s.exe' % tool)])
+        for tool, args in TOOL_X64_I686_REDIRECTS]
+  else:
+    redirect_deps = []
+    redirect_inputs = { 'redirector_script': REDIRECTOR_SCRIPT }
+    redirect_cmds = [
+        command.Command([
+            '%(abs_redirector_script)s',
+            command.path.join('%(output)s', 'bin', 'i686-nacl-' + tool),
+            'x86_64-nacl-' + tool,
+            args])
+        for tool, args in TOOL_X64_I686_REDIRECTS]
+
+  tools.update({
       H('binutils_x86'): {
           'type': 'build',
-          'dependencies': [H('llvm'), 'binutils_x86_src'],
+          'dependencies': ['binutils_x86_src'] + redirect_deps,
+          'inputs': redirect_inputs,
           'commands': [
               command.SkipForIncrementalCommand(
                   ['sh', '%(binutils_x86_src)s/configure'] +
@@ -655,18 +716,37 @@ def HostToolsDirectToNacl(host):
               # the lib dirs, which have unneeded host libs.
               [command.RemoveDirectory(os.path.join('%(output)s', dir))
                for dir in ('lib', 'lib32', 'lib64', 'share')] +
-              # Create the set of directories for host libs and includes, for
+              # Create the set of directories for target libs and includes, for
               # experimentation before we actually build them.
               # Libc includes (libs dir is created by binutils)
+              # TODO(dschuff): remove these when they are populated by target
+              # library packages.
               [command.Mkdir(command.path.join(
-                  '%(output)s', target, 'include'), parents=True)
-                for target in ['i686-nacl', 'x86_64-nacl']] +
+                  '%(output)s', 'x86_64-nacl', 'include'), parents=True),
+               command.Mkdir(command.path.join(
+                   '%(output)s', 'x86_64-nacl', 'lib32')),
+               command.Command(['ln', '-s', command.path.join('..','lib32'),
+                               command.path.join(
+                                   '%(output)s', 'x86_64-nacl', 'lib', '32')]),
+               command.Command(['ln', '-s', 'lib',
+                               command.path.join(
+                                   '%(output)s', 'x86_64-nacl', 'lib64')])] +
               # Compiler libs (includes are shared)
               [command.Mkdir(command.path.join('%(output)s',
                   'lib', 'clang', '3.4', 'lib', target), parents=True)
-               for target in ['i686-nacl', 'x86_64-nacl']]
+               for target in ['i686-nacl', 'x86_64-nacl']] +
+              # Create links for i686-flavored names of the tools. For now we
+              # don't use the redirector scripts that pass different arguments
+              # because the compiler driver doesn't need them.
+              [command.Command([
+                  'ln', '-f',
+                  command.path.join('%(output)s', 'bin', 'x86_64-nacl-' + tool),
+                  command.path.join('%(output)s', 'bin', 'i686-nacl-' + tool)])
+               for tool in ['addr2line', 'ar', 'nm', 'objcopy', 'objdump',
+                            'ranlib', 'readelf', 'size', 'strings', 'strip']] +
+              redirect_cmds
       }
-  }
+  })
   return tools
 
 def ParseComponentRevisionsFile(filename):
@@ -746,21 +826,27 @@ def GetUploadPackageTargets():
 
   common_packages = ['metadata']
 
-  # Target native libraries
-  for arch in ALL_ARCHES:
+  # Target translator libraries
+  for arch in TRANSLATOR_ARCHES:
     legal_arch = pynacl.gsd_storage.LegalizeName(arch)
-    common_packages.append('libs_support_native_%s' % legal_arch)
+    common_packages.append('libs_support_translator_%s' % legal_arch)
     common_packages.append('compiler_rt_%s' % legal_arch)
     if not 'nonsfi' in arch:
       common_packages.append('libgcc_eh_%s' % legal_arch)
 
-  # Target bitcode libraries
+  # Target libraries
   for bias in BITCODE_BIASES:
     legal_bias = pynacl.gsd_storage.LegalizeName(bias)
     common_packages.append('newlib_%s' % legal_bias)
     common_packages.append('libcxx_%s' % legal_bias)
     common_packages.append('libstdcxx_%s' % legal_bias)
-    common_packages.append('libs_support_bitcode_%s' % legal_bias)
+    common_packages.append('libs_support_%s' % legal_bias)
+
+  # Direct-to-nacl target libraries
+  for arch in DIRECT_TO_NACL_ARCHES:
+    common_packages.append('newlib_%s' % arch)
+    common_packages.append('libcxx_%s' % arch)
+    common_packages.append('libs_support_%s' % arch)
 
   # Host components
   host_packages = {}
@@ -771,6 +857,7 @@ def GetUploadPackageTargets():
     legal_triple = pynacl.gsd_storage.LegalizeName(triple)
     host_packages.setdefault(os_name, []).extend(
         ['binutils_pnacl_%s' % legal_triple,
+         'binutils_x86_%s' % legal_triple,
          'llvm_%s' % legal_triple,
          'driver_%s' % legal_triple])
     if os_name != 'win':
@@ -864,9 +951,11 @@ if __name__ == '__main__':
       packages.update(pnacl_targetlibs.TargetLibsSrc(
         GetGitSyncCmdsCallback(rev)))
       for bias in BITCODE_BIASES:
-        packages.update(pnacl_targetlibs.BitcodeLibs(bias, is_canonical))
-      for arch in ALL_ARCHES:
-        packages.update(pnacl_targetlibs.NativeLibs(arch, is_canonical))
+        packages.update(pnacl_targetlibs.TargetLibs(bias, is_canonical))
+      for arch in DIRECT_TO_NACL_ARCHES:
+        packages.update(pnacl_targetlibs.TargetLibs(arch, is_canonical))
+      for arch in TRANSLATOR_ARCHES:
+        packages.update(pnacl_targetlibs.TranslatorLibs(arch, is_canonical))
       packages.update(Metadata(rev))
     if pynacl.platform.IsLinux() or pynacl.platform.IsMac():
       packages.update(pnacl_targetlibs.UnsandboxedIRT(

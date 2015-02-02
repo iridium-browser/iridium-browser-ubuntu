@@ -6,12 +6,23 @@
 #define CHROME_BROWSER_CHROME_NOTIFICATION_TYPES_H_
 
 #include "build/build_config.h"
+
+#if defined(ENABLE_EXTENSIONS)
 #include "extensions/browser/notification_types.h"
+#else
+#include "content/public/browser/notification_types.h"
+#endif
+
+#if defined(ENABLE_EXTENSIONS)
+#define PREVIOUS_END extensions::NOTIFICATION_EXTENSIONS_END
+#else
+#define PREVIOUS_END content::NOTIFICATION_CONTENT_END
+#endif
 
 namespace chrome {
 
 enum NotificationType {
-  NOTIFICATION_CHROME_START = extensions::NOTIFICATION_EXTENSIONS_END,
+  NOTIFICATION_CHROME_START = PREVIOUS_END,
 
   // Browser-window ----------------------------------------------------------
 
@@ -113,12 +124,6 @@ enum NotificationType {
   // handler.  Use APP_TERMINATING for such needs.
   NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
 
-  // Application-modal dialogs -----------------------------------------------
-
-  // Sent after an application-modal dialog has been shown. The source
-  // is the dialog.
-  NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
-
   // This message is sent when a new InfoBar has been added to an
   // InfoBarService.  The source is a Source<InfoBarService> with a pointer to
   // the InfoBarService the InfoBar was added to.  The details is a
@@ -131,16 +136,12 @@ enum NotificationType {
   // Details<InfoBar::RemovedDetails>.
   NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
 
-  // Used to fire notifications about how long various events took to
-  // complete.  E.g., this is used to get more fine grained timings from the
-  // new tab page.  The source is a WebContents and the details is a
-  // MetricEventDurationDetails.
-  NOTIFICATION_METRIC_EVENT_DURATION,
-
+#if defined(ENABLE_EXTENSIONS)
   // This notification is sent when extensions::TabHelper::SetExtensionApp is
   // invoked. The source is the extensions::TabHelper SetExtensionApp was
   // invoked on.
   NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
+#endif
 
   // Tabs --------------------------------------------------------------------
 
@@ -242,12 +243,6 @@ enum NotificationType {
   // the details is history::URLsModifiedDetails that lists the modified or
   // added URLs.
   NOTIFICATION_HISTORY_URLS_MODIFIED,
-
-  // Sent when the user visits a URL.
-  //
-  // The source is the profile owning the history service that changed, and
-  // the details is history::URLVisitedDetails.
-  NOTIFICATION_HISTORY_URL_VISITED,
 
   // Sent when one or more URLs are deleted.
   //
@@ -583,11 +578,6 @@ enum NotificationType {
   // WebContents that was shown, and Details is the string ID of the extension
   // which was installed.
   NOTIFICATION_APP_INSTALLED_TO_NTP,
-
-  // Similar to NOTIFICATION_APP_INSTALLED_TO_NTP but used to notify ash AppList
-  // about installed app. Source is the profile in which the app is installed
-  // and Details is the string ID of the extension.
-  NOTIFICATION_APP_INSTALLED_TO_APPLIST,
 
 #if defined(USE_ASH)
   // Sent when wallpaper show animation has finished.

@@ -37,11 +37,11 @@ class LoadFailObserver : public content::WebContentsObserver {
         failed_load_(false),
         error_code_(net::OK) { }
 
-  virtual void DidFailProvisionalLoad(
+  void DidFailProvisionalLoad(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       int error_code,
-      const base::string16& error_description) OVERRIDE {
+      const base::string16& error_description) override {
     failed_load_ = true;
     error_code_ = static_cast<net::Error>(error_code);
     validated_url_ = validated_url;

@@ -18,6 +18,7 @@ class Canvas;
 class Image;
 }
 class Browser;
+class Profile;
 
 // AvatarMenuButton
 //
@@ -35,11 +36,11 @@ class AvatarMenuButton : public views::MenuButton,
   // will cause the profile menu to be displayed.
   AvatarMenuButton(Browser* browser, bool disabled);
 
-  virtual ~AvatarMenuButton();
+  ~AvatarMenuButton() override;
 
   // views::MenuButton:
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  const char* GetClassName() const override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // Sets the image for the avatar button. Rectangular images, as opposed
   // to Chrome avatar icons, will be resized and modified for the title bar.
@@ -50,14 +51,25 @@ class AvatarMenuButton : public views::MenuButton,
   }
   bool button_on_right() { return button_on_right_; }
 
+  // Get avatar images for the profile.  |avatar| is used in the browser window
+  // whereas |taskbar_badge_avatar| is used for the OS taskbar.  If
+  // |taskbar_badge_avatar| is empty then |avatar| should be used for the
+  // taskbar as well. Returns false if the cache doesn't have an entry for a
+  // Profile::REGULAR_PROFILE type |profile|, otherwise return true.
+  static bool GetAvatarImages(Profile* profile,
+                              bool should_show_avatar_menu,
+                              gfx::Image* avatar,
+                              gfx::Image* taskbar_badge_avatar,
+                              bool* is_rectangle);
+
  private:
   // views::ViewTargeterDelegate:
-  virtual bool DoesIntersectRect(const views::View* target,
-                                 const gfx::Rect& rect) const OVERRIDE;
+  bool DoesIntersectRect(const views::View* target,
+                         const gfx::Rect& rect) const override;
 
   // views::MenuButtonListener:
-  virtual void OnMenuButtonClicked(views::View* source,
-                                   const gfx::Point& point) OVERRIDE;
+  void OnMenuButtonClicked(views::View* source,
+                           const gfx::Point& point) override;
 
   Browser* browser_;
   bool disabled_;

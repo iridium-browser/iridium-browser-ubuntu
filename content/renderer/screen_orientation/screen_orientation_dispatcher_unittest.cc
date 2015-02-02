@@ -59,16 +59,14 @@ class ScreenOrientationDispatcherWithSink : public ScreenOrientationDispatcher {
       :ScreenOrientationDispatcher(NULL) , sink_(sink) {
   }
 
-  virtual bool Send(IPC::Message* message) OVERRIDE {
-    return sink_->Send(message);
-  }
+  bool Send(IPC::Message* message) override { return sink_->Send(message); }
 
   IPC::TestSink* sink_;
 };
 
 class ScreenOrientationDispatcherTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     dispatcher_.reset(new ScreenOrientationDispatcherWithSink(&sink_));
   }
 

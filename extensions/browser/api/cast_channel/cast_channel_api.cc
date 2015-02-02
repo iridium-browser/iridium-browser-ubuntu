@@ -14,6 +14,7 @@
 #include "base/time/default_tick_clock.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/api/cast_channel/cast_auth_ica.h"
 #include "extensions/browser/api/cast_channel/cast_socket.h"
 #include "extensions/browser/api/cast_channel/logger.h"
 #include "extensions/browser/event_router.h"
@@ -171,8 +172,8 @@ void CastChannelAPI::OnMessage(const CastSocket* socket,
 
 CastChannelAPI::~CastChannelAPI() {}
 
-CastChannelAsyncApiFunction::CastChannelAsyncApiFunction()
-  : manager_(NULL), error_(cast_channel::CHANNEL_ERROR_NONE) { }
+CastChannelAsyncApiFunction::CastChannelAsyncApiFunction() : manager_(NULL) {
+}
 
 CastChannelAsyncApiFunction::~CastChannelAsyncApiFunction() { }
 
@@ -182,7 +183,7 @@ bool CastChannelAsyncApiFunction::PrePrepare() {
 }
 
 bool CastChannelAsyncApiFunction::Respond() {
-  return error_ == cast_channel::CHANNEL_ERROR_NONE;
+  return GetError().empty();
 }
 
 CastSocket* CastChannelAsyncApiFunction::GetSocketOrCompleteWithError(
@@ -215,7 +216,10 @@ void CastChannelAsyncApiFunction::SetResultFromSocket(
     const CastSocket& socket) {
   ChannelInfo channel_info;
   FillChannelInfo(socket, &channel_info);
-  error_ = socket.error_state();
+  ChannelError error = socket.error_state();
+  if (error != cast_channel::CHANNEL_ERROR_NONE) {
+    SetError("Channel socket error = " + base::IntToString(error));
+  }
   SetResultFromChannelInfo(channel_info);
 }
 
@@ -230,7 +234,7 @@ void CastChannelAsyncApiFunction::SetResultFromError(int channel_id,
   channel_info.connect_info.port = 0;
   channel_info.connect_info.auth = cast_channel::CHANNEL_AUTH_TYPE_SSL;
   SetResultFromChannelInfo(channel_info);
-  error_ = error;
+  SetError("Channel error = " + base::IntToString(error));
 }
 
 CastSocket* CastChannelAsyncApiFunction::GetSocket(int channel_id) {
@@ -506,6 +510,29 @@ void CastChannelGetLogsFunction::AsyncWorkStart() {
   }
 
   api_->GetLogger()->Reset();
+
+  AsyncWorkCompleted();
+}
+
+CastChannelSetAuthorityKeysFunction::CastChannelSetAuthorityKeysFunction() {
+}
+
+CastChannelSetAuthorityKeysFunction::~CastChannelSetAuthorityKeysFunction() {
+}
+
+bool CastChannelSetAuthorityKeysFunction::Prepare() {
+  params_ = cast_channel::SetAuthorityKeys::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params_.get());
+  return true;
+}
+
+void CastChannelSetAuthorityKeysFunction::AsyncWorkStart() {
+  std::string& keys = params_->keys;
+  std::string& signature = params_->signature;
+  if (signature.empty() || keys.empty() ||
+      !cast_channel::SetTrustedCertificateAuthorities(keys, signature)) {
+    SetError("Unable to set authority keys.");
+  }
 
   AsyncWorkCompleted();
 }

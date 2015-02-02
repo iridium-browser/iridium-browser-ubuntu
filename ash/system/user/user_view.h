@@ -42,29 +42,26 @@ class UserView : public views::View,
            ash::user::LoginStatus login,
            MultiProfileIndex index,
            bool for_detailed_view);
-  virtual ~UserView();
+  ~UserView() override;
 
   // Overridden from MouseWatcherListener:
-  virtual void MouseMovedOutOfHost() OVERRIDE;
+  void MouseMovedOutOfHost() override;
 
   TrayUser::TestState GetStateForTest() const;
   gfx::Rect GetBoundsInScreenOfUserButtonForTest();
 
  private:
   // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual int GetHeightForWidth(int width) const OVERRIDE;
-  virtual void Layout() OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  int GetHeightForWidth(int width) const override;
+  void Layout() override;
 
   // Overridden from views::ButtonListener.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from views::FocusChangeListener:
-  virtual void OnWillChangeFocus(View* focused_before,
-                                 View* focused_now) OVERRIDE;
-  virtual void OnDidChangeFocus(View* focused_before,
-                                View* focused_now) OVERRIDE;
+  void OnWillChangeFocus(View* focused_before, View* focused_now) override;
+  void OnDidChangeFocus(View* focused_before, View* focused_now) override;
 
   void AddLogoutButton(user::LoginStatus login);
   void AddUserCard(user::LoginStatus login);

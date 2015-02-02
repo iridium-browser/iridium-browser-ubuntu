@@ -60,7 +60,7 @@ class LocalFileSyncContextTest : public testing::Test {
         async_modify_finished_(false),
         has_inflight_prepare_for_sync_(false) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     RegisterSyncableFileSystem();
     ASSERT_TRUE(dir_.CreateUniqueTempDir());
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
@@ -72,9 +72,7 @@ class LocalFileSyncContextTest : public testing::Test {
         BrowserThread::IO);
   }
 
-  virtual void TearDown() OVERRIDE {
-    RevokeSyncableFileSystem();
-  }
+  void TearDown() override { RevokeSyncableFileSystem(); }
 
   void StartPrepareForSync(FileSystemContext* file_system_context,
                            const FileSystemURL& url,
@@ -82,7 +80,7 @@ class LocalFileSyncContextTest : public testing::Test {
                            SyncFileMetadata* metadata,
                            FileChangeList* changes,
                            storage::ScopedFile* snapshot) {
-    ASSERT_TRUE(changes != NULL);
+    ASSERT_TRUE(changes != nullptr);
     ASSERT_FALSE(has_inflight_prepare_for_sync_);
     status_ = SYNC_STATUS_UNKNOWN;
     has_inflight_prepare_for_sync_ = true;
@@ -149,7 +147,7 @@ class LocalFileSyncContextTest : public testing::Test {
     EXPECT_EQ(SYNC_STATUS_OK,
               PrepareForSync(file_system_context, url,
                              LocalFileSyncContext::SYNC_EXCLUSIVE,
-                             &metadata, &changes, NULL));
+                             &metadata, &changes, nullptr));
     EXPECT_EQ(expected_file_type, metadata.file_type);
 
     status_ = SYNC_STATUS_UNKNOWN;
@@ -174,7 +172,7 @@ class LocalFileSyncContextTest : public testing::Test {
 
   void StartModifyFileOnIOThread(CannedSyncableFileSystem* file_system,
                                  const FileSystemURL& url) {
-    ASSERT_TRUE(file_system != NULL);
+    ASSERT_TRUE(file_system != nullptr);
     if (!io_task_runner_->RunsTasksOnCurrentThread()) {
       async_modify_finished_ = false;
       ASSERT_TRUE(ui_task_runner_->RunsTasksOnCurrentThread());
@@ -249,7 +247,7 @@ class LocalFileSyncContextTest : public testing::Test {
     FileChangeList changes;
     EXPECT_EQ(SYNC_STATUS_OK,
               PrepareForSync(file_system.file_system_context(), kFile,
-                             sync_mode, &metadata, &changes, NULL));
+                             sync_mode, &metadata, &changes, nullptr));
     EXPECT_EQ(1U, changes.size());
     EXPECT_TRUE(changes.list().back().IsFile());
     EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
@@ -274,7 +272,7 @@ class LocalFileSyncContextTest : public testing::Test {
     }
 
     sync_context_->ShutdownOnUIThread();
-    sync_context_ = NULL;
+    sync_context_ = nullptr;
 
     file_system.TearDown();
   }
@@ -339,7 +337,7 @@ class LocalFileSyncContextTest : public testing::Test {
     EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
 
     sync_context_->ShutdownOnUIThread();
-    sync_context_ = NULL;
+    sync_context_ = nullptr;
 
     file_system.TearDown();
   }
@@ -387,8 +385,8 @@ TEST_F(LocalFileSyncContextTest, InitializeFileSystemContext) {
 
   // Make sure everything's set up for file_system to be able to handle
   // syncable file system operations.
-  EXPECT_TRUE(file_system.backend()->sync_context() != NULL);
-  EXPECT_TRUE(file_system.backend()->change_tracker() != NULL);
+  EXPECT_TRUE(file_system.backend()->sync_context() != nullptr);
+  EXPECT_TRUE(file_system.backend()->change_tracker() != nullptr);
   EXPECT_EQ(sync_context_.get(), file_system.backend()->sync_context());
 
   // Calling MaybeInitialize for the same context multiple times must be ok.
@@ -475,7 +473,7 @@ TEST_F(LocalFileSyncContextTest, MultipleFileSystemContexts) {
   EXPECT_EQ(SYNC_STATUS_OK,
             PrepareForSync(file_system1.file_system_context(), kURL1,
                            LocalFileSyncContext::SYNC_EXCLUSIVE,
-                           &metadata, &changes, NULL));
+                           &metadata, &changes, nullptr));
   EXPECT_EQ(1U, changes.size());
   EXPECT_TRUE(changes.list().back().IsFile());
   EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
@@ -486,7 +484,7 @@ TEST_F(LocalFileSyncContextTest, MultipleFileSystemContexts) {
   EXPECT_EQ(SYNC_STATUS_OK,
             PrepareForSync(file_system2.file_system_context(), kURL2,
                            LocalFileSyncContext::SYNC_EXCLUSIVE,
-                           &metadata, &changes, NULL));
+                           &metadata, &changes, nullptr));
   EXPECT_EQ(1U, changes.size());
   EXPECT_FALSE(changes.list().back().IsFile());
   EXPECT_TRUE(changes.list().back().IsAddOrUpdate());
@@ -494,7 +492,7 @@ TEST_F(LocalFileSyncContextTest, MultipleFileSystemContexts) {
   EXPECT_EQ(0, metadata.size);
 
   sync_context_->ShutdownOnUIThread();
-  sync_context_ = NULL;
+  sync_context_ = nullptr;
 
   file_system1.TearDown();
   file_system2.TearDown();
@@ -561,7 +559,7 @@ TEST_F(LocalFileSyncContextTest, DISABLED_PrepareSyncWhileWriting) {
   EXPECT_EQ(SYNC_STATUS_FILE_BUSY,
             PrepareForSync(file_system.file_system_context(), kURL1,
                            LocalFileSyncContext::SYNC_EXCLUSIVE,
-                           &metadata, &changes, NULL));
+                           &metadata, &changes, nullptr));
   EXPECT_EQ(SYNC_FILE_TYPE_FILE, metadata.file_type);
 
   // Register PrepareForSync method to be invoked when kURL1 becomes
@@ -572,7 +570,7 @@ TEST_F(LocalFileSyncContextTest, DISABLED_PrepareSyncWhileWriting) {
   sync_context_->RegisterURLForWaitingSync(
       kURL1, GetPrepareForSyncClosure(file_system.file_system_context(), kURL1,
                                       LocalFileSyncContext::SYNC_EXCLUSIVE,
-                                      &metadata, &changes, NULL));
+                                      &metadata, &changes, nullptr));
 
   // Wait for the completion.
   EXPECT_EQ(base::File::FILE_OK, WaitUntilModifyFileIsDone());
@@ -591,7 +589,7 @@ TEST_F(LocalFileSyncContextTest, DISABLED_PrepareSyncWhileWriting) {
   EXPECT_EQ(1, metadata.size);
 
   sync_context_->ShutdownOnUIThread();
-  sync_context_ = NULL;
+  sync_context_ = nullptr;
   file_system.TearDown();
 }
 
@@ -679,7 +677,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion) {
   EXPECT_EQ(new_usage, initial_usage);
 
   sync_context_->ShutdownOnUIThread();
-  sync_context_ = NULL;
+  sync_context_ = nullptr;
   file_system.TearDown();
 }
 
@@ -746,7 +744,7 @@ TEST_F(LocalFileSyncContextTest, ApplyRemoteChangeForDeletion_ForRoot) {
   EXPECT_EQ(new_usage, initial_usage);
 
   sync_context_->ShutdownOnUIThread();
-  sync_context_ = NULL;
+  sync_context_ = nullptr;
   file_system.TearDown();
 }
 

@@ -17,15 +17,15 @@ class STORAGE_EXPORT_PRIVATE TransientFileUtil
     : public LocalFileUtil {
  public:
   TransientFileUtil() {}
-  virtual ~TransientFileUtil() {}
+  ~TransientFileUtil() override {}
 
   // LocalFileUtil overrides.
-  virtual storage::ScopedFile CreateSnapshotFile(
+  storage::ScopedFile CreateSnapshotFile(
       FileSystemOperationContext* context,
       const FileSystemURL& url,
       base::File::Error* error,
       base::File::Info* file_info,
-      base::FilePath* platform_path) OVERRIDE;
+      base::FilePath* platform_path) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TransientFileUtil);

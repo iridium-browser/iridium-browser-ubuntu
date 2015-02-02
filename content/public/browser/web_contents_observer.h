@@ -156,6 +156,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // And regardless of what frame navigated, this method is invoked after
   // DidCommitProvisionalLoadForFrame was invoked.
   virtual void DidNavigateAnyFrame(
+      RenderFrameHost* render_frame_host,
       const LoadCommittedDetails& details,
       const FrameNavigateParams& params) {}
 
@@ -322,10 +323,10 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
                                  RenderFrameHost* render_frame_host);
 
   // IPC::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // IPC::Sender implementation.
-  virtual bool Send(IPC::Message* message) OVERRIDE;
+  bool Send(IPC::Message* message) override;
   int routing_id() const;
 
   WebContents* web_contents() const;
@@ -340,7 +341,7 @@ class CONTENT_EXPORT WebContentsObserver : public IPC::Listener,
   // observing.
   WebContentsObserver();
 
-  virtual ~WebContentsObserver();
+  ~WebContentsObserver() override;
 
   // Start observing a different WebContents; used with the default constructor.
   void Observe(WebContents* web_contents);

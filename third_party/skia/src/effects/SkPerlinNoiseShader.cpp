@@ -515,7 +515,7 @@ public:
                     const GrProcessor&);
     virtual ~GrGLPerlinNoise() {}
 
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -573,17 +573,18 @@ public:
     typedef GrGLPerlinNoise GLProcessor;
 
 private:
-    virtual bool onIsEqual(const GrProcessor& sBase) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
         const GrPerlinNoiseEffect& s = sBase.cast<GrPerlinNoiseEffect>();
         return fType == s.fType &&
                fPaintingData->fBaseFrequency == s.fPaintingData->fBaseFrequency &&
                fNumOctaves == s.fNumOctaves &&
                fStitchTiles == s.fStitchTiles &&
-               fCoordTransform.getMatrix() == s.fCoordTransform.getMatrix() &&
                fAlpha == s.fAlpha &&
-               fPermutationsAccess.getTexture() == s.fPermutationsAccess.getTexture() &&
-               fNoiseAccess.getTexture() == s.fNoiseAccess.getTexture() &&
                fPaintingData->fStitchDataInit == s.fPaintingData->fStitchDataInit;
+    }
+
+    void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        inout->setToUnknown(InvariantOutput::kWillNot_ReadInput);
     }
 
     GrPerlinNoiseEffect(SkPerlinNoiseShader::Type type,
@@ -602,7 +603,6 @@ private:
         this->addTextureAccess(&fNoiseAccess);
         fCoordTransform.reset(kLocal_GrCoordSet, matrix);
         this->addCoordTransform(&fCoordTransform);
-        this->setWillNotUseInputColor();
     }
 
     GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
@@ -615,10 +615,6 @@ private:
     GrTextureAccess                 fPermutationsAccess;
     GrTextureAccess                 fNoiseAccess;
     SkPerlinNoiseShader::PaintingData *fPaintingData;
-
-    void getConstantColorComponents(GrColor*, uint32_t* validFlags) const SK_OVERRIDE {
-        *validFlags = 0; // This is noise. Nothing is constant.
-    }
 
 private:
     typedef GrFragmentProcessor INHERITED;
@@ -664,7 +660,7 @@ GrGLPerlinNoise::GrGLPerlinNoise(const GrBackendProcessorFactory& factory,
   , fNumOctaves(processor.cast<GrPerlinNoiseEffect>().numOctaves()) {
 }
 
-void GrGLPerlinNoise::emitCode(GrGLProgramBuilder* builder,
+void GrGLPerlinNoise::emitCode(GrGLFPBuilder* builder,
                                const GrFragmentProcessor&,
                                const GrProcessorKey& key,
                                const char* outputColor,
@@ -673,7 +669,7 @@ void GrGLPerlinNoise::emitCode(GrGLProgramBuilder* builder,
                                const TextureSamplerArray& samplers) {
     sk_ignore_unused_variable(inputColor);
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     SkString vCoords = fsBuilder->ensureFSCoords2D(coords, 0);
 
     fBaseFrequencyUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
@@ -996,10 +992,10 @@ bool SkPerlinNoiseShader::asFragmentProcessor(GrContext* context, const SkPaint&
 
     SkPerlinNoiseShader::PaintingData* paintingData =
             SkNEW_ARGS(PaintingData, (fTileSize, fSeed, fBaseFrequencyX, fBaseFrequencyY, matrix));
-    GrTexture* permutationsTexture = GrLockAndRefCachedBitmapTexture(
-        context, paintingData->getPermutationsBitmap(), NULL);
-    GrTexture* noiseTexture = GrLockAndRefCachedBitmapTexture(
-        context, paintingData->getNoiseBitmap(), NULL);
+    SkAutoTUnref<GrTexture> permutationsTexture(
+        GrRefCachedBitmapTexture(context, paintingData->getPermutationsBitmap(), NULL));
+    SkAutoTUnref<GrTexture> noiseTexture(
+        GrRefCachedBitmapTexture(context, paintingData->getNoiseBitmap(), NULL));
 
     SkMatrix m = context->getMatrix();
     m.setTranslateX(-localMatrix.getTranslateX() + SK_Scalar1);
@@ -1015,17 +1011,6 @@ bool SkPerlinNoiseShader::asFragmentProcessor(GrContext* context, const SkPaint&
         SkDELETE(paintingData);
         *fp = NULL;
     }
-
-    // Unlock immediately, this is not great, but we don't have a way of
-    // knowing when else to unlock it currently. TODO: Remove this when
-    // unref becomes the unlock replacement for all types of textures.
-    if (permutationsTexture) {
-        GrUnlockAndUnrefCachedBitmapTexture(permutationsTexture);
-    }
-    if (noiseTexture) {
-        GrUnlockAndUnrefCachedBitmapTexture(noiseTexture);
-    }
-
     return true;
 }
 

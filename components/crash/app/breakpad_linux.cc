@@ -399,25 +399,25 @@ class CrashReporterWriter : public MimeWriter {
  public:
   explicit CrashReporterWriter(int fd);
 
-  virtual void AddBoundary() OVERRIDE;
+  virtual void AddBoundary() override;
 
-  virtual void AddEnd() OVERRIDE;
+  virtual void AddEnd() override;
 
   virtual void AddPairData(const char* msg_type,
                            size_t msg_type_size,
                           const char* msg_data,
-                           size_t msg_data_size) OVERRIDE;
+                           size_t msg_data_size) override;
 
   virtual void AddPairDataInChunks(const char* msg_type,
                                    size_t msg_type_size,
                                    const char* msg_data,
                                    size_t msg_data_size,
                                    size_t chunk_size,
-                                   bool strip_trailing_spaces) OVERRIDE;
+                                   bool strip_trailing_spaces) override;
 
   virtual void AddFileContents(const char* filename_msg,
                                uint8_t* file_data,
-                               size_t file_size) OVERRIDE;
+                               size_t file_size) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CrashReporterWriter);
@@ -757,10 +757,10 @@ class NonBrowserCrashHandler : public google_breakpad::CrashGenerationClient {
             kCrashDumpSignal)) {
   }
 
-  virtual ~NonBrowserCrashHandler() {}
+  ~NonBrowserCrashHandler() override {}
 
-  virtual bool RequestDump(const void* crash_context,
-                           size_t crash_context_size) OVERRIDE {
+  bool RequestDump(const void* crash_context,
+                   size_t crash_context_size) override {
     int fds[2] = { -1, -1 };
     if (sys_socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
       static const char msg[] = "Failed to create socket for crash dumping.\n";
@@ -970,16 +970,41 @@ void ExecUploadProcessOrTerminate(const BreakpadInfo& info,
   uint64_t uid_str_length = my_uint64_len(uid);
   my_uint64tos(uid_buf, uid, uid_str_length);
   uid_buf[uid_str_length] = '\0';
+
+  const char kChromeFlag[] = "--chrome=";
+  size_t buf_len = my_strlen(dumpfile) + sizeof(kChromeFlag);
+  char* chrome_flag = reinterpret_cast<char*>(allocator->Alloc(buf_len));
+  chrome_flag[0] = '\0';
+  my_strlcat(chrome_flag, kChromeFlag, buf_len);
+  my_strlcat(chrome_flag, dumpfile, buf_len);
+
+  const char kPidFlag[] = "--pid=";
+  buf_len = my_strlen(pid_buf) + sizeof(kPidFlag);
+  char* pid_flag = reinterpret_cast<char*>(allocator->Alloc(buf_len));
+  pid_flag[0] = '\0';
+  my_strlcat(pid_flag, kPidFlag, buf_len);
+  my_strlcat(pid_flag, pid_buf, buf_len);
+
+  const char kUidFlag[] = "--uid=";
+  buf_len = my_strlen(uid_buf) + sizeof(kUidFlag);
+  char* uid_flag = reinterpret_cast<char*>(allocator->Alloc(buf_len));
+  uid_flag[0] = '\0';
+  my_strlcat(uid_flag, kUidFlag, buf_len);
+  my_strlcat(uid_flag, uid_buf, buf_len);
+
+  const char kExeBuf[] = "--exe=";
+  buf_len = my_strlen(exe_buf) + sizeof(kExeBuf);
+  char* exe_flag = reinterpret_cast<char*>(allocator->Alloc(buf_len));
+  exe_flag[0] = '\0';
+  my_strlcat(exe_flag, kExeBuf, buf_len);
+  my_strlcat(exe_flag, exe_buf, buf_len);
+
   const char* args[] = {
     kCrashReporterBinary,
-    "--chrome",
-    dumpfile,
-    "--pid",
-    pid_buf,
-    "--uid",
-    uid_buf,
-    "--exe",
-    exe_buf,
+    chrome_flag,
+    pid_flag,
+    uid_flag,
+    exe_flag,
     NULL,
   };
   static const char msg[] = "Cannot upload crash dump: cannot exec "
@@ -1166,6 +1191,10 @@ void HandleCrashDump(const BreakpadInfo& info) {
   google_breakpad::PageAllocator allocator;
   const char* exe_buf = NULL;
 
+  if (GetCrashReporterClient()->HandleCrashDump(info.filename)) {
+    return;
+  }
+
 #if defined(OS_CHROMEOS)
   // Grab the crashing process' name now, when it should still be available.
   // If we try to do this later in our grandchild the crashing process has
@@ -1313,16 +1342,15 @@ void HandleCrashDump(const BreakpadInfo& info) {
   MimeWriter writer(temp_file_fd, mime_boundary);
 #endif
   {
-    // TODO(thestig) Do not use this inside a compromised context.
-    std::string product_name;
-    std::string version;
+    const char* product_name = "";
+    const char* version = "";
 
     GetCrashReporterClient()->GetProductNameAndVersion(&product_name, &version);
 
     writer.AddBoundary();
-    writer.AddPairString("prod", product_name.c_str());
+    writer.AddPairString("prod", product_name);
     writer.AddBoundary();
-    writer.AddPairString("ver", version.c_str());
+    writer.AddPairString("ver", version);
     writer.AddBoundary();
     if (info.pid > 0) {
       char pid_value_buf[kUint64StringSize];
@@ -1610,6 +1638,7 @@ void InitNonBrowserCrashReporterForAndroid(const std::string& process_type) {
     if (minidump_fd < 0) {
       NOTREACHED() << "Could not find minidump FD, crash reporting disabled.";
     } else {
+      InitCrashKeys();
       EnableNonBrowserCrashDumping(process_type, minidump_fd);
     }
   }

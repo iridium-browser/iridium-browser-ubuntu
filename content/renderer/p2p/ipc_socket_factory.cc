@@ -62,7 +62,8 @@ bool JingleSocketOptionToP2PSocketOption(rtc::Socket::Option option,
 }
 
 // TODO(miu): This needs tuning.  http://crbug.com/237960
-const size_t kMaximumInFlightBytes = 64 * 1024;  // 64 KB
+// http://crbug.com/427555
+const size_t kMaximumInFlightBytes = 256 * 1024;  // 256 KB
 
 // IpcPacketSocket implements rtc::AsyncPacketSocket interface
 // using P2PSocketClient that works over IPC-channel. It must be used
@@ -71,7 +72,7 @@ class IpcPacketSocket : public rtc::AsyncPacketSocket,
                         public P2PSocketClientDelegate {
  public:
   IpcPacketSocket();
-  virtual ~IpcPacketSocket();
+  ~IpcPacketSocket() override;
 
   // Always takes ownership of client even if initialization fails.
   bool Init(P2PSocketType type, P2PSocketClientImpl* client,
@@ -79,31 +80,32 @@ class IpcPacketSocket : public rtc::AsyncPacketSocket,
             const rtc::SocketAddress& remote_address);
 
   // rtc::AsyncPacketSocket interface.
-  virtual rtc::SocketAddress GetLocalAddress() const OVERRIDE;
-  virtual rtc::SocketAddress GetRemoteAddress() const OVERRIDE;
-  virtual int Send(const void *pv, size_t cb,
-                   const rtc::PacketOptions& options) OVERRIDE;
-  virtual int SendTo(const void *pv, size_t cb,
-                     const rtc::SocketAddress& addr,
-                     const rtc::PacketOptions& options) OVERRIDE;
-  virtual int Close() OVERRIDE;
-  virtual State GetState() const OVERRIDE;
-  virtual int GetOption(rtc::Socket::Option option, int* value) OVERRIDE;
-  virtual int SetOption(rtc::Socket::Option option, int value) OVERRIDE;
-  virtual int GetError() const OVERRIDE;
-  virtual void SetError(int error) OVERRIDE;
+  rtc::SocketAddress GetLocalAddress() const override;
+  rtc::SocketAddress GetRemoteAddress() const override;
+  int Send(const void* pv,
+           size_t cb,
+           const rtc::PacketOptions& options) override;
+  int SendTo(const void* pv,
+             size_t cb,
+             const rtc::SocketAddress& addr,
+             const rtc::PacketOptions& options) override;
+  int Close() override;
+  State GetState() const override;
+  int GetOption(rtc::Socket::Option option, int* value) override;
+  int SetOption(rtc::Socket::Option option, int value) override;
+  int GetError() const override;
+  void SetError(int error) override;
 
   // P2PSocketClientDelegate implementation.
-  virtual void OnOpen(const net::IPEndPoint& local_address,
-                      const net::IPEndPoint& remote_address) OVERRIDE;
-  virtual void OnIncomingTcpConnection(
-      const net::IPEndPoint& address,
-      P2PSocketClient* client) OVERRIDE;
-  virtual void OnSendComplete() OVERRIDE;
-  virtual void OnError() OVERRIDE;
-  virtual void OnDataReceived(const net::IPEndPoint& address,
-                              const std::vector<char>& data,
-                              const base::TimeTicks& timestamp) OVERRIDE;
+  void OnOpen(const net::IPEndPoint& local_address,
+              const net::IPEndPoint& remote_address) override;
+  void OnIncomingTcpConnection(const net::IPEndPoint& address,
+                               P2PSocketClient* client) override;
+  void OnSendComplete() override;
+  void OnError() override;
+  void OnDataReceived(const net::IPEndPoint& address,
+                      const std::vector<char>& data,
+                      const base::TimeTicks& timestamp) override;
 
  private:
   enum InternalState {
@@ -186,14 +188,13 @@ class AsyncAddressResolverImpl :  public base::NonThreadSafe,
                                   public rtc::AsyncResolverInterface {
  public:
   AsyncAddressResolverImpl(P2PSocketDispatcher* dispatcher);
-  virtual ~AsyncAddressResolverImpl();
+  ~AsyncAddressResolverImpl() override;
 
   // rtc::AsyncResolverInterface interface.
-  virtual void Start(const rtc::SocketAddress& addr) OVERRIDE;
-  virtual bool GetResolvedAddress(
-      int family, rtc::SocketAddress* addr) const OVERRIDE;
-  virtual int GetError() const OVERRIDE;
-  virtual void Destroy(bool wait) OVERRIDE;
+  void Start(const rtc::SocketAddress& addr) override;
+  bool GetResolvedAddress(int family, rtc::SocketAddress* addr) const override;
+  int GetError() const override;
+  void Destroy(bool wait) override;
 
  private:
   virtual void OnAddressResolved(const net::IPAddressList& addresses);
@@ -375,6 +376,9 @@ int IpcPacketSocket::SendTo(const void *data, size_t data_size,
 
   net::IPEndPoint address_chrome;
   if (!jingle_glue::SocketAddressToIPEndPoint(address, &address_chrome)) {
+    VLOG(1) << "Failed to convert remote address to IPEndPoint: address = "
+            << address.ToSensitiveString() << ", remote_address_ = "
+            << remote_address_.ToSensitiveString();
     NOTREACHED();
     error_ = EINVAL;
     return -1;
@@ -497,7 +501,6 @@ void IpcPacketSocket::OnOpen(const net::IPEndPoint& local_address,
 
   SignalAddressReady(this, local_address_);
   if (IsTcpClientSocket(type_)) {
-    SignalConnect(this);
     // If remote address is unresolved, set resolved remote IP address received
     // in the callback. This address will be used while sending the packets
     // over the network.
@@ -510,6 +513,10 @@ void IpcPacketSocket::OnOpen(const net::IPEndPoint& local_address,
       // Set only the IP address.
       remote_address_.SetResolvedIP(jingle_socket_address.ipaddr());
     }
+
+    // SignalConnect after updating the |remote_address_| so that the listener
+    // can get the resolved remote address.
+    SignalConnect(this);
   }
 }
 
@@ -652,7 +659,7 @@ IpcPacketSocketFactory::~IpcPacketSocketFactory() {
 }
 
 rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateUdpSocket(
-    const rtc::SocketAddress& local_address, int min_port, int max_port) {
+    const rtc::SocketAddress& local_address, uint16 min_port, uint16 max_port) {
   rtc::SocketAddress crome_address;
   P2PSocketClientImpl* socket_client =
       new P2PSocketClientImpl(socket_dispatcher_);
@@ -667,7 +674,7 @@ rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateUdpSocket(
 }
 
 rtc::AsyncPacketSocket* IpcPacketSocketFactory::CreateServerTcpSocket(
-    const rtc::SocketAddress& local_address, int min_port, int max_port,
+    const rtc::SocketAddress& local_address, uint16 min_port, uint16 max_port,
     int opts) {
   // TODO(sergeyu): Implement SSL support.
   if (opts & rtc::PacketSocketFactory::OPT_SSLTCP)

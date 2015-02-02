@@ -12,6 +12,7 @@ import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationTransitionDelegate;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 import org.chromium.net.test.util.TestWebServer;
@@ -37,11 +38,11 @@ public class TransitionTest extends ContentShellTestBase {
         private boolean mDidCallAddStylesheet = false;
         private boolean mHandleDefer = false;
         private ArrayList<String> mTransitionStylesheets;
-        private ContentViewCore mContentViewCore;
+        private WebContents mWebContents;
         private String mTransitionEnteringColor;
 
-        TestNavigationTransitionDelegate(ContentViewCore contentViewCore, boolean handleDefer) {
-            mContentViewCore = contentViewCore;
+        TestNavigationTransitionDelegate(WebContents webContents, boolean handleDefer) {
+            mWebContents = webContents;
             mHandleDefer = handleDefer;
             mTransitionStylesheets = new ArrayList<String>();
         }
@@ -50,7 +51,7 @@ public class TransitionTest extends ContentShellTestBase {
         public void didDeferAfterResponseStarted(String markup, String cssSelector,
                 String enteringColor) {
             mDidCallDefer = true;
-            mContentViewCore.resumeResponseDeferredAtStart();
+            mWebContents.resumeResponseDeferredAtStart();
             mTransitionEnteringColor = enteringColor;
         }
 
@@ -88,14 +89,14 @@ public class TransitionTest extends ContentShellTestBase {
         public String getTransitionEnteringColor() {
             return mTransitionEnteringColor;
         }
-    };
+    }
 
-    private static List<Pair<String, String>> createHeadersList(
-        String[] namesAndValues) {
+    private static List<Pair<String, String>> createHeadersList(String[] namesAndValues) {
         List<Pair<String, String>> result =
-            new ArrayList<Pair<String, String>>();
-        for (int i = 0; i < namesAndValues.length; i += 2)
+                new ArrayList<Pair<String, String>>();
+        for (int i = 0; i < namesAndValues.length; i += 2) {
             result.add(Pair.create(namesAndValues[i], namesAndValues[i + 1]));
+        }
         return result;
     }
 
@@ -113,18 +114,19 @@ public class TransitionTest extends ContentShellTestBase {
 
         contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
         TestNavigationTransitionDelegate delegate = new TestNavigationTransitionDelegate(
-                contentViewCore,
+                contentViewCore.getWebContents(),
                 true);
         contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
 
-        loadUrl(contentViewCore, testCallbackHelperContainer, new LoadUrlParams(URL_1));
+        loadUrl(contentViewCore.getWebContents().getNavigationController(),
+                testCallbackHelperContainer, new LoadUrlParams(URL_1));
 
         assertTrue("didDeferAfterResponseStarted called.", delegate.getDidCallDefer());
     }
 
     /**
      * Tests that the listener does not receive DidDeferAfterResponseStarted if we specify that
-     * the transition is handled.
+     * the transition is not handled.
      */
     @SmallTest
     public void testDidDeferAfterResponseStartedNotCalled() throws Throwable {
@@ -136,11 +138,38 @@ public class TransitionTest extends ContentShellTestBase {
 
         contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
         TestNavigationTransitionDelegate delegate = new TestNavigationTransitionDelegate(
-                contentViewCore,
+                contentViewCore.getWebContents(),
                 false);
         contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
 
-        loadUrl(contentViewCore, testCallbackHelperContainer, new LoadUrlParams(URL_1));
+        loadUrl(contentViewCore.getWebContents().getNavigationController(),
+                testCallbackHelperContainer, new LoadUrlParams(URL_1));
+
+        assertFalse("didDeferAfterResponseStarted called.", delegate.getDidCallDefer());
+    }
+
+    /**
+     * Tests clearNavigationTransitionData(). The listener does not receive
+     * DidDeferAfterResponseStarted even if we specify that the transition is handled
+     * because the data is cleared before the navigation.
+     */
+    @SmallTest
+    public void testDidDeferAfterResponseStartedNotCalledWithoutData() throws Throwable {
+        ContentShellActivity activity = launchContentShellWithUrl(URL_1);
+        waitForActiveShellToBeDoneLoading();
+        ContentViewCore contentViewCore = activity.getActiveContentViewCore();
+        TestCallbackHelperContainer testCallbackHelperContainer =
+                new TestCallbackHelperContainer(contentViewCore);
+
+        contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
+        TestNavigationTransitionDelegate delegate = new TestNavigationTransitionDelegate(
+                contentViewCore.getWebContents(),
+                true);
+        contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
+
+        contentViewCore.getWebContents().clearNavigationTransitionData();
+        loadUrl(contentViewCore.getWebContents().getNavigationController(),
+                testCallbackHelperContainer, new LoadUrlParams(URL_1));
 
         assertFalse("didDeferAfterResponseStarted called.", delegate.getDidCallDefer());
     }
@@ -157,11 +186,12 @@ public class TransitionTest extends ContentShellTestBase {
                 new TestCallbackHelperContainer(contentViewCore);
 
         TestNavigationTransitionDelegate delegate = new TestNavigationTransitionDelegate(
-                contentViewCore,
+                contentViewCore.getWebContents(),
                 false);
         contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
 
-        loadUrl(contentViewCore, testCallbackHelperContainer, new LoadUrlParams(URL_1));
+        loadUrl(contentViewCore.getWebContents().getNavigationController(),
+                testCallbackHelperContainer, new LoadUrlParams(URL_1));
 
         assertFalse("didDeferAfterResponseStarted called.", delegate.getDidCallDefer());
         assertFalse("willHandleDeferAfterResponseStarted called.",
@@ -174,48 +204,46 @@ public class TransitionTest extends ContentShellTestBase {
      */
     @SmallTest
     public void testAddStylesheetToTransitionCalled() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-          webServer = new TestWebServer(false);
+            final String url2 = webServer.setResponse(URL_2, URL_2_DATA, null);
+            ContentShellActivity activity = launchContentShellWithUrl(url2);
+            waitForActiveShellToBeDoneLoading();
+            ContentViewCore contentViewCore = activity.getActiveContentViewCore();
+            TestCallbackHelperContainer testCallbackHelperContainer =
+                    new TestCallbackHelperContainer(contentViewCore);
+            contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
+            TestNavigationTransitionDelegate delegate =
+                    new TestNavigationTransitionDelegate(contentViewCore.getWebContents(), true);
+            contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
 
-          final String url2 = webServer.setResponse(URL_2, URL_2_DATA, null);
-          ContentShellActivity activity = launchContentShellWithUrl(url2);
-          waitForActiveShellToBeDoneLoading();
-          ContentViewCore contentViewCore = activity.getActiveContentViewCore();
-          TestCallbackHelperContainer testCallbackHelperContainer =
-              new TestCallbackHelperContainer(contentViewCore);
-          contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
-          TestNavigationTransitionDelegate delegate =
-              new TestNavigationTransitionDelegate(contentViewCore, true);
-          contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
+            int currentCallCount = testCallbackHelperContainer
+                    .getOnPageFinishedHelper().getCallCount();
+            String[] headers = {
+                    "link",
+                    "<transition0.css>;rel=transition-entering-stylesheet;scope=*",
+                    "link",
+                    "<transition1.css>;rel=transition-entering-stylesheet;scope=*",
+                    "link",
+                    "<transition2.css>;rel=transition-entering-stylesheet;scope=*"
+            };
+            final String url3 = webServer.setResponse(URL_3,
+                    URL_3_DATA,
+                    createHeadersList(headers));
+            LoadUrlParams url3_params = new LoadUrlParams(url3);
+            loadUrl(contentViewCore.getWebContents().getNavigationController(),
+                    testCallbackHelperContainer, url3_params);
+            testCallbackHelperContainer.getOnPageFinishedHelper().waitForCallback(
+                    currentCallCount,
+                    1,
+                    10000,
+                    TimeUnit.MILLISECONDS);
 
-          int currentCallCount = testCallbackHelperContainer
-              .getOnPageFinishedHelper().getCallCount();
-          String[] headers = {
-              "link",
-              "<transition0.css>;rel=transition-entering-stylesheet;scope=*",
-              "link",
-              "<transition1.css>;rel=transition-entering-stylesheet;scope=*",
-              "link",
-              "<transition2.css>;rel=transition-entering-stylesheet;scope=*"
-          };
-          final String url3 = webServer.setResponse(URL_3,
-              URL_3_DATA,
-              createHeadersList(headers));
-          LoadUrlParams url3_params = new LoadUrlParams(url3);
-          loadUrl(contentViewCore, testCallbackHelperContainer, url3_params);
-          testCallbackHelperContainer.getOnPageFinishedHelper().waitForCallback(
-              currentCallCount,
-              1,
-              10000,
-              TimeUnit.MILLISECONDS);
-
-          assertTrue("addStylesheetToTransition called.",
-              delegate.getDidCallAddStylesheet());
-          assertTrue("Three stylesheets are added",
-              delegate.getTransitionStylesheets().size() == 3);
+            assertTrue("addStylesheetToTransition called.",
+                    delegate.getDidCallAddStylesheet());
+            assertTrue("Three stylesheets are added",
+                    delegate.getTransitionStylesheets().size() == 3);
         } finally {
-          if (webServer != null)
             webServer.shutdown();
         }
     }
@@ -226,38 +254,36 @@ public class TransitionTest extends ContentShellTestBase {
      */
     @SmallTest
     public void testAddStylesheetToTransitionNotCalled() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-          webServer = new TestWebServer(false);
+            final String url2 = webServer.setResponse(URL_2, URL_2_DATA, null);
+            ContentShellActivity activity = launchContentShellWithUrl(url2);
+            waitForActiveShellToBeDoneLoading();
+            ContentViewCore contentViewCore = activity.getActiveContentViewCore();
+            TestCallbackHelperContainer testCallbackHelperContainer =
+                    new TestCallbackHelperContainer(contentViewCore);
+            contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
+            TestNavigationTransitionDelegate delegate =
+                    new TestNavigationTransitionDelegate(contentViewCore.getWebContents(), true);
+            contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
 
-          final String url2 = webServer.setResponse(URL_2, URL_2_DATA, null);
-          ContentShellActivity activity = launchContentShellWithUrl(url2);
-          waitForActiveShellToBeDoneLoading();
-          ContentViewCore contentViewCore = activity.getActiveContentViewCore();
-          TestCallbackHelperContainer testCallbackHelperContainer =
-              new TestCallbackHelperContainer(contentViewCore);
-          contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
-          TestNavigationTransitionDelegate delegate =
-              new TestNavigationTransitionDelegate(contentViewCore, true);
-          contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
+            int currentCallCount = testCallbackHelperContainer
+                    .getOnPageFinishedHelper().getCallCount();
+            final String url3 = webServer.setResponse(URL_3, URL_3_DATA, null);
+            LoadUrlParams url3_params = new LoadUrlParams(url3);
+            loadUrl(contentViewCore.getWebContents().getNavigationController(),
+                    testCallbackHelperContainer, url3_params);
+            testCallbackHelperContainer.getOnPageFinishedHelper().waitForCallback(
+                    currentCallCount,
+                    1,
+                    10000,
+                    TimeUnit.MILLISECONDS);
 
-          int currentCallCount = testCallbackHelperContainer
-              .getOnPageFinishedHelper().getCallCount();
-          final String url3 = webServer.setResponse(URL_3, URL_3_DATA, null);
-          LoadUrlParams url3_params = new LoadUrlParams(url3);
-          loadUrl(contentViewCore, testCallbackHelperContainer, url3_params);
-          testCallbackHelperContainer.getOnPageFinishedHelper().waitForCallback(
-              currentCallCount,
-              1,
-              10000,
-              TimeUnit.MILLISECONDS);
-
-          assertFalse("addStylesheetToTransition is not called.",
-              delegate.getDidCallAddStylesheet());
-          assertTrue("No stylesheets are added",
-              delegate.getTransitionStylesheets().size() == 0);
+            assertFalse("addStylesheetToTransition is not called.",
+                    delegate.getDidCallAddStylesheet());
+            assertTrue("No stylesheets are added",
+                    delegate.getTransitionStylesheets().size() == 0);
         } finally {
-          if (webServer != null)
             webServer.shutdown();
         }
     }
@@ -268,10 +294,8 @@ public class TransitionTest extends ContentShellTestBase {
      */
     @SmallTest
     public void testParseTransitionEnteringColor() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
-
             final String url2 = webServer.setResponse(URL_2, URL_2_DATA, null);
             ContentShellActivity activity = launchContentShellWithUrl(url2);
             waitForActiveShellToBeDoneLoading();
@@ -280,7 +304,7 @@ public class TransitionTest extends ContentShellTestBase {
                     new TestCallbackHelperContainer(contentViewCore);
             contentViewCore.getWebContents().setHasPendingNavigationTransitionForTesting();
             TestNavigationTransitionDelegate delegate =
-                    new TestNavigationTransitionDelegate(contentViewCore, true);
+                    new TestNavigationTransitionDelegate(contentViewCore.getWebContents(), true);
             contentViewCore.getWebContents().setNavigationTransitionDelegate(delegate);
 
             String transitionEnteringColor = "#00FF00";
@@ -295,7 +319,8 @@ public class TransitionTest extends ContentShellTestBase {
                     URL_3_DATA,
                     createHeadersList(headers));
             LoadUrlParams url3Params = new LoadUrlParams(url3);
-            loadUrl(contentViewCore, testCallbackHelperContainer, url3Params);
+            loadUrl(contentViewCore.getWebContents().getNavigationController(),
+                    testCallbackHelperContainer, url3Params);
             testCallbackHelperContainer.getOnPageFinishedHelper().waitForCallback(
                     currentCallCount,
                     1,
@@ -307,7 +332,7 @@ public class TransitionTest extends ContentShellTestBase {
                             delegate.getTransitionEnteringColor(),
                             transitionEnteringColor));
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 }

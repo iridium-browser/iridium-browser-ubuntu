@@ -17,7 +17,7 @@ class ScriptState;
 class ScriptValue;
 
 // Created for each ExtendableEvent instance.
-class WaitUntilObserver FINAL : public GarbageCollectedFinalized<WaitUntilObserver>, public ContextLifecycleObserver {
+class WaitUntilObserver final : public GarbageCollectedFinalized<WaitUntilObserver>, public ContextLifecycleObserver {
 public:
     enum EventType {
         Activate,
@@ -28,7 +28,7 @@ public:
 
     // Must be called before and after dispatching the event.
     void willDispatchEvent();
-    void didDispatchEvent();
+    void didDispatchEvent(bool errorOccurred);
 
     // Observes the promise and delays calling the continuation until
     // the given promise is resolved or rejected.

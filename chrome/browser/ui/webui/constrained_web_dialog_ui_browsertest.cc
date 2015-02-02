@@ -9,7 +9,6 @@
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -28,14 +27,12 @@ class ConstrainedWebDialogBrowserTestObserver
       : content::WebContentsObserver(contents),
         contents_destroyed_(false) {
   }
-  virtual ~ConstrainedWebDialogBrowserTestObserver() {}
+  ~ConstrainedWebDialogBrowserTestObserver() override {}
 
   bool contents_destroyed() { return contents_destroyed_; }
 
  private:
-  virtual void WebContentsDestroyed() OVERRIDE {
-    contents_destroyed_ = true;
-  }
+  void WebContentsDestroyed() override { contents_destroyed_ = true; }
 
   bool contents_destroyed_;
 };

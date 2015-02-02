@@ -59,7 +59,7 @@
                 '../core/core.gyp:webcore',
                 '../modules/modules.gyp:modules',
                 '<(DEPTH)/skia/skia.gyp:skia',
-                '<(angle_path)/src/build_angle.gyp:translator',
+                '<(angle_path)/src/angle.gyp:translator',
                 '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
                 '<(DEPTH)/third_party/npapi/npapi.gyp:npapi',
                 '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
@@ -129,7 +129,7 @@
                         'WebTestingSupport.cpp',
                     ],
                     'conditions': [
-                        ['OS=="win" or OS=="mac"', {
+                        ['use_openssl==0 and (OS=="win" or OS=="mac")', {
                             'dependencies': [
                                 '<(DEPTH)/third_party/nss/nss.gyp:*',
                             ],
@@ -215,13 +215,16 @@
                     'type': 'static_library',
                     'dependencies': [
                         '../config.gyp:config',
+                        '../core/core.gyp:webcore_generated',
                         '../core/core.gyp:webcore_testing',
                         '../modules/modules.gyp:modules_testing',
                         '../wtf/wtf.gyp:wtf',
                         '<(DEPTH)/skia/skia.gyp:skia',
+                        '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
                     ],
                     'include_dirs': [
                         '../../',
+                        '<(SHARED_INTERMEDIATE_DIR)/blink',  # gen/blink
                     ],
                     'sources': [
                         'WebTestingSupport.cpp',

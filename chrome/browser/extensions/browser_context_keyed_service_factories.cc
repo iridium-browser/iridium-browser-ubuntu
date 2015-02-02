@@ -24,9 +24,7 @@
 #include "chrome/browser/extensions/api/hotword_private/hotword_private_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/idle/idle_manager_factory.h"
-#include "chrome/browser/extensions/api/input/input.h"
 #include "chrome/browser/extensions/api/location/location_manager.h"
-#include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/mdns/mdns_api.h"
 #include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_event_router_factory.h"
@@ -50,6 +48,7 @@
 #include "chrome/browser/extensions/extension_storage_monitor_factory.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/extension_toolbar_model_factory.h"
+#include "chrome/browser/extensions/extension_warning_badge_service_factory.h"
 #include "chrome/browser/extensions/extension_web_ui_override_registrar.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/menu_manager_factory.h"
@@ -63,6 +62,7 @@
 #include "extensions/browser/api/bluetooth_socket/bluetooth_socket_event_dispatcher.h"
 #include "extensions/browser/api/power/power_api_manager.h"
 #include "extensions/browser/api/usb/usb_device_resource.h"
+#include "extensions/browser/api/virtual_keyboard_private/virtual_keyboard_private_api.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 
 #if defined(OS_CHROMEOS)
@@ -103,6 +103,7 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::ExtensionStorageMonitorFactory::GetInstance();
   extensions::ExtensionSystemFactory::GetInstance();
   extensions::ExtensionToolbarModelFactory::GetInstance();
+  extensions::ExtensionWarningBadgeServiceFactory::GetInstance();
   extensions::ExtensionWebUIOverrideRegistrar::GetFactoryInstance();
   extensions::FeedbackPrivateAPI::GetFactoryInstance();
   extensions::FontSettingsAPI::GetFactoryInstance();
@@ -112,9 +113,6 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::IdentityAPI::GetFactoryInstance();
   extensions::IdleManagerFactory::GetInstance();
   extensions::InstallTrackerFactory::GetInstance();
-#if defined(TOOLKIT_VIEWS)
-  extensions::InputAPI::GetFactoryInstance();
-#endif
 #if defined(OS_CHROMEOS)
   extensions::InputImeAPI::GetFactoryInstance();
   extensions::InputMethodAPI::GetFactoryInstance();
@@ -123,7 +121,6 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #if defined(OS_CHROMEOS)
   extensions::LogPrivateAPI::GetFactoryInstance();
 #endif
-  extensions::ManagementAPI::GetFactoryInstance();
   extensions::MDnsAPI::GetFactoryInstance();
   extensions::MediaGalleriesPrivateAPI::GetFactoryInstance();
 #if defined(OS_CHROMEOS)
@@ -142,20 +139,19 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::ProcessesAPI::GetFactoryInstance();
   extensions::PushMessagingAPI::GetFactoryInstance();
   extensions::ScreenlockPrivateEventRouter::GetFactoryInstance();
-#if !defined(USE_ATHENA)
   extensions::SessionsAPI::GetFactoryInstance();
-#endif
   extensions::SettingsOverridesAPI::GetFactoryInstance();
   extensions::SignedInDevicesManager::GetFactoryInstance();
 #if defined(ENABLE_SPELLCHECK)
   extensions::SpellcheckAPI::GetFactoryInstance();
 #endif
   extensions::StreamsPrivateAPI::GetFactoryInstance();
-#if !defined(USE_ATHENA)
   extensions::TabCaptureRegistry::GetFactoryInstance();
   extensions::TabsWindowsAPI::GetFactoryInstance();
-#endif
   extensions::TtsAPI::GetFactoryInstance();
+#if defined(OS_CHROMEOS)
+  extensions::VirtualKeyboardAPI::GetFactoryInstance();
+#endif
   extensions::WebNavigationAPI::GetFactoryInstance();
   extensions::WebRequestAPI::GetFactoryInstance();
   extensions::WebrtcAudioPrivateEventService::GetFactoryInstance();

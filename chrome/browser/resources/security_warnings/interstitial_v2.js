@@ -26,7 +26,7 @@ function handleKeypress(e) {
   if (BYPASS_SEQUENCE.charCodeAt(keyPressState) == e.keyCode) {
     keyPressState++;
     if (keyPressState == BYPASS_SEQUENCE.length) {
-      sendCommand(CMD_PROCEED);
+      sendCommand(SSL_CMD_PROCEED);
       keyPressState = 0;
     }
   } else {
@@ -65,28 +65,37 @@ function toggleDebuggingInfo() {
 
 function setupEvents() {
   var overridable = loadTimeData.getBoolean('overridable');
-  var ssl = loadTimeData.getBoolean('ssl');
+  var ssl = loadTimeData.getString('type') === 'SSL';
+  var badClock = ssl && loadTimeData.getBoolean('bad_clock');
+  var hidePrimaryButton = badClock && loadTimeData.getBoolean(
+      'hide_primary_button');
 
   if (ssl) {
-    $('body').classList.add('ssl');
+    $('body').classList.add(badClock ? 'bad-clock' : 'ssl');
     $('error-code').textContent = loadTimeData.getString('errorCode');
     $('error-code').classList.remove('hidden');
   } else {
     $('body').classList.add('safe-browsing');
   }
 
-  $('primary-button').addEventListener('click', function() {
-    if (!ssl)
-      sendCommand(SB_CMD_TAKE_ME_BACK);
-    else if (overridable)
-      sendCommand(CMD_DONT_PROCEED);
-    else
-      sendCommand(CMD_RELOAD);
-  });
+  if (hidePrimaryButton) {
+    $('primary-button').classList.add('hidden');
+  } else {
+    $('primary-button').addEventListener('click', function() {
+      if (!ssl)
+        sendCommand(SB_CMD_TAKE_ME_BACK);
+      else if (badClock)
+        sendCommand(SSL_CMD_CLOCK);
+      else if (overridable)
+        sendCommand(SSL_CMD_DONT_PROCEED);
+      else
+        sendCommand(SSL_CMD_RELOAD);
+    });
+  }
 
   if (overridable) {
     $('proceed-link').addEventListener('click', function(event) {
-      sendCommand(ssl ? CMD_PROCEED : SB_CMD_PROCEED);
+      sendCommand(ssl ? SSL_CMD_PROCEED : SB_CMD_PROCEED);
     });
   } else if (!ssl) {
     $('final-paragraph').classList.add('hidden');
@@ -98,17 +107,11 @@ function setupEvents() {
     // Overridable SSL page doesn't have this link.
     $('help-link').addEventListener('click', function(event) {
       if (ssl)
-        sendCommand(CMD_HELP);
+        sendCommand(SSL_CMD_HELP);
       else if (loadTimeData.getBoolean('phishing'))
         sendCommand(SB_CMD_LEARN_MORE_2);
       else
         sendCommand(SB_CMD_SHOW_DIAGNOSTIC);
-    });
-  }
-
-  if (ssl && $('clock-link')) {
-    $('clock-link').addEventListener('click', function(event) {
-      sendCommand(CMD_CLOCK);
     });
   }
 
@@ -119,7 +122,7 @@ function setupEvents() {
         loadTimeData.getString('closeDetails');
     if (!expandedDetails) {
       // Record a histogram entry only the first time that details is opened.
-      sendCommand(ssl ? CMD_MORE : SB_CMD_EXPANDED_SEE_MORE);
+      sendCommand(ssl ? SSL_CMD_MORE : SB_CMD_EXPANDED_SEE_MORE);
       expandedDetails = true;
     }
   });

@@ -80,21 +80,20 @@ class GpuCommandBufferStub
       bool software,
       const GURL& active_url);
 
-  virtual ~GpuCommandBufferStub();
+  ~GpuCommandBufferStub() override;
 
   // IPC::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // IPC::Sender implementation:
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+  bool Send(IPC::Message* msg) override;
 
   // GpuMemoryManagerClient implementation:
-  virtual gfx::Size GetSurfaceSize() const OVERRIDE;
-  virtual gpu::gles2::MemoryTracker* GetMemoryTracker() const OVERRIDE;
-  virtual void SetMemoryAllocation(
-      const gpu::MemoryAllocation& allocation) OVERRIDE;
-  virtual void SuggestHaveFrontBuffer(bool suggest_have_frontbuffer) OVERRIDE;
-  virtual bool GetTotalGpuMemory(uint64* bytes) OVERRIDE;
+  gfx::Size GetSurfaceSize() const override;
+  gpu::gles2::MemoryTracker* GetMemoryTracker() const override;
+  void SetMemoryAllocation(const gpu::MemoryAllocation& allocation) override;
+  void SuggestHaveFrontBuffer(bool suggest_have_frontbuffer) override;
+  bool GetTotalGpuMemory(uint64* bytes) override;
 
   // Whether this command buffer can currently handle IPC messages.
   bool IsScheduled();
@@ -144,6 +143,8 @@ class GpuCommandBufferStub
 
   uint64 GetMemoryUsage() const;
 
+  void SwapBuffersCompleted(const std::vector<ui::LatencyInfo>& latency_info);
+
  private:
   GpuMemoryManager* GetMemoryManager() const;
   bool MakeCurrent();
@@ -166,7 +167,6 @@ class GpuCommandBufferStub
                                  IPC::Message* reply_message);
   void OnAsyncFlush(int32 put_offset, uint32 flush_count,
                     const std::vector<ui::LatencyInfo>& latency_info);
-  void OnEcho(const IPC::Message& message);
   void OnRescheduled();
   void OnRegisterTransferBuffer(int32 id,
                                 base::SharedMemoryHandle transfer_buffer,
@@ -197,12 +197,12 @@ class GpuCommandBufferStub
 
   void OnSetClientHasMemoryAllocationChangedCallback(bool has_callback);
 
-  void OnRegisterGpuMemoryBuffer(int32 id,
-                                 gfx::GpuMemoryBufferHandle handle,
-                                 uint32 width,
-                                 uint32 height,
-                                 uint32 internalformat);
-  void OnUnregisterGpuMemoryBuffer(int32 id);
+  void OnCreateImage(int32 id,
+                     gfx::GpuMemoryBufferHandle handle,
+                     gfx::Size size,
+                     gfx::GpuMemoryBuffer::Format format,
+                     uint32 internalformat);
+  void OnDestroyImage(int32 id);
 
   void OnCommandProcessed();
   void OnParseError();

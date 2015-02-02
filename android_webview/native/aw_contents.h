@@ -17,7 +17,6 @@
 #include "android_webview/browser/gl_view_renderer_manager.h"
 #include "android_webview/browser/icon_helper.h"
 #include "android_webview/browser/renderer_host/aw_render_view_host_ext.h"
-#include "android_webview/browser/shared_renderer_state.h"
 #include "android_webview/native/permission/permission_request_handler_client.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
@@ -128,17 +127,15 @@ class AwContents : public FindHelper::Listener,
   void SetExtraHeadersForUrl(JNIEnv* env, jobject obj,
                              jstring url, jstring extra_headers);
 
-  void DrawGL(AwDrawGLInfo* draw_info);
-
   void InvokeGeolocationCallback(JNIEnv* env,
                                  jobject obj,
                                  jboolean value,
                                  jstring origin);
 
   // PermissionRequestHandlerClient implementation.
-  virtual void OnPermissionRequest(AwPermissionRequest* request) OVERRIDE;
+  virtual void OnPermissionRequest(AwPermissionRequest* request) override;
   virtual void OnPermissionRequestCanceled(
-      AwPermissionRequest* request) OVERRIDE;
+      AwPermissionRequest* request) override;
 
   PermissionRequestHandler* GetPermissionRequestHandler() {
     return permission_request_handler_.get();
@@ -152,14 +149,14 @@ class AwContents : public FindHelper::Listener,
   // AwBrowserPermissionRequestDelegate implementation.
   virtual void RequestProtectedMediaIdentifierPermission(
       const GURL& origin,
-      const base::Callback<void(bool)>& callback) OVERRIDE;
+      const base::Callback<void(bool)>& callback) override;
   virtual void CancelProtectedMediaIdentifierPermissionRequests(
-      const GURL& origin) OVERRIDE;
+      const GURL& origin) override;
   virtual void RequestGeolocationPermission(
       const GURL& origin,
-      const base::Callback<void(bool)>& callback) OVERRIDE;
+      const base::Callback<void(bool)>& callback) override;
   virtual void CancelGeolocationPermissionRequests(
-      const GURL& origin) OVERRIDE;
+      const GURL& origin) override;
 
 
   // Find-in-page API and related methods.
@@ -174,35 +171,36 @@ class AwContents : public FindHelper::Listener,
   // FindHelper::Listener implementation.
   virtual void OnFindResultReceived(int active_ordinal,
                                     int match_count,
-                                    bool finished) OVERRIDE;
+                                    bool finished) override;
   // IconHelper::Listener implementation.
-  virtual bool ShouldDownloadFavicon(const GURL& icon_url) OVERRIDE;
+  virtual bool ShouldDownloadFavicon(const GURL& icon_url) override;
   virtual void OnReceivedIcon(const GURL& icon_url,
-                              const SkBitmap& bitmap) OVERRIDE;
+                              const SkBitmap& bitmap) override;
   virtual void OnReceivedTouchIconUrl(const std::string& url,
-                                      const bool precomposed) OVERRIDE;
+                                      const bool precomposed) override;
 
   // AwRenderViewHostExtClient implementation.
   virtual void OnWebLayoutPageScaleFactorChanged(
-      float page_scale_factor) OVERRIDE;
+      float page_scale_factor) override;
   virtual void OnWebLayoutContentsSizeChanged(
-      const gfx::Size& contents_size) OVERRIDE;
+      const gfx::Size& contents_size) override;
 
   // BrowserViewRendererClient implementation.
-  virtual bool RequestDrawGL(jobject canvas, bool wait_for_completion) OVERRIDE;
-  virtual void PostInvalidate() OVERRIDE;
-  virtual void UpdateParentDrawConstraints() OVERRIDE;
-  virtual void DidSkipCommitFrame() OVERRIDE;
-  virtual void OnNewPicture() OVERRIDE;
-  virtual gfx::Point GetLocationOnScreen() OVERRIDE;
-  virtual void ScrollContainerViewTo(gfx::Vector2d new_value) OVERRIDE;
-  virtual bool IsFlingActive() const OVERRIDE;
+  virtual bool RequestDrawGL(bool wait_for_completion) override;
+  virtual void PostInvalidate() override;
+  virtual void InvalidateOnFunctorDestroy() override;
+  virtual void UpdateParentDrawConstraints() override;
+  virtual void DidSkipCommitFrame() override;
+  virtual void OnNewPicture() override;
+  virtual gfx::Point GetLocationOnScreen() override;
+  virtual void ScrollContainerViewTo(gfx::Vector2d new_value) override;
+  virtual bool IsFlingActive() const override;
   virtual void UpdateScrollState(gfx::Vector2d max_scroll_offset,
                                  gfx::SizeF contents_size_dip,
                                  float page_scale_factor,
                                  float min_page_scale_factor,
-                                 float max_page_scale_factor) OVERRIDE;
-  virtual void DidOverscroll(gfx::Vector2d overscroll_delta) OVERRIDE;
+                                 float max_page_scale_factor) override;
+  virtual void DidOverscroll(gfx::Vector2d overscroll_delta) override;
 
   const BrowserViewRenderer* GetBrowserViewRenderer() const;
 
@@ -224,24 +222,19 @@ class AwContents : public FindHelper::Listener,
   void InitDataReductionProxyIfNecessary();
   void InitAutofillIfNecessary(bool enabled);
 
-  void InitializeHardwareDrawIfNeeded();
-  void ReleaseHardwareDrawIfNeeded();
-
   // Geolocation API support
   void ShowGeolocationPrompt(const GURL& origin, base::Callback<void(bool)>);
   void HideGeolocationPrompt(const GURL& origin);
 
   JavaObjectWeakGlobalRef java_ref_;
-  scoped_ptr<content::WebContents> web_contents_;
   scoped_ptr<AwWebContentsDelegate> web_contents_delegate_;
   scoped_ptr<AwContentsClientBridge> contents_client_bridge_;
+  scoped_ptr<content::WebContents> web_contents_;
   scoped_ptr<AwRenderViewHostExt> render_view_host_ext_;
   scoped_ptr<FindHelper> find_helper_;
   scoped_ptr<IconHelper> icon_helper_;
   scoped_ptr<AwContents> pending_contents_;
-  SharedRendererState shared_renderer_state_;
   BrowserViewRenderer browser_view_renderer_;
-  scoped_ptr<HardwareRenderer> hardware_renderer_;
   scoped_ptr<AwPdfExporter> pdf_exporter_;
   scoped_ptr<PermissionRequestHandler> permission_request_handler_;
 

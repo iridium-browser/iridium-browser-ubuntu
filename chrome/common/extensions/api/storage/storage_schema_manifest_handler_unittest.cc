@@ -25,9 +25,9 @@ class StorageSchemaManifestHandlerTest : public testing::Test {
   StorageSchemaManifestHandlerTest()
       : scoped_channel_(chrome::VersionInfo::CHANNEL_DEV) {}
 
-  virtual ~StorageSchemaManifestHandlerTest() {}
+  ~StorageSchemaManifestHandlerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     manifest_.SetString("name", "test");

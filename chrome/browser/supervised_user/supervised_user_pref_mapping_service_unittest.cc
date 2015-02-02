@@ -28,14 +28,12 @@ class SupervisedUserPrefMappingServiceTest : public ::testing::Test {
         SupervisedUserPrefMappingServiceFactory::GetForBrowserContext(
             &profile_);
   }
-  virtual ~SupervisedUserPrefMappingServiceTest() {}
+  ~SupervisedUserPrefMappingServiceTest() override {}
 
   // testing::Test overrides:
-  virtual void SetUp() OVERRIDE {
-    mapping_service_->Init();
-  }
+  void SetUp() override { mapping_service_->Init(); }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     mapping_service_->Shutdown();
     shared_settings_service_->Shutdown();
   }

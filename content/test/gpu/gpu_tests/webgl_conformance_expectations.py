@@ -25,20 +25,40 @@ class WebGLConformanceExpectations(test_expectations.TestExpectations):
     #     ['mac', 'amd', ('nvidia', 0x1234)], bug=123)
 
     # Fails on all platforms
-    self.Fail('conformance/glsl/misc/shaders-with-uniform-structs.html',
-        bug=351396)
-
-    # Flaky on Win
-    self.Fail('conformance/extensions/webgl-draw-buffers.html',
-        ['win'], bug=369349)
+    self.Fail('conformance/glsl/misc/shaders-with-invariance.html',
+        bug=421710)
+    self.Fail('conformance/glsl/bugs/essl3-shaders-with-webgl1.html',
+        bug=428845)
+    self.Fail('conformance/glsl/misc/expression-list-in-declarator-initializer.html',
+        bug=428845)
 
     # Win failures
     self.Fail('conformance/glsl/misc/struct-equals.html',
         ['win'], bug=391957)
     self.Fail('conformance/glsl/bugs/conditional-discard-in-loop.html',
         ['win'], bug=402195)
-    self.Fail('conformance/attribs/gl-bindAttribLocation-matrix.html',
-        ['win'], bug=415688)
+    self.Fail('conformance/textures/tex-image-and-sub-image-2d-with-webgl-canvas.html',
+        ['win'], bug=420357)
+    self.Fail('conformance/textures/tex-image-and-sub-image-2d-with-webgl-canvas-rgb565.html',
+        ['win'], bug=420357)
+    self.Fail('conformance/textures/tex-image-and-sub-image-2d-with-webgl-canvas-rgba4444.html',
+        ['win'], bug=420357)
+    self.Fail('conformance/textures/tex-image-and-sub-image-2d-with-webgl-canvas-rgba5551.html',
+        ['win'], bug=420357)
+    self.Fail('conformance/glsl/misc/ternary-operators-in-global-initializers.html',
+        ['win'], bug=415694)
+    # This test still causes itself and any tests afterwards to time out
+    # in Win Debug bots.
+    self.Skip('conformance/textures/texture-copying-feedback-loops.html',
+        ['Win'], bug=421695)
+    # Flaky on Win
+    self.Fail('conformance/extensions/webgl-draw-buffers.html',
+        ['win'], bug=369349)
+
+    self.Fail('conformance/rendering/framebuffer-switch.html',
+        ['win'], bug=428849)
+    self.Fail('conformance/rendering/framebuffer-texture-switch.html',
+        ['win'], bug=428849)
 
     # Win7 / Intel failures
     self.Fail('conformance/rendering/gl-scissor-test.html',
@@ -129,6 +149,10 @@ class WebGLConformanceExpectations(test_expectations.TestExpectations):
         ['lion', 'intel'], bug=393331)
     self.Fail('conformance/extensions/webgl-compressed-texture-size-limit.html',
         ['lion', 'intel'], bug=393331)
+
+    # Linux failures
+    self.Fail('conformance/textures/default-texture.html',
+        ['linux', ('nvidia', 0x104a)], bug=422152)
 
     # Android failures
     # The following test is very slow and therefore times out on Android bot.

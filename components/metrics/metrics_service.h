@@ -21,6 +21,7 @@
 #include "base/metrics/histogram_flattener.h"
 #include "base/metrics/histogram_snapshot_manager.h"
 #include "base/metrics/user_metrics.h"
+#include "base/observer_list.h"
 #include "base/time/time.h"
 #include "components/metrics/clean_exit_beacon.h"
 #include "components/metrics/metrics_log.h"
@@ -76,6 +77,17 @@ struct SyntheticTrialGroup {
   SyntheticTrialGroup(uint32 trial, uint32 group);
 };
 
+// Interface class to observe changes to synthetic trials in MetricsService.
+class SyntheticTrialObserver {
+ public:
+  // Called when the list of synthetic field trial groups has changed.
+  virtual void OnSyntheticTrialsChanged(
+      const std::vector<SyntheticTrialGroup>& groups) = 0;
+
+ protected:
+  virtual ~SyntheticTrialObserver() {}
+};
+
 // See metrics_service.cc for a detailed description.
 class MetricsService : public base::HistogramFlattener {
  public:
@@ -98,7 +110,7 @@ class MetricsService : public base::HistogramFlattener {
   MetricsService(MetricsStateManager* state_manager,
                  MetricsServiceClient* client,
                  PrefService* local_state);
-  virtual ~MetricsService();
+  ~MetricsService() override;
 
   // Initializes metrics recording state. Updates various bookkeeping values in
   // prefs and sets up the scheduler. This is a separate function rather than
@@ -152,13 +164,13 @@ class MetricsService : public base::HistogramFlattener {
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // HistogramFlattener:
-  virtual void RecordDelta(const base::HistogramBase& histogram,
-                           const base::HistogramSamples& snapshot) OVERRIDE;
-  virtual void InconsistencyDetected(
-      base::HistogramBase::Inconsistency problem) OVERRIDE;
-  virtual void UniqueInconsistencyDetected(
-      base::HistogramBase::Inconsistency problem) OVERRIDE;
-  virtual void InconsistencyDetectedInLoggedCount(int amount) OVERRIDE;
+  void RecordDelta(const base::HistogramBase& histogram,
+                   const base::HistogramSamples& snapshot) override;
+  void InconsistencyDetected(
+      base::HistogramBase::Inconsistency problem) override;
+  void UniqueInconsistencyDetected(
+      base::HistogramBase::Inconsistency problem) override;
+  void InconsistencyDetectedInLoggedCount(int amount) override;
 
   // This should be called when the application is not idle, i.e. the user seems
   // to be interacting with the application.
@@ -211,6 +223,12 @@ class MetricsService : public base::HistogramFlattener {
   // To use this method, SyntheticTrialGroup should friend your class.
   void RegisterSyntheticFieldTrial(const SyntheticTrialGroup& trial_group);
 
+  // Adds an observer to be notified when the synthetic trials list changes.
+  void AddSyntheticTrialObserver(SyntheticTrialObserver* observer);
+
+  // Removes an existing observer of synthetic trials list changes.
+  void RemoveSyntheticTrialObserver(SyntheticTrialObserver* observer);
+
   // Register the specified |provider| to provide additional metrics into the
   // UMA log. Should be called during MetricsService initialization only.
   void RegisterMetricsProvider(scoped_ptr<MetricsProvider> provider);
@@ -220,6 +238,9 @@ class MetricsService : public base::HistogramFlattener {
   // should not be called more than once.
   void CheckForClonedInstall(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+  // Clears the stability metrics that are saved in local state.
+  void ClearSavedStabilityMetrics();
 
  protected:
   // Exposed for testing.
@@ -243,6 +264,8 @@ class MetricsService : public base::HistogramFlattener {
     CLEANLY_SHUTDOWN = 0xdeadbeef,
     NEED_TO_SHUTDOWN = ~CLEANLY_SHUTDOWN
   };
+
+  friend class ::MetricsServiceAccessor;
 
   typedef std::vector<SyntheticTrialGroup> SyntheticTrialGroups;
 
@@ -356,6 +379,9 @@ class MetricsService : public base::HistogramFlattener {
   // Sets the value of the specified path in prefs and schedules a save.
   void RecordBooleanPrefValue(const char* path, bool value);
 
+  // Notifies observers on a synthetic trial list change.
+  void NotifySyntheticTrialObservers();
+
   // Returns a list of synthetic field trials that were active for the entire
   // duration of the current log.
   void GetCurrentSyntheticFieldTrials(
@@ -363,6 +389,9 @@ class MetricsService : public base::HistogramFlattener {
 
   // Creates a new MetricsLog instance with the given |log_type|.
   scoped_ptr<MetricsLog> CreateLog(MetricsLog::LogType log_type);
+
+  // Records the current environment (system profile) in |log|.
+  void RecordCurrentEnvironment(MetricsLog* log);
 
   // Record complete list of histograms into the current log.
   // Called when we close a log.
@@ -430,14 +459,6 @@ class MetricsService : public base::HistogramFlattener {
   // A number that identifies the how many times the app has been launched.
   int session_id_;
 
-  // Weak pointers factory used to post task on different threads. All weak
-  // pointers managed by this factory have the same lifetime as MetricsService.
-  base::WeakPtrFactory<MetricsService> self_ptr_factory_;
-
-  // Weak pointers factory used for saving state. All weak pointers managed by
-  // this factory are invalidated in ScheduleNextStateSave.
-  base::WeakPtrFactory<MetricsService> state_saver_factory_;
-
   // The scheduler for determining when uploads should happen.
   scoped_ptr<MetricsReportingScheduler> scheduler_;
 
@@ -450,6 +471,9 @@ class MetricsService : public base::HistogramFlattener {
   // Field trial groups that map to Chrome configuration states.
   SyntheticTrialGroups synthetic_trial_groups_;
 
+  // List of observers of |synthetic_trial_groups_| changes.
+  ObserverList<SyntheticTrialObserver> synthetic_trial_observer_list_;
+
   // Execution phase the browser is in.
   static ExecutionPhase execution_phase_;
 
@@ -457,12 +481,18 @@ class MetricsService : public base::HistogramFlattener {
   // exited-cleanly bit in the prefs.
   static ShutdownCleanliness clean_shutdown_status_;
 
-  friend class ::MetricsServiceAccessor;
-
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, IsPluginProcess);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest,
                            PermutedEntropyCacheClearedWhenLowEntropyReset);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, RegisterSyntheticTrial);
+
+  // Weak pointers factory used to post task on different threads. All weak
+  // pointers managed by this factory have the same lifetime as MetricsService.
+  base::WeakPtrFactory<MetricsService> self_ptr_factory_;
+
+  // Weak pointers factory used for saving state. All weak pointers managed by
+  // this factory are invalidated in ScheduleNextStateSave.
+  base::WeakPtrFactory<MetricsService> state_saver_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };

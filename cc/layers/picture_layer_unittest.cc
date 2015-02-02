@@ -20,14 +20,12 @@ namespace {
 
 class MockContentLayerClient : public ContentLayerClient {
  public:
-  virtual void PaintContents(
+  void PaintContents(
       SkCanvas* canvas,
       const gfx::Rect& clip,
-      ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE {}
-  virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
-  virtual bool FillsBoundsCompletely() const OVERRIDE {
-    return false;
-  };
+      ContentLayerClient::GraphicsContextStatus gc_status) override {}
+  void DidChangeLayerCanUseLCDText() override {}
+  bool FillsBoundsCompletely() const override { return false; };
 };
 
 TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
@@ -44,6 +42,10 @@ TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
   OcclusionTracker<Layer> occlusion(gfx::Rect(0, 0, 1000, 1000));
   scoped_ptr<ResourceUpdateQueue> queue(new ResourceUpdateQueue);
   layer->Update(queue.get(), &occlusion);
+
+  EXPECT_EQ(0, host->source_frame_number());
+  host->CommitComplete();
+  EXPECT_EQ(1, host->source_frame_number());
 
   layer->SetBounds(gfx::Size(0, 0));
   layer->SavePaintProperties();
@@ -84,21 +86,22 @@ TEST(PictureLayerTest, SuitableForGpuRasterization) {
   EXPECT_FALSE(layer->IsSuitableForGpuRasterization());
 }
 
-TEST(PictureLayerTest, RecordingModes) {
+TEST(PictureLayerTest, UseTileGridSize) {
+  LayerTreeSettings settings;
+  settings.default_tile_grid_size = gfx::Size(123, 123);
+
   MockContentLayerClient client;
   scoped_refptr<PictureLayer> layer = PictureLayer::Create(&client);
-
-  LayerTreeSettings settings;
   FakeLayerTreeHostClient host_client(FakeLayerTreeHostClient::DIRECT_3D);
   scoped_ptr<FakeLayerTreeHost> host =
       FakeLayerTreeHost::Create(&host_client, settings);
   host->SetRootLayer(layer);
-  EXPECT_EQ(Picture::RECORD_NORMALLY, layer->RecordingMode());
 
-  settings.recording_mode = LayerTreeSettings::RecordWithSkRecord;
-  host = FakeLayerTreeHost::Create(&host_client, settings);
-  host->SetRootLayer(layer);
-  EXPECT_EQ(Picture::RECORD_WITH_SKRECORD, layer->RecordingMode());
+  // Tile-grid is set according to its setting.
+  SkTileGridFactory::TileGridInfo info =
+      layer->GetPicturePileForTesting()->GetTileGridInfoForTesting();
+  EXPECT_EQ(info.fTileInterval.width(), 123 - 2 * info.fMargin.width());
+  EXPECT_EQ(info.fTileInterval.height(), 123 - 2 * info.fMargin.height());
 }
 
 }  // namespace

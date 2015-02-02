@@ -64,7 +64,7 @@ class TestTextfield : public views::Textfield {
        key_received_(false),
        weak_ptr_factory_(this) {}
 
-  virtual bool OnKeyPressed(const ui::KeyEvent& e) OVERRIDE {
+  bool OnKeyPressed(const ui::KeyEvent& e) override {
     key_received_ = true;
 
     // Since OnKeyPressed() might destroy |this|, get a weak pointer and
@@ -80,7 +80,7 @@ class TestTextfield : public views::Textfield {
     return key_handled_;
   }
 
-  virtual bool OnKeyReleased(const ui::KeyEvent& e) OVERRIDE {
+  bool OnKeyReleased(const ui::KeyEvent& e) override {
     key_received_ = true;
     key_handled_ = views::Textfield::OnKeyReleased(e);
     return key_handled_;
@@ -122,8 +122,8 @@ class TextfieldDestroyerController : public views::TextfieldController {
   views::Textfield* target() { return target_.get(); }
 
   // views::TextfieldController:
-  virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const ui::KeyEvent& key_event) OVERRIDE {
+  bool HandleKeyEvent(views::Textfield* sender,
+                      const ui::KeyEvent& key_event) override {
     target_.reset();
     return false;
   }
@@ -159,11 +159,7 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
   }
 
   // ::testing::Test:
-  virtual void SetUp() {
-    ViewsTestBase::SetUp();
-  }
-
-  virtual void TearDown() {
+  void TearDown() override {
     if (widget_)
       widget_->Close();
     ViewsTestBase::TearDown();
@@ -176,23 +172,23 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
   }
 
   // TextfieldController:
-  virtual void ContentsChanged(Textfield* sender,
-                               const base::string16& new_contents) OVERRIDE {
+  void ContentsChanged(Textfield* sender,
+                       const base::string16& new_contents) override {
     // Paste calls TextfieldController::ContentsChanged() explicitly even if the
     // paste action did not change the content. So |new_contents| may match
     // |last_contents_|. For more info, see http://crbug.com/79002
     last_contents_ = new_contents;
   }
 
-  virtual void OnBeforeUserAction(Textfield* sender) OVERRIDE {
+  void OnBeforeUserAction(Textfield* sender) override {
     ++on_before_user_action_;
   }
 
-  virtual void OnAfterUserAction(Textfield* sender) OVERRIDE {
+  void OnAfterUserAction(Textfield* sender) override {
     ++on_after_user_action_;
   }
 
-  virtual void OnAfterCutOrCopy(ui::ClipboardType clipboard_type) OVERRIDE {
+  void OnAfterCutOrCopy(ui::ClipboardType clipboard_type) override {
     copied_to_clipboard_ = clipboard_type;
   }
 
@@ -628,11 +624,11 @@ TEST_F(TextfieldTest, OnKeyPressBinding) {
   class TestDelegate : public ui::TextEditKeyBindingsDelegateAuraLinux {
    public:
     TestDelegate() {}
-    virtual ~TestDelegate() {}
+    ~TestDelegate() override {}
 
-    virtual bool MatchEvent(
+    bool MatchEvent(
         const ui::Event& event,
-        std::vector<ui::TextEditCommandAuraLinux>* commands) OVERRIDE {
+        std::vector<ui::TextEditCommandAuraLinux>* commands) override {
       return false;
     }
 

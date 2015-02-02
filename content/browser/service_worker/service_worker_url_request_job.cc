@@ -18,6 +18,7 @@
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/blob_handle.h"
 #include "content/public/browser/resource_request_info.h"
+#include "content/public/browser/service_worker_context.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
@@ -35,12 +36,22 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
     net::NetworkDelegate* network_delegate,
     base::WeakPtr<ServiceWorkerProviderHost> provider_host,
     base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
+    FetchRequestMode request_mode,
+    FetchCredentialsMode credentials_mode,
+    RequestContextType request_context_type,
+    RequestContextFrameType frame_type,
     scoped_refptr<ResourceRequestBody> body)
     : net::URLRequestJob(request, network_delegate),
       provider_host_(provider_host),
       response_type_(NOT_DETERMINED),
       is_started_(false),
+      service_worker_response_type_(blink::WebServiceWorkerResponseTypeDefault),
       blob_storage_context_(blob_storage_context),
+      request_mode_(request_mode),
+      credentials_mode_(credentials_mode),
+      request_context_type_(request_context_type),
+      frame_type_(frame_type),
+      fall_back_required_(false),
       body_(body),
       weak_factory_(this) {
 }
@@ -193,17 +204,24 @@ const net::HttpResponseInfo* ServiceWorkerURLRequestJob::http_info() const {
 
 void ServiceWorkerURLRequestJob::GetExtraResponseInfo(
     bool* was_fetched_via_service_worker,
+    bool* was_fallback_required_by_service_worker,
     GURL* original_url_via_service_worker,
+    blink::WebServiceWorkerResponseType* response_type_via_service_worker,
     base::TimeTicks* fetch_start_time,
     base::TimeTicks* fetch_ready_time,
     base::TimeTicks* fetch_end_time) const {
   if (response_type_ != FORWARD_TO_SERVICE_WORKER) {
     *was_fetched_via_service_worker = false;
+    *was_fallback_required_by_service_worker = false;
     *original_url_via_service_worker = GURL();
+    *response_type_via_service_worker =
+        blink::WebServiceWorkerResponseTypeDefault;
     return;
   }
   *was_fetched_via_service_worker = true;
+  *was_fallback_required_by_service_worker = fall_back_required_;
   *original_url_via_service_worker = response_url_;
+  *response_type_via_service_worker = service_worker_response_type_;
   *fetch_start_time = fetch_start_time_;
   *fetch_ready_time = fetch_ready_time_;
   *fetch_end_time = fetch_end_time_;
@@ -264,15 +282,21 @@ ServiceWorkerURLRequestJob::CreateFetchRequest() {
   CreateRequestBodyBlob(&blob_uuid, &blob_size);
   scoped_ptr<ServiceWorkerFetchRequest> request(
       new ServiceWorkerFetchRequest());
-
+  request->mode = request_mode_;
+  request->request_context_type = request_context_type_;
+  request->frame_type = frame_type_;
   request->url = request_->url();
   request->method = request_->method();
   const net::HttpRequestHeaders& headers = request_->extra_request_headers();
-  for (net::HttpRequestHeaders::Iterator it(headers); it.GetNext();)
+  for (net::HttpRequestHeaders::Iterator it(headers); it.GetNext();) {
+    if (ServiceWorkerContext::IsExcludedHeaderNameForFetchEvent(it.name()))
+      continue;
     request->headers[it.name()] = it.value();
+  }
   request->blob_uuid = blob_uuid;
   request->blob_size = blob_size;
   request->referrer = GURL(request_->referrer());
+  request->credentials_mode = credentials_mode_;
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request_);
   if (info) {
     request->is_reload = ui::PageTransitionCoreTypeIs(
@@ -371,6 +395,18 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   }
 
   if (fetch_result == SERVICE_WORKER_FETCH_EVENT_RESULT_FALLBACK) {
+    // When the request_mode is |CORS| or |CORS-with-forced-preflight| we can't
+    // simply fallback to the network in the browser process. It is because the
+    // CORS preflight logic is implemented in the renderer. So we returns a
+    // fall_back_required response to the renderer.
+    if (request_mode_ == FETCH_REQUEST_MODE_CORS ||
+        request_mode_ == FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT) {
+      fall_back_required_ = true;
+      CreateResponseHeader(
+          400, "Service Worker Fallback Required", ServiceWorkerHeaderMap());
+      CommitResponseHeader();
+      return;
+    }
     // Change the response type and restart the request to fallback to
     // the network.
     response_type_ = FALLBACK_TO_NETWORK;
@@ -406,6 +442,7 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   }
 
   response_url_ = response.url;
+  service_worker_response_type_ = response.response_type;
   CreateResponseHeader(
       response.status_code, response.status_text, response.headers);
   load_timing_info_.receive_headers_end = base::TimeTicks::Now();

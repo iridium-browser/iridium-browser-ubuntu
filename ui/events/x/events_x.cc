@@ -14,12 +14,12 @@
 
 #include "base/logging.h"
 #include "base/memory/singleton.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
+#include "ui/events/devices/x11/device_list_cache_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#include "ui/events/x/device_data_manager_x11.h"
-#include "ui/events/x/device_list_cache_x.h"
-#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
@@ -312,7 +312,7 @@ unsigned int UpdateX11EventFlags(int ui_flags, unsigned int old_x_flags) {
     {ui::EF_RIGHT_MOUSE_BUTTON, Button3Mask},
   };
   unsigned int new_x_flags = old_x_flags;
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(flags); ++i) {
+  for (size_t i = 0; i < arraysize(flags); ++i) {
     if (ui_flags & flags[i].ui)
       new_x_flags |= flags[i].x;
     else
@@ -358,7 +358,7 @@ namespace ui {
 
 void UpdateDeviceList() {
   XDisplay* display = gfx::GetXDisplay();
-  DeviceListCacheX::GetInstance()->UpdateDeviceList(display);
+  DeviceListCacheX11::GetInstance()->UpdateDeviceList(display);
   TouchFactory::GetInstance()->UpdateDeviceList(display);
   DeviceDataManagerX11::GetInstance()->UpdateDeviceList(display);
 }

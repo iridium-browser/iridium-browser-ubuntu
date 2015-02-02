@@ -10,6 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "url/gurl.h"
@@ -52,7 +53,7 @@ class PermissionContextBase : public KeyedService {
  public:
   PermissionContextBase(Profile* profile,
                         const ContentSettingsType permission_type);
-  virtual ~PermissionContextBase();
+  ~PermissionContextBase() override;
 
   // The renderer is requesting permission to push messages.
   // When the answer to a permission request has been determined, |callback|
@@ -62,6 +63,16 @@ class PermissionContextBase : public KeyedService {
                                  const GURL& requesting_frame,
                                  bool user_gesture,
                                  const BrowserPermissionCallback& callback);
+
+  // Returns whether the permission has been granted, denied...
+  virtual ContentSetting GetPermissionStatus(
+      const GURL& requesting_origin,
+      const GURL& embedding_origin) const;
+
+  // Withdraw an existing permission request, no op if the permission request
+  // was already cancelled by some other means.
+  virtual void CancelPermissionRequest(content::WebContents* web_contents,
+                                       const PermissionRequestID& id);
 
  protected:
   // Decide whether the permission should be granted.
@@ -116,6 +127,8 @@ class PermissionContextBase : public KeyedService {
   base::ScopedPtrHashMap<std::string, PermissionBubbleRequest>
       pending_bubbles_;
 
+  // Must be the last member, to ensure that it will be
+  // destroyed first, which will invalidate weak pointers
   base::WeakPtrFactory<PermissionContextBase> weak_factory_;
 };
 

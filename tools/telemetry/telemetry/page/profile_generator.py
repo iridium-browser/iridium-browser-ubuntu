@@ -81,7 +81,7 @@ def GenerateProfiles(profile_creator_class, profile_creator_name, options):
   if results.failures:
     logging.warning('Some pages failed.')
     logging.warning('Failed pages:\n%s',
-                    '\n'.join(results.pages_that_failed))
+                    '\n'.join(map(str, results.pages_that_failed)))
     return 1
 
   # Everything is a-ok, move results to final destination.
@@ -110,9 +110,6 @@ def AddCommandLineArgs(parser):
       default=None,
       help='Type of profile to generate. '
            'Supported values: %s' % legal_profile_creators)
-  group.add_option('--output-dir',
-      dest='output_dir',
-      help='Generated profile is placed in this directory.')
   parser.add_option_group(group)
 
 

@@ -72,9 +72,9 @@ class MessageSender : public content::NotificationObserver {
     return event.Pass();
   }
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     EventRouter* event_router =
         EventRouter::Get(content::Source<Profile>(source).ptr());
 
@@ -127,7 +127,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MessagingEventURL) {
 
 // Tests connecting from a panel to its extension.
 class PanelMessagingTest : public ExtensionApiTest {
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
   }
@@ -213,7 +213,7 @@ class ExternallyConnectableMessagingTest : public ExtensionApiTest {
   testing::AssertionResult AreAnyNonWebApisDefinedForFrame(
       content::RenderFrameHost* frame) {
     // All runtime API methods are non-web except for sendRequest and connect.
-    const char* non_messaging_apis[] = {
+    const char* const non_messaging_apis[] = {
         "getBackgroundPage",
         "getManifest",
         "getURL",
@@ -622,7 +622,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingTest,
   // previously closed.
   tls_channel_id =
       GetTlsChannelIdFromPortConnect(chromium_connectable.get(), true);
-   // And the empty value is still retrieved.
+  // And the empty value is still retrieved.
   EXPECT_EQ(std::string(), tls_channel_id);
 }
 
@@ -987,7 +987,7 @@ IN_PROC_BROWSER_TEST_F(ExternallyConnectableMessagingWithTlsChannelIdTest,
   // previously closed.
   tls_channel_id =
       GetTlsChannelIdFromPortConnect(chromium_connectable.get(), true);
-   // And the expected value is still retrieved.
+  // And the expected value is still retrieved.
   EXPECT_EQ(expected_tls_channel_id_value, tls_channel_id);
 }
 

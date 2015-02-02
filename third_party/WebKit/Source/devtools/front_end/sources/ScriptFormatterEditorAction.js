@@ -121,7 +121,7 @@ WebInspector.FormatterProjectDelegate.prototype = {
     _addFormatted: function(name, sourceURL, contentType, content)
     {
         var contentProvider = new WebInspector.StaticContentProvider(contentType, content);
-        return this.addContentProvider(sourceURL, name + ":formatted", "deobfuscated:" + sourceURL, contentProvider);
+        return this.addContentProvider(sourceURL, name + ":formatted", sourceURL, "deobfuscated:" + sourceURL, contentProvider);
     },
 
     /**
@@ -147,13 +147,13 @@ WebInspector.ScriptFormatterEditorAction = function()
 
     /** @type {!Map.<!WebInspector.Script, !WebInspector.UISourceCode>} */
     this._uiSourceCodes = new Map();
-    /** @type {!StringMap.<string>} */
-    this._formattedPaths = new StringMap();
+    /** @type {!Map.<string, string>} */
+    this._formattedPaths = new Map();
     /** @type {!Map.<!WebInspector.UISourceCode, !WebInspector.FormatterScriptMapping.FormatData>} */
     this._formatData = new Map();
 
-    /** @type {!StringSet} */
-    this._pathsToFormatOnLoad = new StringSet();
+    /** @type {!Set.<string>} */
+    this._pathsToFormatOnLoad = new Set();
 
     /** @type {!Map.<!WebInspector.Target, !WebInspector.FormatterScriptMapping>} */
     this._scriptMappingByTarget = new Map();
@@ -190,7 +190,7 @@ WebInspector.ScriptFormatterEditorAction.prototype = {
         this._updateButton(uiSourceCode);
 
         var path = uiSourceCode.project().id() + ":" + uiSourceCode.path();
-        if (this._isFormatableScript(uiSourceCode) && uiSourceCode.url && this._pathsToFormatOnLoad.contains(path) && !this._formattedPaths.get(path))
+        if (this._isFormatableScript(uiSourceCode) && uiSourceCode.url && this._pathsToFormatOnLoad.has(path) && !this._formattedPaths.get(path))
             this._formatUISourceCodeScript(uiSourceCode);
     },
 
@@ -231,7 +231,7 @@ WebInspector.ScriptFormatterEditorAction.prototype = {
         this._button = new WebInspector.StatusBarButton(WebInspector.UIString("Pretty print"), "sources-toggle-pretty-print-status-bar-item");
         this._button.toggled = false;
         this._button.addEventListener("click", this._toggleFormatScriptSource, this);
-        this._updateButton(null);
+        this._updateButton(sourcesView.currentUISourceCode());
 
         return this._button.element;
     },
@@ -310,7 +310,7 @@ WebInspector.ScriptFormatterEditorAction.prototype = {
      */
     _cleanForTarget: function(target)
     {
-        var uiSourceCodes = this._formatData.keys();
+        var uiSourceCodes = this._formatData.keysArray();
         for (var i = 0; i < uiSourceCodes.length; ++i) {
             WebInspector.debuggerWorkspaceBinding.setSourceMapping(target, uiSourceCodes[i], null);
             var formatData = this._formatData.get(uiSourceCodes[i]);
@@ -394,7 +394,8 @@ WebInspector.ScriptFormatterEditorAction.prototype = {
         function contentLoaded(content)
         {
             var formatter = WebInspector.Formatter.createFormatter(uiSourceCode.contentType());
-            formatter.formatContent(uiSourceCode.highlighterType(), content || "", innerCallback.bind(this));
+            var highlighterType = WebInspector.SourcesView.uiSourceCodeHighlighterType(uiSourceCode);
+            formatter.formatContent(highlighterType, content || "", innerCallback.bind(this));
         }
 
         /**

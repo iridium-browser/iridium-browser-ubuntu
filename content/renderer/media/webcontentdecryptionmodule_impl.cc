@@ -4,43 +4,27 @@
 
 #include "content/renderer/media/webcontentdecryptionmodule_impl.h"
 
-#include <map>
-#include <vector>
-
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "content/renderer/media/cdm_result_promise.h"
 #include "content/renderer/media/cdm_session_adapter.h"
 #include "content/renderer/media/crypto/key_systems.h"
 #include "content/renderer/media/webcontentdecryptionmodulesession_impl.h"
 #include "media/base/cdm_promise.h"
 #include "media/base/media_keys.h"
+#include "media/blink/cdm_result_promise.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "url/gurl.h"
 
-#if defined(ENABLE_PEPPER_CDMS)
-#include "content/renderer/media/crypto/pepper_cdm_wrapper_impl.h"
-#endif
-
 namespace content {
 
 WebContentDecryptionModuleImpl* WebContentDecryptionModuleImpl::Create(
-#if defined(ENABLE_PEPPER_CDMS)
-    blink::WebLocalFrame* frame,
-#elif defined(ENABLE_BROWSER_CDMS)
-    RendererCdmManager* manager,
-#endif
+    media::CdmFactory* cdm_factory,
     const blink::WebSecurityOrigin& security_origin,
     const base::string16& key_system) {
-#if defined(ENABLE_PEPPER_CDMS)
-  DCHECK(frame);
-#elif defined(ENABLE_BROWSER_CDMS)
-  DCHECK(manager);
-#endif
   DCHECK(!security_origin.isNull());
   DCHECK(!key_system.empty());
 
@@ -65,13 +49,7 @@ WebContentDecryptionModuleImpl* WebContentDecryptionModuleImpl::Create(
   GURL security_origin_as_gurl(security_origin.toString());
 
   if (!adapter->Initialize(
-#if defined(ENABLE_PEPPER_CDMS)
-          base::Bind(&PepperCdmWrapperImpl::Create, frame),
-#elif defined(ENABLE_BROWSER_CDMS)
-          manager,
-#endif
-          key_system_ascii,
-          security_origin_as_gurl)) {
+          cdm_factory, key_system_ascii, security_origin_as_gurl)) {
     return NULL;
   }
 
@@ -108,7 +86,8 @@ void WebContentDecryptionModuleImpl::setServerCertificate(
   adapter_->SetServerCertificate(
       server_certificate,
       server_certificate_length,
-      scoped_ptr<media::SimpleCdmPromise>(new SimpleCdmResultPromise(result)));
+      scoped_ptr<media::SimpleCdmPromise>(
+          new media::CdmResultPromise<>(result, std::string())));
 }
 
 media::Decryptor* WebContentDecryptionModuleImpl::GetDecryptor() {

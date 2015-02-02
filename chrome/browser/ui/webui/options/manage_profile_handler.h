@@ -25,25 +25,24 @@ class ManageProfileHandler : public OptionsPageUIHandler,
                              public ProfileSyncServiceObserver {
  public:
   ManageProfileHandler();
-  virtual ~ManageProfileHandler();
+  ~ManageProfileHandler() override;
 
   // OptionsPageUIHandler:
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
-  virtual void Uninitialize() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
+  void Uninitialize() override;
 
   // WebUIMessageHandler:
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ProfileSyncServiceObserver:
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
  private:
   // This function creates signed in user specific strings in loadTimeData.

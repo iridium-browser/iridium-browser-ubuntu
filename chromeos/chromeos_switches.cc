@@ -37,9 +37,6 @@ const char kDisableBootAnimation[] = "disable-boot-animation";
 // Disables the ChromeOS demo.
 const char kDisableDemoMode[] = "disable-demo-mode";
 
-// Disable Easy sign-in.
-const char kDisableEasySignin[] = "disable-easy-signin";
-
 // Disable HID-detection OOBE screen.
 const char kDisableHIDDetectionOnOOBE[] = "disable-hid-detection-on-oobe";
 
@@ -56,11 +53,17 @@ const char kDisableNewChannelSwitcherUI[] = "disable-new-channel-switcher-ui";
 // Disables new Kiosk UI when kiosk apps are represented as user pods.
 const char kDisableNewKioskUI[] = "disable-new-kiosk-ui";
 
+// Disables the new File System Provider API based ZIP unpacker.
+const char kDisableNewZIPUnpacker[] = "disable-new-zip-unpacker";
+
 // Disable Office Editing for Docs, Sheets & Slides component app so handlers
 // won't be registered, making it possible to install another version for
 // testing.
 const char kDisableOfficeEditingComponentApp[] =
     "disable-office-editing-component-extension";
+
+// Disables rollback option on reset screen.
+const char kDisableRollbackOption[] = "disable-rollback-option";
 
 // Disables volume adjust sound.
 const char kDisableVolumeAdjustSound[] = "disable-volume-adjust-sound";
@@ -75,13 +78,28 @@ const char kEnableCarrierSwitching[] = "enable-carrier-switching";
 // Enables the next generation version of ChromeVox.
 const char kEnableChromeVoxNext[] = "enable-chromevox-next";
 
+// Enables cloud backup feature.
+const char kEnableCloudBackup[] = "enable-cloud-backup";
+
 // Enables consumer management, which allows user to enroll, remotely lock and
 // locate the device.
 const char kEnableConsumerManagement[] = "enable-consumer-management";
 
+// If this switch is set, the device cannot be remotely disabled by its owner.
+const char kDisableDeviceDisabling[] = "disable-device-disabling";
+
 // If this switch is set, Chrome OS login screen uses |EmbeddedSignin| endpoint
 // of GAIA.
 const char kEnableEmbeddedSignin[] = "enable-embedded-signin";
+
+// If this switch is set, the new Korean IME will be available in
+// chrome://settings/languages.
+const char kEnableNewKoreanIme[] = "enable-new-korean-ime";
+
+// If this switch is set, the US keyboard input method will provide suggestions
+// as typing on physical keyboard.
+const char kEnablePhysicalKeyboardAutocorrect[] =
+    "enable-physical-keyboard-autocorrect";
 
 // Enabled sharing assets for installed default apps.
 const char kEnableExtensionAssetsSharing[]  = "enable-extension-assets-sharing";
@@ -89,9 +107,6 @@ const char kEnableExtensionAssetsSharing[]  = "enable-extension-assets-sharing";
 // Enables notifications about captive portals in session.
 const char kEnableNetworkPortalNotification[] =
     "enable-network-portal-notification";
-
-// Enables rollback option on reset screen.
-const char kEnableRollbackOption[] = "enable-rollback-option";
 
 // Enables touchpad three-finger-click as middle button.
 const char kEnableTouchpadThreeFingerClick[]

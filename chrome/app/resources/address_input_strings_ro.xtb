@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ro">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="ro">
 <translation id="777702478322588152">Prefectură</translation>
 <translation id="3713769522066937702">Acest format de cod poștal ZIP nu este recunoscut. Exemplu de cod poștal ZIP valid: <ph name="EXAMPLE"/>. Nu știți ce cod poștal ZIP aveți? Aflați <ph name="BEGIN_LINK"/>aici<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Adresă fizică</translation>

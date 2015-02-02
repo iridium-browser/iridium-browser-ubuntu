@@ -14,14 +14,14 @@ namespace content {
 
 class CONTENT_EXPORT LevelDBIteratorImpl : public content::LevelDBIterator {
  public:
-  virtual ~LevelDBIteratorImpl();
-  virtual bool IsValid() const OVERRIDE;
-  virtual leveldb::Status SeekToLast() OVERRIDE;
-  virtual leveldb::Status Seek(const base::StringPiece& target) OVERRIDE;
-  virtual leveldb::Status Next() OVERRIDE;
-  virtual leveldb::Status Prev() OVERRIDE;
-  virtual base::StringPiece Key() const OVERRIDE;
-  virtual base::StringPiece Value() const OVERRIDE;
+  ~LevelDBIteratorImpl() override;
+  bool IsValid() const override;
+  leveldb::Status SeekToLast() override;
+  leveldb::Status Seek(const base::StringPiece& target) override;
+  leveldb::Status Next() override;
+  leveldb::Status Prev() override;
+  base::StringPiece Key() const override;
+  base::StringPiece Value() const override;
 
  protected:
   explicit LevelDBIteratorImpl(scoped_ptr<leveldb::Iterator> iterator);

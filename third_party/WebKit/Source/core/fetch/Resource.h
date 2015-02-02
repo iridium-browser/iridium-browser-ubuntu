@@ -29,6 +29,7 @@
 #include "platform/network/ResourceLoadPriority.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
+#include "public/platform/WebDataConsumerHandle.h"
 #include "wtf/HashCountedSet.h"
 #include "wtf/HashSet.h"
 #include "wtf/OwnPtr.h"
@@ -40,7 +41,6 @@
 namespace blink {
 
 struct FetchInitiatorInfo;
-class MemoryCache;
 class CachedMetadata;
 class ResourceClient;
 class ResourcePtrBase;
@@ -104,7 +104,7 @@ public:
 
     virtual void setEncoding(const String&) { }
     virtual String encoding() const { return String(); }
-    virtual void appendData(const char*, int);
+    virtual void appendData(const char*, unsigned);
     virtual void error(Resource::Status);
 
     void setNeedsSynchronousCacheHit(bool needsSynchronousCacheHit) { m_needsSynchronousCacheHit = needsSynchronousCacheHit; }
@@ -176,7 +176,8 @@ public:
 
     // Computes the status of an object after loading.
     // Updates the expire date on the cache entry file
-    void finish(double finishTime = 0.0);
+    void setLoadFinishTime(double finishTime) { m_loadFinishTime = finishTime; }
+    void finish();
 
     // FIXME: Remove the stringless variant once all the callsites' error messages are updated.
     bool passesAccessControlCheck(SecurityOrigin*);
@@ -187,10 +188,10 @@ public:
     SharedBuffer* resourceBuffer() const { return m_data.get(); }
     void setResourceBuffer(PassRefPtr<SharedBuffer>);
 
-    virtual void willSendRequest(ResourceRequest&, const ResourceResponse&);
+    virtual void willFollowRedirect(ResourceRequest&, const ResourceResponse&);
 
     virtual void updateRequest(const ResourceRequest&) { }
-    virtual void responseReceived(const ResourceResponse&);
+    virtual void responseReceived(const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>);
     void setResponse(const ResourceResponse& response) { m_response = response; }
     const ResourceResponse& response() const { return m_response; }
 
@@ -242,6 +243,9 @@ public:
     bool isPurgeable() const;
     bool wasPurged() const;
     bool lock();
+
+    void setCacheIdentifier(const String& cacheIdentifier) { m_cacheIdentifier = cacheIdentifier; }
+    String cacheIdentifier() const { return m_cacheIdentifier; };
 
     virtual void didSendData(unsigned long long /* bytesSent */, unsigned long long /* totalBytesToBeSent */) { }
     virtual void didDownloadData(int) { }
@@ -374,6 +378,8 @@ private:
     unsigned m_handleCount;
     unsigned m_preloadCount;
     unsigned m_protectorCount;
+
+    String m_cacheIdentifier;
 
     unsigned m_preloadResult : 2; // PreloadResult
     unsigned m_requestedFromNetworkingLayer : 1;

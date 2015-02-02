@@ -51,22 +51,6 @@ _kind_to_typecode_for_native_array = {
   mojom.DOUBLE: 'd',
 }
 
-_kind_to_typecode = dict(_kind_to_typecode_for_native_array)
-_kind_to_typecode.update({
-  mojom.INT64:                 'q',
-  mojom.UINT64:                'Q',
-  mojom.HANDLE:                'i',
-  mojom.DCPIPE:                'i',
-  mojom.DPPIPE:                'i',
-  mojom.MSGPIPE:               'i',
-  mojom.SHAREDBUFFER:          'i',
-  mojom.NULLABLE_HANDLE:       'i',
-  mojom.NULLABLE_DCPIPE:       'i',
-  mojom.NULLABLE_DPPIPE:       'i',
-  mojom.NULLABLE_MSGPIPE:      'i',
-  mojom.NULLABLE_SHAREDBUFFER: 'i',
-})
-
 
 def NameToComponent(name):
   # insert '_' between anything and a Title name (e.g, HTTPEntry2FooBar ->
@@ -90,9 +74,13 @@ def ConstantStyle(name):
     components = components[1:]
   return '_'.join([x.upper() for x in components])
 
+def FieldStyle(name):
+  components = NameToComponent(name)
+  return '_'.join([x.lower() for x in components])
+
 def GetNameForElement(element):
   if (mojom.IsEnumKind(element) or mojom.IsInterfaceKind(element) or
-      mojom.IsStructKind(element)):
+      mojom.IsStructKind(element) or isinstance(element, mojom.Method)):
     return UpperCamelCase(element.name)
   if isinstance(element, mojom.EnumValue):
     return (GetNameForElement(element.enum) + '.' +
@@ -100,7 +88,9 @@ def GetNameForElement(element):
   if isinstance(element, (mojom.NamedValue,
                           mojom.Constant)):
     return ConstantStyle(element.name)
-  raise Exception('Unexpected element: ' % element)
+  if isinstance(element, mojom.Field):
+    return FieldStyle(element.name)
+  raise Exception('Unexpected element: %s' % element)
 
 def ExpressionToText(token):
   if isinstance(token, (mojom.EnumValue, mojom.NamedValue)):
@@ -120,7 +110,7 @@ def ExpressionToText(token):
 
   return token
 
-def GetStructClass(kind):
+def GetFullyQualifiedName(kind):
   name = []
   if kind.imported_from:
     name.append(kind.imported_from['python_module'])
@@ -128,15 +118,15 @@ def GetStructClass(kind):
   return '.'.join(name)
 
 def GetFieldType(kind, field=None):
-  if mojom.IsAnyArrayKind(kind):
+  if mojom.IsArrayKind(kind):
     arguments = []
     if kind.kind in _kind_to_typecode_for_native_array:
-      arguments.append('%r' %_kind_to_typecode_for_native_array[kind.kind])
+      arguments.append('%r' % _kind_to_typecode_for_native_array[kind.kind])
     elif kind.kind != mojom.BOOL:
       arguments.append(GetFieldType(kind.kind))
     if mojom.IsNullableKind(kind):
       arguments.append('nullable=True')
-    if mojom.IsFixedArrayKind(kind):
+    if kind.length is not None:
       arguments.append('length=%d' % kind.length)
     array_type = 'GenericArrayType'
     if kind.kind == mojom.BOOL:
@@ -145,8 +135,17 @@ def GetFieldType(kind, field=None):
       array_type = 'NativeArrayType'
     return '_descriptor.%s(%s)' % (array_type, ', '.join(arguments))
 
+  if mojom.IsMapKind(kind):
+    arguments = [
+      GetFieldType(kind.key_kind),
+      GetFieldType(kind.value_kind),
+    ]
+    if mojom.IsNullableKind(kind):
+      arguments.append('nullable=True')
+    return '_descriptor.MapType(%s)' % ', '.join(arguments)
+
   if mojom.IsStructKind(kind):
-    arguments = [ GetStructClass(kind) ]
+    arguments = [ 'lambda: %s' % GetFullyQualifiedName(kind) ]
     if mojom.IsNullableKind(kind):
       arguments.append('nullable=True')
     return '_descriptor.StructType(%s)' % ', '.join(arguments)
@@ -154,16 +153,29 @@ def GetFieldType(kind, field=None):
   if mojom.IsEnumKind(kind):
     return GetFieldType(mojom.INT32)
 
-  return _kind_to_type.get(kind, '_descriptor.TYPE_NONE')
+  if mojom.IsInterfaceKind(kind):
+    arguments = [ 'lambda: %s' % GetFullyQualifiedName(kind) ]
+    if mojom.IsNullableKind(kind):
+      arguments.append('nullable=True')
+    return '_descriptor.InterfaceType(%s)' % ', '.join(arguments)
+
+  if mojom.IsInterfaceRequestKind(kind):
+    arguments = []
+    if mojom.IsNullableKind(kind):
+      arguments.append('nullable=True')
+    return '_descriptor.InterfaceRequestType(%s)' % ', '.join(arguments)
+
+  return _kind_to_type[kind]
 
 def GetFieldDescriptor(packed_field):
   field = packed_field.field
   class_name = 'SingleFieldGroup'
   if field.kind == mojom.BOOL:
     class_name = 'FieldDescriptor'
-  arguments = [ '%r' % field.name ]
+  arguments = [ '%r' % GetNameForElement(field) ]
   arguments.append(GetFieldType(field.kind, field))
-  arguments.append(str(packed_field.field.ordinal))
+  arguments.append(str(packed_field.index))
+  arguments.append(str(packed_field.ordinal))
   if field.default:
     if mojom.IsStructKind(field.kind):
       arguments.append('default_value=True')
@@ -172,11 +184,19 @@ def GetFieldDescriptor(packed_field):
   return '_descriptor.%s(%s)' % (class_name, ', '.join(arguments))
 
 def GetFieldGroup(byte):
-  if len(byte.packed_fields) > 1:
+  if byte.packed_fields[0].field.kind == mojom.BOOL:
     descriptors = map(GetFieldDescriptor, byte.packed_fields)
     return '_descriptor.BooleanGroup([%s])' % ', '.join(descriptors)
   assert len(byte.packed_fields) == 1
   return GetFieldDescriptor(byte.packed_fields[0])
+
+def GetResponseStructFromMethod(method):
+  return generator.GetDataHeader(
+      False, generator.GetResponseStructFromMethod(method))
+
+def GetStructFromMethod(method):
+  return generator.GetDataHeader(
+      False, generator.GetStructFromMethod(method))
 
 def ComputeStaticValues(module):
   in_progress = set()
@@ -256,32 +276,58 @@ def ComputeStaticValues(module):
 
   return module
 
+def MojomToPythonImport(mojom):
+  return mojom.replace('.mojom', '_mojom')
 
 class Generator(generator.Generator):
 
   python_filters = {
     'expression_to_text': ExpressionToText,
     'field_group': GetFieldGroup,
+    'fully_qualified_name': GetFullyQualifiedName,
     'name': GetNameForElement,
+    'response_struct_from_method': GetResponseStructFromMethod,
+    'struct_from_method': GetStructFromMethod,
   }
 
   @UseJinja('python_templates/module.py.tmpl', filters=python_filters)
   def GeneratePythonModule(self):
     return {
-      'imports': self.GetImports(),
       'enums': self.module.enums,
+      'imports': self.GetImports(),
+      'interfaces': self.GetQualifiedInterfaces(),
       'module': ComputeStaticValues(self.module),
       'structs': self.GetStructs(),
     }
 
   def GenerateFiles(self, args):
+    import_path = MojomToPythonImport(self.module.name)
     self.Write(self.GeneratePythonModule(),
-               '%s.py' % self.module.name.replace('.mojom', '_mojom'))
+               self.MatchMojomFilePath('%s.py' % import_path))
 
   def GetImports(self):
     for each in self.module.imports:
-      each['python_module'] = each['module_name'].replace('.mojom', '_mojom')
+      each['python_module'] = MojomToPythonImport(each['module_name'])
     return self.module.imports
+
+  def GetQualifiedInterfaces(self):
+    """
+    Returns the list of interfaces of the module. Each interface that has a
+    client will have a reference to the representation of the client interface
+    in the 'qualified_client' field.
+    """
+    interfaces = self.module.interfaces
+    all_interfaces = [] + interfaces
+    for each in self.module.imports:
+      all_interfaces += each['module'].interfaces
+    interfaces_by_name = dict((x.name, x) for x in all_interfaces)
+    for interface in interfaces:
+      if interface.client:
+        assert interface.client in interfaces_by_name, (
+            'Unable to find interface %s declared as client of %s.' %
+            (interface.client, interface.name))
+        interface.qualified_client = interfaces_by_name[interface.client]
+    return sorted(interfaces, key=lambda i: (bool(i.client), i.name))
 
   def GetJinjaParameters(self):
     return {

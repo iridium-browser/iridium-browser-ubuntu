@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/strings/string16.h"
-#include "base/timer/timer.h"
 #include "chrome/browser/signin/screenlock_bridge.h"
 
 class PrefService;
@@ -35,12 +34,17 @@ class EasyUnlockScreenlockStateHandler : public ScreenlockBridge::Observer {
     // A phone eligible to unlock the device is found, but does not have lock
     // screen enabled.
     STATE_PHONE_UNLOCKABLE,
-    // A phone eligible to unlock the device is found, but it's not close enough
-    // to be allowed to unlock the device.
-    STATE_PHONE_NOT_NEARBY,
     // An Easy Unlock enabled phone is found, but it is not allowed to unlock
     // the device because it does not support reporting it's lock screen state.
     STATE_PHONE_UNSUPPORTED,
+    // A phone eligible to unlock the device is found, but its received signal
+    // strength is too low, i.e. the phone is roughly more than 30 feet away,
+    // and therefore is not allowed to unlock the device.
+    STATE_RSSI_TOO_LOW,
+    // A phone eligible to unlock the device is found, but the local device's
+    // transmission power is too high, indicating that the phone is (probably)
+    // more than 1 foot away, and therefore is not allowed to unlock the device.
+    STATE_TX_POWER_TOO_HIGH,
     // The device can be unlocked using Easy Unlock.
     STATE_AUTHENTICATED
   };
@@ -65,10 +69,15 @@ class EasyUnlockScreenlockStateHandler : public ScreenlockBridge::Observer {
   EasyUnlockScreenlockStateHandler(const std::string& user_email,
                                    HardlockState initial_hardlock_state,
                                    ScreenlockBridge* screenlock_bridge);
-  virtual ~EasyUnlockScreenlockStateHandler();
+  ~EasyUnlockScreenlockStateHandler() override;
 
   // Returns true if handler is not in INACTIVE state.
   bool IsActive() const;
+
+  // Whether the handler is in state that is allowed just after auth failure
+  // (i.e. the state that would cause auth failure rather than one caused by an
+  // auth failure).
+  bool InStateValidOnRemoteAuthFailure() const;
 
   // Changes internal state to |new_state| and updates the user's screenlock
   // accordingly.
@@ -87,9 +96,9 @@ class EasyUnlockScreenlockStateHandler : public ScreenlockBridge::Observer {
 
  private:
   // ScreenlockBridge::Observer:
-  virtual void OnScreenDidLock() OVERRIDE;
-  virtual void OnScreenDidUnlock() OVERRIDE;
-  virtual void OnFocusedUserChanged(const std::string& user_id) OVERRIDE;
+  void OnScreenDidLock() override;
+  void OnScreenDidUnlock() override;
+  void OnFocusedUserChanged(const std::string& user_id) override;
 
   // Forces refresh of the Easy Unlock screenlock UI.
   void RefreshScreenlockState();

@@ -20,7 +20,7 @@
 
 namespace blink {
 
-class RespondWithObserver::ThenFunction FINAL : public ScriptFunction {
+class RespondWithObserver::ThenFunction final : public ScriptFunction {
 public:
     enum ResolveType {
         Fulfilled,
@@ -33,7 +33,7 @@ public:
         return self->bindToV8Function();
     }
 
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         visitor->trace(m_observer);
         ScriptFunction::trace(visitor);
@@ -47,7 +47,7 @@ private:
     {
     }
 
-    virtual ScriptValue call(ScriptValue value) OVERRIDE
+    virtual ScriptValue call(ScriptValue value) override
     {
         ASSERT(m_observer);
         ASSERT(m_resolveType == Fulfilled || m_resolveType == Rejected);
@@ -63,9 +63,9 @@ private:
     ResolveType m_resolveType;
 };
 
-RespondWithObserver* RespondWithObserver::create(ExecutionContext* context, int eventID)
+RespondWithObserver* RespondWithObserver::create(ExecutionContext* context, int eventID, WebURLRequest::FetchRequestMode requestMode, WebURLRequest::FrameType frameType)
 {
-    return new RespondWithObserver(context, eventID);
+    return new RespondWithObserver(context, eventID, requestMode, frameType);
 }
 
 void RespondWithObserver::contextDestroyed()
@@ -114,15 +114,30 @@ void RespondWithObserver::responseWasFulfilled(const ScriptValue& value)
         responseWasRejected();
         return;
     }
+    Response* response = V8Response::toImplWithTypeCheck(toIsolate(executionContext()), value.v8Value());
+    // "If either |response|'s type is |opaque| and |request|'s mode is not
+    // |no CORS| or |response|'s type is |error|, return a network error."
+    const FetchResponseData::Type responseType = response->response()->type();
+    if ((responseType == FetchResponseData::OpaqueType && m_requestMode != WebURLRequest::FetchRequestModeNoCORS) || responseType == FetchResponseData::ErrorType) {
+        responseWasRejected();
+        return;
+    }
+    // Treat the opaque response as a network error for frame loading.
+    if (responseType == FetchResponseData::OpaqueType && m_frameType != WebURLRequest::FrameTypeNone) {
+        responseWasRejected();
+        return;
+    }
     WebServiceWorkerResponse webResponse;
-    V8Response::toImplWithTypeCheck(toIsolate(executionContext()), value.v8Value())->populateWebServiceWorkerResponse(webResponse);
+    response->populateWebServiceWorkerResponse(webResponse);
     ServiceWorkerGlobalScopeClient::from(executionContext())->didHandleFetchEvent(m_eventID, webResponse);
     m_state = Done;
 }
 
-RespondWithObserver::RespondWithObserver(ExecutionContext* context, int eventID)
+RespondWithObserver::RespondWithObserver(ExecutionContext* context, int eventID, WebURLRequest::FetchRequestMode requestMode, WebURLRequest::FrameType frameType)
     : ContextLifecycleObserver(context)
     , m_eventID(eventID)
+    , m_requestMode(requestMode)
+    , m_frameType(frameType)
     , m_state(Initial)
 {
 }

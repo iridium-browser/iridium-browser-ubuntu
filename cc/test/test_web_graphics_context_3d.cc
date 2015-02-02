@@ -53,7 +53,6 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
       times_bind_texture_succeeds_(-1),
       times_end_query_succeeds_(-1),
       context_lost_(false),
-      times_map_image_chromium_succeeds_(-1),
       times_map_buffer_chromium_succeeds_(-1),
       current_used_transfer_buffer_usage_bytes_(0),
       max_used_transfer_buffer_usage_bytes_(0),
@@ -502,7 +501,7 @@ void TestWebGraphicsContext3D::bufferData(GLenum target,
   DCHECK_EQ(target, buffers.get(bound_buffer_)->target);
   Buffer* buffer = buffers.get(bound_buffer_);
   if (context_lost_) {
-    buffer->pixels.reset();
+    buffer->pixels = nullptr;
     return;
   }
 
@@ -541,55 +540,43 @@ GLboolean TestWebGraphicsContext3D::unmapBufferCHROMIUM(
   base::ScopedPtrHashMap<unsigned, Buffer>& buffers = namespace_->buffers;
   DCHECK_GT(buffers.count(bound_buffer_), 0u);
   DCHECK_EQ(target, buffers.get(bound_buffer_)->target);
-  buffers.get(bound_buffer_)->pixels.reset();
+  buffers.get(bound_buffer_)->pixels = nullptr;
   return true;
 }
 
-GLuint TestWebGraphicsContext3D::createImageCHROMIUM(GLsizei width,
+GLuint TestWebGraphicsContext3D::createImageCHROMIUM(ClientBuffer buffer,
+                                                     GLsizei width,
                                                      GLsizei height,
-                                                     GLenum internalformat,
-                                                     GLenum usage) {
-  DCHECK_EQ(GL_RGBA8_OES, static_cast<int>(internalformat));
+                                                     GLenum internalformat) {
+  DCHECK_EQ(GL_RGBA, static_cast<int>(internalformat));
   GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
-  base::ScopedPtrHashMap<unsigned, Image>& images = namespace_->images;
-  images.set(image_id, make_scoped_ptr(new Image).Pass());
-  images.get(image_id)->pixels.reset(new uint8[width * height * 4]);
+  base::hash_set<unsigned>& images = namespace_->images;
+  images.insert(image_id);
   return image_id;
 }
 
 void TestWebGraphicsContext3D::destroyImageCHROMIUM(
     GLuint id) {
   RetireImageId(id);
+  base::AutoLock lock(namespace_->lock);
+  base::hash_set<unsigned>& images = namespace_->images;
+  if (!images.count(id))
+    ADD_FAILURE() << "destroyImageCHROMIUM called on unknown image " << id;
+  images.erase(id);
 }
 
-void TestWebGraphicsContext3D::getImageParameterivCHROMIUM(
-    GLuint image_id,
-    GLenum pname,
-    GLint* params) {
+GLuint TestWebGraphicsContext3D::createGpuMemoryBufferImageCHROMIUM(
+    GLsizei width,
+    GLsizei height,
+    GLenum internalformat,
+    GLenum usage) {
+  DCHECK_EQ(GL_RGBA, static_cast<int>(internalformat));
+  GLuint image_id = NextImageId();
   base::AutoLock lock(namespace_->lock);
-  DCHECK_GT(namespace_->images.count(image_id), 0u);
-  DCHECK_EQ(GL_IMAGE_ROWBYTES_CHROMIUM, static_cast<int>(pname));
-  *params = 0;
-}
-
-void* TestWebGraphicsContext3D::mapImageCHROMIUM(GLuint image_id) {
-  base::AutoLock lock(namespace_->lock);
-  base::ScopedPtrHashMap<unsigned, Image>& images = namespace_->images;
-  DCHECK_GT(images.count(image_id), 0u);
-  if (times_map_image_chromium_succeeds_ >= 0) {
-    if (!times_map_image_chromium_succeeds_) {
-      return NULL;
-    }
-    --times_map_image_chromium_succeeds_;
-  }
-  return images.get(image_id)->pixels.get();
-}
-
-void TestWebGraphicsContext3D::unmapImageCHROMIUM(
-    GLuint image_id) {
-  base::AutoLock lock(namespace_->lock);
-  DCHECK_GT(namespace_->images.count(image_id), 0u);
+  base::hash_set<unsigned>& images = namespace_->images;
+  images.insert(image_id);
+  return image_id;
 }
 
 unsigned TestWebGraphicsContext3D::insertSyncPoint() {

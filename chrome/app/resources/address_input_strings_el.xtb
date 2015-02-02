@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="el">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="el">
 <translation id="777702478322588152">Νομαρχία</translation>
 <translation id="3713769522066937702">Αυτή η μορφή ταχυδρομικού κώδικα δεν αναγνωρίζεται. Παράδειγμα έγκυρου ταχυδρομικού κώδικα: <ph name="EXAMPLE"/>. Δεν γνωρίζετε τον ταχυδρομικό σας κώδικα; Βρείτε τον<ph name="BEGIN_LINK"/>εδώ<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Οδός</translation>

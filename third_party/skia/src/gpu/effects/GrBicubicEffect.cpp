@@ -24,7 +24,7 @@ public:
     GrGLBicubicEffect(const GrBackendProcessorFactory& factory,
                       const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -54,7 +54,7 @@ GrGLBicubicEffect::GrGLBicubicEffect(const GrBackendProcessorFactory& factory, c
     : INHERITED(factory) {
 }
 
-void GrGLBicubicEffect::emitCode(GrGLProgramBuilder* builder,
+void GrGLBicubicEffect::emitCode(GrGLFPBuilder* builder,
                                  const GrFragmentProcessor& effect,
                                  const GrProcessorKey& key,
                                  const char* outputColor,
@@ -81,7 +81,7 @@ void GrGLBicubicEffect::emitCode(GrGLProgramBuilder* builder,
         GrGLShaderVar("c2",            kVec4f_GrSLType),
         GrGLShaderVar("c3",            kVec4f_GrSLType),
     };
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     SkString coords2D = fsBuilder->ensureFSCoords2D(coords, 0);
     fsBuilder->emitFunction(kVec4f_GrSLType,
                             "cubicBlend",
@@ -162,17 +162,15 @@ const GrBackendFragmentProcessorFactory& GrBicubicEffect::getFactory() const {
     return GrTBackendFragmentProcessorFactory<GrBicubicEffect>::getInstance();
 }
 
-bool GrBicubicEffect::onIsEqual(const GrProcessor& sBase) const {
+bool GrBicubicEffect::onIsEqual(const GrFragmentProcessor& sBase) const {
     const GrBicubicEffect& s = sBase.cast<GrBicubicEffect>();
-    return this->textureAccess(0) == s.textureAccess(0) &&
-           !memcmp(fCoefficients, s.coefficients(), 16) &&
+    return !memcmp(fCoefficients, s.coefficients(), 16) &&
            fDomain == s.fDomain;
 }
 
-void GrBicubicEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
+void GrBicubicEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
     // FIXME: Perhaps we can do better.
-    *validFlags = 0;
-    return;
+    inout->mulByUnknownAlpha();
 }
 
 GR_DEFINE_FRAGMENT_PROCESSOR_TEST(GrBicubicEffect);

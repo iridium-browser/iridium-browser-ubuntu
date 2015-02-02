@@ -25,7 +25,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterface5::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface5::domTemplate, V8TestInterface5::refObject, V8TestInterface5::derefObject, V8TestInterface5::createPersistentHandle, V8TestInterface5::toActiveDOMObject, 0, V8TestInterface5::visitDOMWrapper, V8TestInterface5::installConditionallyEnabledMethods, V8TestInterface5::installConditionallyEnabledProperties, &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterface5::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface5::domTemplate, V8TestInterface5::refObject, V8TestInterface5::derefObject, V8TestInterface5::trace, V8TestInterface5::toActiveDOMObject, 0, V8TestInterface5::visitDOMWrapper, V8TestInterface5::installConditionallyEnabledMethods, V8TestInterface5::installConditionallyEnabledProperties, &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterface5Implementation.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -33,8 +33,6 @@ const WrapperTypeInfo V8TestInterface5::wrapperTypeInfo = { gin::kEmbedderBlink,
 const WrapperTypeInfo& TestInterface5Implementation::s_wrapperTypeInfo = V8TestInterface5::wrapperTypeInfo;
 
 namespace TestInterface5ImplementationV8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void testInterfaceAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
@@ -60,7 +58,7 @@ static void testInterfaceAttributeAttributeSetter(v8::Local<v8::Value> v8Value, 
         return;
     }
     TestInterface5Implementation* impl = V8TestInterface5::toImpl(holder);
-    TestInterface5Implementation* cppValue = V8TestInterface5::toImplWithTypeCheck(info.GetIsolate(), v8Value);
+    TestInterface5Implementation* cppValue = V8TestInterface5::toImpl(v8::Handle<v8::Object>::Cast(v8Value));
     impl->setTestInterfaceAttribute(WTF::getPtr(cppValue));
 }
 
@@ -340,17 +338,17 @@ static void TestInterface5ImplementationForceSetAttributeOnThisCallback(v8::Loca
 static void voidMethodTestInterfaceEmptyArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwException(createMinimumArityTypeErrorForMethod("voidMethodTestInterfaceEmptyArg", "TestInterface5", 1, info.Length(), info.GetIsolate()), info.GetIsolate());
+        V8ThrowException::throwException(createMinimumArityTypeErrorForMethod(info.GetIsolate(), "voidMethodTestInterfaceEmptyArg", "TestInterface5", 1, info.Length()), info.GetIsolate());
         return;
     }
     TestInterface5Implementation* impl = V8TestInterface5::toImpl(info.Holder());
     TestInterfaceEmpty* testInterfaceEmptyArg;
     {
         if (info.Length() > 0 && !V8TestInterfaceEmpty::hasInstance(info[0], info.GetIsolate())) {
-            V8ThrowException::throwTypeError(ExceptionMessages::failedToExecute("voidMethodTestInterfaceEmptyArg", "TestInterface5", "parameter 1 is not of type 'TestInterfaceEmpty'."), info.GetIsolate());
+            V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodTestInterfaceEmptyArg", "TestInterface5", "parameter 1 is not of type 'TestInterfaceEmpty'."));
             return;
         }
-        testInterfaceEmptyArg = V8TestInterfaceEmpty::toImplWithTypeCheck(info.GetIsolate(), info[0]);
+        testInterfaceEmptyArg = V8TestInterfaceEmpty::toImpl(v8::Handle<v8::Object>::Cast(info[0]));
     }
     impl->voidMethodTestInterfaceEmptyArg(testInterfaceEmptyArg);
 }
@@ -722,18 +720,18 @@ static void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::A
 
 } // namespace TestInterface5ImplementationV8Internal
 
-void V8TestInterface5::visitDOMWrapper(ScriptWrappableBase* internalPointer, const v8::Persistent<v8::Object>& wrapper, v8::Isolate* isolate)
+void V8TestInterface5::visitDOMWrapper(v8::Isolate* isolate, ScriptWrappableBase* scriptWrappableBase, const v8::Persistent<v8::Object>& wrapper)
 {
-    TestInterface5Implementation* impl = internalPointer->toImpl<TestInterface5Implementation>();
+    TestInterface5Implementation* impl = scriptWrappableBase->toImpl<TestInterface5Implementation>();
     v8::Local<v8::Object> creationContext = v8::Local<v8::Object>::New(isolate, wrapper);
     V8WrapperInstantiationScope scope(creationContext, isolate);
     TestInterface5Implementation* referencedName = impl->referencedName();
     if (referencedName) {
-        if (!DOMDataStore::containsWrapper<V8TestInterface5>(referencedName, isolate))
-            wrap(referencedName, creationContext, isolate);
-        DOMDataStore::setWrapperReference<V8TestInterface5>(wrapper, referencedName, isolate);
+        if (!DOMDataStore::containsWrapper(referencedName, isolate))
+            referencedName->wrap(creationContext, isolate);
+        DOMDataStore::setWrapperReference(wrapper, referencedName, isolate);
     }
-    setObjectGroup(internalPointer, wrapper, isolate);
+    setObjectGroup(isolate, scriptWrappableBase, wrapper);
 }
 
 static const V8DOMConfiguration::AttributeConfiguration V8TestInterface5Attributes[] = {
@@ -767,8 +765,10 @@ static void installV8TestInterface5Template(v8::Handle<v8::FunctionTemplate> fun
             0, 0,
             V8TestInterface5Methods, WTF_ARRAY_LENGTH(V8TestInterface5Methods),
             isolate);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
     static const V8DOMConfiguration::ConstantConfiguration V8TestInterface5Constants[] = {
         {"UNSIGNED_LONG", 0, 0, 0, V8DOMConfiguration::ConstantTypeUnsignedLong},
         {"CONST_JAVASCRIPT", 1, 0, 0, V8DOMConfiguration::ConstantTypeShort},
@@ -858,21 +858,14 @@ ActiveDOMObject* V8TestInterface5::toActiveDOMObject(v8::Handle<v8::Object> wrap
     return toImpl(wrapper);
 }
 
-
-void V8TestInterface5::refObject(ScriptWrappableBase* internalPointer)
+void V8TestInterface5::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterface5Implementation>()->ref();
+    scriptWrappableBase->toImpl<TestInterface5Implementation>()->ref();
 }
 
-void V8TestInterface5::derefObject(ScriptWrappableBase* internalPointer)
+void V8TestInterface5::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterface5Implementation>()->deref();
-}
-
-WrapperPersistentNode* V8TestInterface5::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<TestInterface5Implementation>()->deref();
 }
 
 template<>

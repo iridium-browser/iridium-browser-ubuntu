@@ -33,16 +33,16 @@ class SignedCertificateTimestampsViews : public views::DialogDelegateView,
   SignedCertificateTimestampsViews(
       content::WebContents* web_contents,
       const net::SignedCertificateTimestampAndStatusList& sct_list);
-  virtual ~SignedCertificateTimestampsViews();
+  ~SignedCertificateTimestampsViews() override;
 
   // views::DialogDelegate:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
+  base::string16 GetWindowTitle() const override;
+  int GetDialogButtons() const override;
+  ui::ModalType GetModalType() const override;
 
   // views::View:
-  virtual void ViewHierarchyChanged(const ViewHierarchyChangedDetails& details)
-      OVERRIDE;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
  private:
   void Init();
@@ -50,12 +50,12 @@ class SignedCertificateTimestampsViews : public views::DialogDelegateView,
   void ShowSCTInfo(int sct_index);
 
   // views::ComboboxListener:
-  virtual void OnPerformAction(views::Combobox* combobox) OVERRIDE;
+  void OnPerformAction(views::Combobox* combobox) override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   SignedCertificateTimestampInfoView* sct_info_view_;
 

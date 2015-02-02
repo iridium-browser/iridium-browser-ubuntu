@@ -97,16 +97,16 @@ class ShadowController::Impl :
   static Impl* GetInstance();
 
   // aura::EnvObserver override:
-  virtual void OnWindowInitialized(aura::Window* window) OVERRIDE;
+  void OnWindowInitialized(aura::Window* window) override;
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowPropertyChanged(
-      aura::Window* window, const void* key, intptr_t old) OVERRIDE;
-  virtual void OnWindowBoundsChanged(
-      aura::Window* window,
-      const gfx::Rect& old_bounds,
-      const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
+  void OnWindowPropertyChanged(aura::Window* window,
+                               const void* key,
+                               intptr_t old) override;
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override;
+  void OnWindowDestroyed(aura::Window* window) override;
 
  private:
   friend class base::RefCounted<Impl>;
@@ -116,7 +116,7 @@ class ShadowController::Impl :
   typedef std::map<aura::Window*, linked_ptr<Shadow> > WindowShadowMap;
 
   Impl();
-  virtual ~Impl();
+  ~Impl() override;
 
   // Forwarded from ShadowController.
   void OnWindowActivated(aura::Window* gained_active,

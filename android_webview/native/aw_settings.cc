@@ -61,7 +61,7 @@ class AwSettingsUserData : public base::SupportsUserData::Data {
   static AwSettings* GetSettings(content::WebContents* web_contents) {
     if (!web_contents)
       return NULL;
-    AwSettingsUserData* data = reinterpret_cast<AwSettingsUserData*>(
+    AwSettingsUserData* data = static_cast<AwSettingsUserData*>(
         web_contents->GetUserData(kAwSettingsUserDataKey));
     return data ? data->settings_ : NULL;
   }
@@ -401,7 +401,6 @@ void AwSettings::PopulateWebPreferencesLocked(
   web_prefs->allow_running_insecure_content =
       Java_AwSettings_getAllowRunningInsecureContentLocked(env, obj);
 
-  web_prefs->disallow_fullscreen_for_non_media_elements = true;
   web_prefs->fullscreen_supported =
       Java_AwSettings_getFullscreenSupportedLocked(env, obj);
 }

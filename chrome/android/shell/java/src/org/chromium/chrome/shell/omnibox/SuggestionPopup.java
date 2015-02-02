@@ -49,8 +49,7 @@ public class SuggestionPopup implements OnSuggestionsReceivedListener, TextWatch
      * Initializes a suggestion popup that will track urlField value and display suggestions based
      * on that value.
      */
-    public SuggestionPopup(Context context, EditText urlField,
-            ChromeShellToolbar toolbar) {
+    public SuggestionPopup(Context context, EditText urlField, ChromeShellToolbar toolbar) {
         mContext = context;
         mUrlField = urlField;
         mToolbar = toolbar;
@@ -60,7 +59,7 @@ public class SuggestionPopup implements OnSuggestionsReceivedListener, TextWatch
             public void onLayoutChange(View v, int left, int top, int right, int bottom,
                     int oldLeft, int oldTop, int oldRight, int oldBottom) {
                 if (mSuggestionsPopup == null || !mSuggestionsPopup.isShowing()) return;
-                mSuggestionsPopup.setWidth(mUrlField.getWidth());
+                mSuggestionsPopup.setWidth(mToolbar.getWidth());
                 mSuggestionsPopup.setHeight(getSuggestionPopupHeight());
                 mSuggestionsPopup.show();
             }
@@ -105,10 +104,10 @@ public class SuggestionPopup implements OnSuggestionsReceivedListener, TextWatch
 
     private int getSuggestionPopupHeight() {
         Rect appRect = new Rect();
-        ((ChromeShellActivity) mContext).getWindow().getDecorView().
-                getWindowVisibleDisplayFrame(appRect);
-        int dropDownItemHeight = mContext.getResources().
-                getDimensionPixelSize(R.dimen.dropdown_item_height);
+        ((ChromeShellActivity) mContext).getWindow().getDecorView()
+                .getWindowVisibleDisplayFrame(appRect);
+        int dropDownItemHeight = mContext.getResources()
+                .getDimensionPixelSize(R.dimen.dropdown_item_height);
         // Applying margin height equal to |dropDownItemHeight| if constrained by app rect.
         int popupHeight = appRect.height() - dropDownItemHeight;
         if (mSuggestionsPopup != null) {
@@ -138,13 +137,13 @@ public class SuggestionPopup implements OnSuggestionsReceivedListener, TextWatch
             });
         }
         mSuggestionsPopup.setInputMethodMode(ListPopupWindow.INPUT_METHOD_NEEDED);
-        mSuggestionsPopup.setWidth(mUrlField.getWidth());
+        mSuggestionsPopup.setWidth(mToolbar.getWidth());
         mSuggestionArrayAdapter =
                 new SuggestionArrayAdapter(mContext, R.layout.dropdown_item, suggestions,
                         mUrlField);
         mSuggestionsPopup.setHeight(getSuggestionPopupHeight());
         mSuggestionsPopup.setAdapter(mSuggestionArrayAdapter);
-        mSuggestionsPopup.setAnchorView(mUrlField);
+        mSuggestionsPopup.setAnchorView(mToolbar);
         mSuggestionsPopup.setOnItemClickListener(new OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -172,6 +171,8 @@ public class SuggestionPopup implements OnSuggestionsReceivedListener, TextWatch
             mRequestSuggestions = new Runnable() {
                 @Override
                 public void run() {
+                    // TODO(aurimas): Create new tab if none exists.
+                    if (mToolbar.getCurrentTab() == null) return;
                     mRequestSuggestions = null;
                     mAutocomplete.start(
                             mToolbar.getCurrentTab().getProfile(),

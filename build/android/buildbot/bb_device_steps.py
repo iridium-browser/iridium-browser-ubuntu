@@ -73,11 +73,16 @@ INSTRUMENTATION_TESTS = dict((suite.name, suite) for suite in [
       'org.chromium.android_webview.shell',
       'AndroidWebViewTest',
       'webview:android_webview/test/data/device_files'),
+    I('ChromeSyncShell',
+      'ChromeSyncShell.apk',
+      'org.chromium.chrome.browser.sync',
+      'ChromeSyncShellTest',
+      None),
     ])
 
-VALID_TESTS = set(['chromedriver', 'chrome_proxy', 'gpu', 'mojo', 'sync',
+VALID_TESTS = set(['chromedriver', 'chrome_proxy', 'gpu',
                    'telemetry_perf_unittests', 'ui', 'unit', 'webkit',
-                   'webkit_layout'])
+                   'webkit_layout', 'python_unittests'])
 
 RunCmd = bb_utils.RunCmd
 
@@ -145,6 +150,9 @@ def RunTestSuites(options, suites, suites_options=None):
     args.append('--tool=asan')
   if options.gtest_filter:
     args.append('--gtest-filter=%s' % options.gtest_filter)
+  if options.flakiness_server:
+    args.append('--flakiness-dashboard-server=%s' %
+                options.flakiness_server)
 
   for suite in suites:
     bb_annotations.PrintNamedStep(suite)
@@ -181,14 +189,6 @@ def RunChromeProxyTests(options):
   bb_annotations.PrintNamedStep('chrome_proxy')
   RunCmd(['tools/chrome_proxy/run_tests'] + args)
 
-def RunChromeSyncShellTests(options):
-  """Run the chrome sync shell tests"""
-  test = I('ChromeSyncShell',
-           'ChromeSyncShell.apk',
-           'org.chromium.chrome.browser.sync',
-           'ChromeSyncShellTest.apk',
-           'chrome:chrome/test/data/android/device_files')
-  RunInstrumentationSuite(options, test)
 
 def RunTelemetryPerfUnitTests(options):
   """Runs the telemetry perf unit tests.
@@ -203,20 +203,6 @@ def RunTelemetryPerfUnitTests(options):
     args = args + ['--device', devices[0]]
   bb_annotations.PrintNamedStep('telemetry_perf_unittests')
   RunCmd(['tools/perf/run_tests'] + args)
-
-
-def RunMojoTests(options):
-  """Runs the mojo unit tests.
-
-  Args:
-    options: options object.
-  """
-  test = I('MojoTest',
-           None,
-           'org.chromium.mojo.tests',
-           'MojoTest',
-           'bindings:mojo/public/interfaces/bindings/tests/data')
-  RunInstrumentationSuite(options, test)
 
 
 def InstallApk(options, test, print_step=False):
@@ -531,13 +517,18 @@ def RunGPUTests(options):
           EscapeBuilderName(builder_name)])
 
 
+def RunPythonUnitTests(_options):
+  for suite in constants.PYTHON_UNIT_TEST_SUITES:
+    bb_annotations.PrintNamedStep(suite)
+    RunCmd(['build/android/test_runner.py', 'python', '-s', suite])
+
+
 def GetTestStepCmds():
   return [
       ('chromedriver', RunChromeDriverTests),
       ('chrome_proxy', RunChromeProxyTests),
       ('gpu', RunGPUTests),
-      ('mojo', RunMojoTests),
-      ('sync', RunChromeSyncShellTests),
+      ('python_unittests', RunPythonUnitTests),
       ('telemetry_perf_unittests', RunTelemetryPerfUnitTests),
       ('ui', RunInstrumentationTests),
       ('unit', RunUnitTests),

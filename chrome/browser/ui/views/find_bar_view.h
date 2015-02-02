@@ -42,7 +42,7 @@ class FindBarView : public DropdownBarView,
   };
 
   explicit FindBarView(FindBarHost* host);
-  virtual ~FindBarView();
+  ~FindBarView() override;
 
   // Accessors for the text and selection displayed in the text box.
   void SetFindTextAndSelectedRange(const base::string16& find_text,
@@ -65,22 +65,21 @@ class FindBarView : public DropdownBarView,
   void ClearMatchCount();
 
   // Claims focus for the text field and selects its contents.
-  virtual void SetFocusAndSelection(bool select_all) OVERRIDE;
+  void SetFocusAndSelection(bool select_all) override;
 
   // views::View:
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void Layout() override;
+  gfx::Size GetPreferredSize() const override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::TextfieldController:
-  virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const ui::KeyEvent& key_event) OVERRIDE;
-  virtual void OnAfterUserAction(views::Textfield* sender) OVERRIDE;
-  virtual void OnAfterPaste() OVERRIDE;
+  bool HandleKeyEvent(views::Textfield* sender,
+                      const ui::KeyEvent& key_event) override;
+  void OnAfterUserAction(views::Textfield* sender) override;
+  void OnAfterPaste() override;
 
  private:
   // Starts finding |search_text|.  If the text is empty, stops finding.
@@ -90,7 +89,7 @@ class FindBarView : public DropdownBarView,
   void UpdateMatchCountAppearance(bool no_match);
 
   // views::View:
-  virtual void OnThemeChanged() OVERRIDE;
+  void OnThemeChanged() override;
 
   // We use a hidden view to grab mouse clicks and bring focus to the find
   // text box. This is because although the find text box may look like it
@@ -105,7 +104,7 @@ class FindBarView : public DropdownBarView,
       : view_to_focus_on_mousedown_(view_to_focus_on_mousedown) {}
 
    private:
-    virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+    bool OnMousePressed(const ui::MouseEvent& event) override;
 
     views::Textfield* view_to_focus_on_mousedown_;
 

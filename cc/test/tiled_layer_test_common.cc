@@ -58,7 +58,7 @@ void FakeLayerUpdater::SetRectToInvalidate(const gfx::Rect& rect,
 
 scoped_ptr<LayerUpdater::Resource> FakeLayerUpdater::CreateResource(
     PrioritizedResourceManager* manager) {
-  return scoped_ptr<LayerUpdater::Resource>(
+  return make_scoped_ptr(
       new Resource(this, PrioritizedResource::Create(manager)));
 }
 
@@ -87,7 +87,7 @@ FakeTiledLayerWithScaledBounds::~FakeTiledLayerWithScaledBounds() {}
 
 FakeTiledLayer::~FakeTiledLayer() {}
 
-void FakeTiledLayer::SetNeedsDisplayRect(const gfx::RectF& rect) {
+void FakeTiledLayer::SetNeedsDisplayRect(const gfx::Rect& rect) {
   last_needs_display_rect_ = rect;
   TiledLayer::SetNeedsDisplayRect(rect);
 }

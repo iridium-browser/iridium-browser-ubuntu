@@ -117,18 +117,18 @@ class ConfirmEmailDialogDelegate : public TabModalConfirmDialogDelegate {
                              const std::string& last_email,
                              const std::string& email,
                              Callback callback);
-  virtual ~ConfirmEmailDialogDelegate();
+  ~ConfirmEmailDialogDelegate() override;
 
   // TabModalConfirmDialogDelegate:
-  virtual base::string16 GetTitle() OVERRIDE;
-  virtual base::string16 GetDialogMessage() OVERRIDE;
-  virtual base::string16 GetAcceptButtonTitle() OVERRIDE;
-  virtual base::string16 GetCancelButtonTitle() OVERRIDE;
-  virtual base::string16 GetLinkText() const OVERRIDE;
-  virtual void OnAccepted() OVERRIDE;
-  virtual void OnCanceled() OVERRIDE;
-  virtual void OnClosed() OVERRIDE;
-  virtual void OnLinkClicked(WindowOpenDisposition disposition) OVERRIDE;
+  base::string16 GetTitle() override;
+  base::string16 GetDialogMessage() override;
+  base::string16 GetAcceptButtonTitle() override;
+  base::string16 GetCancelButtonTitle() override;
+  base::string16 GetLinkText() const override;
+  void OnAccepted() override;
+  void OnCanceled() override;
+  void OnClosed() override;
+  void OnLinkClicked(WindowOpenDisposition disposition) override;
 
   std::string last_email_;
   std::string email_;
@@ -429,14 +429,14 @@ std::string GetSigninScopedDeviceId(Profile* profile) {
 class CurrentHistoryCleaner : public content::WebContentsObserver {
  public:
   explicit CurrentHistoryCleaner(content::WebContents* contents);
-  virtual ~CurrentHistoryCleaner();
+  ~CurrentHistoryCleaner() override;
 
   // content::WebContentsObserver:
-  virtual void WebContentsDestroyed() OVERRIDE;
-  virtual void DidCommitProvisionalLoadForFrame(
+  void WebContentsDestroyed() override;
+  void DidCommitProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& url,
-      ui::PageTransition transition_type) OVERRIDE;
+      ui::PageTransition transition_type) override;
 
  private:
   scoped_ptr<content::WebContents> contents_;

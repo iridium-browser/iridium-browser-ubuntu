@@ -166,7 +166,8 @@ WebInspector.ObjectPropertyTreeElement.prototype = {
      */
     ondblclick: function(event)
     {
-        if (this.property.writable || this.property.setter)
+        var editableElement = this.elementAndValueToEdit().element;
+        if ((this.property.writable || this.property.setter) && event.target.isSelfOrDescendant(editableElement))
             this.startEditing(event);
         return false;
     },
@@ -181,7 +182,7 @@ WebInspector.ObjectPropertyTreeElement.prototype = {
 
     update: function()
     {
-        this.nameElement = document.createElementWithClass("span", "name");
+        this.nameElement = createElementWithClass("span", "name");
         var name = this.property.name;
         if (/^\s|\s$|^$|\n/.test(name))
             this.nameElement.createTextChildren("\"", name.replace(/\n/g, "\u21B5"), "\"");
@@ -194,11 +195,11 @@ WebInspector.ObjectPropertyTreeElement.prototype = {
         if (this.property.symbol)
             this.nameElement.addEventListener("contextmenu", this._contextMenuFired.bind(this, this.property.symbol), false);
 
-        var separatorElement = document.createElementWithClass("span", "separator");
+        var separatorElement = createElementWithClass("span", "separator");
         separatorElement.textContent = ": ";
 
         if (this.property.value) {
-            this.valueElement = document.createElementWithClass("span", "value");
+            this.valueElement = createElementWithClass("span", "value");
             var type = this.property.value.type;
             var subtype = this.property.value.subtype;
             var description = this.property.value.description;
@@ -222,11 +223,21 @@ WebInspector.ObjectPropertyTreeElement.prototype = {
             } else if (type !== "object" || subtype !== "node") {
                 valueText = description;
             }
-            this.valueElement.setTextContentTruncatedIfNeeded(valueText || "");
-            if (prefix)
-                this.valueElement.insertBefore(document.createTextNode(prefix), this.valueElement.firstChild);
-            if (suffix)
-                this.valueElement.createTextChild(suffix);
+            if (type !== "number" || valueText.indexOf("e") === -1) {
+                this.valueElement.setTextContentTruncatedIfNeeded(valueText || "");
+                if (prefix)
+                    this.valueElement.insertBefore(createTextNode(prefix), this.valueElement.firstChild);
+                if (suffix)
+                    this.valueElement.createTextChild(suffix);
+            } else {
+                var numberParts = valueText.split("e");
+                var mantissa = this.valueElement.createChild("span", "scientific-notation-mantissa");
+                mantissa.textContent = numberParts[0];
+                var exponent = this.valueElement.createChild("span", "scientific-notation-exponent");
+                exponent.textContent = "e" + numberParts[1];
+                this.valueElement.classList.add("scientific-notation-number");
+                this.listItemElement.classList.add("hbox");
+            }
 
             if (this.property.wasThrown)
                 this.valueElement.classList.add("error");
@@ -236,8 +247,8 @@ WebInspector.ObjectPropertyTreeElement.prototype = {
             this.valueElement.addEventListener("contextmenu", this._contextMenuFired.bind(this, this.property.value), false);
             if (type === "object" && subtype === "node" && description) {
                 WebInspector.DOMPresentationUtils.createSpansForNodeTitle(this.valueElement, description);
-                this.valueElement.addEventListener("mousemove", this._mouseMove.bind(this, this.property.value), false);
-                this.valueElement.addEventListener("mouseout", this._mouseOut.bind(this, this.property.value), false);
+                this.valueElement.addEventListener("mousemove", this._mouseMove.bind(this), false);
+                this.valueElement.addEventListener("mouseleave", this._mouseLeave.bind(this), false);
             } else {
                 this.valueElement.title = description || "";
             }
@@ -249,7 +260,7 @@ WebInspector.ObjectPropertyTreeElement.prototype = {
             if (this.property.getter) {
                 this.valueElement = WebInspector.ObjectPropertyTreeElement.createRemoteObjectAccessorPropertySpan(this.property.parentObject, [this.property.name], this._onInvokeGetterClick.bind(this));
             } else {
-                this.valueElement = document.createElementWithClass("span", "console-formatted-undefined");
+                this.valueElement = createElementWithClass("span", "console-formatted-undefined");
                 this.valueElement.textContent = WebInspector.UIString("<unreadable>");
                 this.valueElement.title = WebInspector.UIString("No property getter");
             }
@@ -278,7 +289,7 @@ WebInspector.ObjectPropertyTreeElement.prototype = {
         this.property.value.highlightAsDOMNode();
     },
 
-    _mouseOut: function(event)
+    _mouseLeave: function(event)
     {
         this.property.value.hideDOMNodeHighlight();
     },
@@ -582,7 +593,7 @@ WebInspector.ObjectPropertyTreeElement._appendEmptyPlaceholderIfNeeded = functio
 {
     if (treeElement.children.length)
         return;
-    var title = document.createElementWithClass("div", "info");
+    var title = createElementWithClass("div", "info");
     title.textContent = emptyPlaceholder || WebInspector.UIString("No Properties");
     var infoElement = new TreeElement(title, null, false);
     treeElement.appendChild(infoElement);
@@ -596,7 +607,7 @@ WebInspector.ObjectPropertyTreeElement._appendEmptyPlaceholderIfNeeded = functio
  */
 WebInspector.ObjectPropertyTreeElement.createRemoteObjectAccessorPropertySpan = function(object, propertyPath, callback)
 {
-    var rootElement = document.createElement("span");
+    var rootElement = createElement("span");
     var element = rootElement.createChild("span");
     element.textContent = WebInspector.UIString("(...)");
     if (!object)

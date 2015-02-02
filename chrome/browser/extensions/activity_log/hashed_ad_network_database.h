@@ -14,20 +14,20 @@ namespace extensions {
 class HashedAdNetworkDatabase : public AdNetworkDatabase {
  public:
   HashedAdNetworkDatabase();
-  virtual ~HashedAdNetworkDatabase();
+  ~HashedAdNetworkDatabase() override;
 
-  void set_entries_for_testing(const char** entries, int num_entries) {
+  void set_entries_for_testing(const char* const* entries, int num_entries) {
     entries_ = entries;
     num_entries_ = num_entries;
   }
 
  private:
   // AdNetworkDatabase implementation.
-  virtual bool IsAdNetwork(const GURL& url) const OVERRIDE;
+  bool IsAdNetwork(const GURL& url) const override;
 
   // Points to the array of hash entries. In practice, this is always set to
   // kHashedAdNetworks, but is exposed via set_entries_for_testing().
-  const char** entries_;
+  const char* const* entries_;
 
   // The number of entries.
   int num_entries_;

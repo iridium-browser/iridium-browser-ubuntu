@@ -9,36 +9,17 @@
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "content/renderer/media/cdm_result_promise.h"
 #include "content/renderer/media/cdm_session_adapter.h"
 #include "media/base/cdm_promise.h"
+#include "media/base/media_keys.h"
+#include "media/blink/cdm_result_promise.h"
+#include "media/blink/new_session_cdm_result_promise.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 
 namespace content {
 
 const char kCreateSessionUMAName[] = "CreateSession";
-
-typedef base::Callback<blink::WebContentDecryptionModuleResult::SessionStatus(
-    const std::string& web_session_id)> SessionInitializedCB;
-
-class NewSessionCdmResultPromise : public CdmResultPromise<std::string> {
- public:
-  NewSessionCdmResultPromise(blink::WebContentDecryptionModuleResult result,
-                             std::string uma_name,
-                             const SessionInitializedCB& new_session_created_cb)
-      : CdmResultPromise<std::string>(result, uma_name),
-        new_session_created_cb_(new_session_created_cb) {}
-
- protected:
-  virtual void OnResolve(const std::string& web_session_id) OVERRIDE {
-    blink::WebContentDecryptionModuleResult::SessionStatus status =
-        new_session_created_cb_.Run(web_session_id);
-    web_cdm_result_.completeWithSession(status);
-  }
-
- private:
-  SessionInitializedCB new_session_created_cb_;
-};
+const char kLoadSessionUMAName[] = "LoadSession";
 
 WebContentDecryptionModuleSessionImpl::WebContentDecryptionModuleSessionImpl(
     const scoped_refptr<CdmSessionAdapter>& adapter)
@@ -86,6 +67,7 @@ void WebContentDecryptionModuleSessionImpl::initializeNewSession(
     size_t init_data_length,
     const blink::WebString& session_type,
     blink::WebContentDecryptionModuleResult result) {
+  DCHECK(web_session_id_.empty());
 
   // TODO(ddorwin): Guard against this in supported types check and remove this.
   // Chromium only supports ASCII MIME types.
@@ -111,12 +93,30 @@ void WebContentDecryptionModuleSessionImpl::initializeNewSession(
       init_data,
       init_data_length,
       media::MediaKeys::TEMPORARY_SESSION,
-      scoped_ptr<media::NewSessionCdmPromise>(new NewSessionCdmResultPromise(
-          result,
-          adapter_->GetKeySystemUMAPrefix() + kCreateSessionUMAName,
-          base::Bind(
-              &WebContentDecryptionModuleSessionImpl::OnSessionInitialized,
-              base::Unretained(this)))));
+      scoped_ptr<media::NewSessionCdmPromise>(
+          new media::NewSessionCdmResultPromise(
+              result,
+              adapter_->GetKeySystemUMAPrefix() + kCreateSessionUMAName,
+              base::Bind(
+                  &WebContentDecryptionModuleSessionImpl::OnSessionInitialized,
+                  base::Unretained(this)))));
+}
+
+void WebContentDecryptionModuleSessionImpl::load(
+    const blink::WebString& session_id,
+    blink::WebContentDecryptionModuleResult result) {
+  DCHECK(!session_id.isEmpty());
+  DCHECK(web_session_id_.empty());
+
+  adapter_->LoadSession(
+      base::UTF16ToASCII(session_id),
+      scoped_ptr<media::NewSessionCdmPromise>(
+          new media::NewSessionCdmResultPromise(
+              result,
+              adapter_->GetKeySystemUMAPrefix() + kLoadSessionUMAName,
+              base::Bind(
+                  &WebContentDecryptionModuleSessionImpl::OnSessionInitialized,
+                  base::Unretained(this)))));
 }
 
 void WebContentDecryptionModuleSessionImpl::update(
@@ -129,7 +129,8 @@ void WebContentDecryptionModuleSessionImpl::update(
       web_session_id_,
       response,
       response_length,
-      scoped_ptr<media::SimpleCdmPromise>(new SimpleCdmResultPromise(result)));
+      scoped_ptr<media::SimpleCdmPromise>(
+          new media::CdmResultPromise<>(result, std::string())));
 }
 
 void WebContentDecryptionModuleSessionImpl::close(
@@ -137,7 +138,8 @@ void WebContentDecryptionModuleSessionImpl::close(
   DCHECK(!web_session_id_.empty());
   adapter_->CloseSession(
       web_session_id_,
-      scoped_ptr<media::SimpleCdmPromise>(new SimpleCdmResultPromise(result)));
+      scoped_ptr<media::SimpleCdmPromise>(
+          new media::CdmResultPromise<>(result, std::string())));
 }
 
 void WebContentDecryptionModuleSessionImpl::remove(
@@ -145,7 +147,8 @@ void WebContentDecryptionModuleSessionImpl::remove(
   DCHECK(!web_session_id_.empty());
   adapter_->RemoveSession(
       web_session_id_,
-      scoped_ptr<media::SimpleCdmPromise>(new SimpleCdmResultPromise(result)));
+      scoped_ptr<media::SimpleCdmPromise>(
+          new media::CdmResultPromise<>(result, std::string())));
 }
 
 void WebContentDecryptionModuleSessionImpl::getUsableKeyIds(
@@ -154,7 +157,8 @@ void WebContentDecryptionModuleSessionImpl::getUsableKeyIds(
   adapter_->GetUsableKeyIds(
       web_session_id_,
       scoped_ptr<media::KeyIdsPromise>(
-          new CdmResultPromise<media::KeyIdsVector>(result)));
+          new media::CdmResultPromise<media::KeyIdsVector>(result,
+                                                           std::string())));
 }
 
 void WebContentDecryptionModuleSessionImpl::release(
@@ -177,39 +181,15 @@ void WebContentDecryptionModuleSessionImpl::OnSessionKeysChange(
 
 void WebContentDecryptionModuleSessionImpl::OnSessionExpirationUpdate(
     const base::Time& new_expiry_time) {
-  // TODO(jrummell): Update this once Blink client supports this.
-  // The EME spec has expiration attribute as the time in milliseconds, so use
-  // InMillisecondsF() to convert.
-}
-
-void WebContentDecryptionModuleSessionImpl::OnSessionReady() {
-  client_->ready();
+  client_->expirationChanged(new_expiry_time.ToJsTime());
 }
 
 void WebContentDecryptionModuleSessionImpl::OnSessionClosed() {
-  if (!is_closed_) {
-    is_closed_ = true;
-    client_->close();
-  }
-}
+  if (is_closed_)
+    return;
 
-void WebContentDecryptionModuleSessionImpl::OnSessionError(
-    media::MediaKeys::Exception exception_code,
-    uint32 system_code,
-    const std::string& error_message) {
-  // Convert |exception_code| back to MediaKeyErrorCode if possible.
-  // TODO(jrummell): Update this conversion when promises flow
-  // back into blink:: (as blink:: will have its own error definition).
-  switch (exception_code) {
-    case media::MediaKeys::CLIENT_ERROR:
-      client_->error(Client::MediaKeyErrorCodeClient, system_code);
-      break;
-    default:
-      // This will include all other CDM4 errors and any error generated
-      // by CDM5 or later.
-      client_->error(Client::MediaKeyErrorCodeUnknown, system_code);
-      break;
-  }
+  is_closed_ = true;
+  client_->close();
 }
 
 blink::WebContentDecryptionModuleResult::SessionStatus

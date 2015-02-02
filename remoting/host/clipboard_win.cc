@@ -32,7 +32,13 @@ class ScopedClipboard {
 
   ~ScopedClipboard() {
     if (opened_) {
+      // CloseClipboard() must be called with anonymous access token. See
+      // crbug.com/441834 .
+      BOOL result = ::ImpersonateAnonymousToken(::GetCurrentThread());
+      CHECK(result);
       ::CloseClipboard();
+      result = ::RevertToSelf();
+      CHECK(result);
     }
   }
 
@@ -103,10 +109,10 @@ class ClipboardWin : public Clipboard {
   ClipboardWin();
 
   virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+      scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
   virtual void InjectClipboardEvent(
-      const protocol::ClipboardEvent& event) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+      const protocol::ClipboardEvent& event) override;
+  virtual void Stop() override;
 
  private:
   void OnClipboardUpdate();
@@ -272,7 +278,7 @@ bool ClipboardWin::HandleMessage(
 }
 
 scoped_ptr<Clipboard> Clipboard::Create() {
-  return scoped_ptr<Clipboard>(new ClipboardWin());
+  return make_scoped_ptr(new ClipboardWin());
 }
 
 }  // namespace remoting

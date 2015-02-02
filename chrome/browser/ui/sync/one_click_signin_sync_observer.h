@@ -27,14 +27,14 @@ class OneClickSigninSyncObserver : public content::WebContentsObserver,
 
  protected:
   // Exposed for testing.
-  virtual ~OneClickSigninSyncObserver();
+  ~OneClickSigninSyncObserver() override;
 
  private:
   // content::WebContentsObserver:
-  virtual void WebContentsDestroyed() OVERRIDE;
+  void WebContentsDestroyed() override;
 
   // ProfileSyncServiceObserver:
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
   // Loads the |continue_url_| in the |web_contents()|.
   void LoadContinueUrl();

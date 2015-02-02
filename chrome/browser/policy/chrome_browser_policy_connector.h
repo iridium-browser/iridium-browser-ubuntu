@@ -31,11 +31,11 @@ class ChromeBrowserPolicyConnector : public BrowserPolicyConnector {
   // Init() should be called to create and start the policy machinery.
   ChromeBrowserPolicyConnector();
 
-  virtual ~ChromeBrowserPolicyConnector();
+  ~ChromeBrowserPolicyConnector() override;
 
-  virtual void Init(
+  void Init(
       PrefService* local_state,
-      scoped_refptr<net::URLRequestContextGetter> request_context) OVERRIDE;
+      scoped_refptr<net::URLRequestContextGetter> request_context) override;
 
  private:
   ConfigurationPolicyProvider* CreatePlatformProvider();

@@ -40,7 +40,7 @@ void MailboxReleased(unsigned sync_point,
 
 class SingleOverlayValidator : public OverlayCandidateValidator {
  public:
-  virtual void CheckOverlaySupport(OverlayCandidateList* surfaces) OVERRIDE;
+  void CheckOverlaySupport(OverlayCandidateList* surfaces) override;
 };
 
 void SingleOverlayValidator::CheckOverlaySupport(
@@ -62,7 +62,7 @@ class SingleOverlayProcessor : public OverlayProcessor {
   SingleOverlayProcessor(OutputSurface* surface,
                          ResourceProvider* resource_provider);
   // Virtual to allow testing different strategies.
-  virtual void Initialize() OVERRIDE;
+  void Initialize() override;
 };
 
 SingleOverlayProcessor::SingleOverlayProcessor(
@@ -102,10 +102,18 @@ class OverlayOutputSurface : public OutputSurface {
   explicit OverlayOutputSurface(scoped_refptr<ContextProvider> context_provider)
       : OutputSurface(context_provider) {}
 
+  // OutputSurface implementation
+  void SwapBuffers(CompositorFrame* frame) override;
+
   void InitWithSingleOverlayValidator() {
     overlay_candidate_validator_.reset(new SingleOverlayValidator);
   }
 };
+
+void OverlayOutputSurface::SwapBuffers(CompositorFrame* frame) {
+  client_->DidSwapBuffers();
+  client_->DidSwapBuffersComplete();
+}
 
 scoped_ptr<RenderPass> CreateRenderPass() {
   RenderPassId id(1, 0);
@@ -206,9 +214,9 @@ static void CompareRenderPassLists(const RenderPassList& expected_list,
               actual->shared_quad_state_list.size());
     EXPECT_EQ(expected->quad_list.size(), actual->quad_list.size());
 
-    for (QuadList::Iterator exp_iter = expected->quad_list.begin(),
-                            act_iter = actual->quad_list.begin();
-         exp_iter != expected->quad_list.end();
+    for (auto exp_iter = expected->quad_list.cbegin(),
+              act_iter = actual->quad_list.cbegin();
+         exp_iter != expected->quad_list.cend();
          ++exp_iter, ++act_iter) {
       EXPECT_EQ(exp_iter->rect.ToString(), act_iter->rect.ToString());
       EXPECT_EQ(exp_iter->shared_quad_state->content_bounds.ToString(),
@@ -237,7 +245,7 @@ TEST(OverlayTest, OverlaysProcessorHasStrategy) {
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
       new TestSharedBitmapManager());
   scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
-      &output_surface, shared_bitmap_manager.get(), NULL, 0, false, 1, false));
+      &output_surface, shared_bitmap_manager.get(), NULL, NULL, 0, false, 1));
 
   scoped_ptr<DefaultOverlayProcessor> overlay_processor(
       new DefaultOverlayProcessor(&output_surface, resource_provider.get()));
@@ -258,10 +266,10 @@ class SingleOverlayOnTopTest : public testing::Test {
     resource_provider_ = ResourceProvider::Create(output_surface_.get(),
                                                   shared_bitmap_manager_.get(),
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false);
+                                                  1);
 
     overlay_processor_.reset(new SingleOverlayProcessor(
         output_surface_.get(), resource_provider_.get()));
@@ -529,7 +537,9 @@ class OverlayInfoRendererGL : public GLRenderer {
 
   MOCK_METHOD2(DoDrawQuad, void(DrawingFrame* frame, const DrawQuad* quad));
 
-  virtual void FinishDrawingFrame(DrawingFrame* frame) OVERRIDE {
+  using GLRenderer::BeginDrawingFrame;
+
+  virtual void FinishDrawingFrame(DrawingFrame* frame) override {
     GLRenderer::FinishDrawingFrame(frame);
 
     if (!expect_overlays_) {
@@ -552,7 +562,7 @@ class OverlayInfoRendererGL : public GLRenderer {
 class FakeRendererClient : public RendererClient {
  public:
   // RendererClient methods.
-  virtual void SetFullRootLayerDamage() OVERRIDE {}
+  void SetFullRootLayerDamage() override {}
 };
 
 class MockOverlayScheduler {
@@ -572,7 +582,7 @@ class GLRendererWithOverlaysTest : public testing::Test {
     output_surface_.reset(new OverlayOutputSurface(provider_));
     CHECK(output_surface_->BindToClient(&output_surface_client_));
     resource_provider_ = ResourceProvider::Create(
-        output_surface_.get(), NULL, NULL, 0, false, 1, false);
+        output_surface_.get(), NULL, NULL, NULL, 0, false, 1);
 
     provider_->support()->SetScheduleOverlayPlaneCallback(base::Bind(
         &MockOverlayScheduler::Schedule, base::Unretained(&scheduler_)));
@@ -716,19 +726,26 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   ResourceProvider::ResourceId resource2 =
       CreateResource(resource_provider_.get());
 
+  scoped_ptr<RenderPass> pass = CreateRenderPass();
+  RenderPassList pass_list;
+  pass_list.push_back(pass.Pass());
+
   DirectRenderer::DrawingFrame frame1;
+  frame1.render_passes_in_draw_order = &pass_list;
   frame1.overlay_list.resize(2);
   OverlayCandidate& overlay1 = frame1.overlay_list.back();
   overlay1.resource_id = resource1;
   overlay1.plane_z_order = 1;
 
   DirectRenderer::DrawingFrame frame2;
+  frame2.render_passes_in_draw_order = &pass_list;
   frame2.overlay_list.resize(2);
   OverlayCandidate& overlay2 = frame2.overlay_list.back();
   overlay2.resource_id = resource2;
   overlay2.plane_z_order = 1;
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_FALSE(resource_provider_->InUseByConsumer(resource2));
@@ -736,6 +753,7 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   Mock::VerifyAndClearExpectations(&scheduler_);
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame2);
   renderer_->FinishDrawingFrame(&frame2);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource2));
@@ -744,6 +762,7 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   Mock::VerifyAndClearExpectations(&scheduler_);
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource2));
@@ -754,7 +773,9 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   // No overlays, release the resource.
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(0);
   DirectRenderer::DrawingFrame frame3;
+  frame3.render_passes_in_draw_order = &pass_list;
   renderer_->set_expect_overlays(false);
+  renderer_->BeginDrawingFrame(&frame3);
   renderer_->FinishDrawingFrame(&frame3);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   EXPECT_FALSE(resource_provider_->InUseByConsumer(resource2));
@@ -765,12 +786,14 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
   // Use the same buffer twice.
   renderer_->set_expect_overlays(true);
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   SwapBuffers();
   Mock::VerifyAndClearExpectations(&scheduler_);
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(1);
+  renderer_->BeginDrawingFrame(&frame1);
   renderer_->FinishDrawingFrame(&frame1);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   SwapBuffers();
@@ -779,6 +802,7 @@ TEST_F(GLRendererWithOverlaysTest, ResourcesExportedAndReturned) {
 
   EXPECT_CALL(scheduler_, Schedule(_, _, _, _, _)).Times(0);
   renderer_->set_expect_overlays(false);
+  renderer_->BeginDrawingFrame(&frame3);
   renderer_->FinishDrawingFrame(&frame3);
   EXPECT_TRUE(resource_provider_->InUseByConsumer(resource1));
   SwapBuffers();

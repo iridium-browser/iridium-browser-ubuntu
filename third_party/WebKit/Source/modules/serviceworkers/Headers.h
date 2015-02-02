@@ -5,6 +5,7 @@
 #ifndef Headers_h
 #define Headers_h
 
+#include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/serviceworkers/FetchHeaderList.h"
 #include "wtf/Forward.h"
@@ -14,11 +15,10 @@ namespace blink {
 
 class Dictionary;
 class ExceptionState;
-class HeadersForEachCallback;
-class ScriptValue;
+class Iterator;
 
 // http://fetch.spec.whatwg.org/#headers-class
-class Headers FINAL : public GarbageCollected<Headers>, public ScriptWrappable {
+class Headers final : public GarbageCollected<Headers>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum Guard { ImmutableGuard, RequestGuard, RequestNoCORSGuard, ResponseGuard, NoneGuard };
@@ -26,6 +26,7 @@ public:
     static Headers* create();
     static Headers* create(ExceptionState&);
     static Headers* create(const Headers*, ExceptionState&);
+    static Headers* create(const Vector<Vector<String> >&, ExceptionState&);
     static Headers* create(const Dictionary&, ExceptionState&);
 
     // Shares the FetchHeaderList. Called when creating a Request or Response.
@@ -40,24 +41,25 @@ public:
     Vector<String> getAll(const String& key, ExceptionState&);
     bool has(const String& key, ExceptionState&);
     void set(const String& key, const String& value, ExceptionState&);
-    unsigned long size() const;
-    void forEach(HeadersForEachCallback*, const ScriptValue&);
-    void forEach(HeadersForEachCallback*);
+
+    // Iterable
+    Iterator* iterator(ScriptState*, ExceptionState&);
 
     void setGuard(Guard guard) { m_guard = guard; }
     Guard guard() const { return m_guard; }
 
     // These methods should only be called when size() would return 0.
     void fillWith(const Headers*, ExceptionState&);
+    void fillWith(const Vector<Vector<String> >&, ExceptionState&);
     void fillWith(const Dictionary&, ExceptionState&);
 
+    FetchHeaderList* headerList() const { return m_headerList; }
     void trace(Visitor*);
 
 private:
     Headers();
     // Shares the FetchHeaderList. Called when creating a Request or Response.
     explicit Headers(FetchHeaderList*);
-    void forEachInternal(HeadersForEachCallback*, const ScriptValue*);
 
     Member<FetchHeaderList> m_headerList;
     Guard m_guard;

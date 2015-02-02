@@ -71,88 +71,86 @@ class AutofillDialogViews : public AutofillDialogView,
                             public views::MenuButtonListener {
  public:
   explicit AutofillDialogViews(AutofillDialogViewDelegate* delegate);
-  virtual ~AutofillDialogViews();
+  ~AutofillDialogViews() override;
 
   // AutofillDialogView implementation:
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void UpdatesStarted() OVERRIDE;
-  virtual void UpdatesFinished() OVERRIDE;
-  virtual void UpdateAccountChooser() OVERRIDE;
-  virtual void UpdateButtonStrip() OVERRIDE;
-  virtual void UpdateOverlay() OVERRIDE;
-  virtual void UpdateDetailArea() OVERRIDE;
-  virtual void UpdateForErrors() OVERRIDE;
-  virtual void UpdateNotificationArea() OVERRIDE;
-  virtual void UpdateSection(DialogSection section) OVERRIDE;
-  virtual void UpdateErrorBubble() OVERRIDE;
-  virtual void FillSection(DialogSection section,
-                           ServerFieldType originating_type) OVERRIDE;
-  virtual void GetUserInput(DialogSection section,
-                            FieldValueMap* output) OVERRIDE;
-  virtual base::string16 GetCvc() OVERRIDE;
-  virtual bool SaveDetailsLocally() OVERRIDE;
-  virtual const content::NavigationController* ShowSignIn() OVERRIDE;
-  virtual void HideSignIn() OVERRIDE;
-  virtual void ModelChanged() OVERRIDE;
-  virtual void OnSignInResize(const gfx::Size& pref_size) OVERRIDE;
-  virtual void ValidateSection(DialogSection section) OVERRIDE;
+  void Show() override;
+  void Hide() override;
+  void UpdatesStarted() override;
+  void UpdatesFinished() override;
+  void UpdateAccountChooser() override;
+  void UpdateButtonStrip() override;
+  void UpdateOverlay() override;
+  void UpdateDetailArea() override;
+  void UpdateForErrors() override;
+  void UpdateNotificationArea() override;
+  void UpdateSection(DialogSection section) override;
+  void UpdateErrorBubble() override;
+  void FillSection(DialogSection section,
+                   ServerFieldType originating_type) override;
+  void GetUserInput(DialogSection section, FieldValueMap* output) override;
+  base::string16 GetCvc() override;
+  bool SaveDetailsLocally() override;
+  const content::NavigationController* ShowSignIn(const GURL& url) override;
+  void HideSignIn() override;
+  void ModelChanged() override;
+  void OnSignInResize(const gfx::Size& pref_size) override;
+  void ValidateSection(DialogSection section) override;
 
   // views::View implementation.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  gfx::Size GetMinimumSize() const override;
+  void Layout() override;
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
   // views::DialogDelegate implementation:
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual views::View* CreateOverlayView() OVERRIDE;
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual int GetDefaultDialogButton() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(ui::DialogButton button) const
-      OVERRIDE;
-  virtual bool ShouldDefaultButtonBeBlue() const OVERRIDE;
-  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual views::View* CreateExtraView() OVERRIDE;
-  virtual views::View* CreateTitlebarExtraView() OVERRIDE;
-  virtual views::View* CreateFootnoteView() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
+  ui::ModalType GetModalType() const override;
+  base::string16 GetWindowTitle() const override;
+  void WindowClosing() override;
+  void DeleteDelegate() override;
+  views::View* CreateOverlayView() override;
+  int GetDialogButtons() const override;
+  int GetDefaultDialogButton() const override;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool ShouldDefaultButtonBeBlue() const override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
+  views::View* GetInitiallyFocusedView() override;
+  views::View* CreateExtraView() override;
+  views::View* CreateTitlebarExtraView() override;
+  views::View* CreateFootnoteView() override;
+  bool Cancel() override;
+  bool Accept() override;
 
   // views::WidgetObserver implementation:
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetBoundsChanged(views::Widget* widget,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
+  void OnWidgetClosing(views::Widget* widget) override;
+  void OnWidgetDestroying(views::Widget* widget) override;
+  void OnWidgetBoundsChanged(views::Widget* widget,
+                             const gfx::Rect& new_bounds) override;
 
   // views::TextfieldController implementation:
-  virtual void ContentsChanged(views::Textfield* sender,
-                               const base::string16& new_contents) OVERRIDE;
-  virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const ui::KeyEvent& key_event) OVERRIDE;
-  virtual bool HandleMouseEvent(views::Textfield* sender,
-                                const ui::MouseEvent& key_event) OVERRIDE;
+  void ContentsChanged(views::Textfield* sender,
+                       const base::string16& new_contents) override;
+  bool HandleKeyEvent(views::Textfield* sender,
+                      const ui::KeyEvent& key_event) override;
+  bool HandleMouseEvent(views::Textfield* sender,
+                        const ui::MouseEvent& key_event) override;
 
   // views::FocusChangeListener implementation.
-  virtual void OnWillChangeFocus(views::View* focused_before,
-                                 views::View* focused_now) OVERRIDE;
-  virtual void OnDidChangeFocus(views::View* focused_before,
-                                views::View* focused_now) OVERRIDE;
+  void OnWillChangeFocus(views::View* focused_before,
+                         views::View* focused_now) override;
+  void OnDidChangeFocus(views::View* focused_before,
+                        views::View* focused_now) override;
 
   // views::ComboboxListener implementation:
-  virtual void OnPerformAction(views::Combobox* combobox) OVERRIDE;
+  void OnPerformAction(views::Combobox* combobox) override;
 
   // views::StyledLabelListener implementation:
-  virtual void StyledLabelLinkClicked(const gfx::Range& range, int event_flags)
-      OVERRIDE;
+  void StyledLabelLinkClicked(const gfx::Range& range,
+                              int event_flags) override;
 
   // views::MenuButtonListener implementation.
-  virtual void OnMenuButtonClicked(views::View* source,
-                                   const gfx::Point& point) OVERRIDE;
+  void OnMenuButtonClicked(views::View* source,
+                           const gfx::Point& point) override;
 
  protected:
   // Exposed for testing.
@@ -180,17 +178,17 @@ class AutofillDialogViews : public AutofillDialogView,
                          public base::SupportsWeakPtr<AccountChooser> {
    public:
     explicit AccountChooser(AutofillDialogViewDelegate* delegate);
-    virtual ~AccountChooser();
+    ~AccountChooser() override;
 
     // Updates the view based on the state that |delegate_| reports.
     void Update();
 
     // views::LinkListener implementation.
-    virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+    void LinkClicked(views::Link* source, int event_flags) override;
 
     // views::MenuButtonListener implementation.
-    virtual void OnMenuButtonClicked(views::View* source,
-                                     const gfx::Point& point) OVERRIDE;
+    void OnMenuButtonClicked(views::View* source,
+                             const gfx::Point& point) override;
 
    private:
     // The icon for the currently in-use account.
@@ -216,7 +214,7 @@ class AutofillDialogViews : public AutofillDialogView,
   class OverlayView : public views::View {
    public:
     explicit OverlayView(AutofillDialogViewDelegate* delegate);
-    virtual ~OverlayView();
+    ~OverlayView() override;
 
     // Returns a height which should be used when the contents view has width
     // |w|. Note that the value returned should be used as the height of the
@@ -227,11 +225,11 @@ class AutofillDialogViews : public AutofillDialogView,
     void UpdateState();
 
     // views::View implementation:
-    virtual gfx::Insets GetInsets() const OVERRIDE;
-    virtual void Layout() OVERRIDE;
-    virtual const char* GetClassName() const OVERRIDE;
-    virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-    virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE;
+    gfx::Insets GetInsets() const override;
+    void Layout() override;
+    const char* GetClassName() const override;
+    void OnPaint(gfx::Canvas* canvas) override;
+    void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
    private:
     // Gets the border of the non-client frame view as a BubbleBorder.
@@ -255,17 +253,17 @@ class AutofillDialogViews : public AutofillDialogView,
   class NotificationArea : public views::View {
    public:
     explicit NotificationArea(AutofillDialogViewDelegate* delegate);
-    virtual ~NotificationArea();
+    ~NotificationArea() override;
 
     // Displays the given notifications.
     void SetNotifications(const std::vector<DialogNotification>& notifications);
 
     // views::View implementation.
-    virtual gfx::Size GetPreferredSize() const OVERRIDE;
-    virtual const char* GetClassName() const OVERRIDE;
-    virtual void PaintChildren(gfx::Canvas* canvas,
-                               const views::CullSet& cull_set) OVERRIDE;
-    virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+    gfx::Size GetPreferredSize() const override;
+    const char* GetClassName() const override;
+    void PaintChildren(gfx::Canvas* canvas,
+                       const views::CullSet& cull_set) override;
+    void OnPaint(gfx::Canvas* canvas) override;
 
     void set_arrow_centering_anchor(
         const base::WeakPtr<views::View>& arrow_centering_anchor) {
@@ -300,7 +298,7 @@ class AutofillDialogViews : public AutofillDialogView,
     SectionContainer(const base::string16& label,
                      views::View* controls,
                      views::Button* proxy_button);
-    virtual ~SectionContainer();
+    ~SectionContainer() override;
 
     // Sets the visual appearance of the section to active (considered active
     // when showing the menu or hovered by the mouse cursor).
@@ -310,18 +308,18 @@ class AutofillDialogViews : public AutofillDialogView,
     void SetForwardMouseEvents(bool forward);
 
     // views::View implementation.
-    virtual const char* GetClassName() const OVERRIDE;
-    virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-    virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-    virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-    virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-    virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-    virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+    const char* GetClassName() const override;
+    void OnMouseMoved(const ui::MouseEvent& event) override;
+    void OnMouseEntered(const ui::MouseEvent& event) override;
+    void OnMouseExited(const ui::MouseEvent& event) override;
+    bool OnMousePressed(const ui::MouseEvent& event) override;
+    void OnMouseReleased(const ui::MouseEvent& event) override;
+    void OnGestureEvent(ui::GestureEvent* event) override;
 
    private:
     // views::ViewTargeterDelegate:
-    virtual views::View* TargetForRect(views::View* root,
-                                       const gfx::Rect& rect) OVERRIDE;
+    views::View* TargetForRect(views::View* root,
+                               const gfx::Rect& rect) override;
 
     // Converts |event| to one suitable for |proxy_button_|.
     static ui::MouseEvent ProxyEvent(const ui::MouseEvent& event);
@@ -342,14 +340,14 @@ class AutofillDialogViews : public AutofillDialogView,
   class SuggestedButton : public views::MenuButton {
    public:
     explicit SuggestedButton(views::MenuButtonListener* listener);
-    virtual ~SuggestedButton();
+    ~SuggestedButton() override;
 
     // views::MenuButton implementation.
-    virtual gfx::Size GetPreferredSize() const OVERRIDE;
-    virtual const char* GetClassName() const OVERRIDE;
-    virtual void PaintChildren(gfx::Canvas* canvas,
-                               const views::CullSet& cull_set) OVERRIDE;
-    virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+    gfx::Size GetPreferredSize() const override;
+    const char* GetClassName() const override;
+    void PaintChildren(gfx::Canvas* canvas,
+                       const views::CullSet& cull_set) override;
+    void OnPaint(gfx::Canvas* canvas) override;
 
    private:
     // Returns the corred resource ID (i.e. IDR_*) for the current |state()|.
@@ -363,15 +361,15 @@ class AutofillDialogViews : public AutofillDialogView,
   class DetailsContainerView : public views::View {
    public:
     explicit DetailsContainerView(const base::Closure& callback);
-    virtual ~DetailsContainerView();
+    ~DetailsContainerView() override;
 
     void set_ignore_layouts(bool ignore_layouts) {
       ignore_layouts_ = ignore_layouts;
     }
 
     // views::View implementation.
-    virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
-    virtual void Layout() OVERRIDE;
+    void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+    void Layout() override;
 
    private:
     base::Closure bounds_changed_callback_;
@@ -386,14 +384,14 @@ class AutofillDialogViews : public AutofillDialogView,
   class SuggestionView : public views::View {
    public:
     explicit SuggestionView(AutofillDialogViews* autofill_dialog);
-    virtual ~SuggestionView();
+    ~SuggestionView() override;
 
     void SetState(const SuggestionState& state);
 
     // views::View implementation.
-    virtual gfx::Size GetPreferredSize() const OVERRIDE;
-    virtual int GetHeightForWidth(int width) const OVERRIDE;
-    virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
+    gfx::Size GetPreferredSize() const override;
+    int GetHeightForWidth(int width) const override;
+    void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
     ExpandingTextfield* textfield() { return textfield_; }
 

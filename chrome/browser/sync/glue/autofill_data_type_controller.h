@@ -30,21 +30,20 @@ class AutofillDataTypeController
       Profile* profile);
 
   // NonUIDataTypeController implementation.
-  virtual syncer::ModelType type() const OVERRIDE;
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
+  syncer::ModelType type() const override;
+  syncer::ModelSafeGroup model_safe_group() const override;
 
   // NonFrontendDatatypeController override, needed as stop-gap until bug
   // 163431 is addressed / implemented.
-  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
+  void StartAssociating(const StartCallback& start_callback) override;
 
  protected:
-  virtual ~AutofillDataTypeController();
+  ~AutofillDataTypeController() override;
 
   // NonUIDataTypeController implementation.
-  virtual bool PostTaskOnBackendThread(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE;
-  virtual bool StartModels() OVERRIDE;
+  bool PostTaskOnBackendThread(const tracked_objects::Location& from_here,
+                               const base::Closure& task) override;
+  bool StartModels() override;
 
  private:
   friend class AutofillDataTypeControllerTest;

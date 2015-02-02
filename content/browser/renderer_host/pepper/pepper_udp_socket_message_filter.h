@@ -53,15 +53,15 @@ class CONTENT_EXPORT PepperUDPSocketMessageFilter
   static size_t GetNumInstances();
 
  protected:
-  virtual ~PepperUDPSocketMessageFilter();
+  ~PepperUDPSocketMessageFilter() override;
 
  private:
   // ppapi::host::ResourceMessageFilter overrides.
-  virtual scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
-      const IPC::Message& message) OVERRIDE;
-  virtual int32_t OnResourceMessageReceived(
+  scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
+      const IPC::Message& message) override;
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
   int32_t OnMsgSetOption(const ppapi::host::HostMessageContext* context,
                          PP_UDPSocket_Option name,

@@ -20,39 +20,37 @@ class MockUserInfo;
 class TestSessionStateDelegate : public SessionStateDelegate {
  public:
   TestSessionStateDelegate();
-  virtual ~TestSessionStateDelegate();
+  ~TestSessionStateDelegate() override;
 
   void set_logged_in_users(int users) { logged_in_users_ = users; }
   void AddUser(const std::string user_id);
   const user_manager::UserInfo* GetActiveUserInfo() const;
 
   // SessionStateDelegate:
-  virtual content::BrowserContext* GetBrowserContextByIndex(
-      MultiProfileIndex index) OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextForWindow(
-      aura::Window* window) OVERRIDE;
-  virtual int GetMaximumNumberOfLoggedInUsers() const OVERRIDE;
-  virtual int NumberOfLoggedInUsers() const OVERRIDE;
-  virtual bool IsActiveUserSessionStarted() const OVERRIDE;
-  virtual bool CanLockScreen() const OVERRIDE;
-  virtual bool IsScreenLocked() const OVERRIDE;
-  virtual bool ShouldLockScreenBeforeSuspending() const OVERRIDE;
-  virtual void LockScreen() OVERRIDE;
-  virtual void UnlockScreen() OVERRIDE;
-  virtual bool IsUserSessionBlocked() const OVERRIDE;
-  virtual SessionState GetSessionState() const OVERRIDE;
-  virtual const user_manager::UserInfo* GetUserInfo(
-      ash::MultiProfileIndex index) const OVERRIDE;
-  virtual const user_manager::UserInfo* GetUserInfo(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ShouldShowAvatar(aura::Window* window) const OVERRIDE;
-  virtual void SwitchActiveUser(const std::string& user_id) OVERRIDE;
-  virtual void CycleActiveUser(CycleUser cycle_user) OVERRIDE;
-  virtual bool IsMultiProfileAllowedByPrimaryUserPolicy() const OVERRIDE;
-  virtual void AddSessionStateObserver(
-      ash::SessionStateObserver* observer) OVERRIDE;
-  virtual void RemoveSessionStateObserver(
-      ash::SessionStateObserver* observer) OVERRIDE;
+  content::BrowserContext* GetBrowserContextByIndex(
+      MultiProfileIndex index) override;
+  content::BrowserContext* GetBrowserContextForWindow(
+      aura::Window* window) override;
+  int GetMaximumNumberOfLoggedInUsers() const override;
+  int NumberOfLoggedInUsers() const override;
+  bool IsActiveUserSessionStarted() const override;
+  bool CanLockScreen() const override;
+  bool IsScreenLocked() const override;
+  bool ShouldLockScreenBeforeSuspending() const override;
+  void LockScreen() override;
+  void UnlockScreen() override;
+  bool IsUserSessionBlocked() const override;
+  SessionState GetSessionState() const override;
+  const user_manager::UserInfo* GetUserInfo(
+      ash::MultiProfileIndex index) const override;
+  const user_manager::UserInfo* GetUserInfo(
+      content::BrowserContext* context) const override;
+  bool ShouldShowAvatar(aura::Window* window) const override;
+  void SwitchActiveUser(const std::string& user_id) override;
+  void CycleActiveUser(CycleUser cycle_user) override;
+  bool IsMultiProfileAllowedByPrimaryUserPolicy() const override;
+  void AddSessionStateObserver(ash::SessionStateObserver* observer) override;
+  void RemoveSessionStateObserver(ash::SessionStateObserver* observer) override;
 
   // TODO(oshima): Use state machine instead of using boolean variables.
 

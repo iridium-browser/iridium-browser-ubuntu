@@ -38,15 +38,15 @@ class AllStatus : public SyncEngineEventListener {
   friend class ScopedStatusLock;
  public:
   AllStatus();
-  virtual ~AllStatus();
+  ~AllStatus() override;
 
   // SyncEngineEventListener implementation.
-  virtual void OnSyncCycleEvent(const SyncCycleEvent& event) OVERRIDE;
-  virtual void OnActionableError(const SyncProtocolError& error) OVERRIDE;
-  virtual void OnRetryTimeChanged(base::Time retry_time) OVERRIDE;
-  virtual void OnThrottledTypesChanged(ModelTypeSet throttled_types) OVERRIDE;
-  virtual void OnMigrationRequested(ModelTypeSet types) OVERRIDE;
-  virtual void OnProtocolEvent(const ProtocolEvent& event) OVERRIDE;
+  void OnSyncCycleEvent(const SyncCycleEvent& event) override;
+  void OnActionableError(const SyncProtocolError& error) override;
+  void OnRetryTimeChanged(base::Time retry_time) override;
+  void OnThrottledTypesChanged(ModelTypeSet throttled_types) override;
+  void OnMigrationRequested(ModelTypeSet types) override;
+  void OnProtocolEvent(const ProtocolEvent& event) override;
 
   SyncStatus status() const;
 

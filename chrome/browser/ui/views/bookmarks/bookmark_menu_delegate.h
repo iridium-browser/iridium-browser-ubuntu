@@ -56,7 +56,7 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
                        views::Widget* parent,
                        int first_menu_id,
                        int max_menu_id);
-  virtual ~BookmarkMenuDelegate();
+  ~BookmarkMenuDelegate() override;
 
   // Creates the menus from the model.
   void Init(views::MenuDelegate* real_delegate,
@@ -122,14 +122,14 @@ class BookmarkMenuDelegate : public BaseBookmarkModelObserver,
   int GetMaxWidthForMenu(views::MenuItemView* menu);
 
   // BookmarkModelObserver methods.
-  virtual void BookmarkModelChanged() OVERRIDE;
-  virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
-                                          const BookmarkNode* node) OVERRIDE;
+  void BookmarkModelChanged() override;
+  void BookmarkNodeFaviconChanged(BookmarkModel* model,
+                                  const BookmarkNode* node) override;
 
   // BookmarkContextMenu::Observer methods.
-  virtual void WillRemoveBookmarks(
-      const std::vector<const BookmarkNode*>& bookmarks) OVERRIDE;
-  virtual void DidRemoveBookmarks() OVERRIDE;
+  void WillRemoveBookmarks(
+      const std::vector<const BookmarkNode*>& bookmarks) override;
+  void DidRemoveBookmarks() override;
 
  private:
   typedef std::map<int, const BookmarkNode*> MenuIDToNodeMap;

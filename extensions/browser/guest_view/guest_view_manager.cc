@@ -79,6 +79,11 @@ void GuestViewManager::AttachGuest(
   content::RenderViewHost* rvh =
       content::RenderViewHost::FromID(embedder_render_process_id,
                                       embedder_routing_id);
+  // We need to check that rvh is not NULL because there may be a race between
+  // AttachGuest and destroying the embedder (i.e. when the embedder is
+  // destroyed immediately after the guest is created).
+  if (!rvh)
+    return;
   content::WebContents* embedder_web_contents =
       content::WebContents::FromRenderViewHost(rvh);
   if (!embedder_web_contents)
@@ -131,7 +136,7 @@ void GuestViewManager::CreateGuest(const std::string& view_type,
 content::WebContents* GuestViewManager::CreateGuestWithWebContentsParams(
     const std::string& view_type,
     const std::string& embedder_extension_id,
-    int embedder_render_process_id,
+    content::WebContents* embedder_web_contents,
     const content::WebContents::CreateParams& create_params) {
   int guest_instance_id = GetNextInstanceID();
   GuestViewBase* guest =
@@ -142,9 +147,8 @@ content::WebContents* GuestViewManager::CreateGuestWithWebContentsParams(
   guest_create_params.guest_delegate = guest;
   content::WebContents* guest_web_contents =
       WebContents::Create(guest_create_params);
-  guest->InitWithWebContents(embedder_extension_id,
-                             embedder_render_process_id,
-                             guest_web_contents);
+  guest->InitWithWebContents(
+      embedder_extension_id, embedder_web_contents, guest_web_contents);
   return guest_web_contents;
 }
 

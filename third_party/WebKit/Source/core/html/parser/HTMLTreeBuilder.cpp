@@ -69,7 +69,7 @@ static TextPosition uninitializedPositionValue1()
 
 static inline bool isAllWhitespace(const String& string)
 {
-    return string.isAllSpecialCharacters<isHTMLSpace<UChar> >();
+    return string.isAllSpecialCharacters<isHTMLSpace<UChar>>();
 }
 
 static inline bool isAllWhitespaceOrReplacementCharacters(const String& string)
@@ -175,17 +175,17 @@ public:
 
     void skipLeadingWhitespace()
     {
-        skipLeading<isHTMLSpace<UChar> >();
+        skipLeading<isHTMLSpace<UChar>>();
     }
 
     String takeLeadingWhitespace()
     {
-        return takeLeading<isHTMLSpace<UChar> >();
+        return takeLeading<isHTMLSpace<UChar>>();
     }
 
     void skipLeadingNonWhitespace()
     {
-        skipLeading<isNotHTMLSpace<UChar> >();
+        skipLeading<isNotHTMLSpace<UChar>>();
     }
 
     String takeRemaining()
@@ -2113,7 +2113,6 @@ void HTMLTreeBuilder::processEndTag(AtomicHTMLToken* token)
             if (m_parser->tokenizer()) {
                 // We must set the tokenizer's state to
                 // DataState explicitly if the tokenizer didn't have a chance to.
-                ASSERT(m_parser->tokenizer()->state() == HTMLTokenizer::DataState || m_options.useThreading);
                 m_parser->tokenizer()->setState(HTMLTokenizer::DataState);
             }
             return;

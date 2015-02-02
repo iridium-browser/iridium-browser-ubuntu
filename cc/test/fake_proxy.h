@@ -21,30 +21,30 @@ class FakeProxy : public Proxy {
 
   void SetLayerTreeHost(LayerTreeHost* host);
 
-  virtual void FinishAllRendering() OVERRIDE {}
-  virtual bool IsStarted() const OVERRIDE;
-  virtual void SetOutputSurface(scoped_ptr<OutputSurface>) OVERRIDE {}
-  virtual void SetLayerTreeHostClientReady() OVERRIDE {}
-  virtual void SetVisible(bool visible) OVERRIDE {}
-  virtual const RendererCapabilities& GetRendererCapabilities() const OVERRIDE;
-  virtual void SetNeedsAnimate() OVERRIDE {}
-  virtual void SetNeedsUpdateLayers() OVERRIDE {}
-  virtual void SetNeedsCommit() OVERRIDE {}
-  virtual void SetNeedsRedraw(const gfx::Rect& damage_rect) OVERRIDE {}
-  virtual void SetNextCommitWaitsForActivation() OVERRIDE {}
-  virtual void NotifyInputThrottledUntilCommit() OVERRIDE {}
-  virtual void SetDeferCommits(bool defer_commits) OVERRIDE {}
-  virtual void MainThreadHasStoppedFlinging() OVERRIDE {}
-  virtual bool BeginMainFrameRequested() const OVERRIDE;
-  virtual bool CommitRequested() const OVERRIDE;
-  virtual void Start() OVERRIDE {}
-  virtual void Stop() OVERRIDE {}
-  virtual void ForceSerializeOnSwapBuffers() OVERRIDE {}
-  virtual size_t MaxPartialTextureUpdates() const OVERRIDE;
-  virtual bool SupportsImplScrolling() const OVERRIDE;
-  virtual void SetDebugState(const LayerTreeDebugState& debug_state) OVERRIDE {}
-  virtual bool MainFrameWillHappenForTesting() OVERRIDE;
-  virtual void AsValueInto(base::debug::TracedValue* state) const OVERRIDE;
+  void FinishAllRendering() override {}
+  bool IsStarted() const override;
+  void SetOutputSurface(scoped_ptr<OutputSurface>) override {}
+  void SetLayerTreeHostClientReady() override {}
+  void SetVisible(bool visible) override {}
+  const RendererCapabilities& GetRendererCapabilities() const override;
+  void SetNeedsAnimate() override {}
+  void SetNeedsUpdateLayers() override {}
+  void SetNeedsCommit() override {}
+  void SetNeedsRedraw(const gfx::Rect& damage_rect) override {}
+  void SetNextCommitWaitsForActivation() override {}
+  void NotifyInputThrottledUntilCommit() override {}
+  void SetDeferCommits(bool defer_commits) override {}
+  void MainThreadHasStoppedFlinging() override {}
+  bool BeginMainFrameRequested() const override;
+  bool CommitRequested() const override;
+  void Start() override {}
+  void Stop() override {}
+  void ForceSerializeOnSwapBuffers() override {}
+  size_t MaxPartialTextureUpdates() const override;
+  bool SupportsImplScrolling() const override;
+  void SetDebugState(const LayerTreeDebugState& debug_state) override {}
+  bool MainFrameWillHappenForTesting() override;
+  void AsValueInto(base::debug::TracedValue* state) const override;
 
   virtual RendererCapabilities& GetRendererCapabilities();
   void SetMaxPartialTextureUpdates(size_t max);

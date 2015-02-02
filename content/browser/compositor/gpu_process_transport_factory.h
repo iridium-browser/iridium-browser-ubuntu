@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "content/browser/compositor/image_transport_factory.h"
+#include "content/common/gpu/client/gpu_channel_host.h"
 #include "ui/compositor/compositor.h"
 
 namespace base {
@@ -37,46 +38,47 @@ class GpuProcessTransportFactory
  public:
   GpuProcessTransportFactory();
 
-  virtual ~GpuProcessTransportFactory();
+  ~GpuProcessTransportFactory() override;
 
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
   CreateOffscreenCommandBufferContext();
 
   // ui::ContextFactory implementation.
-  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface(
-      ui::Compositor* compositor, bool software_fallback) OVERRIDE;
-  virtual scoped_refptr<ui::Reflector> CreateReflector(
-      ui::Compositor* source,
-      ui::Layer* target) OVERRIDE;
-  virtual void RemoveReflector(
-      scoped_refptr<ui::Reflector> reflector) OVERRIDE;
-  virtual void RemoveCompositor(ui::Compositor* compositor) OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-      SharedMainThreadContextProvider() OVERRIDE;
-  virtual bool DoesCreateTestContexts() OVERRIDE;
-  virtual cc::SharedBitmapManager* GetSharedBitmapManager() OVERRIDE;
-  virtual base::MessageLoopProxy* GetCompositorMessageLoop() OVERRIDE;
+  void CreateOutputSurface(base::WeakPtr<ui::Compositor> compositor,
+                           bool software_fallback) override;
+  scoped_refptr<ui::Reflector> CreateReflector(ui::Compositor* source,
+                                               ui::Layer* target) override;
+  void RemoveReflector(scoped_refptr<ui::Reflector> reflector) override;
+  void RemoveCompositor(ui::Compositor* compositor) override;
+  scoped_refptr<cc::ContextProvider> SharedMainThreadContextProvider() override;
+  bool DoesCreateTestContexts() override;
+  cc::SharedBitmapManager* GetSharedBitmapManager() override;
+  gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
+  base::MessageLoopProxy* GetCompositorMessageLoop() override;
+  scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() override;
 
   // ImageTransportFactory implementation.
-  virtual ui::ContextFactory* GetContextFactory() OVERRIDE;
-  virtual gfx::GLSurfaceHandle GetSharedSurfaceHandle() OVERRIDE;
-  virtual scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator()
-      OVERRIDE;
-  virtual cc::SurfaceManager* GetSurfaceManager() OVERRIDE;
-  virtual GLHelper* GetGLHelper() OVERRIDE;
-  virtual void AddObserver(ImageTransportFactoryObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(
-      ImageTransportFactoryObserver* observer) OVERRIDE;
+  ui::ContextFactory* GetContextFactory() override;
+  gfx::GLSurfaceHandle GetSharedSurfaceHandle() override;
+  cc::SurfaceManager* GetSurfaceManager() override;
+  GLHelper* GetGLHelper() override;
+  void AddObserver(ImageTransportFactoryObserver* observer) override;
+  void RemoveObserver(ImageTransportFactoryObserver* observer) override;
 #if defined(OS_MACOSX)
-  virtual void OnSurfaceDisplayed(int surface_id) OVERRIDE;
+  void OnSurfaceDisplayed(int surface_id) override;
+  void OnCompositorRecycled(ui::Compositor* compositor) override;
+  bool SurfaceShouldNotShowFramesAfterRecycle(int surface_id) const override;
 #endif
 
  private:
   struct PerCompositorData;
 
   PerCompositorData* CreatePerCompositorData(ui::Compositor* compositor);
-  scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
-      CreateContextCommon(int surface_id);
+  void EstablishedGpuChannel(base::WeakPtr<ui::Compositor> compositor,
+                             bool create_software_renderer);
+  scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateContextCommon(
+      scoped_refptr<GpuChannelHost> gpu_channel_host,
+      int surface_id);
 
   void OnLostMainThreadSharedContextInsideCallback();
   void OnLostMainThreadSharedContext();

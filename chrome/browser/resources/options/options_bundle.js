@@ -38,6 +38,7 @@
 <include src="chromeos/keyboard_overlay.js">
 <include src="chromeos/pointer_overlay.js">
 <include src="chromeos/third_party_ime_confirm_overlay.js">
+<include src="chromeos/power_overlay.js">
 var AccountsOptions = options.AccountsOptions;
 var ChangePictureOptions = options.ChangePictureOptions;
 var ConsumerManagementOverlay = options.ConsumerManagementOverlay;
@@ -48,6 +49,7 @@ var BluetoothOptions = options.BluetoothOptions;
 var BluetoothPairing = options.BluetoothPairing;
 var KeyboardOverlay = options.KeyboardOverlay;
 var PointerOverlay = options.PointerOverlay;
+var PowerOverlay = options.PowerOverlay;
 var UIAccountTweaks = uiAccountTweaks.UIAccountTweaks;
 </if>
 <if expr="use_nss">
@@ -117,7 +119,7 @@ var CertificateImportErrorOverlay = options.CertificateImportErrorOverlay;
 <include src="website_settings.js">
 <include src="website_settings_edit_page.js">
 <include src="../help/help_page.js">
-<include src="../sync_setup_overlay.js">
+<include src="sync_setup_overlay.js">
 <include src="../uber/uber_page_manager_observer.js">
 <include src="../uber/uber_utils.js">
 <include src="options.js">

@@ -26,14 +26,14 @@
 #include "modules/mediastream/RTCDataChannel.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/MessageEvent.h"
 #include "core/fileapi/Blob.h"
 #include "modules/mediastream/RTCPeerConnection.h"
 #include "public/platform/WebRTCPeerConnectionHandler.h"
-#include "wtf/ArrayBuffer.h"
-#include "wtf/ArrayBufferView.h"
 
 namespace blink {
 
@@ -55,7 +55,7 @@ static void throwNoBlobSupportException(ExceptionState& exceptionState)
 RTCDataChannel* RTCDataChannel::create(ExecutionContext* context, RTCPeerConnection* connection, PassOwnPtr<WebRTCDataChannelHandler> handler)
 {
     ASSERT(handler);
-    return adoptRefCountedGarbageCollectedWillBeNoop(new RTCDataChannel(context, connection, handler));
+    return new RTCDataChannel(context, connection, handler);
 }
 
 RTCDataChannel* RTCDataChannel::create(ExecutionContext* context, RTCPeerConnection* connection, WebRTCPeerConnectionHandler* peerConnectionHandler, const String& label, const WebRTCDataChannelInit& init, ExceptionState& exceptionState)
@@ -65,7 +65,7 @@ RTCDataChannel* RTCDataChannel::create(ExecutionContext* context, RTCPeerConnect
         exceptionState.throwDOMException(NotSupportedError, "RTCDataChannel is not supported");
         return nullptr;
     }
-    return adoptRefCountedGarbageCollectedWillBeNoop(new RTCDataChannel(context, connection, handler.release()));
+    return new RTCDataChannel(context, connection, handler.release());
 }
 
 RTCDataChannel::RTCDataChannel(ExecutionContext* context, RTCPeerConnection* connection, PassOwnPtr<WebRTCDataChannelHandler> handler)
@@ -185,14 +185,14 @@ void RTCDataChannel::send(const String& data, ExceptionState& exceptionState)
     }
 }
 
-void RTCDataChannel::send(PassRefPtr<ArrayBuffer> prpData, ExceptionState& exceptionState)
+void RTCDataChannel::send(PassRefPtr<DOMArrayBuffer> prpData, ExceptionState& exceptionState)
 {
     if (m_readyState != ReadyStateOpen) {
         throwNotOpenException(exceptionState);
         return;
     }
 
-    RefPtr<ArrayBuffer> data = prpData;
+    RefPtr<DOMArrayBuffer> data = prpData;
 
     size_t dataLength = data->byteLength();
     if (!dataLength)
@@ -204,7 +204,7 @@ void RTCDataChannel::send(PassRefPtr<ArrayBuffer> prpData, ExceptionState& excep
     }
 }
 
-void RTCDataChannel::send(PassRefPtr<ArrayBufferView> data, ExceptionState& exceptionState)
+void RTCDataChannel::send(PassRefPtr<DOMArrayBufferView> data, ExceptionState& exceptionState)
 {
     if (!m_handler->sendRawData(static_cast<const char*>(data->baseAddress()), data->byteLength())) {
         // FIXME: This should not throw an exception but instead forcefully close the data channel.
@@ -212,7 +212,7 @@ void RTCDataChannel::send(PassRefPtr<ArrayBufferView> data, ExceptionState& exce
     }
 }
 
-void RTCDataChannel::send(PassRefPtrWillBeRawPtr<Blob> data, ExceptionState& exceptionState)
+void RTCDataChannel::send(Blob* data, ExceptionState& exceptionState)
 {
     // FIXME: implement
     throwNoBlobSupportException(exceptionState);
@@ -263,7 +263,7 @@ void RTCDataChannel::didReceiveRawData(const char* data, size_t dataLength)
         return;
     }
     if (m_binaryType == BinaryTypeArrayBuffer) {
-        RefPtr<ArrayBuffer> buffer = ArrayBuffer::create(data, dataLength);
+        RefPtr<DOMArrayBuffer> buffer = DOMArrayBuffer::create(data, dataLength);
         scheduleDispatchEvent(MessageEvent::create(buffer.release()));
         return;
     }

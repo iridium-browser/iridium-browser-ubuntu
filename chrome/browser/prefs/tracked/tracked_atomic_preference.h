@@ -9,7 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "chrome/browser/prefs/pref_hash_filter.h"
+#include "chrome/browser/prefs/tracked/pref_hash_filter.h"
 #include "chrome/browser/prefs/tracked/tracked_preference.h"
 #include "chrome/browser/prefs/tracked/tracked_preference_helper.h"
 
@@ -27,11 +27,10 @@ class TrackedAtomicPreference : public TrackedPreference {
                           TrackedPreferenceValidationDelegate* delegate);
 
   // TrackedPreference implementation.
-  virtual void OnNewValue(const base::Value* value,
-                          PrefHashStoreTransaction* transaction) const OVERRIDE;
-  virtual bool EnforceAndReport(
-      base::DictionaryValue* pref_store_contents,
-      PrefHashStoreTransaction* transaction) const OVERRIDE;
+  void OnNewValue(const base::Value* value,
+                  PrefHashStoreTransaction* transaction) const override;
+  bool EnforceAndReport(base::DictionaryValue* pref_store_contents,
+                        PrefHashStoreTransaction* transaction) const override;
 
  private:
   const std::string pref_path_;

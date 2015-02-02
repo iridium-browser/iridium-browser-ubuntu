@@ -55,7 +55,7 @@ class WebContentsViewAura
  private:
   class WindowObserver;
 
-  virtual ~WebContentsViewAura();
+  ~WebContentsViewAura() override;
 
   void SizeChangedCommon(const gfx::Size& size);
 
@@ -88,7 +88,7 @@ class WebContentsViewAura
 
   // Returns the amount the animating window should be translated in response to
   // the overscroll gesture.
-  gfx::Vector2d GetTranslationForOverscroll(int delta_x, int delta_y);
+  gfx::Vector2dF GetTranslationForOverscroll(float delta_x, float delta_y);
 
   // A window showing the screenshot is overlayed during a navigation triggered
   // by overscroll. This function sets this up.
@@ -100,92 +100,92 @@ class WebContentsViewAura
 
   void AttachTouchEditableToRenderView();
 
-  void OverscrollUpdateForWebContentsDelegate(int delta_y);
+  void OverscrollUpdateForWebContentsDelegate(float delta_y);
 
   // Overridden from WebContentsView:
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
-  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
-  virtual void GetContainerBounds(gfx::Rect *out) const OVERRIDE;
-  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void SetInitialFocus() OVERRIDE;
-  virtual void StoreFocus() OVERRIDE;
-  virtual void RestoreFocus() OVERRIDE;
-  virtual DropData* GetDropData() const OVERRIDE;
-  virtual gfx::Rect GetViewBounds() const OVERRIDE;
-  virtual void CreateView(
-      const gfx::Size& initial_size, gfx::NativeView context) OVERRIDE;
-  virtual RenderWidgetHostViewBase* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual RenderWidgetHostViewBase* CreateViewForPopupWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual void SetPageTitle(const base::string16& title) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void RenderViewSwappedIn(RenderViewHost* host) OVERRIDE;
-  virtual void SetOverscrollControllerEnabled(bool enabled) OVERRIDE;
+  gfx::NativeView GetNativeView() const override;
+  gfx::NativeView GetContentNativeView() const override;
+  gfx::NativeWindow GetTopLevelNativeWindow() const override;
+  void GetContainerBounds(gfx::Rect* out) const override;
+  void SizeContents(const gfx::Size& size) override;
+  void Focus() override;
+  void SetInitialFocus() override;
+  void StoreFocus() override;
+  void RestoreFocus() override;
+  DropData* GetDropData() const override;
+  gfx::Rect GetViewBounds() const override;
+  void CreateView(const gfx::Size& initial_size,
+                  gfx::NativeView context) override;
+  RenderWidgetHostViewBase* CreateViewForWidget(
+      RenderWidgetHost* render_widget_host,
+      bool is_guest_view_hack) override;
+  RenderWidgetHostViewBase* CreateViewForPopupWidget(
+      RenderWidgetHost* render_widget_host) override;
+  void SetPageTitle(const base::string16& title) override;
+  void RenderViewCreated(RenderViewHost* host) override;
+  void RenderViewSwappedIn(RenderViewHost* host) override;
+  void SetOverscrollControllerEnabled(bool enabled) override;
 
   // Overridden from RenderViewHostDelegateView:
-  virtual void ShowContextMenu(RenderFrameHost* render_frame_host,
-                               const ContextMenuParams& params) OVERRIDE;
-  virtual void StartDragging(const DropData& drop_data,
-                             blink::WebDragOperationsMask operations,
-                             const gfx::ImageSkia& image,
-                             const gfx::Vector2d& image_offset,
-                             const DragEventSourceInfo& event_info) OVERRIDE;
-  virtual void UpdateDragCursor(blink::WebDragOperation operation) OVERRIDE;
-  virtual void GotFocus() OVERRIDE;
-  virtual void TakeFocus(bool reverse) OVERRIDE;
-  virtual void ShowDisambiguationPopup(
+  void ShowContextMenu(RenderFrameHost* render_frame_host,
+                       const ContextMenuParams& params) override;
+  void StartDragging(const DropData& drop_data,
+                     blink::WebDragOperationsMask operations,
+                     const gfx::ImageSkia& image,
+                     const gfx::Vector2d& image_offset,
+                     const DragEventSourceInfo& event_info) override;
+  void UpdateDragCursor(blink::WebDragOperation operation) override;
+  void GotFocus() override;
+  void TakeFocus(bool reverse) override;
+  void ShowDisambiguationPopup(
       const gfx::Rect& target_rect,
       const SkBitmap& zoomed_bitmap,
       const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
-      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) OVERRIDE;
-  virtual void HideDisambiguationPopup() OVERRIDE;
+      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) override;
+  void HideDisambiguationPopup() override;
 
   // Overridden from OverscrollControllerDelegate:
-  virtual gfx::Rect GetVisibleBounds() const OVERRIDE;
-  virtual bool OnOverscrollUpdate(float delta_x, float delta_y) OVERRIDE;
-  virtual void OnOverscrollComplete(OverscrollMode overscroll_mode) OVERRIDE;
-  virtual void OnOverscrollModeChange(OverscrollMode old_mode,
-                                      OverscrollMode new_mode) OVERRIDE;
+  gfx::Rect GetVisibleBounds() const override;
+  bool OnOverscrollUpdate(float delta_x, float delta_y) override;
+  void OnOverscrollComplete(OverscrollMode overscroll_mode) override;
+  void OnOverscrollModeChange(OverscrollMode old_mode,
+                              OverscrollMode new_mode) override;
 
   // Overridden from ui::ImplicitAnimationObserver:
-  virtual void OnImplicitAnimationsCompleted() OVERRIDE;
+  void OnImplicitAnimationsCompleted() override;
 
   // Overridden from aura::WindowDelegate:
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual gfx::Size GetMaximumSize() const OVERRIDE;
-  virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
-                               const gfx::Rect& new_bounds) OVERRIDE;
-  virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
-  virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
-  virtual bool ShouldDescendIntoChildForEventHandling(
+  gfx::Size GetMinimumSize() const override;
+  gfx::Size GetMaximumSize() const override;
+  void OnBoundsChanged(const gfx::Rect& old_bounds,
+                       const gfx::Rect& new_bounds) override;
+  gfx::NativeCursor GetCursor(const gfx::Point& point) override;
+  int GetNonClientComponent(const gfx::Point& point) const override;
+  bool ShouldDescendIntoChildForEventHandling(
       aura::Window* child,
-      const gfx::Point& location) OVERRIDE;
-  virtual bool CanFocus() OVERRIDE;
-  virtual void OnCaptureLost() OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE;
-  virtual bool HasHitTestMask() const OVERRIDE;
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
+      const gfx::Point& location) override;
+  bool CanFocus() override;
+  void OnCaptureLost() override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override;
+  void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowDestroyed(aura::Window* window) override;
+  void OnWindowTargetVisibilityChanged(bool visible) override;
+  bool HasHitTestMask() const override;
+  void GetHitTestMask(gfx::Path* mask) const override;
 
   // Overridden from ui::EventHandler:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  void OnKeyEvent(ui::KeyEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
 
   // Overridden from aura::client::DragDropDelegate:
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
+  void OnDragEntered(const ui::DropTargetEvent& event) override;
+  int OnDragUpdated(const ui::DropTargetEvent& event) override;
+  void OnDragExited() override;
+  int OnPerformDrop(const ui::DropTargetEvent& event) override;
 
   // Overridden from aura::WindowObserver:
-  virtual void OnWindowVisibilityChanged(aura::Window* window,
-                                         bool visible) OVERRIDE;
+  void OnWindowVisibilityChanged(aura::Window* window, bool visible) override;
 
   // Update the web contents visiblity.
   void UpdateWebContentsVisibility(bool visible);

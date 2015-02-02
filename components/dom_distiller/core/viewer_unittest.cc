@@ -70,14 +70,12 @@ class TestDomDistillerService : public DomDistillerServiceInterface {
       scoped_ptr<SourcePageHandle> handle) {
     return scoped_ptr<DistillerPage>();
   }
-  virtual DistilledPagePrefs* GetDistilledPagePrefs() OVERRIDE;
+  virtual DistilledPagePrefs* GetDistilledPagePrefs() override;
 };
 
 class DomDistillerViewerTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
-    service_.reset(new TestDomDistillerService());
-  }
+  void SetUp() override { service_.reset(new TestDomDistillerService()); }
 
  protected:
   scoped_ptr<ViewerHandle> CreateViewRequest(

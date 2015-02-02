@@ -32,31 +32,29 @@ namespace net {
 
 namespace {
 
-enum ServerConfigState {
-  // WARNING: Do not change the numerical values of any of server config state.
-  // Do not remove deprecated server config states - just comment them as
-  // deprecated.
-  SERVER_CONFIG_EMPTY = 0,
-  SERVER_CONFIG_INVALID = 1,
-  SERVER_CONFIG_CORRUPTED = 2,
-  SERVER_CONFIG_EXPIRED = 3,
-  SERVER_CONFIG_INVALID_EXPIRY = 4,
+// Tracks the reason (the state of the server config) for sending inchoate
+// ClientHello to the server.
+void RecordInchoateClientHelloReason(
+    QuicCryptoClientConfig::CachedState::ServerConfigState state) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Net.QuicInchoateClientHelloReason", state,
+      QuicCryptoClientConfig::CachedState::SERVER_CONFIG_COUNT);
+}
 
-  // NOTE: Add new server config states only immediately above this line. Make
-  // sure to update the QuicServerConfigState enum in
-  // tools/metrics/histograms/histograms.xml accordingly.
-  SERVER_CONFIG_COUNT
-};
-
-void RecordServerConfigState(ServerConfigState server_config_state) {
-  UMA_HISTOGRAM_ENUMERATION("Net.QuicClientHelloServerConfigState",
-                            server_config_state, SERVER_CONFIG_COUNT);
+// Tracks the state of the QUIC server information loaded from the disk cache.
+void RecordDiskCacheServerConfigState(
+    QuicCryptoClientConfig::CachedState::ServerConfigState state) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Net.QuicServerInfo.DiskCacheState", state,
+      QuicCryptoClientConfig::CachedState::SERVER_CONFIG_COUNT);
 }
 
 }  // namespace
 
 QuicCryptoClientConfig::QuicCryptoClientConfig()
-    : disable_ecdsa_(false) {}
+    : disable_ecdsa_(false) {
+  SetDefaults();
+}
 
 QuicCryptoClientConfig::~QuicCryptoClientConfig() {
   STLDeleteValues(&cached_states_);
@@ -70,12 +68,12 @@ QuicCryptoClientConfig::CachedState::~CachedState() {}
 
 bool QuicCryptoClientConfig::CachedState::IsComplete(QuicWallTime now) const {
   if (server_config_.empty()) {
-    RecordServerConfigState(SERVER_CONFIG_EMPTY);
+    RecordInchoateClientHelloReason(SERVER_CONFIG_EMPTY);
     return false;
   }
 
   if (!server_config_valid_) {
-    RecordServerConfigState(SERVER_CONFIG_INVALID);
+    RecordInchoateClientHelloReason(SERVER_CONFIG_INVALID);
     return false;
   }
 
@@ -83,13 +81,13 @@ bool QuicCryptoClientConfig::CachedState::IsComplete(QuicWallTime now) const {
   if (!scfg) {
     // Should be impossible short of cache corruption.
     DCHECK(false);
-    RecordServerConfigState(SERVER_CONFIG_CORRUPTED);
+    RecordInchoateClientHelloReason(SERVER_CONFIG_CORRUPTED);
     return false;
   }
 
   uint64 expiry_seconds;
   if (scfg->GetUint64(kEXPY, &expiry_seconds) != QUIC_NO_ERROR) {
-    RecordServerConfigState(SERVER_CONFIG_INVALID_EXPIRY);
+    RecordInchoateClientHelloReason(SERVER_CONFIG_INVALID_EXPIRY);
     return false;
   }
   if (now.ToUNIXSeconds() >= expiry_seconds) {
@@ -97,7 +95,7 @@ bool QuicCryptoClientConfig::CachedState::IsComplete(QuicWallTime now) const {
         "Net.QuicClientHelloServerConfig.InvalidDuration",
         base::TimeDelta::FromSeconds(now.ToUNIXSeconds() - expiry_seconds),
         base::TimeDelta::FromMinutes(1), base::TimeDelta::FromDays(20), 50);
-    RecordServerConfigState(SERVER_CONFIG_EXPIRED);
+    RecordInchoateClientHelloReason(SERVER_CONFIG_EXPIRED);
     return false;
   }
 
@@ -111,7 +109,7 @@ bool QuicCryptoClientConfig::CachedState::IsEmpty() const {
 const CryptoHandshakeMessage*
 QuicCryptoClientConfig::CachedState::GetServerConfig() const {
   if (server_config_.empty()) {
-    return NULL;
+    return nullptr;
   }
 
   if (!scfg_.get()) {
@@ -121,7 +119,8 @@ QuicCryptoClientConfig::CachedState::GetServerConfig() const {
   return scfg_.get();
 }
 
-QuicErrorCode QuicCryptoClientConfig::CachedState::SetServerConfig(
+QuicCryptoClientConfig::CachedState::ServerConfigState
+QuicCryptoClientConfig::CachedState::SetServerConfig(
     StringPiece server_config, QuicWallTime now, string* error_details) {
   const bool matches_existing = server_config == server_config_;
 
@@ -139,18 +138,18 @@ QuicErrorCode QuicCryptoClientConfig::CachedState::SetServerConfig(
 
   if (!new_scfg) {
     *error_details = "SCFG invalid";
-    return QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER;
+    return SERVER_CONFIG_INVALID;
   }
 
   uint64 expiry_seconds;
   if (new_scfg->GetUint64(kEXPY, &expiry_seconds) != QUIC_NO_ERROR) {
     *error_details = "SCFG missing EXPY";
-    return QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER;
+    return SERVER_CONFIG_INVALID_EXPIRY;
   }
 
   if (now.ToUNIXSeconds() >= expiry_seconds) {
     *error_details = "SCFG has expired";
-    return QUIC_CRYPTO_SERVER_CONFIG_EXPIRED;
+    return SERVER_CONFIG_EXPIRED;
   }
 
   if (!matches_existing) {
@@ -158,7 +157,7 @@ QuicErrorCode QuicCryptoClientConfig::CachedState::SetServerConfig(
     SetProofInvalid();
     scfg_.reset(new_scfg_storage.release());
   }
-  return QUIC_NO_ERROR;
+  return SERVER_CONFIG_VALID;
 }
 
 void QuicCryptoClientConfig::CachedState::InvalidateServerConfig() {
@@ -226,13 +225,15 @@ bool QuicCryptoClientConfig::CachedState::Initialize(
   DCHECK(server_config_.empty());
 
   if (server_config.empty()) {
+    RecordDiskCacheServerConfigState(SERVER_CONFIG_EMPTY);
     return false;
   }
 
   string error_details;
-  QuicErrorCode error = SetServerConfig(server_config, now,
-                                        &error_details);
-  if (error != QUIC_NO_ERROR) {
+  ServerConfigState state = SetServerConfig(server_config, now,
+                                            &error_details);
+  RecordDiskCacheServerConfigState(state);
+  if (state != SERVER_CONFIG_VALID) {
     DVLOG(1) << "SetServerConfig failed with " << error_details;
     return false;
   }
@@ -292,7 +293,7 @@ void QuicCryptoClientConfig::CachedState::InitializeFrom(
   certs_ = other.certs_;
   server_config_sig_ = other.server_config_sig_;
   server_config_valid_ = other.server_config_valid_;
-  if (other.proof_verify_details_.get() != NULL) {
+  if (other.proof_verify_details_.get() != nullptr) {
     proof_verify_details_.reset(other.proof_verify_details_->Clone());
   }
   ++generation_counter_;
@@ -323,7 +324,10 @@ QuicCryptoClientConfig::CachedState* QuicCryptoClientConfig::LookupOrCreate(
 
   CachedState* cached = new CachedState;
   cached_states_.insert(make_pair(server_id, cached));
-  PopulateFromCanonicalConfig(server_id, cached);
+  bool cache_populated = PopulateFromCanonicalConfig(server_id, cached);
+  UMA_HISTOGRAM_BOOLEAN(
+      "Net.QuicCryptoClientConfig.PopulatedFromCanonicalConfig",
+      cache_populated);
   return cached;
 }
 
@@ -398,7 +402,7 @@ QuicErrorCode QuicCryptoClientConfig::FillClientHello(
     QuicCryptoNegotiatedParameters* out_params,
     CryptoHandshakeMessage* out,
     string* error_details) const {
-  DCHECK(error_details != NULL);
+  DCHECK(error_details != nullptr);
 
   FillInchoateClientHello(server_id, preferred_version, cached,
                           out_params, out);
@@ -437,7 +441,7 @@ QuicErrorCode QuicCryptoClientConfig::FillClientHello(
   size_t key_exchange_index;
   if (!QuicUtils::FindMutualTag(
           aead, their_aeads, num_their_aeads, QuicUtils::LOCAL_PRIORITY,
-          &out_params->aead, NULL) ||
+          &out_params->aead, nullptr) ||
       !QuicUtils::FindMutualTag(
           kexs, their_key_exchanges, num_their_key_exchanges,
           QuicUtils::LOCAL_PRIORITY, &out_params->key_exchange,
@@ -524,7 +528,7 @@ QuicErrorCode QuicCryptoClientConfig::FillClientHello(
                                  out_params->aead, out_params->client_nonce,
                                  out_params->server_nonce, hkdf_input,
                                  CryptoUtils::CLIENT, &crypters,
-                                 NULL /* subkey secret */)) {
+                                 nullptr /* subkey secret */)) {
       *error_details = "Symmetric key setup failed";
       return QUIC_CRYPTO_SYMMETRIC_KEY_SETUP_FAILED;
     }
@@ -567,7 +571,7 @@ QuicErrorCode QuicCryptoClientConfig::FillClientHello(
            out_params->initial_premaster_secret, out_params->aead,
            out_params->client_nonce, out_params->server_nonce, hkdf_input,
            CryptoUtils::CLIENT, &out_params->initial_crypters,
-           NULL /* subkey secret */)) {
+           nullptr /* subkey secret */)) {
     *error_details = "Symmetric key setup failed";
     return QUIC_CRYPTO_SYMMETRIC_KEY_SETUP_FAILED;
   }
@@ -581,7 +585,7 @@ QuicErrorCode QuicCryptoClientConfig::CacheNewServerConfig(
     const vector<string>& cached_certs,
     CachedState* cached,
     string* error_details) {
-  DCHECK(error_details != NULL);
+  DCHECK(error_details != nullptr);
 
   StringPiece scfg;
   if (!message.GetStringPiece(kSCFG, &scfg)) {
@@ -589,9 +593,15 @@ QuicErrorCode QuicCryptoClientConfig::CacheNewServerConfig(
     return QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND;
   }
 
-  QuicErrorCode error = cached->SetServerConfig(scfg, now, error_details);
-  if (error != QUIC_NO_ERROR) {
-    return error;
+  CachedState::ServerConfigState state = cached->SetServerConfig(
+      scfg, now, error_details);
+  if (state == CachedState::SERVER_CONFIG_EXPIRED) {
+    return QUIC_CRYPTO_SERVER_CONFIG_EXPIRED;
+  }
+  // TODO(rtenneti): Return more specific error code than returning
+  // QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER.
+  if (state != CachedState::SERVER_CONFIG_VALID) {
+    return QUIC_INVALID_CRYPTO_MESSAGE_PARAMETER;
   }
 
   StringPiece token;
@@ -612,7 +622,7 @@ QuicErrorCode QuicCryptoClientConfig::CacheNewServerConfig(
 
     cached->SetProof(certs, proof);
   } else {
-    if (proof_verifier() != NULL) {
+    if (proof_verifier() != nullptr) {
       // Secure QUIC: clear existing proof as we have been sent a new SCFG
       // without matching proof/certs.
       cached->ClearProof();
@@ -639,7 +649,7 @@ QuicErrorCode QuicCryptoClientConfig::ProcessRejection(
     bool is_https,
     QuicCryptoNegotiatedParameters* out_params,
     string* error_details) {
-  DCHECK(error_details != NULL);
+  DCHECK(error_details != nullptr);
 
   if (rej.tag() != kREJ) {
     *error_details = "Message is not REJ";
@@ -692,7 +702,7 @@ QuicErrorCode QuicCryptoClientConfig::ProcessServerHello(
     CachedState* cached,
     QuicCryptoNegotiatedParameters* out_params,
     string* error_details) {
-  DCHECK(error_details != NULL);
+  DCHECK(error_details != nullptr);
 
   if (server_hello.tag() != kSHLO) {
     *error_details = "Bad tag";
@@ -767,7 +777,7 @@ QuicErrorCode QuicCryptoClientConfig::ProcessServerConfigUpdate(
     CachedState* cached,
     QuicCryptoNegotiatedParameters* out_params,
     string* error_details) {
-  DCHECK(error_details != NULL);
+  DCHECK(error_details != nullptr);
 
   if (server_config_update.tag() != kSCUP) {
     *error_details = "ServerConfigUpdate must have kSCUP tag.";
@@ -808,7 +818,7 @@ void QuicCryptoClientConfig::InitializeFrom(
 }
 
 void QuicCryptoClientConfig::AddCanonicalSuffix(const string& suffix) {
-  canoncial_suffixes_.push_back(suffix);
+  canonical_suffixes_.push_back(suffix);
 }
 
 void QuicCryptoClientConfig::PreferAesGcm() {
@@ -827,40 +837,41 @@ void QuicCryptoClientConfig::DisableEcdsa() {
   disable_ecdsa_ = true;
 }
 
-void QuicCryptoClientConfig::PopulateFromCanonicalConfig(
+bool QuicCryptoClientConfig::PopulateFromCanonicalConfig(
     const QuicServerId& server_id,
     CachedState* server_state) {
   DCHECK(server_state->IsEmpty());
   size_t i = 0;
-  for (; i < canoncial_suffixes_.size(); ++i) {
-    if (EndsWith(server_id.host(), canoncial_suffixes_[i], false)) {
+  for (; i < canonical_suffixes_.size(); ++i) {
+    if (EndsWith(server_id.host(), canonical_suffixes_[i], false)) {
       break;
     }
   }
-  if (i == canoncial_suffixes_.size())
-    return;
+  if (i == canonical_suffixes_.size())
+    return false;
 
-  QuicServerId suffix_server_id(canoncial_suffixes_[i], server_id.port(),
+  QuicServerId suffix_server_id(canonical_suffixes_[i], server_id.port(),
                                 server_id.is_https(),
                                 server_id.privacy_mode());
   if (!ContainsKey(canonical_server_map_, suffix_server_id)) {
     // This is the first host we've seen which matches the suffix, so make it
     // canonical.
     canonical_server_map_[suffix_server_id] = server_id;
-    return;
+    return false;
   }
 
   const QuicServerId& canonical_server_id =
       canonical_server_map_[suffix_server_id];
   CachedState* canonical_state = cached_states_[canonical_server_id];
   if (!canonical_state->proof_valid()) {
-    return;
+    return false;
   }
 
   // Update canonical version to point at the "most recent" entry.
   canonical_server_map_[suffix_server_id] = server_id;
 
   server_state->InitializeFrom(*canonical_state);
+  return true;
 }
 
 }  // namespace net

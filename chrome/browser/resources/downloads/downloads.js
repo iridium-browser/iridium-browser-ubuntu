@@ -52,15 +52,13 @@ function showInlineBlock(node, isShow) {
 /**
  * Creates a link with a specified onclick handler and content.
  * @param {function()} onclick The onclick handler.
- * @param {string} value The link text.
+ * @param {string=} opt_text The link text.
  * @return {!Element} The created link element.
  */
-function createLink(onclick, value) {
-  var link = document.createElement('a');
+function createActionLink(onclick, opt_text) {
+  var link = new ActionLink;
   link.onclick = onclick;
-  link.href = '#';
-  link.textContent = value;
-  link.oncontextmenu = function() { return false; };
+  if (opt_text) link.textContent = opt_text;
   return link;
 }
 
@@ -91,6 +89,7 @@ function Downloads() {
    */
   this.downloads_ = {};
   this.node_ = $('downloads-display');
+  this.noDownloadsOrResults_ = $('no-downloads-or-results');
   this.summary_ = $('downloads-summary-text');
   this.searchText_ = '';
 
@@ -110,6 +109,8 @@ function Downloads() {
     'chrome://theme/IDR_DOWNLOAD_PROGRESS_FOREGROUND_32@2x';
 
   window.addEventListener('keydown', this.onKeyDown_.bind(this));
+
+  this.onDownloadListChanged_();
 }
 
 /**
@@ -138,7 +139,7 @@ Downloads.prototype.updated = function(download) {
   // TODO(benjhayden) Only do this if its nodeSince_ or nodeDate_ actually did
   // change since this may touch 150 elements and Downloads.prototype.updated
   // may be called 150 times.
-  this.updateDateDisplay_();
+  this.onDownloadListChanged_();
 };
 
 /**
@@ -159,12 +160,6 @@ Downloads.prototype.updateSummary = function() {
   } else {
     this.summary_.textContent = '';
   }
-
-  var hasDownloads = false;
-  for (var i in this.downloads_) {
-    hasDownloads = true;
-    break;
-  }
 };
 
 /**
@@ -176,11 +171,12 @@ Downloads.prototype.size = function() {
 };
 
 /**
- * Update the date visibility in our nodes so that no date is
- * repeated.
+ * Called whenever the downloads lists items have changed (either by being
+ * updated, added, or removed).
  * @private
  */
-Downloads.prototype.updateDateDisplay_ = function() {
+Downloads.prototype.onDownloadListChanged_ = function() {
+  // Update the date visibility in our nodes so that no date is repeated.
   var dateContainers = document.getElementsByClassName('date-container');
   var displayed = {};
   for (var i = 0, container; container = dateContainers[i]; i++) {
@@ -192,6 +188,13 @@ Downloads.prototype.updateDateDisplay_ = function() {
       container.style.display = 'block';
     }
   }
+
+  this.noDownloadsOrResults_.textContent = loadTimeData.getString(
+      this.searchText_ ? 'no_search_results' : 'no_downloads');
+
+  var hasDownloads = this.size() > 0;
+  this.node_.hidden = !hasDownloads;
+  this.noDownloadsOrResults_.hidden = hasDownloads;
 };
 
 /**
@@ -201,7 +204,7 @@ Downloads.prototype.updateDateDisplay_ = function() {
 Downloads.prototype.remove = function(id) {
   this.node_.removeChild(this.downloads_[id].node);
   delete this.downloads_[id];
-  this.updateDateDisplay_();
+  this.onDownloadListChanged_();
 };
 
 /**
@@ -330,7 +333,7 @@ function Download(download) {
   this.nodeTitleArea_ = createElementWithClassName('div', 'title-area');
   this.safe_.appendChild(this.nodeTitleArea_);
 
-  this.nodeFileLink_ = createLink(this.openFile_.bind(this), '');
+  this.nodeFileLink_ = createActionLink(this.openFile_.bind(this));
   this.nodeFileLink_.className = 'name';
   this.nodeFileLink_.style.display = 'none';
   this.nodeTitleArea_.appendChild(this.nodeFileLink_);
@@ -356,7 +359,7 @@ function Download(download) {
   // We don't need 'show in folder' in chromium os. See download_ui.cc and
   // http://code.google.com/p/chromium-os/issues/detail?id=916.
   if (loadTimeData.valueExists('control_showinfolder')) {
-    this.controlShow_ = createLink(this.show_.bind(this),
+    this.controlShow_ = createActionLink(this.show_.bind(this),
         loadTimeData.getString('control_showinfolder'));
     this.nodeControls_.appendChild(this.controlShow_);
   } else {
@@ -369,17 +372,17 @@ function Download(download) {
   this.nodeControls_.appendChild(this.controlRetry_);
 
   // Pause/Resume are a toggle.
-  this.controlPause_ = createLink(this.pause_.bind(this),
+  this.controlPause_ = createActionLink(this.pause_.bind(this),
       loadTimeData.getString('control_pause'));
   this.nodeControls_.appendChild(this.controlPause_);
 
-  this.controlResume_ = createLink(this.resume_.bind(this),
+  this.controlResume_ = createActionLink(this.resume_.bind(this),
       loadTimeData.getString('control_resume'));
   this.nodeControls_.appendChild(this.controlResume_);
 
   // Anchors <a> don't support the "disabled" property.
   if (loadTimeData.getBoolean('allow_deleting_history')) {
-    this.controlRemove_ = createLink(this.remove_.bind(this),
+    this.controlRemove_ = createActionLink(this.remove_.bind(this),
         loadTimeData.getString('control_removefromlist'));
     this.controlRemove_.classList.add('control-remove-link');
   } else {
@@ -394,7 +397,7 @@ function Download(download) {
 
   this.nodeControls_.appendChild(this.controlRemove_);
 
-  this.controlCancel_ = createLink(this.cancel_.bind(this),
+  this.controlCancel_ = createActionLink(this.cancel_.bind(this),
       loadTimeData.getString('control_cancel'));
   this.nodeControls_.appendChild(this.controlCancel_);
 
@@ -414,11 +417,11 @@ function Download(download) {
 
   // Buttons for the malicious case.
   this.malwareNodeControls_ = createElementWithClassName('div', 'controls');
-  this.malwareSave_ = createLink(
+  this.malwareSave_ = createActionLink(
       this.saveDangerous_.bind(this),
       loadTimeData.getString('danger_restore'));
   this.malwareNodeControls_.appendChild(this.malwareSave_);
-  this.malwareDiscard_ = createLink(
+  this.malwareDiscard_ = createActionLink(
       this.discardDangerous_.bind(this),
       loadTimeData.getString('control_removefromlist'));
   this.malwareNodeControls_.appendChild(this.malwareDiscard_);
@@ -884,7 +887,8 @@ function load() {
   var clearAllHolder = $('clear-all-holder');
   var clearAllElement;
   if (loadTimeData.getBoolean('allow_deleting_history')) {
-    clearAllElement = createLink(clearAll, loadTimeData.getString('clear_all'));
+    clearAllElement = createActionLink(
+        clearAll, loadTimeData.getString('clear_all'));
     clearAllElement.classList.add('clear-all-link');
     clearAllHolder.classList.remove('disabled-link');
   } else {
@@ -896,14 +900,10 @@ function load() {
     clearAllHolder.hidden = true;
 
   clearAllHolder.appendChild(clearAllElement);
-  clearAllElement.oncontextmenu = function() { return false; };
 
-  // TODO(jhawkins): Use a link-button here.
-  var openDownloadsFolderLink = $('open-downloads-folder');
-  openDownloadsFolderLink.onclick = function() {
+  $('open-downloads-folder').onclick = function() {
     chrome.send('openDownloadsFolder');
   };
-  openDownloadsFolderLink.oncontextmenu = function() { return false; };
 
   $('term').onsearch = function(e) {
     setSearch($('term').value);
@@ -989,5 +989,3 @@ function tryDownloadUpdatedPeriodically() {
 
 // Add handlers to HTML elements.
 window.addEventListener('DOMContentLoaded', load);
-
-preventDefaultOnPoundLinkClicks();  // From util.js.

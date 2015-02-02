@@ -309,20 +309,14 @@ blink::WebTimeRanges WebMediaPlayerMS::buffered() const {
   return buffered_;
 }
 
-double WebMediaPlayerMS::maxTimeSeekable() const {
+blink::WebTimeRanges WebMediaPlayerMS::seekable() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return 0.0;
+  return blink::WebTimeRanges();
 }
 
 bool WebMediaPlayerMS::didLoadingProgress() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return true;
-}
-
-void WebMediaPlayerMS::paint(blink::WebCanvas* canvas,
-                             const blink::WebRect& rect,
-                             unsigned char alpha) {
-  paint(canvas, rect, alpha, SkXfermode::kSrcOver_Mode);
 }
 
 void WebMediaPlayerMS::paint(blink::WebCanvas* canvas,

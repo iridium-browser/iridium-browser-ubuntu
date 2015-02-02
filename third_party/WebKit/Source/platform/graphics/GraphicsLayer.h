@@ -36,12 +36,12 @@
 #include "platform/graphics/ContentLayerDelegate.h"
 #include "platform/graphics/GraphicsLayerClient.h"
 #include "platform/graphics/GraphicsLayerDebugInfo.h"
+#include "platform/graphics/PaintInvalidationReason.h"
 #include "platform/graphics/filters/FilterOperations.h"
 #include "platform/transforms/TransformationMatrix.h"
 #include "public/platform/WebCompositorAnimationDelegate.h"
 #include "public/platform/WebContentLayer.h"
 #include "public/platform/WebImageLayer.h"
-#include "public/platform/WebInvalidationDebugAnnotations.h"
 #include "public/platform/WebLayerClient.h"
 #include "public/platform/WebLayerScrollClient.h"
 #include "public/platform/WebNinePatchLayer.h"
@@ -88,7 +88,7 @@ public:
     GraphicsLayerClient* client() const { return m_client; }
 
     // WebLayerClient implementation.
-    virtual WebGraphicsLayerDebugInfo* takeDebugInfoFor(WebLayer*) OVERRIDE;
+    virtual WebGraphicsLayerDebugInfo* takeDebugInfoFor(WebLayer*) override;
 
     GraphicsLayerDebugInfo& debugInfo();
 
@@ -182,8 +182,8 @@ public:
     void setPaintingPhase(GraphicsLayerPaintingPhase);
 
     void setNeedsDisplay();
-    // mark the given rect (in layer coords) as needing dispay. Never goes deep.
-    void setNeedsDisplayInRect(const FloatRect&, WebInvalidationDebugAnnotations);
+    // Mark the given rect (in layer coords) as needing display. Never goes deep.
+    void setNeedsDisplayInRect(const IntRect&, PaintInvalidationReason);
 
     void setContentsNeedsDisplay();
 
@@ -224,7 +224,7 @@ public:
     unsigned numLinkHighlights() { return m_linkHighlights.size(); }
     LinkHighlightClient* linkHighlight(int i) { return m_linkHighlights[i]; }
 
-    void setScrollableArea(ScrollableArea*, bool isMainFrame);
+    void setScrollableArea(ScrollableArea*, bool isViewport);
     ScrollableArea* scrollableArea() const { return m_scrollableArea; }
 
     WebContentLayer* contentLayer() const { return m_layer.get(); }
@@ -233,14 +233,14 @@ public:
     static void unregisterContentsLayer(WebLayer*);
 
     // GraphicsContextPainter implementation.
-    virtual void paint(GraphicsContext&, const IntRect& clip) OVERRIDE;
+    virtual void paint(GraphicsContext&, const IntRect& clip) override;
 
     // WebCompositorAnimationDelegate implementation.
-    virtual void notifyAnimationStarted(double monotonicTime, WebCompositorAnimation::TargetProperty) OVERRIDE;
-    virtual void notifyAnimationFinished(double monotonicTime, WebCompositorAnimation::TargetProperty) OVERRIDE;
+    virtual void notifyAnimationStarted(double monotonicTime, int group) override;
+    virtual void notifyAnimationFinished(double monotonicTime, int group) override;
 
     // WebLayerScrollClient implementation.
-    virtual void didScroll() OVERRIDE;
+    virtual void didScroll() override;
 
 protected:
     String debugName(WebLayer*) const;
@@ -346,7 +346,7 @@ private:
 } // namespace blink
 
 #ifndef NDEBUG
-// Outside the WebCore namespace for ease of invocation from gdb.
+// Outside the blink namespace for ease of invocation from gdb.
 void PLATFORM_EXPORT showGraphicsLayerTree(const blink::GraphicsLayer*);
 #endif
 

@@ -24,7 +24,6 @@
 #include "storage/browser/fileapi/native_file_util.h"
 #include "storage/browser/fileapi/quota/quota_reservation.h"
 #include "storage/browser/fileapi/sandbox_file_stream_writer.h"
-#include "storage/browser/fileapi/watcher_manager.h"
 #include "storage/browser/quota/quota_manager.h"
 #include "storage/common/fileapi/file_system_util.h"
 
@@ -42,114 +41,18 @@ class TestFileUtil : public storage::LocalFileUtil {
  public:
   explicit TestFileUtil(const base::FilePath& base_path)
       : base_path_(base_path) {}
-  virtual ~TestFileUtil() {}
+  ~TestFileUtil() override {}
 
   // LocalFileUtil overrides.
-  virtual base::File::Error GetLocalFilePath(
-      FileSystemOperationContext* context,
-      const FileSystemURL& file_system_url,
-      base::FilePath* local_file_path) OVERRIDE {
+  base::File::Error GetLocalFilePath(FileSystemOperationContext* context,
+                                     const FileSystemURL& file_system_url,
+                                     base::FilePath* local_file_path) override {
     *local_file_path = base_path_.Append(file_system_url.path());
     return base::File::FILE_OK;
   }
 
  private:
   base::FilePath base_path_;
-};
-
-// Stub implementation of storage::WatcherManager. Emits a fake notification
-// after a directory watcher is set successfully.
-class TestWatcherManager : public storage::WatcherManager {
- public:
-  TestWatcherManager() : weak_ptr_factory_(this) {}
-  virtual ~TestWatcherManager() {}
-
-  // storage::WatcherManager overrides.
-  virtual void AddObserver(Observer* observer) OVERRIDE {
-    observers_.AddObserver(observer);
-  }
-
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {
-    observers_.RemoveObserver(observer);
-  }
-
-  virtual bool HasObserver(Observer* observer) const OVERRIDE {
-    return observers_.HasObserver(observer);
-  }
-
-  virtual void WatchDirectory(const storage::FileSystemURL& url,
-                              bool recursive,
-                              const StatusCallback& callback) OVERRIDE {
-    if (recursive) {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE,
-          base::Bind(callback, base::File::FILE_ERROR_INVALID_OPERATION));
-      return;
-    }
-
-    const GURL gurl = url.ToGURL();
-    if (watched_urls_.find(gurl) != watched_urls_.end()) {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(callback, base::File::FILE_ERROR_EXISTS));
-      return;
-    }
-
-    watched_urls_.insert(gurl);
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, base::File::FILE_OK));
-
-    // Send a fake changed notification.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&TestWatcherManager::SendFakeChangeNotification,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   url));
-
-    // Send a fake removed notification.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&TestWatcherManager::SendFakeRemoveNotification,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   url));
-  }
-
-  virtual void UnwatchEntry(const storage::FileSystemURL& url,
-                            const StatusCallback& callback) OVERRIDE {
-    const GURL gurl = url.ToGURL();
-    if (watched_urls_.find(gurl) == watched_urls_.end()) {
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(callback, base::File::FILE_ERROR_NOT_FOUND));
-      return;
-    }
-
-    watched_urls_.erase(gurl);
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, base::File::FILE_OK));
-  }
-
- private:
-  // Sends a fake notification to each observer about a changed entry
-  // represented by |url|, as long as it is still being watched.
-  void SendFakeChangeNotification(const storage::FileSystemURL& url) {
-    if (watched_urls_.find(url.ToGURL()) == watched_urls_.end())
-      return;
-
-    FOR_EACH_OBSERVER(Observer, observers_, OnEntryChanged(url));
-  }
-
-  // Sends a fake notification to each observer about a removed entry
-  // represented by |url|, as long as it is still being watched.
-  void SendFakeRemoveNotification(const storage::FileSystemURL& url) {
-    if (watched_urls_.find(url.ToGURL()) == watched_urls_.end())
-      return;
-
-    FOR_EACH_OBSERVER(Observer, observers_, OnEntryRemoved(url));
-  }
-
-  ObserverList<Observer> observers_;
-  std::set<GURL> watched_urls_;
-
-  base::WeakPtrFactory<TestWatcherManager> weak_ptr_factory_;
 };
 
 }  // namespace
@@ -159,52 +62,49 @@ class TestFileSystemBackend::QuotaUtil : public storage::FileSystemQuotaUtil,
                                          public storage::FileUpdateObserver {
  public:
   QuotaUtil() : usage_(0) {}
-  virtual ~QuotaUtil() {}
+  ~QuotaUtil() override {}
 
   // FileSystemQuotaUtil overrides.
-  virtual base::File::Error DeleteOriginDataOnFileTaskRunner(
+  base::File::Error DeleteOriginDataOnFileTaskRunner(
       FileSystemContext* context,
       storage::QuotaManagerProxy* proxy,
       const GURL& origin_url,
-      storage::FileSystemType type) OVERRIDE {
+      storage::FileSystemType type) override {
     NOTREACHED();
     return base::File::FILE_OK;
   }
 
-  virtual scoped_refptr<storage::QuotaReservation>
+  scoped_refptr<storage::QuotaReservation>
   CreateQuotaReservationOnFileTaskRunner(
       const GURL& origin_url,
-      storage::FileSystemType type) OVERRIDE {
+      storage::FileSystemType type) override {
     NOTREACHED();
     return scoped_refptr<storage::QuotaReservation>();
   }
 
-  virtual void GetOriginsForTypeOnFileTaskRunner(
-      storage::FileSystemType type,
-      std::set<GURL>* origins) OVERRIDE {
+  void GetOriginsForTypeOnFileTaskRunner(storage::FileSystemType type,
+                                         std::set<GURL>* origins) override {
     NOTREACHED();
   }
 
-  virtual void GetOriginsForHostOnFileTaskRunner(
-      storage::FileSystemType type,
-      const std::string& host,
-      std::set<GURL>* origins) OVERRIDE {
+  void GetOriginsForHostOnFileTaskRunner(storage::FileSystemType type,
+                                         const std::string& host,
+                                         std::set<GURL>* origins) override {
     NOTREACHED();
   }
 
-  virtual int64 GetOriginUsageOnFileTaskRunner(
-      FileSystemContext* context,
-      const GURL& origin_url,
-      storage::FileSystemType type) OVERRIDE {
+  int64 GetOriginUsageOnFileTaskRunner(FileSystemContext* context,
+                                       const GURL& origin_url,
+                                       storage::FileSystemType type) override {
     return usage_;
   }
 
   // FileUpdateObserver overrides.
-  virtual void OnStartUpdate(const FileSystemURL& url) OVERRIDE {}
-  virtual void OnUpdate(const FileSystemURL& url, int64 delta) OVERRIDE {
+  void OnStartUpdate(const FileSystemURL& url) override {}
+  void OnUpdate(const FileSystemURL& url, int64 delta) override {
     usage_ += delta;
   }
-  virtual void OnEndUpdate(const FileSystemURL& url) OVERRIDE {}
+  void OnEndUpdate(const FileSystemURL& url) override {}
 
  private:
   int64 usage_;
@@ -218,7 +118,6 @@ TestFileSystemBackend::TestFileSystemBackend(
       task_runner_(task_runner),
       file_util_(
           new storage::AsyncFileUtilAdapter(new TestFileUtil(base_path))),
-      watcher_manager_(new TestWatcherManager()),
       quota_util_(new QuotaUtil),
       require_copy_or_move_validator_(false) {
   update_observers_ =
@@ -250,7 +149,7 @@ storage::AsyncFileUtil* TestFileSystemBackend::GetAsyncFileUtil(
 
 storage::WatcherManager* TestFileSystemBackend::GetWatcherManager(
     storage::FileSystemType type) {
-  return watcher_manager_.get();
+  return nullptr;
 }
 
 storage::CopyOrMoveFileValidatorFactory*
@@ -264,7 +163,7 @@ TestFileSystemBackend::GetCopyOrMoveFileValidatorFactory(
       *error_code = base::File::FILE_ERROR_SECURITY;
     return copy_or_move_file_validator_factory_.get();
   }
-  return NULL;
+  return nullptr;
 }
 
 void TestFileSystemBackend::InitializeCopyOrMoveFileValidatorFactory(
@@ -332,7 +231,7 @@ const storage::ChangeObserverList* TestFileSystemBackend::GetChangeObservers(
 
 const storage::AccessObserverList* TestFileSystemBackend::GetAccessObservers(
     storage::FileSystemType type) const {
-  return NULL;
+  return nullptr;
 }
 
 void TestFileSystemBackend::AddFileChangeObserver(

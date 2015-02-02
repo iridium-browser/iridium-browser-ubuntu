@@ -27,8 +27,8 @@ class SignalListener : public base::MessagePumpLibevent::Watcher {
 
   void AddSignalHandler(int signal, const SignalHandler& handler);
 
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
-  virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE {}
+  void OnFileCanReadWithoutBlocking(int fd) override;
+  void OnFileCanWriteWithoutBlocking(int fd) override {}
 
   // WatchFileDescriptor needs a controller through which the operation can be
   // canceled. We don't use it, but this is as good a place as any to store it.
@@ -67,7 +67,7 @@ int g_write_fd = 0;
 
 void GlobalSignalHandler(int signal) {
   char byte = signal;
-  int r ALLOW_UNUSED = write(g_write_fd, &byte, 1);
+  ignore_result(write(g_write_fd, &byte, 1));
 }
 
 }  // namespace

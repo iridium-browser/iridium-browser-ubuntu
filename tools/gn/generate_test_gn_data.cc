@@ -17,11 +17,7 @@ int files_written = 0;
 int targets_written = 0;
 
 base::FilePath UTF8ToFilePath(const std::string& s) {
-#if defined(OS_WIN)
-  return base::FilePath(base::UTF8ToWide(s));
-#else
-  return base::FilePath(s);
-#endif
+return base::FilePath::FromUTF8Unsafe(s);
 }
 
 std::string FilePathToUTF8(const base::FilePath& path) {
@@ -42,7 +38,7 @@ base::FilePath RepoPathToPathName(const std::vector<int>& repo_path) {
 
 std::string TargetIndexToLetter(int target_index) {
   char ret[2];
-  ret[0] = 'a' + target_index;
+  ret[0] = static_cast<char>('a' + target_index);
   ret[1] = 0;
   return ret;
 }

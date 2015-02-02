@@ -172,15 +172,25 @@ GrTexture* GaussianBlur(GrContext* context,
              kRGBA_8888_GrPixelConfig == srcTexture->config() ||
              kAlpha_8_GrPixelConfig == srcTexture->config());
 
-    GrTextureDesc desc;
-    desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+    GrSurfaceDesc desc;
+    desc.fFlags = kRenderTarget_GrSurfaceFlag | kNoStencil_GrSurfaceFlag;
     desc.fWidth = SkScalarFloorToInt(srcRect.width());
     desc.fHeight = SkScalarFloorToInt(srcRect.height());
     desc.fConfig = srcTexture->config();
 
-    GrAutoScratchTexture temp1, temp2;
-    GrTexture* dstTexture = temp1.set(context, desc);
-    GrTexture* tempTexture = canClobberSrc ? srcTexture : temp2.set(context, desc);
+    GrTexture* dstTexture;
+    GrTexture* tempTexture;
+    SkAutoTUnref<GrTexture> temp1, temp2;
+
+    temp1.reset(context->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch));
+    dstTexture = temp1.get();
+    if (canClobberSrc) {
+        tempTexture = srcTexture;
+    } else {
+        temp2.reset(context->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch));
+        tempTexture = temp2.get();
+    }
+
     if (NULL == dstTexture || NULL == tempTexture) {
         return NULL;
     }
@@ -240,7 +250,7 @@ GrTexture* GaussianBlur(GrContext* context,
                 // X convolution from reading garbage.
                 clearRect = SkIRect::MakeXYWH(srcIRect.fRight, srcIRect.fTop,
                                               radiusX, srcIRect.height());
-                context->clear(&clearRect, 0x0, false);
+                context->clear(&clearRect, 0x0, false, context->getRenderTarget());
             }
             context->setRenderTarget(dstTexture->asRenderTarget());
             SkRect dstRect = SkRect::MakeWH(srcRect.width(), srcRect.height());
@@ -257,7 +267,7 @@ GrTexture* GaussianBlur(GrContext* context,
                 // convolution from reading garbage.
                 clearRect = SkIRect::MakeXYWH(srcIRect.fLeft, srcIRect.fBottom,
                                               srcIRect.width(), radiusY);
-                context->clear(&clearRect, 0x0, false);
+                context->clear(&clearRect, 0x0, false, context->getRenderTarget());
             }
 
             context->setRenderTarget(dstTexture->asRenderTarget());
@@ -275,10 +285,10 @@ GrTexture* GaussianBlur(GrContext* context,
         // upsampling.
         clearRect = SkIRect::MakeXYWH(srcIRect.fLeft, srcIRect.fBottom,
                                       srcIRect.width() + 1, 1);
-        context->clear(&clearRect, 0x0, false);
+        context->clear(&clearRect, 0x0, false, context->getRenderTarget());
         clearRect = SkIRect::MakeXYWH(srcIRect.fRight, srcIRect.fTop,
                                       1, srcIRect.height());
-        context->clear(&clearRect, 0x0, false);
+        context->clear(&clearRect, 0x0, false, context->getRenderTarget());
         SkMatrix matrix;
         matrix.setIDiv(srcTexture->width(), srcTexture->height());
         context->setRenderTarget(dstTexture->asRenderTarget());
@@ -295,14 +305,7 @@ GrTexture* GaussianBlur(GrContext* context,
         srcTexture = dstTexture;
         SkTSwap(dstTexture, tempTexture);
     }
-    if (srcTexture == temp1.texture()) {
-        return temp1.detach();
-    } else if (srcTexture == temp2.texture()) {
-        return temp2.detach();
-    } else {
-        srcTexture->ref();
-        return srcTexture;
-    }
+    return SkRef(srcTexture);
 }
 #endif
 

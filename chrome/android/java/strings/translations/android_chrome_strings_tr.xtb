@@ -69,7 +69,6 @@ Yönetilen bir hesapla oturum açıyor ve hesabın yöneticisine Chrome profilin
 <translation id="7267430310003164111">Uygulamanın Google Play Store'dan alınması için istem. Uygulamanın adı: <ph name="APP_NAME"/>. Uygulamanın ortalama kullanıcı oyu: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Yükleniyor...</translation>
 <translation id="3992315671621218278">Bağlantıyı kaydet</translation>
-<translation id="8034522405403831421">Bu sayfa <ph name="SOURCE_LANGUAGE"/> dilinde. <ph name="TARGET_LANGUAGE"/> diline çevrilsin mi?</translation>
 <translation id="2476578072172137802">Site Ayarları</translation>
 <translation id="4195643157523330669">Yeni sekmede aç</translation>
 <translation id="651048280540227067">Menüyü kapat</translation>
@@ -95,6 +94,7 @@ Yönetilen bir hesapla oturum açıyor ve hesabın yöneticisine Chrome profilin
 <translation id="7947953824732555851">Kabul et ve oturum aç</translation>
 <translation id="6333140779060797560">Paylaşım yöntemi: <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Kapat</translation>
+<translation id="5138299137310274655">Bu sayfa <ph name="SOURCE_LANGUAGE"/> dilinde. <ph name="TARGET_LANGUAGE"/> diline çevrilsin mi?</translation>
 <translation id="969096075394517431">Dilleri değiştir</translation>
 <translation id="5032574515228824816">İstem</translation>
 <translation id="7961015016161918242">Hiçbir Zaman</translation>

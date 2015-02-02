@@ -12,7 +12,7 @@
 #include "cc/layers/content_layer_client.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkPaint.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace cc {
 
@@ -25,14 +25,14 @@ class FakeContentLayerClient : public ContentLayerClient {
   };
 
   FakeContentLayerClient();
-  virtual ~FakeContentLayerClient();
+  ~FakeContentLayerClient() override;
 
-  virtual void PaintContents(
+  void PaintContents(
       SkCanvas* canvas,
       const gfx::Rect& rect,
-      ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE;
-  virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
-  virtual bool FillsBoundsCompletely() const OVERRIDE;
+      ContentLayerClient::GraphicsContextStatus gc_status) override;
+  void DidChangeLayerCanUseLCDText() override {}
+  bool FillsBoundsCompletely() const override;
 
   void set_fill_with_nonsolid_color(bool nonsolid) {
     fill_with_nonsolid_color_ = nonsolid;
@@ -59,7 +59,7 @@ class FakeContentLayerClient : public ContentLayerClient {
   }
 
  private:
-  typedef std::vector<std::pair<gfx::RectF, SkPaint> > RectPaintVector;
+  typedef std::vector<std::pair<gfx::RectF, SkPaint>> RectPaintVector;
   typedef std::vector<BitmapData> BitmapVector;
 
   bool fill_with_nonsolid_color_;

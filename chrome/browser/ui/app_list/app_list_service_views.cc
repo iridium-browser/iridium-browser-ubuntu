@@ -26,18 +26,13 @@ void AppListServiceViews::Init(Profile* initial_profile) {
   PerformStartupChecks(initial_profile);
 }
 
-void AppListServiceViews::CreateForProfile(Profile* requested_profile) {
-  shower_.CreateViewForProfile(requested_profile);
-}
-
 void AppListServiceViews::ShowForProfile(Profile* requested_profile) {
   DCHECK(requested_profile);
 
   ScopedKeepAlive keep_alive;
 
-  InvalidatePendingProfileLoads();
-  SetProfilePath(requested_profile->GetPath());
-  shower_.ShowForProfile(requested_profile);
+  CreateForProfile(requested_profile);
+  shower_.ShowForCurrentProfile();
   RecordAppListLaunch();
 }
 
@@ -62,6 +57,13 @@ Profile* AppListServiceViews::GetCurrentAppListProfile() {
 
 AppListControllerDelegate* AppListServiceViews::GetControllerDelegate() {
   return controller_delegate_.get();
+}
+
+void AppListServiceViews::CreateForProfile(Profile* requested_profile) {
+  DCHECK(requested_profile);
+  InvalidatePendingProfileLoads();
+  shower_.CreateViewForProfile(requested_profile);
+  SetProfilePath(shower_.profile()->GetPath());
 }
 
 void AppListServiceViews::DestroyAppList() {

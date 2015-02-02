@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Dialog to confirm the share between profiles.
  *
@@ -56,12 +54,13 @@ function MultiProfileShareDialog(parentNode) {
  * @enum {string}
  * @const
  */
-MultiProfileShareDialog.Result = Object.freeze({
+MultiProfileShareDialog.Result = {
   CAN_EDIT: 'can_edit',
   CAN_COMMET: 'can_comment',
   CAN_VIEW: 'can_view',
   CANCEL: 'cancel'
-});
+};
+Object.freeze(MultiProfileShareDialog.Result);
 
 MultiProfileShareDialog.prototype = {
   __proto__: FileManagerDialogBase.prototype

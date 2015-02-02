@@ -27,40 +27,40 @@ class EncryptedMediaPlayerSupportImpl
   static scoped_ptr<EncryptedMediaPlayerSupport> Create(
       blink::WebMediaPlayerClient* client);
 
-  virtual ~EncryptedMediaPlayerSupportImpl();
+  ~EncryptedMediaPlayerSupportImpl() override;
 
   // EncryptedMediaPlayerSupport implementation.
-  virtual blink::WebMediaPlayer::MediaKeyException GenerateKeyRequest(
+  blink::WebMediaPlayer::MediaKeyException GenerateKeyRequest(
       blink::WebLocalFrame* frame,
       const blink::WebString& key_system,
       const unsigned char* init_data,
-      unsigned init_data_length)  OVERRIDE;
+      unsigned init_data_length) override;
 
-  virtual blink::WebMediaPlayer::MediaKeyException AddKey(
+  blink::WebMediaPlayer::MediaKeyException AddKey(
       const blink::WebString& key_system,
       const unsigned char* key,
       unsigned key_length,
       const unsigned char* init_data,
       unsigned init_data_length,
-      const blink::WebString& session_id) OVERRIDE;
+      const blink::WebString& session_id) override;
 
-  virtual blink::WebMediaPlayer::MediaKeyException CancelKeyRequest(
+  blink::WebMediaPlayer::MediaKeyException CancelKeyRequest(
       const blink::WebString& key_system,
-      const blink::WebString& session_id) OVERRIDE;
+      const blink::WebString& session_id) override;
 
-  virtual void SetInitialContentDecryptionModule(
-      blink::WebContentDecryptionModule* initial_cdm) OVERRIDE;
+  void SetInitialContentDecryptionModule(
+      blink::WebContentDecryptionModule* initial_cdm) override;
 
-  virtual void SetContentDecryptionModule(
-      blink::WebContentDecryptionModule* cdm) OVERRIDE;
-  virtual void SetContentDecryptionModule(
+  void SetContentDecryptionModule(
+      blink::WebContentDecryptionModule* cdm) override;
+  void SetContentDecryptionModule(
       blink::WebContentDecryptionModule* cdm,
-      blink::WebContentDecryptionModuleResult result) OVERRIDE;
+      blink::WebContentDecryptionModuleResult result) override;
 
-  virtual media::SetDecryptorReadyCB CreateSetDecryptorReadyCB() OVERRIDE;
-  virtual media::Demuxer::NeedKeyCB CreateNeedKeyCB() OVERRIDE;
+  media::SetDecryptorReadyCB CreateSetDecryptorReadyCB() override;
+  media::Demuxer::NeedKeyCB CreateNeedKeyCB() override;
 
-  virtual void OnPipelineDecryptError() OVERRIDE;
+  void OnPipelineDecryptError() override;
 
  private:
   explicit EncryptedMediaPlayerSupportImpl(blink::WebMediaPlayerClient* client);

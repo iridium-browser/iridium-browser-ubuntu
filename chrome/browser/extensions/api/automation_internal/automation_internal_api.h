@@ -37,9 +37,9 @@ class AutomationInternalEnableTabFunction
   DECLARE_EXTENSION_FUNCTION("automationInternal.enableTab",
                              AUTOMATIONINTERNAL_ENABLETAB)
  protected:
-  virtual ~AutomationInternalEnableTabFunction() {}
+  ~AutomationInternalEnableTabFunction() override {}
 
-  virtual ExtensionFunction::ResponseAction Run() OVERRIDE;
+  ExtensionFunction::ResponseAction Run() override;
 };
 
 class AutomationInternalPerformActionFunction
@@ -47,9 +47,9 @@ class AutomationInternalPerformActionFunction
   DECLARE_EXTENSION_FUNCTION("automationInternal.performAction",
                              AUTOMATIONINTERNAL_PERFORMACTION)
  protected:
-  virtual ~AutomationInternalPerformActionFunction() {}
+  ~AutomationInternalPerformActionFunction() override {}
 
-  virtual ExtensionFunction::ResponseAction Run() OVERRIDE;
+  ExtensionFunction::ResponseAction Run() override;
 
  private:
   // Helper function to route an action to an action adapter.
@@ -58,14 +58,45 @@ class AutomationInternalPerformActionFunction
       AutomationActionAdapter* adapter);
 };
 
+class AutomationInternalEnableFrameFunction : public UIThreadExtensionFunction {
+  DECLARE_EXTENSION_FUNCTION("automationInternal.enableFrame",
+                             AUTOMATIONINTERNAL_PERFORMACTION)
+ protected:
+  ~AutomationInternalEnableFrameFunction() override {}
+
+  ExtensionFunction::ResponseAction Run() override;
+};
+
 class AutomationInternalEnableDesktopFunction
     : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("automationInternal.enableDesktop",
                              AUTOMATIONINTERNAL_ENABLEDESKTOP)
  protected:
-  virtual ~AutomationInternalEnableDesktopFunction() {}
+  ~AutomationInternalEnableDesktopFunction() override {}
 
-  virtual ResponseAction Run() OVERRIDE;
+  ResponseAction Run() override;
+};
+
+class AutomationInternalQuerySelectorFunction
+    : public UIThreadExtensionFunction {
+  DECLARE_EXTENSION_FUNCTION("automationInternal.querySelector",
+                             AUTOMATIONINTERNAL_ENABLEDESKTOP)
+
+ public:
+  typedef base::Callback<void(const std::string& error,
+                              int result_acc_obj_id)> Callback;
+
+ protected:
+  ~AutomationInternalQuerySelectorFunction() override {}
+
+  ResponseAction Run() override;
+
+ private:
+  void OnResponse(const std::string& error, int result_acc_obj_id);
+
+  // Used for assigning a unique ID to each request so that the response can be
+  // routed appropriately.
+  static int query_request_id_counter_;
 };
 
 }  // namespace extensions

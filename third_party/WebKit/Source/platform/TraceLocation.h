@@ -13,7 +13,7 @@ namespace blink {
 
 class TraceLocation {
 public:
-    // Currenetly only store the bits used in Blink, base::Location stores more.
+    // Currently only store the bits used in Blink, base::Location stores more.
     // These char*s are not copied and must live for the duration of the program.
     TraceLocation(const char* functionName, const char* fileName)
         : m_functionName(functionName)

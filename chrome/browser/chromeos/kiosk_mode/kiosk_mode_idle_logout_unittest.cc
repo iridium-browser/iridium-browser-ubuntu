@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_idle_logout.h"
 
-#include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
@@ -26,12 +25,12 @@ class KioskModeIdleLogoutTest : public ash::test::AshTestBase {
       : idle_logout_(NULL) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     AshTestBase::SetUp();
     idle_logout_ = new KioskModeIdleLogout();
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     delete idle_logout_;
     AshTestBase::TearDown();
   }
@@ -44,8 +43,7 @@ class KioskModeIdleLogoutTest : public ash::test::AshTestBase {
   }
 
   bool UserActivityObserverRegistered() {
-    return ash::Shell::GetInstance()->user_activity_detector()->HasObserver(
-        idle_logout_);
+    return wm::UserActivityDetector::Get()->HasObserver(idle_logout_);
   }
 
   ScopedDeviceSettingsTestHelper device_settings_test_helper_;

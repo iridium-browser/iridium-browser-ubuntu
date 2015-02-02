@@ -40,7 +40,6 @@ namespace {
 content::WebUIDataSource* CreateCrashesUIHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUICrashesHost);
-  source->SetUseJsonJSFormatV2();
 
   source->AddLocalizedString("shortProductName", IDS_SHORT_PRODUCT_NAME);
   source->AddLocalizedString("crashesTitle", IDS_CRASHES_TITLE);
@@ -73,13 +72,13 @@ class CrashesDOMHandler : public WebUIMessageHandler,
                           public CrashUploadList::Delegate {
  public:
   CrashesDOMHandler();
-  virtual ~CrashesDOMHandler();
+  ~CrashesDOMHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // CrashUploadList::Delegate implemenation.
-  virtual void OnUploadListAvailable() OVERRIDE;
+  void OnUploadListAvailable() override;
 
  private:
   // Asynchronously fetches the list of crashes. Called from JS.

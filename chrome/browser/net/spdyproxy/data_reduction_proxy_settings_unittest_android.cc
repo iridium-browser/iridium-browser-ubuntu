@@ -14,7 +14,7 @@
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings_test_utils.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -39,7 +39,7 @@ class TestDataReductionProxySettingsAndroid
         settings_(settings) {}
 
   // Returns the provided setting object. Used by wrapping methods.
-  virtual DataReductionProxySettings* Settings() OVERRIDE {
+  virtual DataReductionProxySettings* Settings() override {
     return settings_;
   }
 
@@ -126,7 +126,7 @@ class DataReductionProxySettingsAndroidTest
           DataReductionProxyChromeSettings> {
  public:
   // DataReductionProxySettingsTest implementation:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     env_ = base::android::AttachCurrentThread();
     DataReductionProxySettingsAndroid::Register(env_);
     DataReductionProxySettingsTestBase::SetUp();

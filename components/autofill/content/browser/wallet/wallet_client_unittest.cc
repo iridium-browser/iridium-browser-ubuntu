@@ -657,19 +657,19 @@ class MockWalletClientDelegate : public WalletClientDelegate {
         is_shipping_required_(true) {}
   ~MockWalletClientDelegate() {}
 
-  virtual const AutofillMetrics& GetMetricLogger() const OVERRIDE {
+  virtual const AutofillMetrics& GetMetricLogger() const override {
     return metric_logger_;
   }
 
-  virtual std::string GetRiskData() const OVERRIDE {
+  virtual std::string GetRiskData() const override {
     return "risky business";
   }
 
-  virtual std::string GetWalletCookieValue() const OVERRIDE {
+  virtual std::string GetWalletCookieValue() const override {
     return "gdToken";
   }
 
-  virtual bool IsShippingAddressRequired() const OVERRIDE {
+  virtual bool IsShippingAddressRequired() const override {
     return is_shipping_required_;
   }
 
@@ -723,12 +723,12 @@ class MockWalletClientDelegate : public WalletClientDelegate {
                     const std::vector<FormFieldError>& form_field_errors));
   MOCK_METHOD1(OnWalletError, void(WalletClient::ErrorType error_type));
 
-  virtual void OnDidGetFullWallet(scoped_ptr<FullWallet> full_wallet) OVERRIDE {
+  virtual void OnDidGetFullWallet(scoped_ptr<FullWallet> full_wallet) override {
     EXPECT_TRUE(full_wallet);
     ++full_wallets_received_;
   }
   virtual void OnDidGetWalletItems(scoped_ptr<WalletItems> wallet_items)
-      OVERRIDE {
+      override {
     EXPECT_TRUE(wallet_items);
     ++wallet_items_received_;
   }
@@ -750,16 +750,14 @@ class WalletClientTest : public testing::Test {
   WalletClientTest()
       : request_context_(new net::TestURLRequestContextGetter(
             base::MessageLoopProxy::current())) {}
-  virtual ~WalletClientTest() {}
+  ~WalletClientTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     wallet_client_.reset(new WalletClient(
         request_context_.get(), &delegate_, GURL(kMerchantUrl)));
   }
 
-  virtual void TearDown() OVERRIDE {
-    wallet_client_.reset();
-  }
+  void TearDown() override { wallet_client_.reset(); }
 
   void VerifyAndFinishRequest(net::HttpStatusCode response_code,
                               const std::string& request_body,
@@ -1007,7 +1005,7 @@ TEST_F(WalletClientTest, WalletErrorCodes) {
       },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
+  for (size_t i = 0; i < arraysize(test_cases); ++i) {
     SCOPED_TRACE(
         base::StringPrintf(
             "%s - %s",

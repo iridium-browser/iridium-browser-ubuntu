@@ -4,7 +4,6 @@
 
 #include "chrome/browser/extensions/standard_management_policy_provider.h"
 
-#include <algorithm>
 #include <string>
 
 #include "base/logging.h"
@@ -77,16 +76,18 @@ bool StandardManagementPolicyProvider::UserMayLoad(
   if (Manifest::IsComponentLocation(extension->location()))
     return true;
 
-  // Fields in |by_id| will automatically fall back to default settings if
-  // they are not specified by policy.
-  const ExtensionManagement::IndividualSettings& by_id =
-      settings_->ReadById(extension->id());
-  const ExtensionManagement::GlobalSettings& global =
-      settings_->ReadGlobalSettings();
+  // Shared modules are always allowed too: they only contain resources that
+  // are used by other extensions. The extension that depends on the shared
+  // module may be filtered by policy.
+  if (extension->is_shared_module())
+    return true;
+
+  ExtensionManagement::InstallationMode installation_mode =
+      settings_->GetInstallationMode(extension);
 
   // Force-installed extensions cannot be overwritten manually.
   if (!Manifest::IsPolicyLocation(extension->location()) &&
-      by_id.installation_mode == ExtensionManagement::INSTALLATION_FORCED) {
+      installation_mode == ExtensionManagement::INSTALLATION_FORCED) {
     return ReturnLoadError(extension, error);
   }
 
@@ -96,7 +97,7 @@ bool StandardManagementPolicyProvider::UserMayLoad(
   // handled by the switch statement below, please consider whether enterprise
   // policy should be able to disallow extensions of the new type. If so, add
   // a branch to the second block and add a line to the definition of
-  // kExtensionAllowedTypesMap in configuration_policy_handler_list.cc.
+  // kAllowedTypesMap in extension_management_constants.h.
   switch (extension->GetType()) {
     case Manifest::TYPE_UNKNOWN:
       break;
@@ -107,19 +108,15 @@ bool StandardManagementPolicyProvider::UserMayLoad(
     case Manifest::TYPE_LEGACY_PACKAGED_APP:
     case Manifest::TYPE_PLATFORM_APP:
     case Manifest::TYPE_SHARED_MODULE: {
-      if (global.has_restricted_allowed_types &&
-          std::find(global.allowed_types.begin(),
-                    global.allowed_types.end(),
-                    extension->GetType()) == global.allowed_types.end()) {
+      if (!settings_->IsAllowedManifestType(extension->GetType()))
         return ReturnLoadError(extension, error);
-      }
       break;
     }
     case Manifest::NUM_LOAD_TYPES:
       NOTREACHED();
   }
 
-  if (by_id.installation_mode == ExtensionManagement::INSTALLATION_BLOCKED)
+  if (installation_mode == ExtensionManagement::INSTALLATION_BLOCKED)
     return ReturnLoadError(extension, error);
 
   return true;
@@ -139,6 +136,26 @@ bool StandardManagementPolicyProvider::MustRemainEnabled(
   return !AdminPolicyIsModifiable(extension, error) ||
          (extension->location() == extensions::Manifest::EXTERNAL_COMPONENT &&
           ExternalComponentLoader::IsModifiable(extension));
+}
+
+bool StandardManagementPolicyProvider::MustRemainInstalled(
+    const Extension* extension,
+    base::string16* error) const {
+  ExtensionManagement::InstallationMode mode =
+      settings_->GetInstallationMode(extension);
+  // Disallow removing of recommended extension, to avoid re-install it
+  // again while policy is reload. But disabling of recommended extension is
+  // allowed.
+  if (mode == ExtensionManagement::INSTALLATION_FORCED ||
+      mode == ExtensionManagement::INSTALLATION_RECOMMENDED) {
+    if (error) {
+      *error = l10n_util::GetStringFUTF16(
+          IDS_EXTENSION_CANT_UNINSTALL_POLICY_REQUIRED,
+          base::UTF8ToUTF16(extension->name()));
+    }
+    return true;
+  }
+  return false;
 }
 
 }  // namespace extensions

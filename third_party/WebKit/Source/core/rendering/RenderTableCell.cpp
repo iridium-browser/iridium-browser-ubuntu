@@ -29,6 +29,7 @@
 #include "core/css/StylePropertySet.h"
 #include "core/html/HTMLTableCellElement.h"
 #include "core/paint/BoxPainter.h"
+#include "core/paint/DrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderTableCol.h"
 #include "core/rendering/RenderView.h"
@@ -859,27 +860,27 @@ inline CollapsedBorderValue RenderTableCell::cachedCollapsedLeftBorder(const Ren
 {
     if (styleForCellFlow->isHorizontalWritingMode())
         return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSStart) : section()->cachedCollapsedBorder(this, CBSEnd);
-    return styleForCellFlow->isFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSAfter) : section()->cachedCollapsedBorder(this, CBSBefore);
+    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSAfter) : section()->cachedCollapsedBorder(this, CBSBefore);
 }
 
 inline CollapsedBorderValue RenderTableCell::cachedCollapsedRightBorder(const RenderStyle* styleForCellFlow) const
 {
     if (styleForCellFlow->isHorizontalWritingMode())
         return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSEnd) : section()->cachedCollapsedBorder(this, CBSStart);
-    return styleForCellFlow->isFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSBefore) : section()->cachedCollapsedBorder(this, CBSAfter);
+    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSBefore) : section()->cachedCollapsedBorder(this, CBSAfter);
 }
 
 inline CollapsedBorderValue RenderTableCell::cachedCollapsedTopBorder(const RenderStyle* styleForCellFlow) const
 {
     if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->isFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSAfter) : section()->cachedCollapsedBorder(this, CBSBefore);
+        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSAfter) : section()->cachedCollapsedBorder(this, CBSBefore);
     return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSStart) : section()->cachedCollapsedBorder(this, CBSEnd);
 }
 
 inline CollapsedBorderValue RenderTableCell::cachedCollapsedBottomBorder(const RenderStyle* styleForCellFlow) const
 {
     if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->isFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSBefore) : section()->cachedCollapsedBorder(this, CBSAfter);
+        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSBefore) : section()->cachedCollapsedBorder(this, CBSAfter);
     return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSEnd) : section()->cachedCollapsedBorder(this, CBSStart);
 }
 
@@ -930,7 +931,7 @@ int RenderTableCell::borderHalfLeft(bool outer) const
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
         return styleForCellFlow->isLeftToRightDirection() ? borderHalfStart(outer) : borderHalfEnd(outer);
-    return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
+    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
 }
 
 int RenderTableCell::borderHalfRight(bool outer) const
@@ -938,14 +939,14 @@ int RenderTableCell::borderHalfRight(bool outer) const
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
         return styleForCellFlow->isLeftToRightDirection() ? borderHalfEnd(outer) : borderHalfStart(outer);
-    return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
+    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
 }
 
 int RenderTableCell::borderHalfTop(bool outer) const
 {
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
+        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
     return styleForCellFlow->isLeftToRightDirection() ? borderHalfStart(outer) : borderHalfEnd(outer);
 }
 
@@ -953,7 +954,7 @@ int RenderTableCell::borderHalfBottom(bool outer) const
 {
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
+        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
     return styleForCellFlow->isLeftToRightDirection() ? borderHalfEnd(outer) : borderHalfStart(outer);
 }
 
@@ -977,7 +978,7 @@ int RenderTableCell::borderHalfBefore(bool outer) const
 {
     CollapsedBorderValue border = collapsedBeforeBorder(DoNotIncludeBorderColor);
     if (border.exists())
-        return (border.width() + ((styleForCellFlow()->isFlippedBlocksWritingMode() ^ outer) ? 0 : 1)) / 2; // Give the extra pixel to top and left.
+        return (border.width() + ((styleForCellFlow()->slowIsFlippedBlocksWritingMode() ^ outer) ? 0 : 1)) / 2; // Give the extra pixel to top and left.
     return 0;
 }
 
@@ -985,7 +986,7 @@ int RenderTableCell::borderHalfAfter(bool outer) const
 {
     CollapsedBorderValue border = collapsedAfterBorder(DoNotIncludeBorderColor);
     if (border.exists())
-        return (border.width() + ((styleForCellFlow()->isFlippedBlocksWritingMode() ^ outer) ? 1 : 0)) / 2;
+        return (border.width() + ((styleForCellFlow()->slowIsFlippedBlocksWritingMode() ^ outer) ? 1 : 0)) / 2;
     return 0;
 }
 
@@ -1198,6 +1199,7 @@ void RenderTableCell::paintBoxDecorationBackground(PaintInfo& paintInfo, const L
         return;
 
     LayoutRect paintRect = LayoutRect(paintOffset, pixelSnappedSize());
+    DrawingRecorder recorder(paintInfo.context, this, paintInfo.phase, pixelSnappedIntRect(paintRect));
     BoxPainter::paintBoxShadow(paintInfo, paintRect, style(), Normal);
 
     // Paint our cell background.

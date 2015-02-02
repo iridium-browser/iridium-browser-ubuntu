@@ -29,12 +29,12 @@ class RendererStartupHelper : public KeyedService,
  public:
   // This class sends messages to all renderers started for |browser_context|.
   explicit RendererStartupHelper(content::BrowserContext* browser_context);
-  virtual ~RendererStartupHelper();
+  ~RendererStartupHelper() override;
 
   // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
   content::BrowserContext* browser_context_;  // Not owned.
@@ -57,14 +57,14 @@ class RendererStartupHelperFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<RendererStartupHelperFactory>;
 
   RendererStartupHelperFactory();
-  virtual ~RendererStartupHelperFactory();
+  ~RendererStartupHelperFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
 
   DISALLOW_COPY_AND_ASSIGN(RendererStartupHelperFactory);
 };

@@ -80,14 +80,16 @@ net::URLRequestJob* URLRequestFakerForPostRequests(
   const net::UploadDataStream* upload_data = request->get_upload();
   g_last_upload_bytes.Get().clear();
   if (upload_data) {
-    const ScopedVector<net::UploadElementReader>& readers =
-        upload_data->element_readers();
-    for (size_t i = 0; i < readers.size(); ++i) {
-      const net::UploadBytesElementReader* bytes_reader =
-          readers[i]->AsBytesReader();
-      if (bytes_reader) {
-        g_last_upload_bytes.Get() +=
-            std::string(bytes_reader->bytes(), bytes_reader->length());
+    const ScopedVector<net::UploadElementReader>* readers =
+        upload_data->GetElementReaders();
+    if (readers) {
+      for (size_t i = 0; i < readers->size(); ++i) {
+        const net::UploadBytesElementReader* bytes_reader =
+            (*readers)[i]->AsBytesReader();
+        if (bytes_reader) {
+          g_last_upload_bytes.Get() +=
+              std::string(bytes_reader->bytes(), bytes_reader->length());
+        }
       }
     }
   }
@@ -109,9 +111,7 @@ class FakeBackgroundModeManager : public BackgroundModeManager {
     background_mode_active_ = active;
   }
 
-  virtual bool IsBackgroundModeActive() OVERRIDE {
-    return background_mode_active_;
-  }
+  bool IsBackgroundModeActive() override { return background_mode_active_; }
 
  private:
   bool background_mode_active_;
@@ -159,7 +159,7 @@ class BetterSessionRestoreTest : public InProcessBrowserTest {
   }
 
  protected:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     SessionServiceTestHelper helper(
         SessionServiceFactory::GetForProfile(browser()->profile()));
     helper.SetForceBrowserNotAliveWithNoWindows(true);
@@ -369,15 +369,15 @@ class ContinueWhereILeftOffTest : public BetterSessionRestoreTest {
  public:
   ContinueWhereILeftOffTest() { }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     BetterSessionRestoreTest::SetUpOnMainThread();
     SessionStartupPref::SetStartupPref(
         browser()->profile(), SessionStartupPref(SessionStartupPref::LAST));
   }
 
  protected:
-  virtual Browser* QuitBrowserAndRestore(Browser* browser,
-                                         bool close_all_windows) OVERRIDE {
+  Browser* QuitBrowserAndRestore(Browser* browser,
+                                 bool close_all_windows) override {
     content::WindowedNotificationObserver session_restore_observer(
         chrome::NOTIFICATION_SESSION_RESTORE_DONE,
         content::NotificationService::AllSources());
@@ -577,13 +577,17 @@ IN_PROC_BROWSER_TEST_F(ContinueWhereILeftOffTest,
   CheckFormRestored(new_browser, false, false);
 }
 
+// ChromeOS does not override the SessionStartupPreference upon controlled
+// system restart.
+#if !defined(OS_CHROMEOS)
 class RestartTest : public BetterSessionRestoreTest {
  public:
   RestartTest() { }
-  virtual ~RestartTest() { }
+  ~RestartTest() override {}
+
  protected:
   void Restart() {
-    // Simluate restarting the browser, but let the test exit peacefully.
+    // Simulate restarting the browser, but let the test exit peacefully.
     for (chrome::BrowserIterator it; !it.done(); it.Next())
       content::BrowserContext::SaveSessionState(it->profile());
     PrefService* pref_service = g_browser_process->local_state();
@@ -656,6 +660,7 @@ IN_PROC_BROWSER_TEST_F(RestartTest, PostWithPassword) {
   // The form data contained passwords, so it's removed completely.
   CheckFormRestored(false, false);
 }
+#endif
 
 // These tests ensure that the Better Session Restore features are not triggered
 // when they shouldn't be.
@@ -663,7 +668,7 @@ class NoSessionRestoreTest : public BetterSessionRestoreTest {
  public:
   NoSessionRestoreTest() { }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     BetterSessionRestoreTest::SetUpOnMainThread();
     SessionStartupPref::SetStartupPref(
         browser()->profile(), SessionStartupPref(SessionStartupPref::DEFAULT));

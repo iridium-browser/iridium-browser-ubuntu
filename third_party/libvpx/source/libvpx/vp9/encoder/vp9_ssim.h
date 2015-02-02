@@ -23,6 +23,20 @@ double vp9_calc_ssim(YV12_BUFFER_CONFIG *source, YV12_BUFFER_CONFIG *dest,
 double vp9_calc_ssimg(YV12_BUFFER_CONFIG *source, YV12_BUFFER_CONFIG *dest,
                       double *ssim_y, double *ssim_u, double *ssim_v);
 
+#if CONFIG_VP9_HIGHBITDEPTH
+double vp9_highbd_calc_ssim(YV12_BUFFER_CONFIG *source,
+                            YV12_BUFFER_CONFIG *dest,
+                            double *weight,
+                            unsigned int bd);
+
+double vp9_highbd_calc_ssimg(YV12_BUFFER_CONFIG *source,
+                             YV12_BUFFER_CONFIG *dest,
+                             double *ssim_y,
+                             double *ssim_u,
+                             double *ssim_v,
+                             unsigned int bd);
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

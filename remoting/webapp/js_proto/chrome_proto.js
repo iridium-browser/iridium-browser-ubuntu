@@ -55,8 +55,12 @@ chrome.runtime = {
     /** @type {string} */
     message: ''
   },
-  /** @return {{version: string, app: {background: Object}}} */
+  /** @type {string} */
+  id: '',
+  /** @return {{name: string, version: string, app: {background: Object}}} */
   getManifest: function() {},
+  /** @param {function(Window):void} callback */
+  getBackgroundPage: function(callback) {},
   /** @type {chrome.Event} */
   onSuspend: null,
   /** @type {chrome.Event} */
@@ -128,8 +132,9 @@ chrome.extension = {};
 
 /**
  * @param {*} message
+ * @param {function(*)=} opt_callback
  */
-chrome.extension.sendMessage = function(message) {}
+chrome.extension.sendMessage = function(message, opt_callback) {};
 
 /** @type {chrome.Event} */
 chrome.extension.onMessage;
@@ -144,6 +149,11 @@ chrome.i18n = {};
  * @return {string}
  */
 chrome.i18n.getMessage = function(messageName, opt_args) {};
+
+/**
+ * @return {string}
+ */
+chrome.i18n.getUILanguage = function() {};
 
 
 /** @type {Object} */
@@ -355,14 +365,21 @@ var AppWindow = function() {
   this.onFullscreened = null;
   /** @type {string} */
   this.id = '';
+  /** @type {Bounds} */
+  this.outerBounds = null;
+  /** @type {Bounds} */
+  this.innerBounds = null;
 };
 
 AppWindow.prototype.close = function() {};
 AppWindow.prototype.drawAttention = function() {};
+AppWindow.prototype.focus = function() {};
 AppWindow.prototype.maximize = function() {};
 AppWindow.prototype.minimize = function() {};
 AppWindow.prototype.restore = function() {};
 AppWindow.prototype.show = function() {};
+/** @return {boolean} */
+AppWindow.prototype.isMinimized = function() {};
 AppWindow.prototype.fullscreen = function() {};
 /** @return {boolean} */
 AppWindow.prototype.isFullscreen = function() {};
@@ -385,6 +402,18 @@ var LaunchData = function() {
   this.id = '';
   /** @type {Array.<{type: string, entry: FileEntry}>} */
   this.items = [];
+};
+
+/** @constructor */
+function Bounds() {
+  /** @type {number} */
+  this.left = 0;
+  /** @type {number} */
+  this.top = 0;
+  /** @type {number} */
+  this.width = 0;
+  /** @type {number} */
+  this.height = 0;
 };
 
 /** @constructor */

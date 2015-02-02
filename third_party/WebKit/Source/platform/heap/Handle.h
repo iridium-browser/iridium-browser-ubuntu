@@ -57,16 +57,16 @@ struct IsGarbageCollectedMixin {
 
 #if COMPILER(MSVC)
     template<typename U> static TrueType hasAdjustAndMark(char[&U::adjustAndMark != 0]);
-    template<typename U> static TrueType hasIsAlive(char[&U::isAlive != 0]);
+    template<typename U> static TrueType hasIsHeapObjectAlive(char[&U::isHeapObjectAlive != 0]);
 #else
     template<size_t> struct F;
     template<typename U> static TrueType hasAdjustAndMark(F<sizeof(&U::adjustAndMark)>*);
-    template<typename U> static TrueType hasIsAlive(F<sizeof(&U::isAlive)>*);
+    template<typename U> static TrueType hasIsHeapObjectAlive(F<sizeof(&U::isHeapObjectAlive)>*);
 #endif
-    template<typename U> static FalseType hasIsAlive(...);
+    template<typename U> static FalseType hasIsHeapObjectAlive(...);
     template<typename U> static FalseType hasAdjustAndMark(...);
 
-    static bool const value = (sizeof(TrueType) == sizeof(hasAdjustAndMark<T>(0))) && (sizeof(TrueType) == sizeof(hasIsAlive<T>(0)));
+    static bool const value = (sizeof(TrueType) == sizeof(hasAdjustAndMark<T>(0))) && (sizeof(TrueType) == sizeof(hasIsHeapObjectAlive<T>(0)));
 };
 
 template <typename T>
@@ -79,13 +79,13 @@ struct IsGarbageCollectedType {
     typedef typename WTF::RemoveConst<T>::Type NonConstType;
     typedef WTF::IsSubclassOfTemplate<NonConstType, GarbageCollected> GarbageCollectedSubclass;
     typedef IsGarbageCollectedMixin<NonConstType> GarbageCollectedMixinSubclass;
-    typedef WTF::IsSubclassOfTemplate3<NonConstType, HeapHashSet> HeapHashSetSubclass;
-    typedef WTF::IsSubclassOfTemplate3<NonConstType, HeapLinkedHashSet> HeapLinkedHashSetSubclass;
+    typedef WTF::IsSubclassOfTemplate<NonConstType, HeapHashSet> HeapHashSetSubclass;
+    typedef WTF::IsSubclassOfTemplate<NonConstType, HeapLinkedHashSet> HeapLinkedHashSetSubclass;
     typedef WTF::IsSubclassOfTemplateTypenameSizeTypename<NonConstType, HeapListHashSet> HeapListHashSetSubclass;
-    typedef WTF::IsSubclassOfTemplate5<NonConstType, HeapHashMap> HeapHashMapSubclass;
+    typedef WTF::IsSubclassOfTemplate<NonConstType, HeapHashMap> HeapHashMapSubclass;
     typedef WTF::IsSubclassOfTemplateTypenameSize<NonConstType, HeapVector> HeapVectorSubclass;
     typedef WTF::IsSubclassOfTemplateTypenameSize<NonConstType, HeapDeque> HeapDequeSubclass;
-    typedef WTF::IsSubclassOfTemplate3<NonConstType, HeapHashCountedSet> HeapHashCountedSetSubclass;
+    typedef WTF::IsSubclassOfTemplate<NonConstType, HeapHashCountedSet> HeapHashCountedSetSubclass;
     typedef WTF::IsSubclassOfTemplate<NonConstType, HeapTerminatedArray> HeapTerminatedArraySubclass;
 
     template<typename U, size_t inlineCapacity> static TrueType listHashSetNodeIsHeapAllocated(WTF::ListHashSetNode<U, HeapListHashSetAllocator<U, inlineCapacity> >*);
@@ -149,199 +149,6 @@ private:
     friend class PersistentAnchor;
     friend class ThreadState;
 };
-
-
-const int wrapperPersistentsPerRegion = 256;
-const size_t wrapperPersistentOffsetMask = ~static_cast<size_t>(3);
-const size_t wrapperPersistentLiveBitMask = 1;
-
-class WrapperPersistentNode {
-    ALLOW_ONLY_INLINE_ALLOCATION();
-    WTF_MAKE_NONCOPYABLE(WrapperPersistentNode);
-public:
-    bool isAlive() { return m_regionOffset & wrapperPersistentLiveBitMask; }
-
-    WrapperPersistentRegion* region()
-    {
-        return reinterpret_cast<WrapperPersistentRegion*>(
-            reinterpret_cast<Address>(this) - regionOffset());
-    }
-
-    virtual void trace(Visitor* visitor) { }
-
-    static inline void destroy(const WrapperPersistentNode*);
-
-protected:
-    WrapperPersistentNode() : m_raw(0), m_regionOffset(0) { }
-    WrapperPersistentNode(void *raw, size_t regionOffset) : m_raw(raw), m_regionOffset(regionOffset) { }
-
-private:
-    size_t regionOffset() { return m_regionOffset & wrapperPersistentOffsetMask; }
-
-    WrapperPersistentNode* takeSlot()
-    {
-        // The slot should not be alive at the point where it is allocated.
-        ASSERT(!isAlive());
-        WrapperPersistentNode* nextFree = reinterpret_cast<WrapperPersistentNode*>(m_raw);
-        m_raw = 0;
-        return nextFree;
-    }
-
-    WrapperPersistentNode* freeSlot(WrapperPersistentNode* nextFree)
-    {
-        m_regionOffset &= ~wrapperPersistentLiveBitMask;
-        m_raw = nextFree;
-        return this;
-    }
-
-    // Don't allow delete being called on wrapper persistent nodes. We
-    // do use placement new to initialize the slot with the right vtable. See
-    // WrapperPersistent<T> below.
-    void operator delete(void*);
-
-protected:
-    // m_raw is used both to point to the object when the WrapperPersistentNode is used/alive
-    // and to point to the next free wrapperPersistentNode in the region when the node is
-    // unused/dead.
-    void* m_raw;
-
-    // The m_regionOffset field encodes liveness of the slot as well as being an
-    // offset from this node to the base of the containing WrapperPersistentRegion.
-    size_t m_regionOffset;
-
-    friend class WrapperPersistentRegion;
-};
-
-template<typename T>
-class WrapperPersistent FINAL : public WrapperPersistentNode {
-    ALLOW_ONLY_INLINE_ALLOCATION();
-public:
-    static WrapperPersistent<T>* create(T* raw);
-
-    virtual void trace(Visitor* visitor) OVERRIDE
-    {
-        ASSERT(isAlive());
-        visitor->mark(static_cast<T*>(m_raw));
-    }
-
-private:
-    WrapperPersistent() { }
-
-    // We need to use a constructor to initialize the allocated slot since it
-    // has a vtable which must be set to the WrapperPersistent<T> type.
-    WrapperPersistent(T* raw, size_t regionOffset) : WrapperPersistentNode(raw, regionOffset) { }
-
-    // Don't allow delete being called on wrapper persistents.
-    void operator delete(void*);
-};
-
-class PLATFORM_EXPORT WrapperPersistentRegion {
-    WTF_MAKE_NONCOPYABLE(WrapperPersistentRegion);
-public:
-    WrapperPersistentRegion()
-    {
-        WrapperPersistentNode* nextFree = 0;
-        for (int i = wrapperPersistentsPerRegion - 1; i >= 0; --i) {
-            size_t regionOffset = reinterpret_cast<Address>(&m_entries[i]) - reinterpret_cast<Address>(this);
-            // Setup the free slot with an offset to the containing region's base and a pointer to the next
-            // free slot in the region.
-            ASSERT(!(regionOffset & ~wrapperPersistentOffsetMask));
-            new (&m_entries[i]) WrapperPersistentNode(nextFree, regionOffset);
-            nextFree = &m_entries[i];
-        }
-        m_prev = 0;
-        m_next = 0;
-        m_freeHead = nextFree;
-        m_count = 0;
-    }
-
-    Address allocate()
-    {
-        if (!m_freeHead) {
-            ASSERT(m_count == wrapperPersistentsPerRegion);
-            return 0;
-        }
-        // We have a free persistent slot in this region.
-        WrapperPersistentNode* freeSlot = m_freeHead;
-        // Take the slot and advance m_freeHead to the next free slot.
-        m_freeHead = freeSlot->takeSlot();
-        ASSERT(m_count < wrapperPersistentsPerRegion);
-        m_count++;
-        return reinterpret_cast<Address>(freeSlot);
-    }
-
-    void free(WrapperPersistentNode* object)
-    {
-        ASSERT(object);
-        m_freeHead = object->freeSlot(m_freeHead);
-        ASSERT(m_count > 0);
-        m_count--;
-        if (!m_count)
-            ThreadState::current()->freeWrapperPersistentRegion(this);
-    }
-
-    bool removeIfNotLast(WrapperPersistentRegion** headPtr);
-    static void insertHead(WrapperPersistentRegion** headPtr, WrapperPersistentRegion* newHead);
-    static WrapperPersistentRegion* removeHead(WrapperPersistentRegion** headPtr);
-    static Address outOfLineAllocate(ThreadState*, WrapperPersistentRegion**);
-    static void trace(WrapperPersistentRegion* head, Visitor* visitor)
-    {
-        for (WrapperPersistentRegion* current = head; current; current = current->m_next)
-            current->traceRegion(visitor);
-    }
-
-private:
-    void traceRegion(Visitor* visitor)
-    {
-        size_t live = 0;
-
-#ifdef NDEBUG
-        for (int i = 0; i < wrapperPersistentsPerRegion && live < m_count; ++i) {
-#else
-        // In DEBUG mode we scan all entries to validate we only have m_count
-        // live entries.
-        for (int i = 0; i < wrapperPersistentsPerRegion; ++i) {
-#endif
-            if (m_entries[i].isAlive()) {
-                m_entries[i].trace(visitor);
-                live++;
-            }
-        }
-        ASSERT(live == m_count);
-    }
-
-    WrapperPersistentRegion* m_prev;
-    WrapperPersistentRegion* m_next;
-    WrapperPersistentNode* m_freeHead;
-    size_t m_count;
-    WrapperPersistentNode m_entries[wrapperPersistentsPerRegion];
-};
-
-template<typename T>
-WrapperPersistent<T>* WrapperPersistent<T>::create(T* raw)
-{
-    ThreadState* state = ThreadState::current();
-    WrapperPersistentRegion* region = state->wrapperRoots();
-    ASSERT(region);
-    Address persistentSlot = region->allocate();
-    if (!persistentSlot)
-        persistentSlot = WrapperPersistentRegion::outOfLineAllocate(state, &region);
-    ASSERT(persistentSlot);
-    ASSERT(!reinterpret_cast<WrapperPersistentNode*>(persistentSlot)->isAlive());
-
-    size_t regionOffset = persistentSlot - reinterpret_cast<Address>(region);
-    regionOffset |= wrapperPersistentLiveBitMask;
-
-    // We use placement new to call the constructor to ensure that we setup the
-    // vtable correctly.
-    return new (persistentSlot) WrapperPersistent<T>(raw, regionOffset);
-}
-
-void WrapperPersistentNode::destroy(const WrapperPersistentNode* node)
-{
-    WrapperPersistentNode* persistent = const_cast<WrapperPersistentNode*>(node);
-    persistent->region()->free(persistent);
-}
 
 // RootsAccessor for Persistent that provides access to thread-local list
 // of persistent handles. Can only be used to create handles that
@@ -499,8 +306,6 @@ class CrossThreadPersistent;
 // the same thread.
 template<typename T, typename RootsAccessor /* = ThreadLocalPersistents<ThreadingTrait<T>::Affinity > */ >
 class Persistent : public PersistentBase<RootsAccessor, Persistent<T, RootsAccessor> > {
-    WTF_DISALLOW_CONSTRUCTION_FROM_ZERO(Persistent);
-    WTF_DISALLOW_ZERO_ASSIGNMENT(Persistent);
 public:
     Persistent() : m_raw(0) { }
 
@@ -635,8 +440,6 @@ private:
 // different from the construction thread.
 template<typename T>
 class CrossThreadPersistent : public Persistent<T, GlobalPersistents> {
-    WTF_DISALLOW_CONSTRUCTION_FROM_ZERO(CrossThreadPersistent);
-    WTF_DISALLOW_ZERO_ASSIGNMENT(CrossThreadPersistent);
 public:
     CrossThreadPersistent(T* raw) : Persistent<T, GlobalPersistents>(raw) { }
 
@@ -727,8 +530,6 @@ public:
 // all Member fields of a live object will be traced marked as live as well.
 template<typename T>
 class Member {
-    WTF_DISALLOW_CONSTRUCTION_FROM_ZERO(Member);
-    WTF_DISALLOW_ZERO_ASSIGNMENT(Member);
 public:
     Member() : m_raw(0)
     {
@@ -919,8 +720,6 @@ public:
 // time of GC the weak pointers will automatically be set to null.
 template<typename T>
 class WeakMember : public Member<T> {
-    WTF_DISALLOW_CONSTRUCTION_FROM_ZERO(WeakMember);
-    WTF_DISALLOW_ZERO_ASSIGNMENT(WeakMember);
 public:
     WeakMember() : Member<T>() { }
 
@@ -1011,7 +810,6 @@ template<typename T, typename U> inline bool operator!=(const Persistent<T>& a, 
 #define RefCountedGarbageCollectedWillBeGarbageCollectedFinalized blink::GarbageCollectedFinalized
 #define ThreadSafeRefCountedWillBeGarbageCollected blink::GarbageCollected
 #define ThreadSafeRefCountedWillBeGarbageCollectedFinalized blink::GarbageCollectedFinalized
-#define ThreadSafeRefCountedWillBeThreadSafeRefCountedGarbageCollected blink::ThreadSafeRefCountedGarbageCollected
 #define PersistentWillBeMember blink::Member
 #define CrossThreadPersistentWillBeMember blink::Member
 #define RefPtrWillBePersistent blink::Persistent
@@ -1053,54 +851,21 @@ template<typename T, typename U> inline bool operator!=(const Persistent<T>& a, 
 #define WillBeHeapTerminatedArray blink::HeapTerminatedArray
 #define WillBeHeapTerminatedArrayBuilder blink::HeapTerminatedArrayBuilder
 #define WillBeHeapLinkedStack blink::HeapLinkedStack
+#define PersistentHeapHashMapWillBeHeapHashMap blink::HeapHashMap
 #define PersistentHeapHashSetWillBeHeapHashSet blink::HeapHashSet
 #define PersistentHeapDequeWillBeHeapDeque blink::HeapDeque
 #define PersistentHeapVectorWillBeHeapVector blink::HeapVector
 
-template<typename T> PassRefPtrWillBeRawPtr<T> adoptRefWillBeNoop(T* ptr)
+template<typename T> T* adoptRefWillBeNoop(T* ptr)
 {
-    static const bool notRefCountedGarbageCollected = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCountedGarbageCollected>::value;
     static const bool notRefCounted = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCounted>::value;
-    COMPILE_ASSERT(notRefCountedGarbageCollected, useAdoptRefCountedWillBeRefCountedGarbageCollected);
     COMPILE_ASSERT(notRefCounted, youMustAdopt);
-    return PassRefPtrWillBeRawPtr<T>(ptr);
+    return ptr;
 }
 
-template<typename T> PassRefPtrWillBeRawPtr<T> adoptRefWillBeRefCountedGarbageCollected(T* ptr)
+template<typename T> T* adoptPtrWillBeNoop(T* ptr)
 {
-    static const bool isRefCountedGarbageCollected = WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCountedGarbageCollected>::value;
-    COMPILE_ASSERT(isRefCountedGarbageCollected, useAdoptRefWillBeNoop);
-    return PassRefPtrWillBeRawPtr<T>(adoptRefCountedGarbageCollected(ptr));
-}
-
-template<typename T> PassRefPtrWillBeRawPtr<T> adoptRefWillBeThreadSafeRefCountedGarbageCollected(T* ptr)
-{
-    static const bool isThreadSafeRefCountedGarbageCollected = WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, ThreadSafeRefCountedGarbageCollected>::value;
-    COMPILE_ASSERT(isThreadSafeRefCountedGarbageCollected, useAdoptRefWillBeNoop);
-    return PassRefPtrWillBeRawPtr<T>(adoptRefCountedGarbageCollected(ptr));
-}
-
-template<typename T> PassOwnPtrWillBeRawPtr<T> adoptPtrWillBeNoop(T* ptr)
-{
-    static const bool notRefCountedGarbageCollected = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCountedGarbageCollected>::value;
     static const bool notRefCounted = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCounted>::value;
-    COMPILE_ASSERT(notRefCountedGarbageCollected, useAdoptRefCountedWillBeRefCountedGarbageCollected);
-    COMPILE_ASSERT(notRefCounted, youMustAdopt);
-    return PassOwnPtrWillBeRawPtr<T>(ptr);
-}
-
-template<typename T> T* adoptPtrWillBeRefCountedGarbageCollected(T* ptr)
-{
-    static const bool isRefCountedGarbageCollected = WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCountedGarbageCollected>::value;
-    COMPILE_ASSERT(isRefCountedGarbageCollected, useAdoptRefWillBeNoop);
-    return adoptRefCountedGarbageCollected(ptr);
-}
-
-template<typename T> T* adoptRefCountedGarbageCollectedWillBeNoop(T* ptr)
-{
-    static const bool notRefCountedGarbageCollected = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCountedGarbageCollected>::value;
-    static const bool notRefCounted = !WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCounted>::value;
-    COMPILE_ASSERT(notRefCountedGarbageCollected, useAdoptRefCountedWillBeRefCountedGarbageCollected);
     COMPILE_ASSERT(notRefCounted, youMustAdopt);
     return ptr;
 }
@@ -1129,7 +894,6 @@ public:
 #define RefCountedGarbageCollectedWillBeGarbageCollectedFinalized blink::RefCountedGarbageCollected
 #define ThreadSafeRefCountedWillBeGarbageCollected WTF::ThreadSafeRefCounted
 #define ThreadSafeRefCountedWillBeGarbageCollectedFinalized WTF::ThreadSafeRefCounted
-#define ThreadSafeRefCountedWillBeThreadSafeRefCountedGarbageCollected WTF::ThreadSafeRefCounted
 #define PersistentWillBeMember blink::Persistent
 #define CrossThreadPersistentWillBeMember blink::CrossThreadPersistent
 #define RefPtrWillBePersistent WTF::RefPtr
@@ -1171,23 +935,13 @@ public:
 #define WillBeHeapTerminatedArray WTF::TerminatedArray
 #define WillBeHeapTerminatedArrayBuilder WTF::TerminatedArrayBuilder
 #define WillBeHeapLinkedStack WTF::LinkedStack
+#define PersistentHeapHashMapWillBeHeapHashMap blink::PersistentHeapHashMap
 #define PersistentHeapHashSetWillBeHeapHashSet blink::PersistentHeapHashSet
 #define PersistentHeapDequeWillBeHeapDeque blink::PersistentHeapDeque
 #define PersistentHeapVectorWillBeHeapVector blink::PersistentHeapVector
 
 template<typename T> PassRefPtrWillBeRawPtr<T> adoptRefWillBeNoop(T* ptr) { return adoptRef(ptr); }
-template<typename T> PassRefPtrWillBeRawPtr<T> adoptRefWillBeRefCountedGarbageCollected(T* ptr) { return adoptRef(ptr); }
-template<typename T> PassRefPtrWillBeRawPtr<T> adoptRefWillBeThreadSafeRefCountedGarbageCollected(T* ptr) { return adoptRef(ptr); }
 template<typename T> PassOwnPtrWillBeRawPtr<T> adoptPtrWillBeNoop(T* ptr) { return adoptPtr(ptr); }
-template<typename T> PassOwnPtrWillBeRawPtr<T> adoptPtrWillBeRefCountedGarbageCollected(T* ptr) { return adoptPtr(ptr); }
-
-template<typename T> T* adoptRefCountedGarbageCollectedWillBeNoop(T* ptr)
-{
-    static const bool isRefCountedGarbageCollected = WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<T>::Type, RefCountedGarbageCollected>::value;
-    COMPILE_ASSERT(isRefCountedGarbageCollected, useAdoptRefWillBeNoop);
-    return adoptRefCountedGarbageCollected(ptr);
-}
-
 
 #define WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED WTF_MAKE_FAST_ALLOCATED
 #define DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(type) \

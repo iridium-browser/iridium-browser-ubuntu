@@ -165,9 +165,9 @@ class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
       : pp_instance_(pp_instance) {
   }
 
-  virtual ~ManifestServiceProxy() { }
+  ~ManifestServiceProxy() override {}
 
-  virtual void StartupInitializationComplete() OVERRIDE {
+  void StartupInitializationComplete() override {
     if (StartPpapiProxy(pp_instance_) == PP_TRUE) {
       JsonManifest* manifest = GetJsonManifest(pp_instance_);
       NexeLoadManager* load_manager = NexeLoadManager::Get(pp_instance_);
@@ -187,9 +187,9 @@ class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
     }
   }
 
-  virtual void OpenResource(
+  void OpenResource(
       const std::string& key,
-      const ManifestServiceChannel::OpenResourceCallback& callback) OVERRIDE {
+      const ManifestServiceChannel::OpenResourceCallback& callback) override {
     DCHECK(ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->
                BelongsToCurrentThread());
 
@@ -275,23 +275,40 @@ int32_t FileDownloaderToPepperError(FileDownloader::Status status) {
   return PP_ERROR_FAILED;
 }
 
+NaClAppProcessType PP_ToNaClAppProcessType(
+    PP_NaClAppProcessType pp_process_type) {
+#define STATICALLY_CHECK_NACLAPPPROCESSTYPE_EQ(pp, nonpp)        \
+  static_assert(static_cast<int>(pp) == static_cast<int>(nonpp), \
+                "PP_NaClAppProcessType differs from NaClAppProcessType");
+  STATICALLY_CHECK_NACLAPPPROCESSTYPE_EQ(PP_UNKNOWN_NACL_PROCESS_TYPE,
+                                         kUnknownNaClProcessType);
+  STATICALLY_CHECK_NACLAPPPROCESSTYPE_EQ(PP_NATIVE_NACL_PROCESS_TYPE,
+                                         kNativeNaClProcessType);
+  STATICALLY_CHECK_NACLAPPPROCESSTYPE_EQ(PP_PNACL_PROCESS_TYPE,
+                                         kPNaClProcessType);
+  STATICALLY_CHECK_NACLAPPPROCESSTYPE_EQ(PP_PNACL_TRANSLATOR_PROCESS_TYPE,
+                                         kPNaClTranslatorProcessType);
+  STATICALLY_CHECK_NACLAPPPROCESSTYPE_EQ(PP_NUM_NACL_PROCESS_TYPES,
+                                         kNumNaClProcessTypes);
+#undef STATICALLY_CHECK_NACLAPPPROCESSTYPE_EQ
+  DCHECK(pp_process_type > PP_UNKNOWN_NACL_PROCESS_TYPE &&
+         pp_process_type < PP_NUM_NACL_PROCESS_TYPES);
+  return static_cast<NaClAppProcessType>(pp_process_type);
+}
+
 // Launch NaCl's sel_ldr process.
 void LaunchSelLdr(PP_Instance instance,
                   PP_Bool main_service_runtime,
                   const char* alleged_url,
                   const PP_NaClFileInfo* nexe_file_info,
-                  PP_Bool uses_irt,
-                  PP_Bool uses_ppapi,
                   PP_Bool uses_nonsfi_mode,
                   PP_Bool enable_ppapi_dev,
-                  PP_Bool enable_dyncode_syscalls,
-                  PP_Bool enable_exception_handling,
-                  PP_Bool enable_crash_throttling,
+                  PP_NaClAppProcessType pp_process_type,
                   void* imc_handle,
                   PP_CompletionCallback callback) {
   CHECK(ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->
             BelongsToCurrentThread());
-
+  NaClAppProcessType process_type = PP_ToNaClAppProcessType(pp_process_type);
   // Create the manifest service proxy here, so on error case, it will be
   // destructed (without passing it to ManifestServiceChannel).
   scoped_ptr<ManifestServiceChannel::Delegate> manifest_service_proxy(
@@ -304,7 +321,9 @@ void LaunchSelLdr(PP_Instance instance,
   // If the nexe uses ppapi APIs, we need a routing ID.
   // To get the routing ID, we must be on the main thread.
   // Some nexes do not use ppapi and launch from the background thread,
-  // so those nexes can skip finding a routing_id.
+  // so those nexes can skip finding a routing_id. Currently, that only
+  // applies to the PNaClTranslatorProcesses.
+  bool uses_ppapi = process_type != kPNaClTranslatorProcessType;
   if (uses_ppapi) {
     routing_id = GetRoutingID(instance);
     if (!routing_id) {
@@ -354,11 +373,8 @@ void LaunchSelLdr(PP_Instance instance,
               nexe_file_info->token_hi,
               routing_id,
               perm_bits,
-              PP_ToBool(uses_irt),
               PP_ToBool(uses_nonsfi_mode),
-              PP_ToBool(enable_dyncode_syscalls),
-              PP_ToBool(enable_exception_handling),
-              PP_ToBool(enable_crash_throttling)),
+              process_type),
           &launch_result,
           &error_message_string))) {
     ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
@@ -423,11 +439,9 @@ void LaunchSelLdr(PP_Instance instance,
 
   // Create the manifest service handle as well.
   // For security hardening, disable the IPCs for open_resource() when they
-  // aren't needed.  PNaCl doesn't expose open_resource().  Note that
-  // enable_dyncode_syscalls is true if and only if the plugin is a non-PNaCl
-  // plugin.
+  // aren't needed.  PNaCl doesn't expose open_resource().
   if (load_manager &&
-      enable_dyncode_syscalls &&
+      process_type == kNativeNaClProcessType &&
       IsValidChannelHandle(
           launch_result.manifest_service_ipc_channel_handle)) {
     scoped_ptr<ManifestServiceChannel> manifest_service_channel(

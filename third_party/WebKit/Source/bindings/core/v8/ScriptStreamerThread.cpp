@@ -58,8 +58,8 @@ blink::WebThread& ScriptStreamerThread::platformThread()
     return *m_thread;
 }
 
-ScriptStreamingTask::ScriptStreamingTask(v8::ScriptCompiler::ScriptStreamingTask* task, ScriptStreamer* streamer)
-    : m_v8Task(adoptPtr(task)), m_streamer(streamer) { }
+ScriptStreamingTask::ScriptStreamingTask(WTF::PassOwnPtr<v8::ScriptCompiler::ScriptStreamingTask> task, ScriptStreamer* streamer)
+    : m_v8Task(task), m_streamer(streamer) { }
 
 void ScriptStreamingTask::run()
 {
@@ -67,9 +67,7 @@ void ScriptStreamingTask::run()
     // Running the task can and will block: SourceStream::GetSomeData will get
     // called and it will block and wait for data from the network.
     m_v8Task->Run();
-    // Post a task to the main thread to signal that V8 has completed the
-    // streaming.
-    callOnMainThread(WTF::bind(&ScriptStreamer::streamingComplete, m_streamer));
+    m_streamer->streamingCompleteOnBackgroundThread();
     ScriptStreamerThread::shared()->taskDone();
 }
 

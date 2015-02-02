@@ -57,20 +57,16 @@ class AutomationApiTest : public ExtensionApiTest {
     host_resolver()->AddRule("*", embedded_test_server()->base_url().host());
   }
 
-  void LoadPage() {
-    StartEmbeddedTestServer();
-    const GURL url = GetURLForPath(kDomain, "/index.html");
-    ui_test_utils::NavigateToURL(browser(), url);
-  }
-
  public:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() override {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
   }
 };
 
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, TestRendererAccessibilityEnabled) {
-  LoadPage();
+  StartEmbeddedTestServer();
+  const GURL url = GetURLForPath(kDomain, "/index.html");
+  ui_test_utils::NavigateToURL(browser(), url);
 
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
   content::WebContents* const tab =
@@ -159,6 +155,11 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopActions) {
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "actions.html"))
       << message_;
 }
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopLoadTabs) {
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "load_tabs.html"))
+      << message_;
+}
 #else
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotSupported) {
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop",
@@ -169,6 +170,13 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotSupported) {
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, CloseTab) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "close_tab.html"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, QuerySelector) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(
+      RunExtensionSubtest("automation/tests/tabs", "queryselector.html"))
       << message_;
 }
 
@@ -322,7 +330,7 @@ class FakeAutomationInternalEnableTabFunction
  public:
   FakeAutomationInternalEnableTabFunction() {}
 
-  ExtensionFunction::ResponseAction Run() OVERRIDE {
+  ExtensionFunction::ResponseAction Run() override {
     using api::automation_internal::EnableTab::Params;
     scoped_ptr<Params> params(Params::Create(*args_));
     EXTENSION_FUNCTION_VALIDATE(params.get());
@@ -336,9 +344,9 @@ class FakeAutomationInternalEnableTabFunction
           base::Bind(&TreeSerializationState::InitializeTree0,
                      base::Unretained(&state),
                      base::Unretained(browser_context())));
-      return RespondNow(
-          ArgumentList(api::automation_internal::EnableTab::Results::Create(
-              kPid, kTab0Rid)));
+      // TODO(aboxhall): Need to rewrite this test in terms of tree ids.
+      return RespondNow(ArgumentList(
+          api::automation_internal::EnableTab::Results::Create(0)));
     }
     if (tab_id == 1) {
       // tab 1 <--> tree1
@@ -347,9 +355,8 @@ class FakeAutomationInternalEnableTabFunction
           base::Bind(&TreeSerializationState::InitializeTree1,
                      base::Unretained(&state),
                      base::Unretained(browser_context())));
-      return RespondNow(
-          ArgumentList(api::automation_internal::EnableTab::Results::Create(
-              kPid, kTab1Rid)));
+      return RespondNow(ArgumentList(
+          api::automation_internal::EnableTab::Results::Create(0)));
     }
     return RespondNow(Error("Unrecognised tab_id"));
   }
@@ -423,7 +430,7 @@ class FakeAutomationInternalPerformActionFunction
  public:
   FakeAutomationInternalPerformActionFunction() {}
 
-  ExtensionFunction::ResponseAction Run() OVERRIDE {
+  ExtensionFunction::ResponseAction Run() override {
     if (state.destroy_tree0) {
       // Step 4.f: tell the extension to destroy the tree and re-request it.
       state.SendTreeDestroyedEvent(kTab0Rid, browser_context());

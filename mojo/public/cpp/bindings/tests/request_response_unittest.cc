@@ -15,80 +15,69 @@ namespace {
 
 class ProviderImpl : public InterfaceImpl<sample::Provider> {
  public:
-  virtual void EchoString(
-      const String& a,
-      const Callback<void(String)>& callback) MOJO_OVERRIDE {
+  void EchoString(const String& a,
+                  const Callback<void(String)>& callback) override {
     Callback<void(String)> callback_copy;
     // Make sure operator= is used.
     callback_copy = callback;
     callback_copy.Run(a);
   }
 
-  virtual void EchoStrings(
-      const String& a,
-      const String& b,
-      const Callback<void(String, String)>& callback) MOJO_OVERRIDE {
+  void EchoStrings(const String& a,
+                   const String& b,
+                   const Callback<void(String, String)>& callback) override {
     callback.Run(a, b);
   }
 
-  virtual void EchoMessagePipeHandle(
+  void EchoMessagePipeHandle(
       ScopedMessagePipeHandle a,
-      const Callback<void(ScopedMessagePipeHandle)>& callback) MOJO_OVERRIDE {
+      const Callback<void(ScopedMessagePipeHandle)>& callback) override {
     callback.Run(a.Pass());
   }
 
-  virtual void EchoEnum(sample::Enum a,
-                        const Callback<void(sample::Enum)>& callback)
-      MOJO_OVERRIDE {
+  void EchoEnum(sample::Enum a,
+                const Callback<void(sample::Enum)>& callback) override {
     callback.Run(a);
   }
 };
 
 class StringRecorder {
  public:
-  explicit StringRecorder(std::string* buf) : buf_(buf) {
-  }
-  void Run(const String& a) const {
-    *buf_ = a;
-  }
+  explicit StringRecorder(std::string* buf) : buf_(buf) {}
+  void Run(const String& a) const { *buf_ = a; }
   void Run(const String& a, const String& b) const {
     *buf_ = a.get() + b.get();
   }
+
  private:
   std::string* buf_;
 };
 
 class EnumRecorder {
  public:
-  explicit EnumRecorder(sample::Enum* value) : value_(value) {
-  }
-  void Run(sample::Enum a) const {
-    *value_ = a;
-  }
+  explicit EnumRecorder(sample::Enum* value) : value_(value) {}
+  void Run(sample::Enum a) const { *value_ = a; }
+
  private:
   sample::Enum* value_;
 };
 
 class MessagePipeWriter {
  public:
-  explicit MessagePipeWriter(const char* text) : text_(text) {
-  }
+  explicit MessagePipeWriter(const char* text) : text_(text) {}
   void Run(ScopedMessagePipeHandle handle) const {
     WriteTextMessage(handle.get(), text_);
   }
+
  private:
   std::string text_;
 };
 
 class RequestResponseTest : public testing::Test {
  public:
-  virtual ~RequestResponseTest() {
-    loop_.RunUntilIdle();
-  }
+  ~RequestResponseTest() override { loop_.RunUntilIdle(); }
 
-  void PumpMessages() {
-    loop_.RunUntilIdle();
-  }
+  void PumpMessages() { loop_.RunUntilIdle(); }
 
  private:
   Environment env_;

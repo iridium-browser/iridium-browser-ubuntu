@@ -26,7 +26,7 @@ class InvalidatorStorage : public syncer::InvalidationStateTracker {
  public:
   // |pref_service| may not be NULL and must outlive |this|.
   explicit InvalidatorStorage(PrefService* pref_service);
-  virtual ~InvalidatorStorage();
+  ~InvalidatorStorage() override;
 
   // Register prefs to be used by per-Profile instances of this class which
   // store invalidation state in Profile prefs.
@@ -37,15 +37,14 @@ class InvalidatorStorage : public syncer::InvalidationStateTracker {
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // InvalidationStateTracker implementation.
-  virtual void ClearAndSetNewClientId(const std::string& client_id) OVERRIDE;
-  virtual std::string GetInvalidatorClientId() const OVERRIDE;
-  virtual void SetBootstrapData(const std::string& data) OVERRIDE;
-  virtual std::string GetBootstrapData() const OVERRIDE;
-  virtual void SetSavedInvalidations(
-      const syncer::UnackedInvalidationsMap& map) OVERRIDE;
-  virtual syncer::UnackedInvalidationsMap GetSavedInvalidations()
-      const OVERRIDE;
-  virtual void Clear() OVERRIDE;
+  void ClearAndSetNewClientId(const std::string& client_id) override;
+  std::string GetInvalidatorClientId() const override;
+  void SetBootstrapData(const std::string& data) override;
+  std::string GetBootstrapData() const override;
+  void SetSavedInvalidations(
+      const syncer::UnackedInvalidationsMap& map) override;
+  syncer::UnackedInvalidationsMap GetSavedInvalidations() const override;
+  void Clear() override;
 
  private:
   base::ThreadChecker thread_checker_;

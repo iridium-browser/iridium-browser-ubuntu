@@ -32,23 +32,20 @@ class FakeRtcpTransport : public PacedPacketSender {
   base::TimeDelta packet_delay() const { return packet_delay_; }
   void set_packet_delay(base::TimeDelta delay) { packet_delay_ = delay; }
 
-  virtual bool SendRtcpPacket(uint32 ssrc, PacketRef packet) OVERRIDE {
+  bool SendRtcpPacket(uint32 ssrc, PacketRef packet) override {
     clock_->Advance(packet_delay_);
     rtcp_->IncomingRtcpPacket(&packet->data[0], packet->data.size());
     return true;
   }
 
-  virtual bool SendPackets(const SendPacketVector& packets) OVERRIDE {
+  bool SendPackets(const SendPacketVector& packets) override { return false; }
+
+  bool ResendPackets(const SendPacketVector& packets,
+                     const DedupInfo& dedup_info) override {
     return false;
   }
 
-  virtual bool ResendPackets(
-      const SendPacketVector& packets, const DedupInfo& dedup_info) OVERRIDE {
-    return false;
-  }
-
-  virtual void CancelSendingPacket(const PacketKey& packet_key) OVERRIDE {
-  }
+  void CancelSendingPacket(const PacketKey& packet_key) override {}
 
  private:
   base::SimpleTestTickClock* const clock_;
@@ -61,12 +58,12 @@ class FakeRtcpTransport : public PacedPacketSender {
 class FakeReceiverStats : public RtpReceiverStatistics {
  public:
   FakeReceiverStats() {}
-  virtual ~FakeReceiverStats() {}
+  ~FakeReceiverStats() override {}
 
-  virtual void GetStatistics(uint8* fraction_lost,
-                             uint32* cumulative_lost,
-                             uint32* extended_high_sequence_number,
-                             uint32* jitter) OVERRIDE {
+  void GetStatistics(uint8* fraction_lost,
+                     uint32* cumulative_lost,
+                     uint32* extended_high_sequence_number,
+                     uint32* jitter) override {
     *fraction_lost = 0;
     *cumulative_lost = 0;
     *extended_high_sequence_number = 0;
@@ -122,7 +119,7 @@ class RtcpTest : public ::testing::Test {
     receiver_to_sender_.set_rtcp_destination(&rtcp_for_sender_);
   }
 
-  virtual ~RtcpTest() {}
+  ~RtcpTest() override {}
 
   scoped_ptr<base::SimpleTestTickClock> sender_clock_;
   scoped_ptr<test::SkewedTickClock> receiver_clock_;

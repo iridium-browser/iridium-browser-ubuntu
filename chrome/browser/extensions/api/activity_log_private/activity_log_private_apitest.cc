@@ -23,12 +23,12 @@ class ActivityLogApiTest : public ExtensionApiTest {
  public:
   ActivityLogApiTest() : saved_cmdline_(CommandLine::NO_PROGRAM) {}
 
-  virtual ~ActivityLogApiTest() {
+  ~ActivityLogApiTest() override {
     ExtensionApiTest::SetUpCommandLine(&saved_cmdline_);
     *CommandLine::ForCurrentProcess() = saved_cmdline_;
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     saved_cmdline_ = *CommandLine::ForCurrentProcess();
     command_line->AppendSwitch(switches::kEnableExtensionActivityLogging);
@@ -39,7 +39,7 @@ class ActivityLogApiTest : public ExtensionApiTest {
     response->set_code(net::HTTP_OK);
     response->set_content("<html><head><title>ActivityLogTest</title>"
                           "</head><body>Hello World</body></html>");
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
  private:

@@ -255,7 +255,7 @@ class NotifiesDeletionMessage : public IPC::Message {
  public:
   NotifiesDeletionMessage(bool* deleted, const IPC::Message& other)
       : IPC::Message(other), deleted_(deleted) {}
-  virtual ~NotifiesDeletionMessage() { *deleted_ = true; }
+  ~NotifiesDeletionMessage() override { *deleted_ = true; }
 
  private:
   bool* deleted_;
@@ -263,9 +263,8 @@ class NotifiesDeletionMessage : public IPC::Message {
 
 TEST_F(FrameSwapMessageQueueTest, TestDeletesNextSwapMessage) {
   bool message_deleted = false;
-  QueueNextSwapMessage(make_scoped_ptr(new NotifiesDeletionMessage(
-                                           &message_deleted, first_message_))
-                           .PassAs<IPC::Message>());
+  QueueNextSwapMessage(make_scoped_ptr(
+      new NotifiesDeletionMessage(&message_deleted, first_message_)));
   queue_ = NULL;
   ASSERT_TRUE(message_deleted);
 }
@@ -274,8 +273,7 @@ TEST_F(FrameSwapMessageQueueTest, TestDeletesVisualStateMessage) {
   bool message_deleted = false;
   QueueVisualStateMessage(1,
                           make_scoped_ptr(new NotifiesDeletionMessage(
-                                              &message_deleted, first_message_))
-                              .PassAs<IPC::Message>());
+                              &message_deleted, first_message_)));
   queue_ = NULL;
   ASSERT_TRUE(message_deleted);
 }
@@ -284,8 +282,7 @@ TEST_F(FrameSwapMessageQueueTest, TestDeletesQueuedVisualStateMessage) {
   bool message_deleted = false;
   QueueVisualStateMessage(1,
                           make_scoped_ptr(new NotifiesDeletionMessage(
-                                              &message_deleted, first_message_))
-                              .PassAs<IPC::Message>());
+                              &message_deleted, first_message_)));
   queue_->DidSwap(1);
   queue_ = NULL;
   ASSERT_TRUE(message_deleted);

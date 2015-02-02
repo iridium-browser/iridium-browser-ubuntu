@@ -4,7 +4,6 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/sync_file_system/file_status_observer.h"
@@ -40,7 +39,7 @@ class SyncFileSystemApiTest : public ExtensionApiTest {
         real_minimum_preserved_space_(0),
         real_default_quota_(0) {}
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
 
     real_minimum_preserved_space_ =
@@ -54,7 +53,7 @@ class SyncFileSystemApiTest : public ExtensionApiTest {
     storage::QuotaManager::kSyncableStorageDefaultHostQuota = 123456;
   }
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  void TearDownInProcessBrowserTestFixture() override {
     storage::QuotaManager::kMinimumPreserveForSystem =
         real_minimum_preserved_space_;
     storage::QuotaManager::kSyncableStorageDefaultHostQuota =
@@ -62,7 +61,7 @@ class SyncFileSystemApiTest : public ExtensionApiTest {
     ExtensionApiTest::TearDownInProcessBrowserTestFixture();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Must happen after the browser process is created because instantiating
     // the factory will instantiate ExtensionSystemFactory which depends on
     // ExtensionsBrowserClient setup in BrowserProcessImpl.
@@ -94,12 +93,13 @@ ACTION_P2(UpdateRemoteChangeQueue, origin, mock_remote_service) {
   mock_remote_service->NotifyRemoteChangeQueueUpdated(1);
 }
 
-ACTION_P5(ReturnWithFakeFileAddedStatus,
+ACTION_P6(ReturnWithFakeFileAddedStatus,
           origin,
           mock_remote_service,
-          sync_direction,
+          file_type,
           sync_file_status,
-          sync_action_taken) {
+          sync_action_taken,
+          sync_direction) {
   FileSystemURL mock_url = sync_file_system::CreateSyncableFileSystemURL(
       *origin,
       base::FilePath(FILE_PATH_LITERAL("foo.txt")));
@@ -109,7 +109,11 @@ ACTION_P5(ReturnWithFakeFileAddedStatus,
                             sync_file_system::SYNC_STATUS_OK,
                             mock_url));
   mock_remote_service->NotifyFileStatusChanged(
-      mock_url, sync_direction, sync_file_status, sync_action_taken);
+      mock_url,
+      file_type,
+      sync_file_status,
+      sync_action_taken,
+      sync_direction);
 }
 
 }  // namespace
@@ -140,6 +144,7 @@ IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, OnFileStatusChanged) {
       .WillOnce(ReturnWithFakeFileAddedStatus(
           &origin,
           mock_remote_service(),
+          sync_file_system::SYNC_FILE_TYPE_FILE,
           sync_file_system::SYNC_FILE_STATUS_SYNCED,
           sync_file_system::SYNC_ACTION_ADDED,
           sync_file_system::SYNC_DIRECTION_REMOTE_TO_LOCAL));
@@ -156,6 +161,7 @@ IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, OnFileStatusChangedDeleted) {
       .WillOnce(ReturnWithFakeFileAddedStatus(
           &origin,
           mock_remote_service(),
+          sync_file_system::SYNC_FILE_TYPE_FILE,
           sync_file_system::SYNC_FILE_STATUS_SYNCED,
           sync_file_system::SYNC_ACTION_DELETED,
           sync_file_system::SYNC_DIRECTION_REMOTE_TO_LOCAL));

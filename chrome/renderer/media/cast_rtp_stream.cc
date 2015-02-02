@@ -5,11 +5,13 @@
 #include "chrome/renderer/media/cast_rtp_stream.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/media/cast_session.h"
 #include "chrome/renderer/media/cast_udp_transport.h"
 #include "content/public/renderer/media_stream_audio_sink.h"
@@ -101,6 +103,12 @@ CastRtpPayloadParams DefaultH264Payload() {
 }
 
 bool IsHardwareVP8EncodingSupported() {
+  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableCastStreamingHWEncoding)) {
+    VLOG(1) << "Disabled hardware VP8 support for Cast Streaming.";
+    return false;
+  }
+
   // Query for hardware VP8 encoder support.
   std::vector<media::VideoEncodeAccelerator::SupportedProfile> vea_profiles =
       content::GetSupportedVideoEncodeAcceleratorProfiles();
@@ -114,6 +122,12 @@ bool IsHardwareVP8EncodingSupported() {
 }
 
 bool IsHardwareH264EncodingSupported() {
+  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableCastStreamingHWEncoding)) {
+    VLOG(1) << "Disabled hardware h264 support for Cast Streaming.";
+    return false;
+  }
+
   // Query for hardware H.264 encoder support.
   std::vector<media::VideoEncodeAccelerator::SupportedProfile> vea_profiles =
       content::GetSupportedVideoEncodeAcceleratorProfiles();
@@ -260,7 +274,7 @@ class CastVideoSink : public base::SupportsWeakPtr<CastVideoSink>,
         expected_natural_size_(expected_natural_size),
         error_callback_(error_callback) {}
 
-  virtual ~CastVideoSink() {
+  ~CastVideoSink() override {
     if (sink_added_)
       RemoveFromVideoTrack(this, track_);
   }
@@ -349,17 +363,17 @@ class CastAudioSink : public base::SupportsWeakPtr<CastAudioSink>,
         output_sample_rate_(output_sample_rate),
         input_preroll_(0) {}
 
-  virtual ~CastAudioSink() {
+  ~CastAudioSink() override {
     if (sink_added_)
       RemoveFromAudioTrack(this, track_);
   }
 
   // Called on real-time audio thread.
   // content::MediaStreamAudioSink implementation.
-  virtual void OnData(const int16* audio_data,
-                      int sample_rate,
-                      int number_of_channels,
-                      int number_of_frames) OVERRIDE {
+  void OnData(const int16* audio_data,
+              int sample_rate,
+              int number_of_channels,
+              int number_of_frames) override {
     scoped_ptr<media::AudioBus> input_bus;
     if (resampler_) {
       input_bus = ResampleData(
@@ -416,7 +430,7 @@ class CastAudioSink : public base::SupportsWeakPtr<CastAudioSink>,
   }
 
   // Called on real-time audio thread.
-  virtual void OnSetFormat(const media::AudioParameters& params) OVERRIDE {
+  void OnSetFormat(const media::AudioParameters& params) override {
     if (params.sample_rate() == output_sample_rate_)
       return;
     fifo_.reset(new media::AudioFifo(

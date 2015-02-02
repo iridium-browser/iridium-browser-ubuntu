@@ -6,7 +6,6 @@
 
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
-#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "storage/browser/fileapi/file_system_url.h"
 
@@ -97,10 +96,6 @@ bool ExternalMountPoints::RegisterFileSystem(
     FileSystemType type,
     const FileSystemMountOption& mount_option,
     const base::FilePath& path_in) {
-  // COPY_SYNC_OPTION_SYNC is only applicable to native local file system.
-  DCHECK(type == kFileSystemTypeNativeLocal ||
-         mount_option.copy_sync_option() != COPY_SYNC_OPTION_SYNC);
-
   base::AutoLock locker(lock_);
 
   base::FilePath path = NormalizeFilePath(path_in);

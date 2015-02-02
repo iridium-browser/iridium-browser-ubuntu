@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/extensions/webstore_data_fetcher_delegate.h"
 #include "ui/gfx/image/image_skia.h"
+#include "url/gurl.h"
 
 class Profile;
 
@@ -51,7 +52,8 @@ class KioskAppData : public base::SupportsWeakPtr<KioskAppData>,
 
   KioskAppData(KioskAppDataDelegate* delegate,
                const std::string& app_id,
-               const std::string& user_id);
+               const std::string& user_id,
+               const GURL& update_url);
   virtual ~KioskAppData();
 
   // Loads app data from cache. If there is no cached data, fetches it
@@ -70,6 +72,7 @@ class KioskAppData : public base::SupportsWeakPtr<KioskAppData>,
   const std::string& app_id() const { return app_id_; }
   const std::string& user_id() const { return user_id_; }
   const std::string& name() const { return name_; }
+  const GURL& update_url() const { return update_url_; }
   const gfx::ImageSkia& icon() const { return icon_; }
   const base::RefCountedString* raw_icon() const {
     return raw_icon_.get();
@@ -110,11 +113,11 @@ class KioskAppData : public base::SupportsWeakPtr<KioskAppData>,
   void StartFetch();
 
   // extensions::WebstoreDataFetcherDelegate overrides:
-  virtual void OnWebstoreRequestFailure() OVERRIDE;
+  virtual void OnWebstoreRequestFailure() override;
   virtual void OnWebstoreResponseParseSuccess(
-      scoped_ptr<base::DictionaryValue> webstore_data) OVERRIDE;
+      scoped_ptr<base::DictionaryValue> webstore_data) override;
   virtual void OnWebstoreResponseParseFailure(
-      const std::string& error) OVERRIDE;
+      const std::string& error) override;
 
   // Helper function for testing for the existence of |key| in
   // |response|. Passes |key|'s content via |value| and returns
@@ -129,6 +132,7 @@ class KioskAppData : public base::SupportsWeakPtr<KioskAppData>,
   std::string app_id_;
   std::string user_id_;
   std::string name_;
+  GURL update_url_;
   gfx::ImageSkia icon_;
   scoped_refptr<base::RefCountedString> raw_icon_;
 

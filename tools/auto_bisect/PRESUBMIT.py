@@ -12,10 +12,10 @@ import imp
 import subprocess
 import os
 
-# Paths to bisect config files relative to src/tools.
+# Paths to bisect config files relative to this script.
 CONFIG_FILES = [
-    'auto_bisect/config.cfg',
-    'run-perf-test.cfg'
+    'bisect.cfg',
+    os.path.join(os.path.pardir, 'run-perf-test.cfg'),
 ]
 
 def CheckChangeOnUpload(input_api, output_api):
@@ -38,10 +38,10 @@ def _CommonChecks(input_api, output_api):
 def _CheckAllConfigFiles(input_api, output_api):
   """Checks all bisect config files and returns a list of presubmit results."""
   results = []
-  for f in input_api.AffectedFiles():
-    for config_file in CONFIG_FILES:
-      if f.LocalPath().endswith(config_file):
-        results.extend(_CheckConfigFile(config_file, output_api))
+  script_path = input_api.PresubmitLocalPath()
+  for config_file in CONFIG_FILES:
+    file_path = os.path.join(script_path, config_file)
+    results.extend(_CheckConfigFile(file_path, output_api))
   return results
 
 
@@ -53,7 +53,7 @@ def _CheckConfigFile(file_path, output_api):
     warning = 'Failed to read config file %s: %s' % (file_path, str(e))
     return [output_api.PresubmitError(warning, items=[file_path])]
 
-  if not hasattr(config_file.config):
+  if not hasattr(config_file, 'config'):
     warning = 'Config file has no "config" global variable: %s' % str(e)
     return [output_api.PresubmitError(warning, items=[file_path])]
 
@@ -88,6 +88,10 @@ def _RunPyLint(input_api, output_api):
   """Runs unit tests for auto-bisect."""
   telemetry_path = os.path.join(
       input_api.PresubmitLocalPath(), os.path.pardir, 'telemetry')
+  mock_path = os.path.join(
+      input_api.PresubmitLocalPath(), os.path.pardir, os.path.pardir,
+      'third_party', 'pymock')
   tests = input_api.canned_checks.GetPylint(
-      input_api, output_api, extra_paths_list=[telemetry_path])
+      input_api, output_api, extra_paths_list=[telemetry_path, mock_path])
   return input_api.RunTests(tests)
+

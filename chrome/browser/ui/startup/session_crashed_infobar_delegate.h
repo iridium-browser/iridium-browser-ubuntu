@@ -19,14 +19,14 @@ class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   explicit SessionCrashedInfoBarDelegate(Profile* profile);
-  virtual ~SessionCrashedInfoBarDelegate();
+  ~SessionCrashedInfoBarDelegate() override;
 
   // ConfirmInfoBarDelegate:
-  virtual int GetIconID() const OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual int GetButtons() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
+  int GetIconID() const override;
+  base::string16 GetMessageText() const override;
+  int GetButtons() const override;
+  base::string16 GetButtonLabel(InfoBarButton button) const override;
+  bool Accept() override;
 
   bool accepted_;
   Profile* profile_;

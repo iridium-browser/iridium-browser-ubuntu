@@ -36,13 +36,11 @@ class FileSystemProviderOperationsDeleteEntryTest : public testing::Test {
   FileSystemProviderOperationsDeleteEntryTest() {}
   virtual ~FileSystemProviderOperationsDeleteEntryTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
+    MountOptions mount_options(kFileSystemId, "" /* display_name */);
+    mount_options.writable = true;
     file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* file_system_name */,
-                               true /* writable */,
-                               base::FilePath() /* mount_path */);
+        ProvidedFileSystemInfo(kExtensionId, mount_options, base::FilePath());
   }
 
   ProvidedFileSystemInfo file_system_info_;
@@ -107,9 +105,7 @@ TEST_F(FileSystemProviderOperationsDeleteEntryTest, Execute_ReadOnly) {
 
   const ProvidedFileSystemInfo read_only_file_system_info(
       kExtensionId,
-      kFileSystemId,
-      "" /* file_system_name */,
-      false /* writable */,
+      MountOptions(kFileSystemId, "" /* display_name */),
       base::FilePath() /* mount_path */);
 
   DeleteEntry delete_entry(NULL,

@@ -36,17 +36,24 @@
 #include "webrtc/video_send_stream.h"
 
 namespace cricket {
-class FakeVideoSendStream : public webrtc::VideoSendStream {
+class FakeVideoSendStream : public webrtc::VideoSendStream,
+                            public webrtc::VideoSendStreamInput {
  public:
   FakeVideoSendStream(const webrtc::VideoSendStream::Config& config,
                       const webrtc::VideoEncoderConfig& encoder_config);
-  webrtc::VideoSendStream::Config GetConfig();
+  webrtc::VideoSendStream::Config GetConfig() const;
+  webrtc::VideoEncoderConfig GetEncoderConfig() const;
   std::vector<webrtc::VideoStream> GetVideoStreams();
 
   bool IsSending() const;
   bool GetVp8Settings(webrtc::VideoCodecVP8* settings) const;
 
+  int GetNumberOfSwappedFrames() const;
+  int GetLastWidth() const;
+  int GetLastHeight() const;
+
  private:
+  virtual void SwapFrame(webrtc::I420VideoFrame* frame) OVERRIDE;
   virtual webrtc::VideoSendStream::Stats GetStats() const OVERRIDE;
 
   virtual bool ReconfigureVideoEncoder(
@@ -62,6 +69,8 @@ class FakeVideoSendStream : public webrtc::VideoSendStream {
   webrtc::VideoEncoderConfig encoder_config_;
   bool codec_settings_set_;
   webrtc::VideoCodecVP8 vp8_settings_;
+  int num_swapped_frames_;
+  webrtc::I420VideoFrame last_frame_;
 };
 
 class FakeVideoReceiveStream : public webrtc::VideoReceiveStream {
@@ -78,7 +87,6 @@ class FakeVideoReceiveStream : public webrtc::VideoReceiveStream {
 
   virtual void Start() OVERRIDE;
   virtual void Stop() OVERRIDE;
-  virtual void GetCurrentReceiveCodec(webrtc::VideoCodec* codec);
 
   webrtc::VideoReceiveStream::Config config_;
   bool receiving_;
@@ -86,11 +94,12 @@ class FakeVideoReceiveStream : public webrtc::VideoReceiveStream {
 
 class FakeCall : public webrtc::Call {
  public:
-  FakeCall();
+  FakeCall(const webrtc::Call::Config& config);
   ~FakeCall();
 
   void SetVideoCodecs(const std::vector<webrtc::VideoCodec> codecs);
 
+  webrtc::Call::Config GetConfig() const;
   std::vector<FakeVideoSendStream*> GetVideoSendStreams();
   std::vector<FakeVideoReceiveStream*> GetVideoReceiveStreams();
 
@@ -118,44 +127,16 @@ class FakeCall : public webrtc::Call {
       webrtc::VideoReceiveStream* receive_stream) OVERRIDE;
   virtual webrtc::PacketReceiver* Receiver() OVERRIDE;
 
-  virtual uint32_t SendBitrateEstimate() OVERRIDE;
-  virtual uint32_t ReceiveBitrateEstimate() OVERRIDE;
+  virtual webrtc::Call::Stats GetStats() const OVERRIDE;
 
   virtual void SignalNetworkState(webrtc::Call::NetworkState state) OVERRIDE;
 
+  const webrtc::Call::Config config_;
   webrtc::Call::NetworkState network_state_;
   std::vector<webrtc::VideoCodec> codecs_;
   std::vector<FakeVideoSendStream*> video_send_streams_;
   std::vector<FakeVideoReceiveStream*> video_receive_streams_;
 };
-
-class FakeWebRtcVideoChannel2 : public WebRtcVideoChannel2 {
- public:
-  FakeWebRtcVideoChannel2(FakeCall* call,
-                          WebRtcVideoEngine2* engine,
-                          VoiceMediaChannel* voice_channel);
-  virtual ~FakeWebRtcVideoChannel2();
-
-  VoiceMediaChannel* GetVoiceChannel();
-  FakeCall* GetFakeCall();
-
- private:
-  FakeCall* fake_call_;
-  VoiceMediaChannel* voice_channel_;
-};
-
-class FakeWebRtcVideoMediaChannelFactory : public WebRtcVideoChannelFactory {
- public:
-  FakeWebRtcVideoChannel2* GetFakeChannel(VideoMediaChannel* channel);
-
- private:
-  virtual WebRtcVideoChannel2* Create(
-      WebRtcVideoEngine2* engine,
-      VoiceMediaChannel* voice_channel) OVERRIDE;
-
-  std::map<VideoMediaChannel*, FakeWebRtcVideoChannel2*> channel_map_;
-};
-
 
 }  // namespace cricket
 #endif  // TALK_MEDIA_WEBRTC_WEBRTCVIDEOENGINE2_UNITTEST_H_

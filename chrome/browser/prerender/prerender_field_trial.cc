@@ -19,7 +19,6 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/variations/variations_associated_data.h"
 
@@ -32,9 +31,6 @@ using std::vector;
 namespace prerender {
 
 namespace {
-
-const char kOmniboxTrialName[] = "PrerenderFromOmnibox";
-int g_omnibox_trial_default_group_number = kint32min;
 
 const char kDisabledGroup[] = "Disabled";
 const char kEnabledGroup[] = "Enabled";
@@ -201,8 +197,6 @@ void SetupPrerenderFieldTrial() {
 
 }  // end namespace
 
-void ConfigureOmniboxPrerender();
-
 void ConfigurePrerender(const CommandLine& command_line) {
   enum PrerenderOption {
     PRERENDER_OPTION_AUTO,
@@ -245,27 +239,6 @@ void ConfigurePrerender(const CommandLine& command_line) {
     default:
       NOTREACHED();
   }
-
-  ConfigureOmniboxPrerender();
-}
-
-void ConfigureOmniboxPrerender() {
-  // Field trial to see if we're enabled.
-  const FieldTrial::Probability kDivisor = 100;
-
-  FieldTrial::Probability kDisabledProbability = 10;
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
-      channel == chrome::VersionInfo::CHANNEL_BETA) {
-    kDisabledProbability = 1;
-  }
-  scoped_refptr<FieldTrial> omnibox_prerender_trial(
-      FieldTrialList::FactoryGetFieldTrial(
-          kOmniboxTrialName, kDivisor, "OmniboxPrerenderEnabled",
-          2014, 12, 31, FieldTrial::SESSION_RANDOMIZED,
-          &g_omnibox_trial_default_group_number));
-  omnibox_prerender_trial->AppendGroup("OmniboxPrerenderDisabled",
-                                       kDisabledProbability);
 }
 
 bool IsOmniboxEnabled(Profile* profile) {
@@ -291,9 +264,8 @@ bool IsOmniboxEnabled(Profile* profile) {
     DCHECK_EQ(switches::kPrerenderFromOmniboxSwitchValueAuto, switch_value);
   }
 
-  const int group = FieldTrialList::FindValue(kOmniboxTrialName);
-  return group == FieldTrial::kNotFinalized ||
-         group == g_omnibox_trial_default_group_number;
+  return (FieldTrialList::FindFullName("PrerenderFromOmnibox") !=
+          "OmniboxPrerenderDisabled");
 }
 
 /*

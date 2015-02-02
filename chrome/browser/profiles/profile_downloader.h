@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/image_decoder.h"
+#include "google_apis/gaia/gaia_oauth_client.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -26,7 +27,8 @@ class URLFetcher;
 
 // Downloads user profile information. The profile picture is decoded in a
 // sandboxed process.
-class ProfileDownloader : public net::URLFetcherDelegate,
+class ProfileDownloader : public gaia::GaiaOAuthClient::Delegate,
+                          public net::URLFetcherDelegate,
                           public ImageDecoder::Delegate,
                           public OAuth2TokenService::Observer,
                           public OAuth2TokenService::Consumer {
@@ -39,7 +41,7 @@ class ProfileDownloader : public net::URLFetcherDelegate,
   };
 
   explicit ProfileDownloader(ProfileDownloaderDelegate* delegate);
-  virtual ~ProfileDownloader();
+  ~ProfileDownloader() override;
 
   // Starts downloading profile information if the necessary authorization token
   // is ready. If not, subscribes to token service and starts fetching if the
@@ -50,6 +52,9 @@ class ProfileDownloader : public net::URLFetcherDelegate,
   // is ready. If not, subscribes to token service and starts fetching if the
   // token is available. Should not be called more than once.
   virtual void StartForAccount(const std::string& account_id);
+
+  // On successful download this returns the hosted domain of the user.
+  virtual base::string16 GetProfileHostedDomain() const;
 
   // On successful download this returns the full name of the user. For example
   // "Pat Smith".
@@ -80,33 +85,40 @@ class ProfileDownloader : public net::URLFetcherDelegate,
   FRIEND_TEST_ALL_PREFIXES(ProfileDownloaderTest, ParseData);
   FRIEND_TEST_ALL_PREFIXES(ProfileDownloaderTest, DefaultURL);
 
+  // gaia::GaiaOAuthClient::Delegate implementation.
+  void OnGetUserInfoResponse(
+      scoped_ptr<base::DictionaryValue> user_info) override;
+  void OnOAuthError() override;
+  void OnNetworkError(int response_code) override;
+
   // Overriden from net::URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // Overriden from ImageDecoder::Delegate:
-  virtual void OnImageDecoded(const ImageDecoder* decoder,
-                              const SkBitmap& decoded_image) OVERRIDE;
-  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE;
+  void OnImageDecoded(const ImageDecoder* decoder,
+                      const SkBitmap& decoded_image) override;
+  void OnDecodeImageFailed(const ImageDecoder* decoder) override;
 
   // Overriden from OAuth2TokenService::Observer:
-  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE;
+  void OnRefreshTokenAvailable(const std::string& account_id) override;
 
   // Overriden from OAuth2TokenService::Consumer:
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
   // Parses the entry response and gets the name, profile image URL and locale.
   // |data| should be the JSON formatted data return by the response.
   // Returns false to indicate a parsing error.
-  static bool ParseProfileJSON(const std::string& data,
+  static bool ParseProfileJSON(base::DictionaryValue* root_dictionary,
                                base::string16* full_name,
                                base::string16* given_name,
                                std::string* url,
                                int image_size,
-                               std::string* profile_locale);
+                               std::string* profile_locale,
+                               base::string16* hosted_domain);
   // Returns true if the image url is url of the default profile picture.
   static bool IsDefaultProfileImageURL(const std::string& url);
 
@@ -123,9 +135,10 @@ class ProfileDownloader : public net::URLFetcherDelegate,
   ProfileDownloaderDelegate* delegate_;
   std::string account_id_;
   std::string auth_token_;
-  scoped_ptr<net::URLFetcher> user_entry_fetcher_;
+  scoped_ptr<gaia::GaiaOAuthClient> gaia_client_;
   scoped_ptr<net::URLFetcher> profile_image_fetcher_;
   scoped_ptr<OAuth2TokenService::Request> oauth2_access_token_request_;
+  base::string16 profile_hosted_domain_;
   base::string16 profile_full_name_;
   base::string16 profile_given_name_;
   std::string profile_locale_;

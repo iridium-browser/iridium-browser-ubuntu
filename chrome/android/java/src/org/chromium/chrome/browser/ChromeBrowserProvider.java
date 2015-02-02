@@ -75,15 +75,23 @@ public class ChromeBrowserProvider extends ContentProvider {
     private static final String API_AUTHORITY_SUFFIX = ".browser";
 
     private static final String BROWSER_CONTRACT_API_AUTHORITY =
-        "com.google.android.apps.chrome.browser-contract";
+            "com.google.android.apps.chrome.browser-contract";
 
     // These values are taken from android.provider.BrowserContract.java since
     // that class is hidden from the SDK.
     private static final String BROWSER_CONTRACT_AUTHORITY = "com.android.browser";
     private static final String BROWSER_CONTRACT_HISTORY_CONTENT_TYPE =
-        "vnd.android.cursor.dir/browser-history";
+            "vnd.android.cursor.dir/browser-history";
     private static final String BROWSER_CONTRACT_HISTORY_CONTENT_ITEM_TYPE =
-        "vnd.android.cursor.item/browser-history";
+            "vnd.android.cursor.item/browser-history";
+    private static final String BROWSER_CONTRACT_BOOKMARK_CONTENT_TYPE =
+        "vnd.android.cursor.dir/bookmark";
+    private static final String BROWSER_CONTRACT_BOOKMARK_CONTENT_ITEM_TYPE =
+        "vnd.android.cursor.item/bookmark";
+    private static final String BROWSER_CONTRACT_SEARCH_CONTENT_TYPE =
+        "vnd.android.cursor.dir/searches";
+    private static final String BROWSER_CONTRACT_SEARCH_CONTENT_ITEM_TYPE =
+        "vnd.android.cursor.item/searches";
 
     // This Authority is for internal interface. It's concatenated with
     // Context.getPackageName() so that we can install different channels
@@ -528,14 +536,14 @@ public class ChromeBrowserProvider extends ContentProvider {
         switch (match) {
             case URI_MATCH_BOOKMARKS:
             case URL_MATCH_API_BOOKMARK:
-                return "vnd.android.cursor.dir/bookmark";
+                return BROWSER_CONTRACT_BOOKMARK_CONTENT_TYPE;
             case URI_MATCH_BOOKMARKS_ID:
             case URL_MATCH_API_BOOKMARK_ID:
-                return "vnd.android.cursor.item/bookmark";
+                return BROWSER_CONTRACT_BOOKMARK_CONTENT_ITEM_TYPE;
             case URL_MATCH_API_SEARCHES:
-                return "vnd.android.cursor.dir/searches";
+                return BROWSER_CONTRACT_SEARCH_CONTENT_TYPE;
             case URL_MATCH_API_SEARCHES_ID:
-                return "vnd.android.cursor.item/searches";
+                return BROWSER_CONTRACT_SEARCH_CONTENT_ITEM_TYPE;
             case URL_MATCH_API_HISTORY_CONTENT:
                 return BROWSER_CONTRACT_HISTORY_CONTENT_TYPE;
             case URL_MATCH_API_HISTORY_CONTENT_ID:

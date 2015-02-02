@@ -130,7 +130,7 @@ LocalChangeProcessor* GetLocalChangeProcessorAdapter(
     base::WeakPtr<SyncFileSystemService> service,
     const GURL& origin) {
   if (!service)
-    return NULL;
+    return nullptr;
   return service->GetLocalChangeProcessor(origin);
 }
 
@@ -146,17 +146,18 @@ class LocalSyncRunner : public SyncProcessRunner,
   LocalSyncRunner(const std::string& name,
                   SyncFileSystemService* sync_service)
       : SyncProcessRunner(name, sync_service,
-                          scoped_ptr<SyncProcessRunner::TimerHelper>(), 1),
+                          nullptr,  /* timer_helper */
+                          1  /* max_parallel_task */),
         factory_(this) {}
 
-  virtual void StartSync(const SyncStatusCallback& callback) OVERRIDE {
+  void StartSync(const SyncStatusCallback& callback) override {
     GetSyncService()->local_service_->ProcessLocalChange(
         base::Bind(&LocalSyncRunner::DidProcessLocalChange,
                    factory_.GetWeakPtr(), callback));
   }
 
   // LocalFileSyncService::Observer overrides.
-  virtual void OnLocalChangeAvailable(int64 pending_changes) OVERRIDE {
+  void OnLocalChangeAvailable(int64 pending_changes) override {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     OnChangesUpdated(pending_changes);
@@ -189,23 +190,24 @@ class RemoteSyncRunner : public SyncProcessRunner,
                    SyncFileSystemService* sync_service,
                    RemoteFileSyncService* remote_service)
       : SyncProcessRunner(name, sync_service,
-                          scoped_ptr<SyncProcessRunner::TimerHelper>(), 1),
+                          nullptr,  /* timer_helper */
+                          1  /* max_parallel_task */),
         remote_service_(remote_service),
         last_state_(REMOTE_SERVICE_OK),
         factory_(this) {}
 
-  virtual void StartSync(const SyncStatusCallback& callback) OVERRIDE {
+  void StartSync(const SyncStatusCallback& callback) override {
     remote_service_->ProcessRemoteChange(
         base::Bind(&RemoteSyncRunner::DidProcessRemoteChange,
                    factory_.GetWeakPtr(), callback));
   }
 
-  virtual SyncServiceState GetServiceState() OVERRIDE {
+  SyncServiceState GetServiceState() override {
     return RemoteStateToSyncServiceState(last_state_);
   }
 
   // RemoteFileSyncService::Observer overrides.
-  virtual void OnRemoteChangeQueueUpdated(int64 pending_changes) OVERRIDE {
+  void OnRemoteChangeQueueUpdated(int64 pending_changes) override {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     OnChangesUpdated(pending_changes);
@@ -214,9 +216,8 @@ class RemoteSyncRunner : public SyncProcessRunner,
     GetSyncService()->RunForEachSyncRunners(&SyncProcessRunner::Schedule);
   }
 
-  virtual void OnRemoteServiceStateUpdated(
-      RemoteServiceState state,
-      const std::string& description) OVERRIDE {
+  void OnRemoteServiceStateUpdated(RemoteServiceState state,
+                                   const std::string& description) override {
     // Just forward to SyncFileSystemService.
     GetSyncService()->OnRemoteServiceStateUpdated(state, description);
     last_state_ = state;
@@ -267,7 +268,7 @@ void SyncFileSystemService::Shutdown() {
 
   ExtensionRegistry::Get(profile_)->RemoveObserver(this);
 
-  profile_ = NULL;
+  profile_ = nullptr;
 }
 
 SyncFileSystemService::~SyncFileSystemService() {
@@ -569,13 +570,13 @@ void SyncFileSystemService::DidDumpFiles(
 
   // After all metadata loaded, sync status can be added to each entry.
   for (size_t i = 0; i < files->GetSize(); ++i) {
-    base::DictionaryValue* file = NULL;
+    base::DictionaryValue* file = nullptr;
     std::string path_string;
     if (!files->GetDictionary(i, &file) ||
         !file->GetString("path", &path_string)) {
       NOTREACHED();
       completion_callback.Run(
-          NULL, SYNC_FILE_ERROR_FAILED, SYNC_FILE_STATUS_UNKNOWN);
+          nullptr, SYNC_FILE_ERROR_FAILED, SYNC_FILE_STATUS_UNKNOWN);
       continue;
     }
 
@@ -714,12 +715,13 @@ void SyncFileSystemService::OnStateChanged() {
 
 void SyncFileSystemService::OnFileStatusChanged(
     const FileSystemURL& url,
+    SyncFileType file_type,
     SyncFileStatus sync_status,
     SyncAction action_taken,
     SyncDirection direction) {
   FOR_EACH_OBSERVER(
       SyncEventObserver, observers_,
-      OnFileSynced(url, sync_status, action_taken, direction));
+      OnFileSynced(url, file_type, sync_status, action_taken, direction));
 }
 
 void SyncFileSystemService::UpdateSyncEnabledStatus(

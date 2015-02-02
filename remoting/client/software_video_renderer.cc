@@ -16,9 +16,7 @@
 #include "remoting/client/frame_consumer.h"
 #include "remoting/codec/video_decoder.h"
 #include "remoting/codec/video_decoder_verbatim.h"
-#if !defined(MEDIA_DISABLE_LIBVPX)
 #include "remoting/codec/video_decoder_vpx.h"
-#endif  // !defined(MEDIA_DISABLE_LIBVPX)
 #include "remoting/protocol/session_config.h"
 #include "third_party/libyuv/include/libyuv/convert_argb.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
@@ -39,24 +37,24 @@ class RgbToBgrVideoDecoderFilter : public VideoDecoder {
       : parent_(parent.Pass()) {
   }
 
-  virtual void Initialize(const webrtc::DesktopSize& screen_size) OVERRIDE {
+  void Initialize(const webrtc::DesktopSize& screen_size) override {
     parent_->Initialize(screen_size);
   }
 
-  virtual bool DecodePacket(const VideoPacket& packet) OVERRIDE {
+  bool DecodePacket(const VideoPacket& packet) override {
     return parent_->DecodePacket(packet);
   }
 
-  virtual void Invalidate(const webrtc::DesktopSize& view_size,
-                          const webrtc::DesktopRegion& region) OVERRIDE {
+  void Invalidate(const webrtc::DesktopSize& view_size,
+                  const webrtc::DesktopRegion& region) override {
     return parent_->Invalidate(view_size, region);
   }
 
-  virtual void RenderFrame(const webrtc::DesktopSize& view_size,
-                           const webrtc::DesktopRect& clip_area,
-                           uint8* image_buffer,
-                           int image_stride,
-                           webrtc::DesktopRegion* output_region) OVERRIDE {
+  void RenderFrame(const webrtc::DesktopSize& view_size,
+                   const webrtc::DesktopRect& clip_area,
+                   uint8* image_buffer,
+                   int image_stride,
+                   webrtc::DesktopRegion* output_region) override {
     parent_->RenderFrame(view_size, clip_area, image_buffer, image_stride,
                          output_region);
 
@@ -70,7 +68,7 @@ class RgbToBgrVideoDecoderFilter : public VideoDecoder {
     }
   }
 
-  virtual const webrtc::DesktopRegion* GetImageShape() OVERRIDE {
+  const webrtc::DesktopRegion* GetImageShape() override {
     return parent_->GetImageShape();
   }
 
@@ -149,13 +147,11 @@ void SoftwareVideoRenderer::Core::Initialize(const SessionConfig& config) {
   ChannelConfig::Codec codec = config.video_config().codec;
   if (codec == ChannelConfig::CODEC_VERBATIM) {
     decoder_.reset(new VideoDecoderVerbatim());
-#if !defined(MEDIA_DISABLE_LIBVPX)
   } else if (codec == ChannelConfig::CODEC_VP8) {
     decoder_ = VideoDecoderVpx::CreateForVP8();
   } else if (codec == ChannelConfig::CODEC_VP9) {
     decoder_ = VideoDecoderVpx::CreateForVP9();
   } else {
-#endif  // !defined(MEDIA_DISABLE_LIBVPX)
     NOTREACHED() << "Invalid Encoding found: " << codec;
   }
 

@@ -9,6 +9,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "platform/ParsingUtilities.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/weborigin/KURL.h"
 #include "wtf/text/WTFString.h"
 
@@ -207,6 +208,8 @@ bool CSPDirectiveList::checkSourceAndReportViolation(SourceListDirective* direct
         prefix = "Refused to load the image '";
     else if (ContentSecurityPolicy::MediaSrc == effectiveDirective)
         prefix = "Refused to load media from '";
+    else if (ContentSecurityPolicy::ManifestSrc == effectiveDirective)
+        prefix = "Refused to load manifest from '";
     else if (ContentSecurityPolicy::ObjectSrc == effectiveDirective)
         prefix = "Refused to load plugin data from '";
     else if (ContentSecurityPolicy::ScriptSrc == effectiveDirective)
@@ -305,12 +308,7 @@ bool CSPDirectiveList::allowChildFrameFromSource(const KURL& url, ContentSecurit
     // It overrides 'child-src', which overrides the default sources. So, we do this nested set
     // of calls to 'operativeDirective()' to grab 'frame-src' if it exists, 'child-src' if it
     // doesn't, and 'defaut-src' if neither are available.
-    //
-    // All of this only applies, of course, if we're in CSP 1.1. In CSP 1.0, 'frame-src'
-    // overrides 'default-src' directly.
-    SourceListDirective* whichDirective = m_policy->experimentalFeaturesEnabled() ?
-        operativeDirective(m_frameSrc.get(), operativeDirective(m_childSrc.get())) :
-        operativeDirective(m_frameSrc.get());
+    SourceListDirective* whichDirective = operativeDirective(m_frameSrc.get(), operativeDirective(m_childSrc.get()));
 
     return reportingStatus == ContentSecurityPolicy::SendReport ?
         checkSourceAndReportViolation(whichDirective, url, ContentSecurityPolicy::FrameSrc) :
@@ -343,6 +341,13 @@ bool CSPDirectiveList::allowMediaFromSource(const KURL& url, ContentSecurityPoli
     return reportingStatus == ContentSecurityPolicy::SendReport ?
         checkSourceAndReportViolation(operativeDirective(m_mediaSrc.get()), url, ContentSecurityPolicy::MediaSrc) :
         checkSource(operativeDirective(m_mediaSrc.get()), url);
+}
+
+bool CSPDirectiveList::allowManifestFromSource(const KURL& url, ContentSecurityPolicy::ReportingStatus reportingStatus) const
+{
+    return reportingStatus == ContentSecurityPolicy::SendReport ?
+        checkSourceAndReportViolation(operativeDirective(m_manifestSrc.get()), url, ContentSecurityPolicy::ManifestSrc) :
+        checkSource(operativeDirective(m_manifestSrc.get()), url);
 }
 
 bool CSPDirectiveList::allowConnectToSource(const KURL& url, ContentSecurityPolicy::ReportingStatus reportingStatus) const
@@ -611,12 +616,12 @@ void CSPDirectiveList::parseReferrer(const String& name, const String& value)
 
     // value1
     //       ^
-    if (equalIgnoringCase("always", begin, position - begin)) {
+    if (equalIgnoringCase("unsafe-url", begin, position - begin)) {
         m_referrerPolicy = ReferrerPolicyAlways;
-    } else if (equalIgnoringCase("default", begin, position - begin)) {
-        m_referrerPolicy = ReferrerPolicyDefault;
-    } else if (equalIgnoringCase("never", begin, position - begin)) {
+    } else if (equalIgnoringCase("no-referrer", begin, position - begin)) {
         m_referrerPolicy = ReferrerPolicyNever;
+    } else if (equalIgnoringCase("no-referrer-when-downgrade", begin, position - begin)) {
+        m_referrerPolicy = ReferrerPolicyDefault;
     } else if (equalIgnoringCase("origin", begin, position - begin)) {
         m_referrerPolicy = ReferrerPolicyOrigin;
     } else {
@@ -666,19 +671,21 @@ void CSPDirectiveList::addDirective(const String& name, const String& value)
         applySandboxPolicy(name, value);
     } else if (equalIgnoringCase(name, ContentSecurityPolicy::ReportURI)) {
         parseReportURI(name, value);
+    } else if (equalIgnoringCase(name, ContentSecurityPolicy::BaseURI)) {
+        setCSPDirective<SourceListDirective>(name, value, m_baseURI);
+    } else if (equalIgnoringCase(name, ContentSecurityPolicy::ChildSrc)) {
+        setCSPDirective<SourceListDirective>(name, value, m_childSrc);
+    } else if (equalIgnoringCase(name, ContentSecurityPolicy::FormAction)) {
+        setCSPDirective<SourceListDirective>(name, value, m_formAction);
+    } else if (equalIgnoringCase(name, ContentSecurityPolicy::PluginTypes)) {
+        setCSPDirective<MediaListDirective>(name, value, m_pluginTypes);
+    } else if (equalIgnoringCase(name, ContentSecurityPolicy::ReflectedXSS)) {
+        parseReflectedXSS(name, value);
+    } else if (equalIgnoringCase(name, ContentSecurityPolicy::Referrer)) {
+        parseReferrer(name, value);
     } else if (m_policy->experimentalFeaturesEnabled()) {
-        if (equalIgnoringCase(name, ContentSecurityPolicy::BaseURI))
-            setCSPDirective<SourceListDirective>(name, value, m_baseURI);
-        else if (equalIgnoringCase(name, ContentSecurityPolicy::ChildSrc))
-            setCSPDirective<SourceListDirective>(name, value, m_childSrc);
-        else if (equalIgnoringCase(name, ContentSecurityPolicy::FormAction))
-            setCSPDirective<SourceListDirective>(name, value, m_formAction);
-        else if (equalIgnoringCase(name, ContentSecurityPolicy::PluginTypes))
-            setCSPDirective<MediaListDirective>(name, value, m_pluginTypes);
-        else if (equalIgnoringCase(name, ContentSecurityPolicy::ReflectedXSS))
-            parseReflectedXSS(name, value);
-        else if (equalIgnoringCase(name, ContentSecurityPolicy::Referrer))
-            parseReferrer(name, value);
+        if (equalIgnoringCase(name, ContentSecurityPolicy::ManifestSrc))
+            setCSPDirective<SourceListDirective>(name, value, m_manifestSrc);
         else
             m_policy->reportUnsupportedDirective(name);
     } else {

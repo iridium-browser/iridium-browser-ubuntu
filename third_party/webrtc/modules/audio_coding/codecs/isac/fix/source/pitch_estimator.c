@@ -32,7 +32,7 @@ int32_t WebRtcIsacfix_Log2Q8(uint32_t x) {
   int16_t frac;
 
   zeros=WebRtcSpl_NormU32(x);
-  frac=(int16_t)WEBRTC_SPL_RSHIFT_W32(((uint32_t)(WEBRTC_SPL_LSHIFT_W32(x, zeros))&0x7FFFFFFF), 23);
+  frac = (int16_t)(((x << zeros) & 0x7FFFFFFF) >> 23);
   /* log2(magn(i)) */
 
   lg2= (WEBRTC_SPL_LSHIFT_W32((31-zeros), 8)+frac);
@@ -45,11 +45,11 @@ static __inline int16_t Exp2Q10(int16_t x) { // Both in and out in Q10
   int16_t tmp16_1, tmp16_2;
 
   tmp16_2=(int16_t)(0x0400|(x&0x03FF));
-  tmp16_1=-(int16_t)WEBRTC_SPL_RSHIFT_W16(x,10);
+  tmp16_1 = -(x >> 10);
   if(tmp16_1>0)
-    return (int16_t) WEBRTC_SPL_RSHIFT_W16(tmp16_2, tmp16_1);
+    return tmp16_2 >> tmp16_1;
   else
-    return (int16_t) WEBRTC_SPL_LSHIFT_W16(tmp16_2, -tmp16_1);
+    return tmp16_2 << -tmp16_1;
 
 }
 
@@ -77,7 +77,7 @@ static __inline void Intrp1DQ8(int32_t *x, int32_t *fx, int32_t *y, int32_t *fy)
     /* t in Q31, without signs */
     t32 = WebRtcSpl_DivResultInQ31(nom32 * sign1, den32 * sign2);
 
-    t16=(int16_t)WEBRTC_SPL_RSHIFT_W32(t32, 23);  /* Q8 */
+    t16 = (int16_t)(t32 >> 23);  /* Q8 */
     t16=t16*sign1*sign2;        /* t in Q8 with signs */
 
     *y = x[0]+t16;          /* Q8 */
@@ -88,7 +88,7 @@ static __inline void Intrp1DQ8(int32_t *x, int32_t *fx, int32_t *y, int32_t *fy)
 
     /* Part I: 0.5 * t * (t-1) * fx[0] */
     tmp16_1=(int16_t)WEBRTC_SPL_MUL_16_16(t16,t16); /* Q8*Q8=Q16 */
-    tmp16_1 = WEBRTC_SPL_RSHIFT_W16(tmp16_1,2);  /* Q16>>2 = Q14 */
+    tmp16_1 >>= 2;  /* Q16>>2 = Q14 */
     t16 = (int16_t)WEBRTC_SPL_MUL_16_16(t16, 64);           /* Q8<<6 = Q14  */
     tmp16 = tmp16_1-t16;
     *fy = WEBRTC_SPL_MUL_16_32_RSFT15(tmp16, fx[0]); /* (Q14 * Q8 >>15)/2 = Q8 */
@@ -327,7 +327,7 @@ void WebRtcIsacfix_InitialPitch(const int16_t *in, /* Q0 */
 
   /* Bias towards constant pitch */
   tmp32a = lagsQ8[0] - PITCH_MIN_LAG_Q8;
-  ratq = WEBRTC_SPL_RSHIFT_W32(tmp32a, 1) + OFFSET_Q8;
+  ratq = (tmp32a >> 1) + OFFSET_Q8;
 
   for (k = 1; k <= PITCH_LAG_SPAN2; k++)
   {
@@ -335,7 +335,7 @@ void WebRtcIsacfix_InitialPitch(const int16_t *in, /* Q0 */
     tmp32b = (int32_t) (WEBRTC_SPL_LSHIFT_W32(tmp32a, 1)) - ratq; // Q8
     tmp32c = WEBRTC_SPL_MUL_16_16_RSFT((int16_t) tmp32b, (int16_t) tmp32b, 8); // Q8
 
-    tmp32b = (int32_t)tmp32c + (int32_t)WEBRTC_SPL_RSHIFT_W32(ratq, 1);
+    tmp32b = tmp32c + (ratq >> 1);
         // (k-r)^2 + 0.5 * r  Q8
     tmp32c = WebRtcIsacfix_Log2Q8((uint32_t)tmp32a) - 2048;
         // offset 8*2^8 , log2(0.5*k) Q8
@@ -343,7 +343,7 @@ void WebRtcIsacfix_InitialPitch(const int16_t *in, /* Q0 */
         // offset 8*2^8 , log2(0.5*k) Q8
     tmp32e =  tmp32c - tmp32d;
 
-    cv2q[k] += WEBRTC_SPL_RSHIFT_W32(tmp32e, 1);
+    cv2q[k] += tmp32e >> 1;
 
   }
 
@@ -401,12 +401,10 @@ void WebRtcIsacfix_InitialPitch(const int16_t *in, /* Q0 */
     lagsQ8[3] = lagsQ8[0];
   }
 
-  lagsQ7[0]=(int16_t) WEBRTC_SPL_RSHIFT_W32(lagsQ8[0], 1);
-  lagsQ7[1]=(int16_t) WEBRTC_SPL_RSHIFT_W32(lagsQ8[1], 1);
-  lagsQ7[2]=(int16_t) WEBRTC_SPL_RSHIFT_W32(lagsQ8[2], 1);
-  lagsQ7[3]=(int16_t) WEBRTC_SPL_RSHIFT_W32(lagsQ8[3], 1);
-
-
+  lagsQ7[0] = (int16_t)(lagsQ8[0] >> 1);
+  lagsQ7[1] = (int16_t)(lagsQ8[1] >> 1);
+  lagsQ7[2] = (int16_t)(lagsQ8[2] >> 1);
+  lagsQ7[3] = (int16_t)(lagsQ8[3] >> 1);
 }
 
 

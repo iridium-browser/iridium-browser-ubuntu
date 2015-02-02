@@ -69,7 +69,6 @@
 <translation id="7267430310003164111">Google Play स्टोर से ऐप्स प्राप्त करने का संकेत.  ऐप्स नाम: <ph name="APP_NAME"/>.  ऐप्स औसत रेटिंग: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">इंस्‍टॉल हो रहा है...</translation>
 <translation id="3992315671621218278">लिंक सहेजें</translation>
-<translation id="8034522405403831421">यह पृष्ठ <ph name="SOURCE_LANGUAGE"/> में है. इसका <ph name="TARGET_LANGUAGE"/> में अनुवाद करें?</translation>
 <translation id="2476578072172137802">साइट की सेटिंग</translation>
 <translation id="4195643157523330669">नए टैब में खोलें</translation>
 <translation id="651048280540227067">मेनू को खारिज करें</translation>
@@ -95,6 +94,7 @@
 <translation id="7947953824732555851">स्वीकार करें और प्रवेश करें</translation>
 <translation id="6333140779060797560"><ph name="APPLICATION"/> के द्वारा साझा करें</translation>
 <translation id="6040143037577758943">बंद करें</translation>
+<translation id="5138299137310274655">यह पृष्‍ठ <ph name="SOURCE_LANGUAGE"/> में है. इसका <ph name="TARGET_LANGUAGE"/> में अनुवाद करें?</translation>
 <translation id="969096075394517431">भाषाएं बदलें</translation>
 <translation id="5032574515228824816">शीघ्र</translation>
 <translation id="7961015016161918242">कभी नहीं</translation>

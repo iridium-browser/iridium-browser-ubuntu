@@ -88,7 +88,8 @@ void WebstoreProvider::Start(const base::string16& query) {
 
   // Add a placeholder result which when clicked will run the user's query in a
   // browser. This placeholder is removed when the search results arrive.
-  Add(scoped_ptr<SearchResult>(new SearchWebstoreResult(profile_, query_)));
+  Add(scoped_ptr<SearchResult>(
+      new SearchWebstoreResult(profile_, controller_, query_)));
 }
 
 void WebstoreProvider::Stop() {
@@ -146,9 +147,9 @@ void WebstoreProvider::ProcessWebstoreSearchResults(
   }
 }
 
-scoped_ptr<ChromeSearchResult> WebstoreProvider::CreateResult(
+scoped_ptr<SearchResult> WebstoreProvider::CreateResult(
     const base::DictionaryValue& dict) {
-  scoped_ptr<ChromeSearchResult> result;
+  scoped_ptr<SearchResult> result;
 
   std::string app_id;
   std::string localized_name;

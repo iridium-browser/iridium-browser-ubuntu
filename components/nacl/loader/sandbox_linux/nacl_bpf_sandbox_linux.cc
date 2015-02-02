@@ -11,14 +11,20 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/ptrace.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 
+#include "components/nacl/common/nacl_switches.h"
 #include "content/public/common/sandbox_init.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
+#include "sandbox/linux/bpf_dsl/policy.h"
+#include "sandbox/linux/seccomp-bpf-helpers/syscall_parameters_restrictions.h"
 #include "sandbox/linux/services/linux_syscalls.h"
 
 #endif  // defined(USE_SECCOMP_BPF)
@@ -33,38 +39,63 @@ using sandbox::bpf_dsl::Allow;
 using sandbox::bpf_dsl::Error;
 using sandbox::bpf_dsl::ResultExpr;
 
-class NaClBPFSandboxPolicy : public sandbox::bpf_dsl::SandboxBPFDSLPolicy {
+class NaClBPFSandboxPolicy : public sandbox::bpf_dsl::Policy {
  public:
   NaClBPFSandboxPolicy()
-      : baseline_policy_(content::GetBPFSandboxBaselinePolicy()) {}
-  virtual ~NaClBPFSandboxPolicy() {}
+      : baseline_policy_(content::GetBPFSandboxBaselinePolicy()),
+        policy_pid_(syscall(__NR_getpid)) {
+    const base::CommandLine* command_line =
+        base::CommandLine::ForCurrentProcess();
+    // nacl_process_host.cc doesn't always enable the debug stub when
+    // kEnableNaClDebug is passed, but it's OK to enable the extra syscalls
+    // whenever kEnableNaClDebug is passed.
+    enable_nacl_debug_ = command_line->HasSwitch(switches::kEnableNaClDebug);
+  }
+  ~NaClBPFSandboxPolicy() override {}
 
-  virtual ResultExpr EvaluateSyscall(int system_call_number) const OVERRIDE;
-  virtual ResultExpr InvalidSyscall() const OVERRIDE {
+  ResultExpr EvaluateSyscall(int system_call_number) const override;
+  ResultExpr InvalidSyscall() const override {
     return baseline_policy_->InvalidSyscall();
   }
 
  private:
-  scoped_ptr<sandbox::bpf_dsl::SandboxBPFDSLPolicy> baseline_policy_;
+  scoped_ptr<sandbox::bpf_dsl::Policy> baseline_policy_;
+  bool enable_nacl_debug_;
+  const pid_t policy_pid_;
 
   DISALLOW_COPY_AND_ASSIGN(NaClBPFSandboxPolicy);
 };
 
 ResultExpr NaClBPFSandboxPolicy::EvaluateSyscall(int sysno) const {
   DCHECK(baseline_policy_);
-  switch (sysno) {
-    // TODO(jln): NaCl's GDB debug stub uses the following socket system calls,
-    // see if it can be restricted a bit.
+
+  // EvaluateSyscall must be called from the same process that instantiated the
+  // NaClBPFSandboxPolicy.
+  DCHECK_EQ(policy_pid_, syscall(__NR_getpid));
+
+  // NaCl's GDB debug stub uses the following socket system calls. We only
+  // allow them when --enable-nacl-debug is specified.
+  if (enable_nacl_debug_) {
+    switch (sysno) {
+    // trusted/service_runtime/linux/thread_suspension.c needs sigwait(). Thread
+    // suspension is currently only used in the debug stub.
+      case __NR_rt_sigtimedwait:
+        return Allow();
 #if defined(__x86_64__) || defined(__arm__) || defined(__mips__)
-    // transport_common.cc needs this.
-    case __NR_accept:
-    case __NR_setsockopt:
+      // transport_common.cc needs this.
+      case __NR_accept:
+      case __NR_setsockopt:
+        return Allow();
 #elif defined(__i386__)
-    case __NR_socketcall:
+      case __NR_socketcall:
+        return Allow();
 #endif
-    // trusted/service_runtime/linux/thread_suspension.c needs sigwait() and is
-    // used by NaCl's GDB debug stub.
-    case __NR_rt_sigtimedwait:
+      default:
+        break;
+    }
+  }
+
+  switch (sysno) {
 #if defined(__i386__) || defined(__mips__)
     // Needed on i386 to set-up the custom segments.
     case __NR_modify_ldt:
@@ -88,10 +119,6 @@ ResultExpr NaClBPFSandboxPolicy::EvaluateSyscall(int sysno) const {
     case __NR_pwrite64:
     case __NR_sched_get_priority_max:
     case __NR_sched_get_priority_min:
-    case __NR_sched_getaffinity:
-    case __NR_sched_getparam:
-    case __NR_sched_getscheduler:
-    case __NR_sched_setscheduler:
     case __NR_sysinfo:
     // __NR_times needed as clock() is called by CommandBufferHelper, which is
     // used by NaCl applications that use Pepper's 3D interfaces.
@@ -102,6 +129,11 @@ ResultExpr NaClBPFSandboxPolicy::EvaluateSyscall(int sysno) const {
     case __NR_ioctl:
     case __NR_ptrace:
       return Error(EPERM);
+    case __NR_sched_getaffinity:
+    case __NR_sched_getparam:
+    case __NR_sched_getscheduler:
+    case __NR_sched_setscheduler:
+      return sandbox::RestrictSchedTarget(policy_pid_, sysno);
     default:
       return baseline_policy_->EvaluateSyscall(sysno);
   }
@@ -130,8 +162,7 @@ void RunSandboxSanityChecks() {
 bool InitializeBPFSandbox() {
 #if defined(USE_SECCOMP_BPF)
   bool sandbox_is_initialized = content::InitializeSandbox(
-      scoped_ptr<sandbox::bpf_dsl::SandboxBPFDSLPolicy>(
-          new NaClBPFSandboxPolicy));
+      scoped_ptr<sandbox::bpf_dsl::Policy>(new NaClBPFSandboxPolicy));
   if (sandbox_is_initialized) {
     RunSandboxSanityChecks();
     return true;

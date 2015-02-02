@@ -20,7 +20,10 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/screen_manager.h"
-#include "chrome/browser/chromeos/login/screens/screen_observer.h"
+#include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
+#include "chrome/browser/chromeos/login/screens/controller_pairing_screen.h"
+#include "chrome/browser/chromeos/login/screens/eula_screen.h"
+#include "chrome/browser/chromeos/login/screens/host_pairing_screen.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -54,13 +57,17 @@ class UserImageScreen;
 
 // Class that manages control flow between wizard screens. Wizard controller
 // interacts with screen controllers to move the user between screens.
-class WizardController : public ScreenObserver, public ScreenManager {
+class WizardController : public BaseScreenDelegate,
+                         public ScreenManager,
+                         public EulaScreen::Delegate,
+                         public ControllerPairingScreen::Delegate,
+                         public HostPairingScreen::Delegate {
  public:
   // Observes screen changes.
   class Observer {
    public:
     // Called before a screen change happens.
-    virtual void OnScreenChanged(WizardScreen* next_screen) = 0;
+    virtual void OnScreenChanged(BaseScreen* next_screen) = 0;
 
     // Called after the browser session has started.
     virtual void OnSessionStart() = 0;
@@ -128,18 +135,15 @@ class WizardController : public ScreenObserver, public ScreenManager {
   // reworked at hackaton.
   void EnableUserImageScreenReturnToPreviousHack();
 
-  // Callback for enrollment auth token.
-  void OnEnrollmentAuthTokenReceived(const std::string& auth_token);
-
   // Returns a pointer to the current screen or NULL if there's no such
   // screen.
-  WizardScreen* current_screen() const { return current_screen_; }
+  BaseScreen* current_screen() const { return current_screen_; }
 
   // Returns true if the current wizard instance has reached the login screen.
   bool login_screen_started() const { return login_screen_started_; }
 
   // ScreenManager implementation.
-  virtual WizardScreen* CreateScreen(const std::string& screen_name) OVERRIDE;
+  virtual BaseScreen* CreateScreen(const std::string& screen_name) override;
 
   static const char kNetworkScreenName[];
   static const char kLoginScreenName[];
@@ -161,6 +165,7 @@ class WizardController : public ScreenObserver, public ScreenManager {
   static const char kHIDDetectionScreenName[];
   static const char kControllerPairingScreenName[];
   static const char kHostPairingScreenName[];
+  static const char kDeviceDisabledScreenName[];
 
   // Volume percent at which spoken feedback is still audible.
   static const int kMinAudibleOutputVolumePercent;
@@ -182,6 +187,7 @@ class WizardController : public ScreenObserver, public ScreenManager {
   void ShowHIDDetectionScreen();
   void ShowControllerPairingScreen();
   void ShowHostPairingScreen();
+  void ShowDeviceDisabledScreen();
 
   // Shows images login screen.
   void ShowLoginScreen(const LoginScreenContext& context);
@@ -210,11 +216,15 @@ class WizardController : public ScreenObserver, public ScreenManager {
   void OnKioskAutolaunchConfirmed();
   void OnKioskEnableCompleted();
   void OnWrongHWIDWarningSkipped();
-  void OnAutoEnrollmentCheckCompleted();
   void OnTermsOfServiceDeclined();
   void OnTermsOfServiceAccepted();
   void OnControllerPairingFinished();
   void OnHostPairingFinished();
+  void OnAutoEnrollmentCheckCompleted();
+
+  // Callback invoked once it has been determined whether the device is disabled
+  // or not.
+  void OnDeviceDisabledChecked(bool device_disabled);
 
   // Callback function after setting MetricsReporting.
   void InitiateMetricsReportingChangeCallback(bool enabled);
@@ -235,33 +245,40 @@ class WizardController : public ScreenObserver, public ScreenManager {
   // Actions that should be done right after update stage is finished.
   void PerformOOBECompletedActions();
 
-  // Overridden from ScreenObserver:
-  virtual void OnExit(ExitCodes exit_code) OVERRIDE;
-  virtual void ShowCurrentScreen() OVERRIDE;
-  virtual void OnSetUserNamePassword(const std::string& username,
-                                     const std::string& password) OVERRIDE;
-  virtual void SetUsageStatisticsReporting(bool val) OVERRIDE;
-  virtual bool GetUsageStatisticsReporting() const OVERRIDE;
-  virtual ErrorScreen* GetErrorScreen() OVERRIDE;
-  virtual void ShowErrorScreen() OVERRIDE;
-  virtual void HideErrorScreen(WizardScreen* parent_screen) OVERRIDE;
+  // Overridden from BaseScreenDelegate:
+  virtual void OnExit(ExitCodes exit_code) override;
+  virtual void ShowCurrentScreen() override;
+  virtual ErrorScreen* GetErrorScreen() override;
+  virtual void ShowErrorScreen() override;
+  virtual void HideErrorScreen(BaseScreen* parent_screen) override;
+
+  // Overridden from EulaScreen::Delegate:
+  virtual void SetUsageStatisticsReporting(bool val) override;
+  virtual bool GetUsageStatisticsReporting() const override;
+
+  // Override from ControllerPairingScreen::Delegate:
+  virtual void SetHostConfiguration() override;
+
+  // Override from HostPairingScreen::Delegate:
+  virtual void ConfigureHost(bool accepted_eula,
+                             const std::string& lang,
+                             const std::string& timezone,
+                             bool send_reports,
+                             const std::string& keyboard_layout) override;
 
   // Notification of a change in the state of an accessibility setting.
   void OnAccessibilityStatusChanged(
       const AccessibilityStatusEventDetails& details);
 
   // Switches from one screen to another.
-  void SetCurrentScreen(WizardScreen* screen);
+  void SetCurrentScreen(BaseScreen* screen);
 
   // Switches from one screen to another with delay before showing. Calling
   // ShowCurrentScreen directly forces screen to be shown immediately.
-  void SetCurrentScreenSmooth(WizardScreen* screen, bool use_smoothing);
+  void SetCurrentScreenSmooth(BaseScreen* screen, bool use_smoothing);
 
   // Changes status area visibility.
   void SetStatusAreaVisible(bool visible);
-
-  // Logs in the specified user via default login screen.
-  void Login(const std::string& username, const std::string& password);
 
   // Launched kiosk app configured for auto-launch.
   void AutoLaunchKioskApp();
@@ -322,14 +339,10 @@ class WizardController : public ScreenObserver, public ScreenManager {
   static bool zero_delay_enabled_;
 
   // Screen that's currently active.
-  WizardScreen* current_screen_;
+  BaseScreen* current_screen_;
 
   // Screen that was active before, or NULL for login screen.
-  WizardScreen* previous_screen_;
-
-  std::string username_;
-  std::string password_;
-  std::string auth_token_;
+  BaseScreen* previous_screen_;
 
   // True if running official BUILD.
   bool is_official_build_;
@@ -365,6 +378,10 @@ class WizardController : public ScreenObserver, public ScreenManager {
   // instance.
   bool enrollment_recovery_;
 
+  // Whether the auto-enrollment check should be retried or the cached result
+  // returned if present.
+  bool retry_auto_enrollment_check_;
+
   // Time when the EULA was accepted. Used to measure the duration from the EULA
   // acceptance until the Sign-In screen is displayed.
   base::Time time_eula_accepted_;
@@ -397,11 +414,10 @@ class WizardController : public ScreenObserver, public ScreenManager {
   scoped_ptr<TimeZoneProvider> timezone_provider_;
 
   // Pairing controller for shark devices.
-  scoped_ptr<pairing_chromeos::ControllerPairingController>
-      controller_pairing_controller_;
+  scoped_ptr<pairing_chromeos::ControllerPairingController> shark_controller_;
 
   // Pairing controller for remora devices.
-  scoped_ptr<pairing_chromeos::HostPairingController> host_pairing_controller_;
+  scoped_ptr<pairing_chromeos::HostPairingController> remora_controller_;
 
   // Maps screen ids to last time of their shows.
   base::hash_map<std::string, base::Time> screen_show_times_;

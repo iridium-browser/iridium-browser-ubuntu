@@ -68,7 +68,7 @@ class INVALIDATION_EXPORT_PRIVATE SyncInvalidationListener
       scoped_ptr<SyncNetworkChannel> network_channel);
 
   // Calls Stop().
-  virtual ~SyncInvalidationListener();
+  ~SyncInvalidationListener() override;
 
   // Does not take ownership of |delegate| or |state_writer|.
   // |invalidation_state_tracker| must be initialized.
@@ -91,50 +91,42 @@ class INVALIDATION_EXPORT_PRIVATE SyncInvalidationListener
   void UpdateRegisteredIds(const ObjectIdSet& ids);
 
   // invalidation::InvalidationListener implementation.
-  virtual void Ready(
-      invalidation::InvalidationClient* client) OVERRIDE;
-  virtual void Invalidate(
-      invalidation::InvalidationClient* client,
-      const invalidation::Invalidation& invalidation,
-      const invalidation::AckHandle& ack_handle) OVERRIDE;
-  virtual void InvalidateUnknownVersion(
+  void Ready(invalidation::InvalidationClient* client) override;
+  void Invalidate(invalidation::InvalidationClient* client,
+                  const invalidation::Invalidation& invalidation,
+                  const invalidation::AckHandle& ack_handle) override;
+  void InvalidateUnknownVersion(
       invalidation::InvalidationClient* client,
       const invalidation::ObjectId& object_id,
-      const invalidation::AckHandle& ack_handle) OVERRIDE;
-  virtual void InvalidateAll(
-      invalidation::InvalidationClient* client,
-      const invalidation::AckHandle& ack_handle) OVERRIDE;
-  virtual void InformRegistrationStatus(
-      invalidation::InvalidationClient* client,
-      const invalidation::ObjectId& object_id,
-      invalidation::InvalidationListener::RegistrationState reg_state) OVERRIDE;
-  virtual void InformRegistrationFailure(
+      const invalidation::AckHandle& ack_handle) override;
+  void InvalidateAll(invalidation::InvalidationClient* client,
+                     const invalidation::AckHandle& ack_handle) override;
+  void InformRegistrationStatus(
       invalidation::InvalidationClient* client,
       const invalidation::ObjectId& object_id,
-      bool is_transient,
-      const std::string& error_message) OVERRIDE;
-  virtual void ReissueRegistrations(
-      invalidation::InvalidationClient* client,
-      const std::string& prefix,
-      int prefix_length) OVERRIDE;
-  virtual void InformError(
-      invalidation::InvalidationClient* client,
-      const invalidation::ErrorInfo& error_info) OVERRIDE;
+      invalidation::InvalidationListener::RegistrationState reg_state) override;
+  void InformRegistrationFailure(invalidation::InvalidationClient* client,
+                                 const invalidation::ObjectId& object_id,
+                                 bool is_transient,
+                                 const std::string& error_message) override;
+  void ReissueRegistrations(invalidation::InvalidationClient* client,
+                            const std::string& prefix,
+                            int prefix_length) override;
+  void InformError(invalidation::InvalidationClient* client,
+                   const invalidation::ErrorInfo& error_info) override;
 
   // AckHandler implementation.
-  virtual void Acknowledge(
-      const invalidation::ObjectId& id,
-      const syncer::AckHandle& handle) OVERRIDE;
-  virtual void Drop(
-      const invalidation::ObjectId& id,
-      const syncer::AckHandle& handle) OVERRIDE;
+  void Acknowledge(const invalidation::ObjectId& id,
+                   const syncer::AckHandle& handle) override;
+  void Drop(const invalidation::ObjectId& id,
+            const syncer::AckHandle& handle) override;
 
   // StateWriter implementation.
-  virtual void WriteState(const std::string& state) OVERRIDE;
+  void WriteState(const std::string& state) override;
 
   // SyncNetworkChannel::Observer implementation.
-  virtual void OnNetworkChannelStateChanged(
-      InvalidatorState invalidator_state) OVERRIDE;
+  void OnNetworkChannelStateChanged(
+      InvalidatorState invalidator_state) override;
 
   void DoRegistrationUpdate();
 

@@ -8,7 +8,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -47,7 +46,7 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
   SessionServiceTest() : window_bounds(0, 1, 2, 3), sync_save_count_(0) {}
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
 
     profile_manager_.reset(
@@ -61,22 +60,23 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
 
     helper_.SetService(session_service);
 
-    service()->SetWindowType(
-        window_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
+    service()->SetWindowType(window_id,
+                             Browser::TYPE_TABBED,
+                             SessionService::TYPE_NORMAL);
     service()->SetWindowBounds(window_id,
                                window_bounds,
                                ui::SHOW_STATE_NORMAL);
   }
 
   // Upon notification, increment the sync_save_count variable
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     ASSERT_EQ(type, chrome::NOTIFICATION_SESSION_SERVICE_SAVED);
     sync_save_count_++;
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     helper_.SetService(NULL);
     BrowserWithTestWindowTest::TearDown();
   }
@@ -155,8 +155,9 @@ class SessionServiceTest : public BrowserWithTestWindowTest,
     UpdateNavigation(window_id, tab1_id, *nav1, true);
 
     const gfx::Rect window2_bounds(3, 4, 5, 6);
-    service()->SetWindowType(
-        window2_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
+    service()->SetWindowType(window2_id,
+                             Browser::TYPE_TABBED,
+                             SessionService::TYPE_NORMAL);
     service()->SetWindowBounds(window2_id,
                                window2_bounds,
                                ui::SHOW_STATE_MAXIMIZED);
@@ -201,7 +202,7 @@ TEST_F(SessionServiceTest, Basic) {
   ASSERT_EQ(0, windows[0]->selected_tab_index);
   ASSERT_EQ(window_id.id(), windows[0]->window_id.id());
   ASSERT_EQ(1U, windows[0]->tabs.size());
-  ASSERT_EQ(Browser::TYPE_TABBED, windows[0]->type);
+  ASSERT_EQ(SessionWindow::TYPE_TABBED, windows[0]->type);
 
   SessionTab* tab = windows[0]->tabs[0];
   helper_.AssertTabEquals(window_id, tab_id, 0, 0, 1, *tab);
@@ -354,8 +355,9 @@ TEST_F(SessionServiceTest, WindowWithNoTabsGetsPruned) {
   UpdateNavigation(window_id, tab1_id, nav1, true);
 
   const gfx::Rect window2_bounds(3, 4, 5, 6);
-  service()->SetWindowType(
-      window2_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
+  service()->SetWindowType(window2_id,
+                           Browser::TYPE_TABBED,
+                           SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window2_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -449,8 +451,9 @@ TEST_F(SessionServiceTest, WindowCloseCommittedAfterNavigate) {
   SessionID tab2_id;
   ASSERT_NE(window2_id.id(), window_id.id());
 
-  service()->SetWindowType(
-      window2_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
+  service()->SetWindowType(window2_id,
+                           Browser::TYPE_TABBED,
+                           SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -492,8 +495,9 @@ TEST_F(SessionServiceTest, IgnorePopups) {
   SessionID tab2_id;
   ASSERT_NE(window2_id.id(), window_id.id());
 
-  service()->SetWindowType(
-      window2_id, Browser::TYPE_POPUP, SessionService::TYPE_NORMAL);
+  service()->SetWindowType(window2_id,
+                           Browser::TYPE_POPUP,
+                           SessionService::TYPE_NORMAL);
   service()->SetWindowBounds(window2_id,
                              window_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -532,8 +536,9 @@ TEST_F(SessionServiceTest, RestoreApp) {
   SessionID tab2_id;
   ASSERT_NE(window2_id.id(), window_id.id());
 
-  service()->SetWindowType(
-      window2_id, Browser::TYPE_POPUP, SessionService::TYPE_APP);
+  service()->SetWindowType(window2_id,
+                           Browser::TYPE_POPUP,
+                           SessionService::TYPE_APP);
   service()->SetWindowBounds(window2_id,
                              window_bounds,
                              ui::SHOW_STATE_NORMAL);
@@ -556,7 +561,7 @@ TEST_F(SessionServiceTest, RestoreApp) {
   ReadWindows(&(windows.get()), NULL);
 
   ASSERT_EQ(2U, windows.size());
-  int tabbed_index = windows[0]->type == Browser::TYPE_TABBED ?
+  int tabbed_index = windows[0]->type == SessionWindow::TYPE_TABBED ?
       0 : 1;
   int app_index = tabbed_index == 0 ? 1 : 0;
   ASSERT_EQ(0, windows[tabbed_index]->selected_tab_index);
@@ -570,7 +575,7 @@ TEST_F(SessionServiceTest, RestoreApp) {
   ASSERT_EQ(0, windows[app_index]->selected_tab_index);
   ASSERT_EQ(window2_id.id(), windows[app_index]->window_id.id());
   ASSERT_EQ(1U, windows[app_index]->tabs.size());
-  ASSERT_TRUE(windows[app_index]->type == Browser::TYPE_POPUP);
+  ASSERT_TRUE(windows[app_index]->type == SessionWindow::TYPE_POPUP);
   ASSERT_EQ("TestApp", windows[app_index]->app_name);
 
   tab = windows[app_index]->tabs[0];
@@ -716,7 +721,7 @@ TEST_F(SessionServiceTest, SavedSessionNotification) {
   content::NotificationRegistrar registrar_;
   registrar_.Add(this, chrome::NOTIFICATION_SESSION_SERVICE_SAVED,
                  content::NotificationService::AllSources());
-  service()->Save();
+  service()->GetBaseSessionServiceForTest()->Save();
   EXPECT_EQ(sync_save_count_, 1);
 }
 
@@ -771,7 +776,8 @@ TEST_F(SessionServiceTest, KeepPostDataWithoutPasswords) {
   SerializedNavigationEntry nav1 =
       SerializedNavigationEntryTestHelper::CreateNavigation(
           "http://google.com", "title");
-  SerializedNavigationEntryTestHelper::SetPageState(page_state, &nav1);
+  SerializedNavigationEntryTestHelper::SetEncodedPageState(
+      page_state.ToEncodedData(), &nav1);
   SerializedNavigationEntryTestHelper::SetHasPostData(true, &nav1);
 
   // Create a TabNavigation containing page_state and representing a normal
@@ -779,7 +785,8 @@ TEST_F(SessionServiceTest, KeepPostDataWithoutPasswords) {
   SerializedNavigationEntry nav2 =
       SerializedNavigationEntryTestHelper::CreateNavigation(
           "http://google.com/nopost", "title");
-  SerializedNavigationEntryTestHelper::SetPageState(page_state, &nav2);
+  SerializedNavigationEntryTestHelper::SetEncodedPageState(
+      page_state.ToEncodedData(), &nav2);
   nav2.set_index(1);
 
   helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
@@ -810,7 +817,8 @@ TEST_F(SessionServiceTest, RemovePostDataWithPasswords) {
   SerializedNavigationEntry nav1 =
       SerializedNavigationEntryTestHelper::CreateNavigation(
           "http://google.com", "title");
-  SerializedNavigationEntryTestHelper::SetPageState(page_state, &nav1);
+  SerializedNavigationEntryTestHelper::SetEncodedPageState(
+      page_state.ToEncodedData(), &nav1);
   SerializedNavigationEntryTestHelper::SetHasPostData(true, &nav1);
   helper_.PrepareTabInWindow(window_id, tab_id, 0, true);
   UpdateNavigation(window_id, tab_id, nav1, true);
@@ -822,37 +830,9 @@ TEST_F(SessionServiceTest, RemovePostDataWithPasswords) {
 
   // Expected: the HTTP body was removed from the page state of the POST
   // navigation with passwords.
-  EXPECT_NE(page_state, windows[0]->tabs[0]->navigations[0].page_state());
+  EXPECT_NE(page_state.ToEncodedData(),
+            windows[0]->tabs[0]->navigations[0].encoded_page_state());
 }
-
-// This test is only applicable to chromeos.
-#if defined(OS_CHROMEOS)
-// Verifies migration of tab/window closed works.
-TEST_F(SessionServiceTest, CanOpenV1TabClosed) {
-  base::FilePath v1_file_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &v1_file_path));
-  // v1_session_file contains a tab closed command with the original id. The
-  // file was generated from ClosingTabStaysClosed. If we successfully processed
-  // the file we'll have one tab.
-  v1_file_path =
-      v1_file_path.AppendASCII("sessions").AppendASCII("v1_session_file");
-  base::FilePath dest_file_path(path_);
-  dest_file_path = dest_file_path.AppendASCII("Current Session");
-
-  // Forces closing the file.
-  helper_.SetService(NULL);
-
-  ASSERT_TRUE(base::CopyFile(v1_file_path, dest_file_path));
-
-  SessionService* session_service = new SessionService(path_);
-  helper_.SetService(session_service);
-  ScopedVector<SessionWindow> windows;
-  SessionID::id_type active_window_id = 0;
-  helper_.ReadWindows(&(windows.get()), &active_window_id);
-  ASSERT_EQ(1u, windows.size());
-  EXPECT_EQ(1u, windows[0]->tabs.size());
-}
-#endif  // defined(OS_CHROMEOS)
 
 TEST_F(SessionServiceTest, ReplacePendingNavigation) {
   const std::string base_url("http://google.com/");
@@ -932,10 +912,8 @@ TEST_F(SessionServiceTest, RestoreActivation1) {
   CreateAndWriteSessionWithTwoWindows(
       window2_id, tab1_id, tab2_id, &nav1, &nav2);
 
-  service()->ScheduleCommand(
-      service()->CreateSetActiveWindowCommand(window2_id));
-  service()->ScheduleCommand(
-      service()->CreateSetActiveWindowCommand(window_id));
+  service()->ScheduleCommand(CreateSetActiveWindowCommand(window2_id).Pass());
+  service()->ScheduleCommand(CreateSetActiveWindowCommand(window_id).Pass());
 
   ScopedVector<SessionWindow> windows;
   SessionID::id_type active_window_id = 0;
@@ -955,12 +933,9 @@ TEST_F(SessionServiceTest, RestoreActivation2) {
   CreateAndWriteSessionWithTwoWindows(
       window2_id, tab1_id, tab2_id, &nav1, &nav2);
 
-  service()->ScheduleCommand(
-      service()->CreateSetActiveWindowCommand(window2_id));
-  service()->ScheduleCommand(
-      service()->CreateSetActiveWindowCommand(window_id));
-  service()->ScheduleCommand(
-      service()->CreateSetActiveWindowCommand(window2_id));
+  service()->ScheduleCommand(CreateSetActiveWindowCommand(window2_id).Pass());
+  service()->ScheduleCommand(CreateSetActiveWindowCommand(window_id).Pass());
+  service()->ScheduleCommand(CreateSetActiveWindowCommand(window2_id).Pass());
 
   ScopedVector<SessionWindow> windows;
   SessionID::id_type active_window_id = 0;

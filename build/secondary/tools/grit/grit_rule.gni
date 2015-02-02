@@ -159,10 +159,10 @@ if (enable_extensions) {
 if (enable_plugins) {
   grit_defines += [ "-D", "enable_plugins" ]
 }
-if (printing_mode != 0) {
+if (enable_basic_printing || enable_print_preview) {
   grit_defines += [ "-D", "enable_printing" ]
-  if (printing_mode == 1) {
-    grit_defines += [ "-D", "enable_full_printing" ]
+  if (enable_print_preview) {
+    grit_defines += [ "-D", "enable_print_preview" ]
   }
 }
 if (enable_themes) {
@@ -329,6 +329,10 @@ template("grit") {
     # target rather than this library.
     deps = [ ":$grit_custom_target" ]
     public_configs = [ ":$grit_config" ]
+
+    if (defined(invoker.public_configs)) {
+      public_configs += invoker.public_configs
+    }
 
     if (defined(invoker.visibility)) {
       visibility = invoker.visibility

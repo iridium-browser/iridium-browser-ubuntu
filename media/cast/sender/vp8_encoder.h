@@ -8,7 +8,6 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_checker.h"
-#include "base/time/time.h"
 #include "media/cast/cast_config.h"
 #include "media/cast/sender/software_video_encoder.h"
 #include "third_party/libvpx/source/libvpx/vpx/vpx_encoder.h"
@@ -17,37 +16,27 @@ namespace media {
 class VideoFrame;
 }
 
-// VPX forward declaration.
-typedef struct vpx_codec_ctx vpx_enc_ctx_t;
-
 namespace media {
 namespace cast {
 
-const int kNumberOfVp8VideoBuffers = 3;
-
 class Vp8Encoder : public SoftwareVideoEncoder {
  public:
-  Vp8Encoder(const VideoSenderConfig& video_config, int max_unacked_frames);
+  explicit Vp8Encoder(const VideoSenderConfig& video_config);
 
-  virtual ~Vp8Encoder();
+  ~Vp8Encoder() override;
 
-  // Initialize the encoder before Encode() can be called. This method
-  // must be called on the thread that Encode() is called.
-  virtual void Initialize() OVERRIDE;
-
-  // Encode a raw image (as a part of a video stream).
-  virtual bool Encode(const scoped_refptr<media::VideoFrame>& video_frame,
-                      EncodedFrame* encoded_image) OVERRIDE;
-
-  // Update the encoder with a new target bit rate.
-  virtual void UpdateRates(uint32 new_bitrate) OVERRIDE;
-
-  // Set the next frame to be a key frame.
-  virtual void GenerateKeyFrame() OVERRIDE;
-
-  virtual void LatestFrameIdToReference(uint32 frame_id) OVERRIDE;
+  // SoftwareVideoEncoder implementations.
+  void Initialize() override;
+  void Encode(const scoped_refptr<media::VideoFrame>& video_frame,
+              const base::TimeTicks& reference_time,
+              EncodedFrame* encoded_frame) override;
+  void UpdateRates(uint32 new_bitrate) override;
+  void GenerateKeyFrame() override;
+  void LatestFrameIdToReference(uint32 frame_id) override;
 
  private:
+  enum { kNumberOfVp8VideoBuffers = 3 };
+
   enum Vp8Buffers {
     kAltRefBuffer = 0,
     kGoldenBuffer = 1,
@@ -60,15 +49,17 @@ class Vp8Encoder : public SoftwareVideoEncoder {
     kBufferSent,
     kBufferAcked
   };
+
   struct BufferState {
     uint32 frame_id;
     Vp8BufferState state;
   };
 
-  void InitEncode(int number_of_cores);
-
-  // Calculate the max target in % for a keyframe.
-  uint32 MaxIntraTarget(uint32 optimal_buffer_size) const;
+  bool is_initialized() const {
+    // Initialize() sets the timebase denominator value to non-zero if the
+    // encoder is successfully initialized, and it is zero otherwise.
+    return config_.g_timebase.den != 0;
+  }
 
   // Calculate which next Vp8 buffers to update with the next frame.
   Vp8Buffers GetNextBufferToUpdate();
@@ -84,18 +75,32 @@ class Vp8Encoder : public SoftwareVideoEncoder {
   const VideoSenderConfig cast_config_;
   const bool use_multiple_video_buffers_;
 
-  // VP8 internal objects.
-  scoped_ptr<vpx_codec_enc_cfg_t> config_;
-  scoped_ptr<vpx_enc_ctx_t> encoder_;
+  // VP8 internal objects.  These are valid for use only while is_initialized()
+  // returns true.
+  vpx_codec_enc_cfg_t config_;
+  vpx_codec_ctx_t encoder_;
+
+  // Wrapper for access to YUV data planes in a media::VideoFrame.
   vpx_image_t* raw_image_;
 
+  // Set to true to request the next frame emitted by Vp8Encoder be a key frame.
   bool key_frame_requested_;
-  bool first_frame_received_;
-  base::TimeDelta first_frame_timestamp_;
+
+  // The |VideoFrame::timestamp()| of the last encoded frame.  This is used to
+  // predict the duration of the next frame.
+  base::TimeDelta last_frame_timestamp_;
+
+  // The last encoded frame's ID.
   uint32 last_encoded_frame_id_;
+
+  // Used to track which buffers are old enough to be re-used.
   uint32 last_acked_frame_id_;
-  uint32 frame_id_to_reference_;
-  uint32 undroppable_frames_;
+
+  // Used by GetNextBufferToUpdate() to track how many consecutive times the
+  // newest buffer had to be overwritten.
+  int undroppable_frames_;
+
+  // Tracks the lifecycle and dependency state of each of the three buffers.
   BufferState buffer_state_[kNumberOfVp8VideoBuffers];
 
   // This is bound to the thread where Initialize() is called.

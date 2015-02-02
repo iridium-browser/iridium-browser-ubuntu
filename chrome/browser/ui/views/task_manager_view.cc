@@ -68,26 +68,23 @@ class TaskManagerTableModel
     model_->AddObserver(this);
   }
 
-  virtual ~TaskManagerTableModel() {
-    model_->RemoveObserver(this);
-  }
+  ~TaskManagerTableModel() override { model_->RemoveObserver(this); }
 
   // TableModel overrides:
-  virtual int RowCount() OVERRIDE;
-  virtual base::string16 GetText(int row, int column) OVERRIDE;
-  virtual gfx::ImageSkia GetIcon(int row) OVERRIDE;
-  virtual void SetObserver(ui::TableModelObserver* observer) OVERRIDE;
-  virtual int CompareValues(int row1, int row2, int column_id) OVERRIDE;
+  int RowCount() override;
+  base::string16 GetText(int row, int column) override;
+  gfx::ImageSkia GetIcon(int row) override;
+  void SetObserver(ui::TableModelObserver* observer) override;
+  int CompareValues(int row1, int row2, int column_id) override;
 
   // TableGrouper overrides:
-  virtual void GetGroupRange(int model_index,
-                             views::GroupRange* range) OVERRIDE;
+  void GetGroupRange(int model_index, views::GroupRange* range) override;
 
   // TaskManagerModelObserver overrides:
-  virtual void OnModelChanged() OVERRIDE;
-  virtual void OnItemsChanged(int start, int length) OVERRIDE;
-  virtual void OnItemsAdded(int start, int length) OVERRIDE;
-  virtual void OnItemsRemoved(int start, int length) OVERRIDE;
+  void OnModelChanged() override;
+  void OnItemsChanged(int start, int length) override;
+  void OnItemsAdded(int start, int length) override;
+  void OnItemsRemoved(int start, int length) override;
 
  private:
   TaskManagerModel* model_;
@@ -144,7 +141,7 @@ void TaskManagerTableModel::OnItemsRemoved(int start, int length) {
     observer_->OnItemsRemoved(start, length);
 }
 
-// The Task manager UI container.
+// The Task Manager UI container.
 class TaskManagerView : public views::ButtonListener,
                         public views::DialogDelegateView,
                         public views::TableViewObserver,
@@ -153,57 +150,58 @@ class TaskManagerView : public views::ButtonListener,
                         public ui::SimpleMenuModel::Delegate {
  public:
   explicit TaskManagerView(chrome::HostDesktopType desktop_type);
-  virtual ~TaskManagerView();
+  ~TaskManagerView() override;
 
-  // Shows the Task manager window, or re-activates an existing one.
+  // Shows the Task Manager window, or re-activates an existing one.
   static void Show(Browser* browser);
 
+  // Hides the Task Manager if it is showing.
+  static void Hide();
+
   // views::View:
-  virtual void Layout() OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  void Layout() override;
+  gfx::Size GetPreferredSize() const override;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::DialogDelegateView:
-  virtual bool CanResize() const OVERRIDE;
-  virtual bool CanMaximize() const OVERRIDE;
-  virtual bool CanMinimize() const OVERRIDE;
-  virtual bool ExecuteWindowsCommand(int command_id) OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual std::string GetWindowName() const OVERRIDE;
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
+  bool CanResize() const override;
+  bool CanMaximize() const override;
+  bool CanMinimize() const override;
+  bool ExecuteWindowsCommand(int command_id) override;
+  base::string16 GetWindowTitle() const override;
+  std::string GetWindowName() const override;
+  int GetDialogButtons() const override;
+  void WindowClosing() override;
+  bool UseNewStyleForThisDialog() const override;
 
   // views::TableViewObserver:
-  virtual void OnSelectionChanged() OVERRIDE;
-  virtual void OnDoubleClick() OVERRIDE;
-  virtual void OnKeyDown(ui::KeyboardCode keycode) OVERRIDE;
+  void OnSelectionChanged() override;
+  void OnDoubleClick() override;
+  void OnKeyDown(ui::KeyboardCode keycode) override;
 
   // views::LinkListener:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   // Called by the column picker to pick up any new stat counters that
   // may have appeared since last time.
   void UpdateStatsCounters();
 
   // views::ContextMenuController:
-  virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& point,
-                                      ui::MenuSourceType source_type) OVERRIDE;
+  void ShowContextMenuForView(views::View* source,
+                              const gfx::Point& point,
+                              ui::MenuSourceType source_type) override;
 
   // ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int id, int event_flags) OVERRIDE;
+  bool IsCommandIdChecked(int id) const override;
+  bool IsCommandIdEnabled(int id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  void ExecuteCommand(int id, int event_flags) override;
 
  private:
   // Creates the child controls.
@@ -411,6 +409,7 @@ void TaskManagerView::UpdateStatsCounters() {
 
 void TaskManagerView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
+  views::DialogDelegateView::ViewHierarchyChanged(details);
   // Since we want the Kill button and the Memory Details link to show up in
   // the same visual row as the close button, which is provided by the
   // framework, we must add the buttons to the non-client view, which is the
@@ -507,6 +506,12 @@ void TaskManagerView::Show(Browser* browser) {
   ash::SetShelfItemDetailsForDialogWindow(
       native_window, IDR_ASH_SHELF_ICON_TASK_MANAGER, native_window->title());
 #endif
+}
+
+// static
+void TaskManagerView::Hide() {
+  if (instance_)
+    instance_->GetWidget()->Close();
 }
 
 // ButtonListener implementation.
@@ -660,6 +665,10 @@ namespace chrome {
 // Declared in browser_dialogs.h so others don't need to depend on our header.
 void ShowTaskManager(Browser* browser) {
   TaskManagerView::Show(browser);
+}
+
+void HideTaskManager() {
+  TaskManagerView::Hide();
 }
 
 }  // namespace chrome

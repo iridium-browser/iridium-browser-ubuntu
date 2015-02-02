@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import "media/mojo/interfaces/media_types.mojom"
+module mojo;
 
-module mojo {
+import "media/mojo/interfaces/media_types.mojom";
 
 // DemuxerStream is modeled after media::DemuxerStream using mojo in order to
 // enable proxying between a media::Pipeline and media::Renderer living in two
@@ -15,7 +15,8 @@ interface DemuxerStream {
   enum Type {
     UNKNOWN,
     AUDIO,
-    LAST_TYPE = AUDIO
+    VIDEO,
+    LAST_TYPE = VIDEO,
   };
 
   // See media::DemuxerStream for descriptions.
@@ -49,6 +50,9 @@ interface DemuxerStreamClient {
   // whenever a DemuxerStream::STATUS_CONFIG_CHANGED is observed (either
   // in a Read() callback or over the DataPipe).
   OnAudioDecoderConfigChanged(AudioDecoderConfig config);
-};
 
-}  // module mojo
+  // A new VideoDecoderConfig is available. Will be sent by the DemuxerStream
+  // whenever a DemuxerStream::STATUS_CONFIG_CHANGED is observed (either
+  // in a Read() callback or over the DataPipe).
+  OnVideoDecoderConfigChanged(VideoDecoderConfig config);
+};

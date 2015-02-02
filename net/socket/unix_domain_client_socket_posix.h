@@ -32,7 +32,7 @@ class NET_EXPORT UnixDomainClientSocket : public StreamSocket {
   // UnixDomainServerSocket uses this after it accepts a connection.
   explicit UnixDomainClientSocket(scoped_ptr<SocketLibevent> socket);
 
-  virtual ~UnixDomainClientSocket();
+  ~UnixDomainClientSocket() override;
 
   // Fills |address| with |socket_path| and its length. For Android or Linux
   // platform, this supports abstract namespaces.
@@ -41,28 +41,30 @@ class NET_EXPORT UnixDomainClientSocket : public StreamSocket {
                           SockaddrStorage* address);
 
   // StreamSocket implementation.
-  virtual int Connect(const CompletionCallback& callback) OVERRIDE;
-  virtual void Disconnect() OVERRIDE;
-  virtual bool IsConnected() const OVERRIDE;
-  virtual bool IsConnectedAndIdle() const OVERRIDE;
-  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE;
-  virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
-  virtual const BoundNetLog& NetLog() const OVERRIDE;
-  virtual void SetSubresourceSpeculation() OVERRIDE;
-  virtual void SetOmniboxSpeculation() OVERRIDE;
-  virtual bool WasEverUsed() const OVERRIDE;
-  virtual bool UsingTCPFastOpen() const OVERRIDE;
-  virtual bool WasNpnNegotiated() const OVERRIDE;
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE;
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE;
+  int Connect(const CompletionCallback& callback) override;
+  void Disconnect() override;
+  bool IsConnected() const override;
+  bool IsConnectedAndIdle() const override;
+  int GetPeerAddress(IPEndPoint* address) const override;
+  int GetLocalAddress(IPEndPoint* address) const override;
+  const BoundNetLog& NetLog() const override;
+  void SetSubresourceSpeculation() override;
+  void SetOmniboxSpeculation() override;
+  bool WasEverUsed() const override;
+  bool UsingTCPFastOpen() const override;
+  bool WasNpnNegotiated() const override;
+  NextProto GetNegotiatedProtocol() const override;
+  bool GetSSLInfo(SSLInfo* ssl_info) override;
 
   // Socket implementation.
-  virtual int Read(IOBuffer* buf, int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
-  virtual int Write(IOBuffer* buf, int buf_len,
-                    const CompletionCallback& callback) OVERRIDE;
-  virtual int SetReceiveBufferSize(int32 size) OVERRIDE;
-  virtual int SetSendBufferSize(int32 size) OVERRIDE;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override;
+  int SetReceiveBufferSize(int32 size) override;
+  int SetSendBufferSize(int32 size) override;
 
   // Releases ownership of underlying SocketDescriptor to caller.
   // Internal state is reset so that this object can be used again.

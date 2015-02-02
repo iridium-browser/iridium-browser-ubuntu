@@ -21,6 +21,8 @@ class Widget;
 
 namespace athena {
 
+class ActivityView;
+
 // The view model for the representation of the activity.
 class ATHENA_EXPORT ActivityViewModel {
  public:
@@ -41,18 +43,18 @@ class ATHENA_EXPORT ActivityViewModel {
   // Returns an icon for the activity.
   virtual gfx::ImageSkia GetIcon() const = 0;
 
+  // Sets the ActivityView for the model to update. The model does not take
+  // ownership of the view.
+  virtual void SetActivityView(ActivityView* view) = 0;
+
   // True if the activity wants to use Widget's frame, or false if the activity
   // draws its own frame.
   virtual bool UsesFrame() const = 0;
 
-  // Returns the contents view which might be NULL if the activity is not
+  // Returns the contents view which might be nullptr if the activity is not
   // loaded. Note that the caller should not hold on to the view since it can
   // be deleted by the resource manager.
   virtual views::View* GetContentsView() = 0;
-
-  // Creates a custom widget for the activity. Returns NULL to use default
-  // implementation.
-  virtual views::Widget* CreateWidget() = 0;
 
   // Returns an image which can be used to represent the activity in e.g. the
   // overview mode. The returned image can have no size if either a view exists

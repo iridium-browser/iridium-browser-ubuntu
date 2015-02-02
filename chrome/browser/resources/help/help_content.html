@@ -1,6 +1,6 @@
  <div class="content-area">
   <div id="about-container">
-    <img src="chrome://theme/IDR_PRODUCT_LOGO_32" alt="">
+    <img id="product-logo" src="chrome://theme/IDR_PRODUCT_LOGO_32" alt="">
     <div id="product-description">
       <h2 i18n-content="aboutProductTitle"></h2>
       <span i18n-content="aboutProductDescription"></span>
@@ -96,9 +96,7 @@
         <div id="build-date"></div>
       </section>
     </div>
-    <button id="more-info-expander" class="link-button"
-        i18n-content="showMoreInfo">
-    </button>
+    <a is="action-link" id="more-info-expander" i18n-content="showMoreInfo"></a>
 </if>
   </div>
   <div id="product-container">
@@ -112,4 +110,9 @@
     <div id="product-tos"></div>
 </if>
   </div>
+<if expr="chromeos">
+  <div id="product-label-container" hidden>
+    <img id="product-label" src="chrome://chromeos-asset/fcc/label.png">
+  </div>
+</if>
 </div>

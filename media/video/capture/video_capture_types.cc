@@ -27,7 +27,7 @@ bool VideoCaptureFormat::IsValid() const {
          (frame_size.GetArea() < media::limits::kMaxCanvas) &&
          (frame_rate >= 0.0f) &&
          (frame_rate < media::limits::kMaxFramesPerSecond) &&
-         (pixel_format >= PIXEL_FORMAT_UNKNOWN) &&
+         (pixel_format >= 0) &&
          (pixel_format < PIXEL_FORMAT_MAX);
 }
 
@@ -69,4 +69,13 @@ std::string VideoCaptureFormat::PixelFormatToString(VideoPixelFormat format) {
 
 VideoCaptureParams::VideoCaptureParams()
     : resolution_change_policy(RESOLUTION_POLICY_FIXED) {}
+
+ImageCaptureFormat::ImageCaptureFormat() : pixel_format(PIXEL_FORMAT_UNKNOWN) {
+}
+
+ImageCaptureFormat::ImageCaptureFormat(const gfx::Size& frame_size,
+                                       VideoPixelFormat pixel_format)
+    : frame_size(frame_size), pixel_format(pixel_format) {
+}
+
 }  // namespace media

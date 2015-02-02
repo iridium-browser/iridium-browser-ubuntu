@@ -41,7 +41,7 @@ gl::Error Buffer9::setData(const void* data, size_t size, GLenum usage)
     }
 
     mSize = size;
-    if (data)
+    if (data && size > 0)
     {
         memcpy(mMemory.data(), data, size);
     }
@@ -56,9 +56,10 @@ gl::Error Buffer9::setData(const void* data, size_t size, GLenum usage)
     return gl::Error(GL_NO_ERROR);
 }
 
-void *Buffer9::getData()
+gl::Error Buffer9::getData(const uint8_t **outData)
 {
-    return mMemory.data();
+    *outData = mMemory.data();
+    return gl::Error(GL_NO_ERROR);
 }
 
 gl::Error Buffer9::setSubData(const void* data, size_t size, size_t offset)
@@ -72,7 +73,7 @@ gl::Error Buffer9::setSubData(const void* data, size_t size, size_t offset)
     }
 
     mSize = std::max(mSize, offset + size);
-    if (data)
+    if (data && size > 0)
     {
         memcpy(mMemory.data() + offset, data, size);
     }

@@ -33,29 +33,33 @@ class PermissionRequestCreatorApiary : public PermissionRequestCreator,
   PermissionRequestCreatorApiary(
       OAuth2TokenService* oauth2_token_service,
       scoped_ptr<SupervisedUserSigninManagerWrapper> signin_wrapper,
-      net::URLRequestContextGetter* context);
-  virtual ~PermissionRequestCreatorApiary();
+      net::URLRequestContextGetter* context,
+      const GURL& apiary_url);
+  ~PermissionRequestCreatorApiary() override;
 
   static scoped_ptr<PermissionRequestCreator> CreateWithProfile(
-      Profile* profile);
+      Profile* profile, const GURL& apiary_url);
 
   // PermissionRequestCreator implementation:
-  virtual void CreatePermissionRequest(const GURL& url_requested,
-                                       const base::Closure& callback) OVERRIDE;
+  bool IsEnabled() const override;
+  void CreatePermissionRequest(const GURL& url_requested,
+                               const SuccessCallback& callback) override;
+
+  void set_url_fetcher_id_for_testing(int id) { url_fetcher_id_ = id; }
 
  private:
   struct Request;
   typedef ScopedVector<Request>::iterator RequestIterator;
 
   // OAuth2TokenService::Consumer implementation:
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
   // net::URLFetcherDelegate implementation.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   std::string GetApiScopeToUse() const;
 
@@ -70,6 +74,8 @@ class PermissionRequestCreatorApiary : public PermissionRequestCreator,
   OAuth2TokenService* oauth2_token_service_;
   scoped_ptr<SupervisedUserSigninManagerWrapper> signin_wrapper_;
   net::URLRequestContextGetter* context_;
+  GURL apiary_url_;
+  int url_fetcher_id_;
 
   ScopedVector<Request> requests_;
 };

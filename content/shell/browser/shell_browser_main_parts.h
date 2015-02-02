@@ -9,6 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
+#include "content/shell/browser/shell_browser_context.h"
 
 #if defined(OS_ANDROID)
 namespace breakpad {
@@ -26,25 +27,23 @@ class NetLog;
 
 namespace content {
 
-class ShellBrowserContext;
-class ShellDevToolsDelegate;
-class ShellPluginServiceFilter;
+class DevToolsHttpHandler;
 
 class ShellBrowserMainParts : public BrowserMainParts {
  public:
   explicit ShellBrowserMainParts(const MainFunctionParams& parameters);
-  virtual ~ShellBrowserMainParts();
+  ~ShellBrowserMainParts() override;
 
   // BrowserMainParts overrides.
-  virtual void PreEarlyInitialization() OVERRIDE;
-  virtual void PreMainMessageLoopStart() OVERRIDE;
-  virtual void PostMainMessageLoopStart() OVERRIDE;
-  virtual void PreMainMessageLoopRun() OVERRIDE;
-  virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
-  virtual void PostMainMessageLoopRun() OVERRIDE;
+  void PreEarlyInitialization() override;
+  void PreMainMessageLoopStart() override;
+  void PostMainMessageLoopStart() override;
+  void PreMainMessageLoopRun() override;
+  bool MainMessageLoopRun(int* result_code) override;
+  void PostMainMessageLoopRun() override;
 
-  ShellDevToolsDelegate* devtools_delegate() {
-    return devtools_delegate_.get();
+  DevToolsHttpHandler* devtools_http_handler() {
+    return devtools_http_handler_;
   }
 
   ShellBrowserContext* browser_context() { return browser_context_.get(); }
@@ -53,6 +52,17 @@ class ShellBrowserMainParts : public BrowserMainParts {
   }
 
   net::NetLog* net_log() { return net_log_.get(); }
+
+ protected:
+  virtual void InitializeBrowserContexts();
+  virtual void InitializeMessageLoopContext();
+
+  void set_browser_context(ShellBrowserContext* context) {
+    browser_context_.reset(context);
+  }
+  void set_off_the_record_browser_context(ShellBrowserContext* context) {
+    off_the_record_browser_context_.reset(context);
+  }
 
  private:
 #if defined(OS_ANDROID)
@@ -66,10 +76,7 @@ class ShellBrowserMainParts : public BrowserMainParts {
   const MainFunctionParams parameters_;
   bool run_message_loop_;
 
-  scoped_ptr<ShellDevToolsDelegate> devtools_delegate_;
-#if defined(ENABLE_PLUGINS)
-  scoped_ptr<ShellPluginServiceFilter> plugin_service_filter_;
-#endif
+  DevToolsHttpHandler* devtools_http_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellBrowserMainParts);
 };

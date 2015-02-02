@@ -1181,6 +1181,32 @@ _NAMED_TYPE_INFO = {
       'GL_RGBA8_OES',
     ],
   },
+  'ImageInternalFormat': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_RGB',
+      'GL_RGBA',
+    ],
+  },
+  'ImageUsage': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_MAP_CHROMIUM',
+      'GL_SCANOUT_CHROMIUM'
+    ],
+  },
+  'ValueBufferTarget': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_SUBSCRIBED_VALUES_BUFFER_CHROMIUM',
+    ],
+  },
+  'SubscriptionTarget': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_MOUSE_POSITION_CHROMIUM',
+    ],
+  },
   'VertexAttribType': {
     'type': 'GLenum',
     'valid': [
@@ -1434,6 +1460,57 @@ _FUNCTION_INFO = {
     'extension': "CHROMIUM_texture_mailbox",
     'chromium': True,
   },
+  'GenValuebuffersCHROMIUM': {
+    'type': 'GENn',
+    'gl_test_func': 'glGenValuebuffersCHROMIUM',
+    'resource_type': 'Valuebuffer',
+    'resource_types': 'Valuebuffers',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'DeleteValuebuffersCHROMIUM': {
+    'type': 'DELn',
+    'gl_test_func': 'glDeleteValuebuffersCHROMIUM',
+    'resource_type': 'Valuebuffer',
+    'resource_types': 'Valuebuffers',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'IsValuebufferCHROMIUM': {
+    'type': 'Is',
+    'decoder_func': 'DoIsValuebufferCHROMIUM',
+    'expectation': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'BindValuebufferCHROMIUM': {
+    'type': 'Bind',
+    'decoder_func': 'DoBindValueBufferCHROMIUM',
+    'gen_func': 'GenValueBuffersCHROMIUM',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'SubscribeValueCHROMIUM': {
+    'decoder_func': 'DoSubscribeValueCHROMIUM',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'PopulateSubscribedValuesCHROMIUM': {
+    'decoder_func': 'DoPopulateSubscribedValuesCHROMIUM',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'UniformValuebufferCHROMIUM': {
+    'decoder_func': 'DoUniformValueBufferCHROMIUM',
+    'unit_test': False,
+    'extension': True,
+    'chromium': True,
+  },
   'ClearStencil': {
     'type': 'StateSet',
     'state': 'ClearStencil',
@@ -1471,7 +1548,8 @@ _FUNCTION_INFO = {
   'CreateImageCHROMIUM': {
     'type': 'Manual',
     'cmd_args':
-        'GLsizei width, GLsizei height, GLenum internalformat, GLenum usage',
+        'ClientBuffer buffer, GLsizei width, GLsizei height, '
+        'GLenum internalformat',
     'result': ['GLuint'],
     'client_test': False,
     'gen_cmd': False,
@@ -1486,8 +1564,11 @@ _FUNCTION_INFO = {
     'extension': True,
     'chromium': True,
   },
-  'GetImageParameterivCHROMIUM': {
+  'CreateGpuMemoryBufferImageCHROMIUM': {
     'type': 'Manual',
+    'cmd_args':
+        'GLsizei width, GLsizei height, GLenum internalformat, GLenum usage',
+    'result': ['GLuint'],
     'client_test': False,
     'gen_cmd': False,
     'expectation': False,
@@ -1527,6 +1608,12 @@ _FUNCTION_INFO = {
   'BlendFuncSeparate': {
     'type': 'StateSet',
     'state': 'BlendFunc',
+  },
+  'BlendBarrierKHR': {
+    'gl_test_func': 'glBlendBarrierKHR',
+    'extension': True,
+    'extension_flag': 'blend_equation_advanced',
+    'client_test': False,
   },
   'SampleCoverage': {'decoder_func': 'DoSampleCoverage'},
   'StencilFunc': {
@@ -1589,15 +1676,6 @@ _FUNCTION_INFO = {
     'resource_types': 'Renderbuffers',
   },
   'DeleteShader': {'type': 'Delete', 'decoder_func': 'DoDeleteShader'},
-  'DeleteSharedIdsCHROMIUM': {
-    'type': 'Custom',
-    'decoder_func': 'DoDeleteSharedIdsCHROMIUM',
-    'impl_func': False,
-    'expectation': False,
-    'data_transfer_methods': ['shm'],
-    'extension': True,
-    'chromium': True,
-  },
   'DeleteTextures': {
     'type': 'DELn',
     'resource_type': 'Texture',
@@ -1705,15 +1783,6 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glGenTextures',
     'resource_type': 'Texture',
     'resource_types': 'Textures',
-  },
-  'GenSharedIdsCHROMIUM': {
-    'type': 'Custom',
-    'decoder_func': 'DoGenSharedIdsCHROMIUM',
-    'impl_func': False,
-    'expectation': False,
-    'data_transfer_methods': ['shm'],
-    'extension': True,
-    'chromium': True,
   },
   'GetActiveAttrib': {
     'type': 'Custom',
@@ -1985,12 +2054,6 @@ _FUNCTION_INFO = {
     'client_test': False,
     'pepper_interface': 'ChromiumMapSub',
   },
-  'MapImageCHROMIUM': {
-    'gen_cmd': False,
-    'extension': True,
-    'chromium': True,
-    'client_test': False,
-  },
   'MapTexSubImage2DCHROMIUM': {
     'gen_cmd': False,
     'extension': True,
@@ -2071,15 +2134,6 @@ _FUNCTION_INFO = {
         'GLboolean async',
     'result': ['uint32_t'],
     'defer_reads': True,
-  },
-  'RegisterSharedIdsCHROMIUM': {
-    'type': 'Custom',
-    'decoder_func': 'DoRegisterSharedIdsCHROMIUM',
-    'impl_func': False,
-    'expectation': False,
-    'data_transfer_methods': ['shm'],
-    'extension': True,
-    'chromium': True,
   },
   'ReleaseShaderCompiler': {
     'decoder_func': 'DoReleaseShaderCompiler',
@@ -2238,12 +2292,6 @@ _FUNCTION_INFO = {
     'chromium': True,
     'client_test': False,
     'pepper_interface': 'ChromiumMapSub',
-  },
-  'UnmapImageCHROMIUM': {
-    'gen_cmd': False,
-    'extension': True,
-    'chromium': True,
-    'client_test': False,
   },
   'UnmapTexSubImage2DCHROMIUM': {
     'gen_cmd': False,
@@ -3160,7 +3208,7 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     """Writes the GLES2 Implemention declaration."""
     impl_decl = func.GetInfo('impl_decl')
     if impl_decl == None or impl_decl == True:
-      file.Write("virtual %s %s(%s) OVERRIDE;\n" %
+      file.Write("%s %s(%s) override;\n" %
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
       file.Write("\n")
@@ -3201,7 +3249,7 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteGLES2TraceImplementationHeader(self, func, file):
     """Writes the GLES2 Trace Implemention header."""
-    file.Write("virtual %s %s(%s) OVERRIDE;\n" %
+    file.Write("%s %s(%s) override;\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
 
@@ -3252,7 +3300,7 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteGLES2InterfaceStub(self, func, file):
     """Writes the GLES2 Interface stub declaration."""
-    file.Write("virtual %s %s(%s) OVERRIDE;\n" %
+    file.Write("%s %s(%s) override;\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
 
@@ -3849,7 +3897,7 @@ class ManualHandler(CustomHandler):
 
   def WriteGLES2ImplementationHeader(self, func, file):
     """Overrriden from TypeHandler."""
-    file.Write("virtual %s %s(%s) OVERRIDE;\n" %
+    file.Write("%s %s(%s) override;\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
     file.Write("\n")
@@ -4170,7 +4218,8 @@ class GENnHandler(TypeHandler):
     not_shared = func.GetInfo('not_shared')
     if not_shared:
       alloc_code = (
-"""  IdAllocatorInterface* id_allocator = GetIdAllocator(id_namespaces::k%s);
+
+"""  IdAllocator* id_allocator = GetIdAllocator(id_namespaces::k%s);
   for (GLsizei ii = 0; ii < n; ++ii)
     %s[ii] = id_allocator->AllocateID();""" %
   (func.GetInfo('resource_types'), func.GetOriginalArgs()[1].name))
@@ -5868,8 +5917,10 @@ TEST_P(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
           "  helper_->%s(%s%sGetResultShmId(), GetResultShmOffset());\n" %
                  (func.name, arg_string, comma))
       file.Write("  WaitForCmd();\n")
-      file.Write("  %s result_value = *result;\n" % func.return_type)
-      file.Write('  GPU_CLIENT_LOG("returned " << result_value);\n')
+      file.Write("  %s result_value = *result" % func.return_type)
+      if func.return_type == "GLboolean":
+        file.Write(" != 0")
+      file.Write(';\n  GPU_CLIENT_LOG("returned " << result_value);\n')
       file.Write("  CheckGLError();\n")
       file.Write("  return result_value;\n")
       file.Write("}\n")
@@ -7370,6 +7421,7 @@ class GLGenerator(object):
     self.errors = 0
     self.pepper_interfaces = []
     self.interface_info = {}
+    self.generated_cpp_filenames = []
 
     for interface in _PEPPER_INTERFACES:
       interface = PepperInterface(interface)
@@ -7494,6 +7546,7 @@ class GLGenerator(object):
     file.Write("};\n")
     file.Write("\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteFormat(self, filename):
     """Writes the command buffer format"""
@@ -7505,6 +7558,7 @@ class GLGenerator(object):
         func.WriteStruct(file)
     file.Write("\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteDocs(self, filename):
     """Writes the command buffer doc version of the commands"""
@@ -7516,6 +7570,7 @@ class GLGenerator(object):
         func.WriteDocs(file)
     file.Write("\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteFormatTest(self, filename):
     """Writes the command buffer format test."""
@@ -7532,6 +7587,7 @@ class GLGenerator(object):
         func.WriteFormatTest(file)
 
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteCmdHelperHeader(self, filename):
     """Writes the gles2 command helper."""
@@ -7544,6 +7600,7 @@ class GLGenerator(object):
         func.WriteCmdHelper(file)
 
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteServiceContextStateHeader(self, filename):
     """Writes the service context state header."""
@@ -7604,6 +7661,7 @@ class GLGenerator(object):
         """)
 
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteClientContextStateHeader(self, filename):
     """Writes the client context state header."""
@@ -7617,6 +7675,7 @@ class GLGenerator(object):
     file.Write("};\n\n")
 
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteContextStateGetters(self, file, class_name):
     """Writes the state getters."""
@@ -7825,6 +7884,7 @@ void ContextState::InitState(const ContextState *prev_state) const {
 
     self.WriteContextStateGetters(file, "ContextState")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteClientContextStateImpl(self, filename):
     """Writes the context state client side implementation."""
@@ -7874,6 +7934,7 @@ bool ClientContextState::SetCapabilityState(
 }
 """)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteServiceImplementation(self, filename):
     """Writes the service decorder implementation."""
@@ -7920,6 +7981,7 @@ bool GLES2DecoderImpl::SetCapabilityState(GLenum cap, bool enabled) {
 }
 """)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteServiceUnitTests(self, filename):
     """Writes the service decorder unit tests."""
@@ -7954,8 +8016,8 @@ bool GLES2DecoderImpl::SetCapabilityState(GLenum cap, bool enabled) {
             func.WriteServiceUnitTest(file, {
               'test_name': test_name
             })
-
       file.Close()
+      self.generated_cpp_filenames.append(file.filename)
     file = CHeaderWriter(
         filename % 0,
         "// It is included by gles2_cmd_decoder_unittest_base.cc\n")
@@ -8031,6 +8093,7 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
     file.Write("""}
 """)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteServiceUnitTestsForExtensions(self, filename):
     """Writes the service decorder unit tests for functions with extension_flag.
@@ -8054,6 +8117,7 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
           })
 
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2Header(self, filename):
     """Writes the GLES2 header."""
@@ -8066,6 +8130,7 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
 
     file.Write("\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2CLibImplementation(self, filename):
     """Writes the GLES2 c lib implementation."""
@@ -8091,6 +8156,7 @@ extern const NameToFunc g_gles2_function_table[] = {
 }  // namespace gles2
 """)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2InterfaceHeader(self, filename):
     """Writes the GLES2 interface header."""
@@ -8101,6 +8167,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2InterfaceHeader(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2InterfaceStub(self, filename):
     """Writes the GLES2 interface stub header."""
@@ -8110,6 +8177,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2InterfaceStub(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2InterfaceStubImpl(self, filename):
     """Writes the GLES2 interface header."""
@@ -8119,6 +8187,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2InterfaceStubImpl(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2ImplementationHeader(self, filename):
     """Writes the GLES2 Implementation header."""
@@ -8129,6 +8198,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2ImplementationHeader(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2Implementation(self, filename):
     """Writes the GLES2 Implementation."""
@@ -8139,6 +8209,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2Implementation(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2TraceImplementationHeader(self, filename):
     """Writes the GLES2 Trace Implementation header."""
@@ -8148,6 +8219,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2TraceImplementationHeader(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2TraceImplementation(self, filename):
     """Writes the GLES2 Trace Implementation."""
@@ -8157,6 +8229,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2TraceImplementation(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2ImplementationUnitTests(self, filename):
     """Writes the GLES2 helper header."""
@@ -8167,6 +8240,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     for func in self.original_functions:
       func.WriteGLES2ImplementationUnitTest(file)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteServiceUtilsHeader(self, filename):
     """Writes the gles2 auto generated utility header."""
@@ -8179,6 +8253,7 @@ extern const NameToFunc g_gles2_function_table[] = {
                  (named_type.GetType(), ToUnderscore(name)))
     file.Write("\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteServiceUtilsImplementation(self, filename):
     """Writes the gles2 auto generated utility implementation."""
@@ -8214,6 +8289,7 @@ extern const NameToFunc g_gles2_function_table[] = {
     file.Write(" {\n");
     file.Write("}\n\n");
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteCommonUtilsHeader(self, filename):
     """Writes the gles2 common utility header."""
@@ -8225,15 +8301,16 @@ extern const NameToFunc g_gles2_function_table[] = {
                    type_info)
     file.Write("\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteCommonUtilsImpl(self, filename):
     """Writes the gles2 common utility header."""
     enum_re = re.compile(r'\#define\s+(GL_[a-zA-Z0-9_]+)\s+([0-9A-Fa-fx]+)')
     dict = {}
-    for fname in ['../../third_party/khronos/GLES2/gl2.h',
-                  '../../third_party/khronos/GLES2/gl2ext.h',
-                  '../../gpu/GLES2/gl2chromium.h',
-                  '../../gpu/GLES2/gl2extchromium.h']:
+    for fname in ['third_party/khronos/GLES2/gl2.h',
+                  'third_party/khronos/GLES2/gl2ext.h',
+                  'gpu/GLES2/gl2chromium.h',
+                  'gpu/GLES2/gl2extchromium.h']:
       lines = open(fname).readlines()
       for line in lines:
         m = enum_re.match(line)
@@ -8279,6 +8356,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
 
 """)
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WritePepperGLES2Interface(self, filename, dev):
     """Writes the Pepper OpenGLES interface definition."""
@@ -8421,6 +8499,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
 
     file.Write("}  // namespace ppapi\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteGLES2ToPPAPIBridge(self, filename):
     """Connects GLES2 helper library to PPB_OpenGLES2 interface"""
@@ -8466,6 +8545,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
                    (return_str, interface_str, func.GetPepperName(), arg))
       file.Write("}\n\n")
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteMojoGLCallVisitor(self, filename):
     """Provides the GL implementation for mojo"""
@@ -8482,6 +8562,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
                               func.MakeOriginalArgString("")))
 
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
   def WriteMojoGLCallVisitorForExtension(self, filename, extension):
     """Provides the GL implementation for mojo for a particular extension"""
@@ -8498,6 +8579,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
                               func.MakeOriginalArgString("")))
 
     file.Close()
+    self.generated_cpp_filenames.append(file.filename)
 
 def Format(generated_files):
   for filename in generated_files:
@@ -8538,7 +8620,7 @@ def main(argv):
 
   # This script lives under gpu/command_buffer, cd to base directory.
   os.chdir(os.path.dirname(__file__) + "/../..")
-
+  base_dir = os.getcwd()
   gen = GLGenerator(options.verbose)
   gen.ParseGLH("gpu/command_buffer/cmd_buffer_functions.txt")
 
@@ -8551,40 +8633,57 @@ def main(argv):
   gen.WriteGLES2ToPPAPIBridge("ppapi/lib/gl/gles2/gles2.c")
   gen.WritePepperGLES2Implementation(
       "ppapi/shared_impl/ppb_opengles2_shared.cc")
-  os.chdir("gpu/command_buffer")
-  gen.WriteCommandIds("common/gles2_cmd_ids_autogen.h")
-  gen.WriteFormat("common/gles2_cmd_format_autogen.h")
-  gen.WriteFormatTest("common/gles2_cmd_format_test_autogen.h")
-  gen.WriteGLES2InterfaceHeader("client/gles2_interface_autogen.h")
-  gen.WriteGLES2InterfaceStub("client/gles2_interface_stub_autogen.h")
+  os.chdir(base_dir)
+  gen.WriteCommandIds("gpu/command_buffer/common/gles2_cmd_ids_autogen.h")
+  gen.WriteFormat("gpu/command_buffer/common/gles2_cmd_format_autogen.h")
+  gen.WriteFormatTest(
+    "gpu/command_buffer/common/gles2_cmd_format_test_autogen.h")
+  gen.WriteGLES2InterfaceHeader(
+    "gpu/command_buffer/client/gles2_interface_autogen.h")
+  gen.WriteGLES2InterfaceStub(
+    "gpu/command_buffer/client/gles2_interface_stub_autogen.h")
   gen.WriteGLES2InterfaceStubImpl(
-      "client/gles2_interface_stub_impl_autogen.h")
-  gen.WriteGLES2ImplementationHeader("client/gles2_implementation_autogen.h")
-  gen.WriteGLES2Implementation("client/gles2_implementation_impl_autogen.h")
+      "gpu/command_buffer/client/gles2_interface_stub_impl_autogen.h")
+  gen.WriteGLES2ImplementationHeader(
+    "gpu/command_buffer/client/gles2_implementation_autogen.h")
+  gen.WriteGLES2Implementation(
+    "gpu/command_buffer/client/gles2_implementation_impl_autogen.h")
   gen.WriteGLES2ImplementationUnitTests(
-      "client/gles2_implementation_unittest_autogen.h")
+      "gpu/command_buffer/client/gles2_implementation_unittest_autogen.h")
   gen.WriteGLES2TraceImplementationHeader(
-      "client/gles2_trace_implementation_autogen.h")
+      "gpu/command_buffer/client/gles2_trace_implementation_autogen.h")
   gen.WriteGLES2TraceImplementation(
-      "client/gles2_trace_implementation_impl_autogen.h")
-  gen.WriteGLES2CLibImplementation("client/gles2_c_lib_autogen.h")
-  gen.WriteCmdHelperHeader("client/gles2_cmd_helper_autogen.h")
-  gen.WriteServiceImplementation("service/gles2_cmd_decoder_autogen.h")
-  gen.WriteServiceContextStateHeader("service/context_state_autogen.h")
-  gen.WriteServiceContextStateImpl("service/context_state_impl_autogen.h")
-  gen.WriteClientContextStateHeader("client/client_context_state_autogen.h")
+      "gpu/command_buffer/client/gles2_trace_implementation_impl_autogen.h")
+  gen.WriteGLES2CLibImplementation(
+    "gpu/command_buffer/client/gles2_c_lib_autogen.h")
+  gen.WriteCmdHelperHeader(
+    "gpu/command_buffer/client/gles2_cmd_helper_autogen.h")
+  gen.WriteServiceImplementation(
+    "gpu/command_buffer/service/gles2_cmd_decoder_autogen.h")
+  gen.WriteServiceContextStateHeader(
+    "gpu/command_buffer/service/context_state_autogen.h")
+  gen.WriteServiceContextStateImpl(
+    "gpu/command_buffer/service/context_state_impl_autogen.h")
+  gen.WriteClientContextStateHeader(
+    "gpu/command_buffer/client/client_context_state_autogen.h")
   gen.WriteClientContextStateImpl(
-      "client/client_context_state_impl_autogen.h")
-  gen.WriteServiceUnitTests("service/gles2_cmd_decoder_unittest_%d_autogen.h")
+      "gpu/command_buffer/client/client_context_state_impl_autogen.h")
+  gen.WriteServiceUnitTests(
+    "gpu/command_buffer/service/gles2_cmd_decoder_unittest_%d_autogen.h")
   gen.WriteServiceUnitTestsForExtensions(
-    "service/gles2_cmd_decoder_unittest_extensions_autogen.h")
-  gen.WriteServiceUtilsHeader("service/gles2_cmd_validation_autogen.h")
+    "gpu/command_buffer/service/"
+    "gles2_cmd_decoder_unittest_extensions_autogen.h")
+  gen.WriteServiceUtilsHeader(
+    "gpu/command_buffer/service/gles2_cmd_validation_autogen.h")
   gen.WriteServiceUtilsImplementation(
-      "service/gles2_cmd_validation_implementation_autogen.h")
-  gen.WriteCommonUtilsHeader("common/gles2_cmd_utils_autogen.h")
-  gen.WriteCommonUtilsImpl("common/gles2_cmd_utils_implementation_autogen.h")
-  gen.WriteGLES2Header("../GLES2/gl2chromium_autogen.h")
-  mojo_gles2_prefix = "../../mojo/public/c/gles2/gles2_call_visitor"
+    "gpu/command_buffer/service/"
+    "gles2_cmd_validation_implementation_autogen.h")
+  gen.WriteCommonUtilsHeader(
+    "gpu/command_buffer/common/gles2_cmd_utils_autogen.h")
+  gen.WriteCommonUtilsImpl(
+    "gpu/command_buffer/common/gles2_cmd_utils_implementation_autogen.h")
+  gen.WriteGLES2Header("gpu/GLES2/gl2chromium_autogen.h")
+  mojo_gles2_prefix = "mojo/public/c/gles2/gles2_call_visitor"
   gen.WriteMojoGLCallVisitor(mojo_gles2_prefix + "_autogen.h")
   gen.WriteMojoGLCallVisitorForExtension(
       mojo_gles2_prefix + "_chromium_texture_mailbox_autogen.h",
@@ -8593,42 +8692,7 @@ def main(argv):
       mojo_gles2_prefix + "_chromium_sync_point_autogen.h",
       "CHROMIUM_sync_point")
 
-  Format([
-      "common/gles2_cmd_format_autogen.h",
-      "common/gles2_cmd_format_test_autogen.h",
-      "common/gles2_cmd_ids_autogen.h",
-      "common/gles2_cmd_utils_autogen.h",
-      "common/gles2_cmd_utils_implementation_autogen.h",
-      "client/client_context_state_autogen.h",
-      "client/client_context_state_impl_autogen.h",
-      "client/gles2_cmd_helper_autogen.h",
-      "client/gles2_c_lib_autogen.h",
-      "client/gles2_implementation_autogen.h",
-      "client/gles2_implementation_impl_autogen.h",
-      "client/gles2_implementation_unittest_autogen.h",
-      "client/gles2_interface_autogen.h",
-      "client/gles2_interface_stub_autogen.h",
-      "client/gles2_interface_stub_impl_autogen.h",
-      "client/gles2_trace_implementation_autogen.h",
-      "client/gles2_trace_implementation_impl_autogen.h",
-      "service/context_state_autogen.h",
-      "service/context_state_impl_autogen.h",
-      "service/gles2_cmd_decoder_autogen.h",
-      "service/gles2_cmd_decoder_unittest_0_autogen.h",
-      "service/gles2_cmd_decoder_unittest_1_autogen.h",
-      "service/gles2_cmd_decoder_unittest_2_autogen.h",
-      "service/gles2_cmd_decoder_unittest_3_autogen.h",
-      "service/gles2_cmd_validation_autogen.h",
-      "service/gles2_cmd_validation_implementation_autogen.h"])
-  os.chdir("../..")
-  mojo_gles2_prefix = "mojo/public/c/gles2/gles2_call_visitor"
-  Format([
-      "gpu/GLES2/gl2chromium_autogen.h",
-      mojo_gles2_prefix + "_autogen.h",
-      mojo_gles2_prefix + "_chromium_texture_mailbox_autogen.h",
-      mojo_gles2_prefix + "_chromium_sync_point_autogen.h",
-      "ppapi/lib/gl/gles2/gles2.c",
-      "ppapi/shared_impl/ppb_opengles2_shared.cc"])
+  Format(gen.generated_cpp_filenames)
 
   if gen.errors > 0:
     print "%d errors" % gen.errors

@@ -56,20 +56,34 @@ extern "C" void* __libc_stack_end;  // NOLINT
 #include <sanitizer/msan_interface.h>
 #endif
 
+#if OS(FREEBSD)
+#include <pthread_np.h>
+#endif
+
 namespace blink {
 
 static void* getStackStart()
 {
-#if defined(__GLIBC__) || OS(ANDROID)
+#if defined(__GLIBC__) || OS(ANDROID) || OS(FREEBSD)
     pthread_attr_t attr;
-    if (!pthread_getattr_np(pthread_self(), &attr)) {
+    int error;
+#if OS(FREEBSD)
+    pthread_attr_init(&attr);
+    error = pthread_attr_get_np(pthread_self(), &attr);
+#else
+    error = pthread_getattr_np(pthread_self(), &attr);
+#endif
+    if (!error) {
         void* base;
         size_t size;
-        int error = pthread_attr_getstack(&attr, &base, &size);
+        error = pthread_attr_getstack(&attr, &base, &size);
         RELEASE_ASSERT(!error);
         pthread_attr_destroy(&attr);
         return reinterpret_cast<Address>(base) + size;
     }
+#if OS(FREEBSD)
+    pthread_attr_destroy(&attr);
+#endif
 #if defined(__GLIBC__)
     // pthread_getattr_np can fail for the main thread. In this case
     // just like NaCl we rely on the __libc_stack_end to give us
@@ -96,11 +110,33 @@ static void* getStackStart()
 #endif
 }
 
-// The maximum number of WrapperPersistentRegions to keep around in the
-// m_pooledWrapperPersistentRegions pool.
-static const size_t MaxPooledWrapperPersistentRegionCount = 2;
+static size_t getUnderestimatedStackSize()
+{
+#if defined(__GLIBC__) || OS(ANDROID) || OS(FREEBSD)
+    // We cannot get the stack size in these platforms because
+    // pthread_getattr_np() can fail for the main thread.
+    // This is OK because ThreadState::current() doesn't use the stack size
+    // in these platforms.
+    return 0;
+#elif OS(MACOSX)
+    return pthread_get_stacksize_np(pthread_self());
+#elif OS(WIN) && COMPILER(MSVC)
+    // On Windows stack limits for the current thread are available in
+    // the thread information block (TIB). Its fields can be accessed through
+    // FS segment register on x86 and GS segment register on x86_64.
+#ifdef _WIN64
+    return __readgsqword(offsetof(NT_TIB64, StackBase)) - __readgsqword(offsetof(NT_TIB64, StackLimit));
+#else
+    return __readfsdword(offsetof(NT_TIB, StackBase)) - __readfsdword(offsetof(NT_TIB, StackLimit));
+#endif
+#else
+    return 0;
+#endif
+}
 
 WTF::ThreadSpecific<ThreadState*>* ThreadState::s_threadSpecific = 0;
+uintptr_t ThreadState::s_mainThreadStackStart = 0;
+uintptr_t ThreadState::s_mainThreadUnderestimatedStackSize = 0;
 uint8_t ThreadState::s_mainThreadStateStorage[sizeof(ThreadState)];
 SafePointBarrier* ThreadState::s_safePointBarrier = 0;
 bool ThreadState::s_inGC = false;
@@ -269,16 +305,6 @@ private:
     ThreadCondition m_resume;
 };
 
-BaseHeapPage::BaseHeapPage(PageMemory* storage, const GCInfo* gcInfo, ThreadState* state)
-    : m_storage(storage)
-    , m_gcInfo(gcInfo)
-    , m_threadState(state)
-    , m_terminating(false)
-    , m_tracedAfterOrphaned(false)
-{
-    ASSERT(isPageHeaderAddress(reinterpret_cast<Address>(this)));
-}
-
 // Statically unfold the heap initialization loop so the compiler statically
 // knows the heap index when using HeapIndexTrait.
 template<int num> struct InitializeHeaps {
@@ -295,9 +321,6 @@ template<> struct InitializeHeaps<0> {
 
 ThreadState::ThreadState()
     : m_thread(currentThread())
-    , m_liveWrapperPersistents(new WrapperPersistentRegion())
-    , m_pooledWrapperPersistents(0)
-    , m_pooledWrapperPersistentRegionCount(0)
     , m_persistents(adoptPtr(new PersistentAnchor()))
     , m_startOfStack(reinterpret_cast<intptr_t*>(getStackStart()))
     , m_endOfStack(reinterpret_cast<intptr_t*>(getStackStart()))
@@ -310,10 +333,11 @@ ThreadState::ThreadState()
     , m_sweepInProgress(false)
     , m_noAllocationCount(0)
     , m_inGC(false)
-    , m_heapContainsCache(adoptPtr(new HeapContainsCache()))
     , m_isTerminating(false)
+    , m_shouldFlushHeapDoesNotContainCache(false)
     , m_lowCollectionRate(false)
     , m_numberOfSweeperTasks(0)
+    , m_traceDOMWrappers(0)
 #if defined(ADDRESS_SANITIZER)
     , m_asanFakeStack(__asan_get_current_fake_stack())
 #endif
@@ -321,12 +345,17 @@ ThreadState::ThreadState()
     ASSERT(!**s_threadSpecific);
     **s_threadSpecific = this;
 
+    if (isMainThread()) {
+        s_mainThreadStackStart = reinterpret_cast<uintptr_t>(m_startOfStack) - sizeof(void*);
+        s_mainThreadUnderestimatedStackSize = getUnderestimatedStackSize() - sizeof(void*);
+    }
+
     InitializeHeaps<NumberOfHeaps>::init(m_heaps, this);
 
     m_weakCallbackStack = new CallbackStack();
 
-    if (blink::Platform::current())
-        m_sweeperThread = adoptPtr(blink::Platform::current()->createThread("Blink GC Sweeper"));
+    if (Platform::current())
+        m_sweeperThread = adoptPtr(Platform::current()->createThread("Blink GC Sweeper Thread"));
 }
 
 ThreadState::~ThreadState()
@@ -337,15 +366,11 @@ ThreadState::~ThreadState()
     for (int i = 0; i < NumberOfHeaps; i++)
         delete m_heaps[i];
     deleteAllValues(m_interruptors);
-    while (m_liveWrapperPersistents) {
-        WrapperPersistentRegion* region = WrapperPersistentRegion::removeHead(&m_liveWrapperPersistents);
-        delete region;
-    }
-    while (m_pooledWrapperPersistents) {
-        WrapperPersistentRegion* region = WrapperPersistentRegion::removeHead(&m_pooledWrapperPersistents);
-        delete region;
-    }
     **s_threadSpecific = 0;
+    if (isMainThread()) {
+        s_mainThreadStackStart = 0;
+        s_mainThreadUnderestimatedStackSize = 0;
+    }
 }
 
 void ThreadState::init()
@@ -455,6 +480,8 @@ void ThreadState::cleanup()
         // We should not have any persistents left when getting to this point,
         // if we have it is probably a bug so adding a debug ASSERT to catch this.
         ASSERT(!currentCount);
+        // All of pre-finalizers should be consumed.
+        ASSERT(m_preFinalizers.isEmpty());
 
         // Add pages to the orphaned page pool to ensure any global GCs from this point
         // on will not trace objects on this thread's heaps.
@@ -578,28 +605,10 @@ void ThreadState::visitStack(Visitor* visitor)
 void ThreadState::visitPersistents(Visitor* visitor)
 {
     m_persistents->trace(visitor);
-    WrapperPersistentRegion::trace(m_liveWrapperPersistents, visitor);
-}
-
-bool ThreadState::checkAndMarkPointer(Visitor* visitor, Address address)
-{
-    // If thread is terminating ignore conservative pointers.
-    if (m_isTerminating)
-        return false;
-
-    // This checks for normal pages and for large objects which span the extent
-    // of several normal pages.
-    BaseHeapPage* page = heapPageFromAddress(address);
-    if (page) {
-        page->checkAndMarkPointer(visitor, address);
-        // Whether or not the pointer was within an object it was certainly
-        // within a page that is part of the heap, so we don't want to ask the
-        // other other heaps or put this address in the
-        // HeapDoesNotContainCache.
-        return true;
+    if (m_traceDOMWrappers) {
+        TRACE_EVENT0("blink_gc", "V8GCController::traceDOMWrappers");
+        m_traceDOMWrappers(m_isolate, visitor);
     }
-
-    return false;
 }
 
 #if ENABLE(GC_PROFILE_MARKING)
@@ -645,7 +654,10 @@ void ThreadState::snapshot()
         json->endDictionary();                                            \
     }
     json->beginArray("heaps");
-    SNAPSHOT_HEAP(General);
+    SNAPSHOT_HEAP(General1);
+    SNAPSHOT_HEAP(General2);
+    SNAPSHOT_HEAP(General3);
+    SNAPSHOT_HEAP(General4);
     SNAPSHOT_HEAP(CollectionBacking);
     FOR_EACH_TYPED_HEAP(SNAPSHOT_HEAP);
     json->endArray();
@@ -705,34 +717,6 @@ bool ThreadState::popAndInvokeWeakPointerCallback(Visitor* visitor)
         return true;
     }
     return false;
-}
-
-WrapperPersistentRegion* ThreadState::takeWrapperPersistentRegion()
-{
-    WrapperPersistentRegion* region;
-    if (m_pooledWrapperPersistentRegionCount) {
-        region = WrapperPersistentRegion::removeHead(&m_pooledWrapperPersistents);
-        m_pooledWrapperPersistentRegionCount--;
-    } else {
-        region = new WrapperPersistentRegion();
-    }
-    ASSERT(region);
-    WrapperPersistentRegion::insertHead(&m_liveWrapperPersistents, region);
-    return region;
-}
-
-void ThreadState::freeWrapperPersistentRegion(WrapperPersistentRegion* region)
-{
-    if (!region->removeIfNotLast(&m_liveWrapperPersistents))
-        return;
-
-    // Region was removed, ie. it was not the last region in the list.
-    if (m_pooledWrapperPersistentRegionCount < MaxPooledWrapperPersistentRegionCount) {
-        WrapperPersistentRegion::insertHead(&m_pooledWrapperPersistents, region);
-        m_pooledWrapperPersistentRegionCount++;
-    } else {
-        delete region;
-    }
 }
 
 PersistentNode* ThreadState::globalRoots()
@@ -870,6 +854,22 @@ bool ThreadState::isConsistentForSweeping()
 }
 #endif
 
+void ThreadState::prepareRegionTree()
+{
+    // Add the regions allocated by this thread to the region search tree.
+    for (size_t i = 0; i < m_allocatedRegionsSinceLastGC.size(); ++i)
+        Heap::addPageMemoryRegion(m_allocatedRegionsSinceLastGC[i]);
+    m_allocatedRegionsSinceLastGC.clear();
+}
+
+void ThreadState::flushHeapDoesNotContainCacheIfNeeded()
+{
+    if (m_shouldFlushHeapDoesNotContainCache) {
+        Heap::flushHeapDoesNotContainCache();
+        m_shouldFlushHeapDoesNotContainCache = false;
+    }
+}
+
 void ThreadState::prepareForGC()
 {
     for (int i = 0; i < NumberOfHeaps; i++) {
@@ -884,7 +884,9 @@ void ThreadState::prepareForGC()
         if (sweepRequested())
             heap->clearLiveAndMarkDead();
     }
+    prepareRegionTree();
     setSweepRequested();
+    flushHeapDoesNotContainCacheIfNeeded();
 }
 
 void ThreadState::setupHeapsForTermination()
@@ -895,42 +897,23 @@ void ThreadState::setupHeapsForTermination()
 
 BaseHeapPage* ThreadState::heapPageFromAddress(Address address)
 {
-    BaseHeapPage* cachedPage = heapContainsCache()->lookup(address);
-#if !ENABLE(ASSERT)
-    if (cachedPage)
-        return cachedPage;
-#endif
-
     for (int i = 0; i < NumberOfHeaps; i++) {
-        BaseHeapPage* page = m_heaps[i]->heapPageFromAddress(address);
-        if (page) {
-            // Asserts that make sure heapPageFromAddress takes addresses from
-            // the whole aligned blinkPageSize memory area. This is necessary
-            // for the negative cache to work.
-            ASSERT(page->isLargeObject() || page == m_heaps[i]->heapPageFromAddress(roundToBlinkPageStart(address)));
-            if (roundToBlinkPageStart(address) != roundToBlinkPageEnd(address))
-                ASSERT(page->isLargeObject() || page == m_heaps[i]->heapPageFromAddress(roundToBlinkPageEnd(address) - 1));
-            ASSERT(!cachedPage || page == cachedPage);
-            if (!cachedPage)
-                heapContainsCache()->addEntry(address, page);
+        if (BaseHeapPage* page = m_heaps[i]->heapPageFromAddress(address))
             return page;
-        }
     }
-    ASSERT(!cachedPage);
     return 0;
 }
 
 void ThreadState::getStats(HeapStats& stats)
 {
     stats = m_stats;
-#if ENABLE(ASSERT)
-    if (isConsistentForSweeping()) {
-        HeapStats scannedStats;
-        for (int i = 0; i < NumberOfHeaps; i++)
-            m_heaps[i]->getScannedStats(scannedStats);
-        ASSERT(scannedStats == stats);
-    }
-#endif
+}
+
+void ThreadState::getStatsForTesting(HeapStats& stats)
+{
+    ASSERT(isConsistentForSweeping());
+    for (int i = 0; i < NumberOfHeaps; i++)
+        m_heaps[i]->getStatsForTesting(stats);
 }
 
 bool ThreadState::stopThreads()
@@ -1050,13 +1033,14 @@ void ThreadState::unregisterSweepingTask()
 
 void ThreadState::waitUntilSweepersDone()
 {
+    TRACE_EVENT0("blink_gc", "ThreadState::waitUntilSweepersDone");
     MutexLocker locker(m_sweepMutex);
     while (m_numberOfSweeperTasks > 0)
         m_sweepThreadCondition.wait(m_sweepMutex);
 }
 
 
-class SweepNonFinalizedHeapTask FINAL : public WebThread::Task {
+class SweepNonFinalizedHeapTask final : public WebThread::Task {
 public:
     SweepNonFinalizedHeapTask(ThreadState* state, BaseHeap* heap, HeapStats* stats)
         : m_threadState(state)
@@ -1071,7 +1055,11 @@ public:
         m_threadState->unregisterSweepingTask();
     }
 
-    virtual void run() { m_heap->sweep(m_stats); }
+    virtual void run()
+    {
+        TRACE_EVENT0("blink_gc", "ThreadState::sweepNonFinalizedHeaps");
+        m_heap->sweep(m_stats);
+    }
 
 private:
     ThreadState* m_threadState;
@@ -1114,101 +1102,108 @@ void ThreadState::performPendingSweep()
             // Perform thread-specific weak processing.
             while (popAndInvokeWeakPointerCallback(Heap::s_markingVisitor)) { }
         }
+        {
+            TRACE_EVENT0("blink_gc", "ThreadState::invokePreFinalizers");
+            invokePreFinalizers(*Heap::s_markingVisitor);
+        }
         leaveNoAllocationScope();
 
         // Perform sweeping and finalization.
+        performPendingSweepInParallel();
+    }
 
-        // Sweeping will recalculate the stats
-        m_stats.clear();
-
-        // Sweep the non-finalized heap pages on multiple threads.
-        // Attempt to load-balance by having the sweeper thread sweep as
-        // close to half of the pages as possible.
-        int nonFinalizedPages = 0;
-        for (int i = 0; i < NumberOfNonFinalizedHeaps; i++)
-            nonFinalizedPages += m_heaps[FirstNonFinalizedHeap + i]->normalPageCount();
-
-        int finalizedPages = 0;
-        for (int i = 0; i < NumberOfFinalizedHeaps; i++)
-            finalizedPages += m_heaps[FirstFinalizedHeap + i]->normalPageCount();
-
-        int pagesToSweepInParallel = nonFinalizedPages < finalizedPages ? nonFinalizedPages : ((nonFinalizedPages + finalizedPages) / 2);
-
-        // Start the sweeper thread for the non finalized heaps. No
-        // finalizers need to run and therefore the pages can be
-        // swept on other threads.
-        static const int minNumberOfPagesForParallelSweep = 10;
-        HeapStats heapStatsVector[NumberOfNonFinalizedHeaps];
-        BaseHeap* splitOffHeaps[NumberOfNonFinalizedHeaps] = { 0 };
-        for (int i = 0; i < NumberOfNonFinalizedHeaps && pagesToSweepInParallel > 0; i++) {
-            BaseHeap* heap = m_heaps[FirstNonFinalizedHeap + i];
-            int pageCount = heap->normalPageCount();
-            // Only use the sweeper thread if it exists and there are
-            // pages to sweep.
-            if (m_sweeperThread && pageCount > minNumberOfPagesForParallelSweep) {
-                // Create a new thread heap instance to make sure that the
-                // state modified while sweeping is separate for the
-                // sweeper thread and the owner thread.
-                int pagesToSplitOff = std::min(pageCount, pagesToSweepInParallel);
-                pagesToSweepInParallel -= pagesToSplitOff;
-                BaseHeap* splitOff = heap->split(pagesToSplitOff);
-                splitOffHeaps[i] = splitOff;
-                HeapStats* stats = &heapStatsVector[i];
-                m_sweeperThread->postTask(new SweepNonFinalizedHeapTask(this, splitOff, stats));
-            }
-        }
-
-        {
-            // Sweep the remainder of the non-finalized pages (or all of them
-            // if there is no sweeper thread).
-            TRACE_EVENT0("blink_gc", "ThreadState::sweepNonFinalizedHeaps");
-            for (int i = 0; i < NumberOfNonFinalizedHeaps; i++) {
-                HeapStats stats;
-                m_heaps[FirstNonFinalizedHeap + i]->sweep(&stats);
-                m_stats.add(&stats);
-            }
-        }
-
-        {
-            // Sweep the finalized pages.
-            TRACE_EVENT0("blink_gc", "ThreadState::sweepFinalizedHeaps");
-            for (int i = 0; i < NumberOfFinalizedHeaps; i++) {
-                HeapStats stats;
-                m_heaps[FirstFinalizedHeap + i]->sweep(&stats);
-                m_stats.add(&stats);
-            }
-        }
-
-        // Wait for the sweeper threads and update the heap stats with the
-        // stats for the heap portions swept by those threads.
-        waitUntilSweepersDone();
-        for (int i = 0; i < NumberOfNonFinalizedHeaps; i++) {
-            m_stats.add(&heapStatsVector[i]);
-            if (BaseHeap* splitOff = splitOffHeaps[i])
-                m_heaps[FirstNonFinalizedHeap + i]->merge(splitOff);
-        }
-
-        for (int i = 0; i < NumberOfHeaps; i++)
-            m_heaps[i]->postSweepProcessing();
-
-        getStats(m_statsAfterLastGC);
-
-    } // End NoSweepScope
     clearGCRequested();
     clearSweepRequested();
     // If we collected less than 50% of objects, record that the
     // collection rate is low which we use to determine when to
     // perform the next GC.
-    setLowCollectionRate(m_stats.totalObjectSpace() > (objectSpaceBeforeSweep >> 1));
+    setLowCollectionRate(m_stats.totalObjectSpace() > (objectSpaceBeforeSweep / 2));
 
-    if (blink::Platform::current()) {
-        blink::Platform::current()->histogramCustomCounts("BlinkGC.PerformPendingSweep", WTF::currentTimeMS() - timeStamp, 0, 10 * 1000, 50);
+    if (Platform::current()) {
+        Platform::current()->histogramCustomCounts("BlinkGC.PerformPendingSweep", WTF::currentTimeMS() - timeStamp, 0, 10 * 1000, 50);
     }
 
     if (isMainThread()) {
         TRACE_EVENT_SET_NONCONST_SAMPLING_STATE(samplingState);
         ScriptForbiddenScope::exit();
     }
+}
+
+void ThreadState::performPendingSweepInParallel()
+{
+    // Sweeping will recalculate the stats
+    m_stats.clear();
+
+    // Sweep the non-finalized heap pages on multiple threads.
+    // Attempt to load-balance by having the sweeper thread sweep as
+    // close to half of the pages as possible.
+    int nonFinalizedPages = 0;
+    for (int i = 0; i < NumberOfNonFinalizedHeaps; i++)
+        nonFinalizedPages += m_heaps[FirstNonFinalizedHeap + i]->normalPageCount();
+
+    int finalizedPages = 0;
+    for (int i = 0; i < NumberOfFinalizedHeaps; i++)
+        finalizedPages += m_heaps[FirstFinalizedHeap + i]->normalPageCount();
+
+    int pagesToSweepInParallel = nonFinalizedPages < finalizedPages ? nonFinalizedPages : ((nonFinalizedPages + finalizedPages) / 2);
+
+    // Start the sweeper thread for the non finalized heaps. No
+    // finalizers need to run and therefore the pages can be
+    // swept on other threads.
+    static const int minNumberOfPagesForParallelSweep = 10;
+    HeapStats heapStatsVector[NumberOfNonFinalizedHeaps];
+    OwnPtr<BaseHeap> splitOffHeaps[NumberOfNonFinalizedHeaps];
+    for (int i = 0; i < NumberOfNonFinalizedHeaps && pagesToSweepInParallel > 0; i++) {
+        BaseHeap* heap = m_heaps[FirstNonFinalizedHeap + i];
+        int pageCount = heap->normalPageCount();
+        // Only use the sweeper thread if it exists and there are
+        // pages to sweep.
+        if (m_sweeperThread && pageCount > minNumberOfPagesForParallelSweep) {
+            // Create a new thread heap instance to make sure that the
+            // state modified while sweeping is separate for the
+            // sweeper thread and the owner thread.
+            int pagesToSplitOff = std::min(pageCount, pagesToSweepInParallel);
+            pagesToSweepInParallel -= pagesToSplitOff;
+            splitOffHeaps[i] = heap->split(pagesToSplitOff);
+            HeapStats* stats = &heapStatsVector[i];
+            m_sweeperThread->postTask(new SweepNonFinalizedHeapTask(this, splitOffHeaps[i].get(), stats));
+        }
+    }
+
+    {
+        // Sweep the remainder of the non-finalized pages (or all of them
+        // if there is no sweeper thread).
+        TRACE_EVENT0("blink_gc", "ThreadState::sweepNonFinalizedHeaps");
+        for (int i = 0; i < NumberOfNonFinalizedHeaps; i++) {
+            HeapStats stats;
+            m_heaps[FirstNonFinalizedHeap + i]->sweep(&stats);
+            m_stats.add(&stats);
+        }
+    }
+
+    {
+        // Sweep the finalized pages.
+        TRACE_EVENT0("blink_gc", "ThreadState::sweepFinalizedHeaps");
+        for (int i = 0; i < NumberOfFinalizedHeaps; i++) {
+            HeapStats stats;
+            m_heaps[FirstFinalizedHeap + i]->sweep(&stats);
+            m_stats.add(&stats);
+        }
+    }
+
+    // Wait for the sweeper threads and update the heap stats with the
+    // stats for the heap portions swept by those threads.
+    waitUntilSweepersDone();
+    for (int i = 0; i < NumberOfNonFinalizedHeaps; i++) {
+        m_stats.add(&heapStatsVector[i]);
+        if (splitOffHeaps[i])
+            m_heaps[FirstNonFinalizedHeap + i]->merge(splitOffHeaps[i].release());
+    }
+
+    for (int i = 0; i < NumberOfHeaps; i++)
+        m_heaps[i]->postSweepProcessing();
+
+    getStats(m_statsAfterLastGC);
 }
 
 void ThreadState::addInterruptor(Interruptor* interruptor)
@@ -1247,6 +1242,26 @@ ThreadState::AttachedThreadStateSet& ThreadState::attachedThreads()
     return threads;
 }
 
+void ThreadState::unregisterPreFinalizerInternal(void* target)
+{
+    if (isSweepInProgress())
+        return;
+    auto it = m_preFinalizers.find(target);
+    ASSERT(it != m_preFinalizers.end());
+    m_preFinalizers.remove(it);
+}
+
+void ThreadState::invokePreFinalizers(Visitor& visitor)
+{
+    Vector<void*> deadObjects;
+    for (auto& entry : m_preFinalizers) {
+        if (entry.value(entry.key, visitor))
+            deadObjects.append(entry.key);
+    }
+    // FIXME: removeAll is inefficient.  It can shrink repeatedly.
+    m_preFinalizers.removeAll(deadObjects);
+}
+
 #if ENABLE(GC_PROFILE_MARKING)
 const GCInfo* ThreadState::findGCInfoFromAllThreads(Address address)
 {
@@ -1268,4 +1283,4 @@ const GCInfo* ThreadState::findGCInfoFromAllThreads(Address address)
 }
 #endif
 
-}
+} // namespace blink

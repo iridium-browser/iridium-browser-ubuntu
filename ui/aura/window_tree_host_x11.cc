@@ -35,15 +35,15 @@
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
+#include "ui/events/devices/x11/device_list_cache_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/event_switches.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/platform/platform_event_observer.h"
 #include "ui/events/platform/x11/x11_event_source.h"
-#include "ui/events/x/device_data_manager_x11.h"
-#include "ui/events/x/device_list_cache_x.h"
-#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/screen.h"
 
 using std::max;
@@ -133,7 +133,7 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
 #endif  // defined(USE_XI2_MT)
   }
 
-  virtual ~TouchEventCalibrate() {
+  ~TouchEventCalibrate() override {
     if (ui::PlatformEventSource::GetInstance())
       ui::PlatformEventSource::GetInstance()->RemovePlatformEventObserver(this);
   }
@@ -202,7 +202,7 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
 
  private:
   // ui::PlatformEventObserver:
-  virtual void WillProcessEvent(const ui::PlatformEvent& event) OVERRIDE {
+  void WillProcessEvent(const ui::PlatformEvent& event) override {
 #if defined(USE_XI2_MT)
     if (event->type == GenericEvent &&
         (event->xgeneric.evtype == XI_TouchBegin ||
@@ -216,7 +216,7 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
 #endif  // defined(USE_XI2_MT)
   }
 
-  virtual void DidProcessEvent(const ui::PlatformEvent& event) OVERRIDE {}
+  void DidProcessEvent(const ui::PlatformEvent& event) override {}
 
   // The difference in screen's native resolution pixels between
   // the border of the touchscreen and the border of the screen,
@@ -570,40 +570,6 @@ void WindowTreeHostX11::SetCapture() {
 
 void WindowTreeHostX11::ReleaseCapture() {
   // TODO(oshima): Release x input.
-}
-
-void WindowTreeHostX11::PostNativeEvent(
-    const base::NativeEvent& native_event) {
-  DCHECK(xwindow_);
-  DCHECK(xdisplay_);
-  XEvent xevent = *native_event;
-  xevent.xany.display = xdisplay_;
-  xevent.xany.window = xwindow_;
-
-  switch (xevent.type) {
-    case EnterNotify:
-    case LeaveNotify:
-    case MotionNotify:
-    case KeyPress:
-    case KeyRelease:
-    case ButtonPress:
-    case ButtonRelease: {
-      // The fields used below are in the same place for all of events
-      // above. Using xmotion from XEvent's unions to avoid repeating
-      // the code.
-      xevent.xmotion.root = x_root_window_;
-      xevent.xmotion.time = CurrentTime;
-
-      gfx::Point point(xevent.xmotion.x, xevent.xmotion.y);
-      ConvertPointToNativeScreen(&point);
-      xevent.xmotion.x_root = point.x();
-      xevent.xmotion.y_root = point.y();
-    }
-    default:
-      break;
-  }
-  XSendEvent(xdisplay_, xwindow_, False, 0, &xevent);
-  XFlush(xdisplay_);
 }
 
 void WindowTreeHostX11::SetCursorNative(gfx::NativeCursor cursor) {

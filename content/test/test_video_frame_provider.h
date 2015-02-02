@@ -29,13 +29,13 @@ class TestVideoFrameProvider : public VideoFrameProvider {
       const RepaintCB& repaint_cb);
 
   // VideoFrameProvider implementation.
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual void Play() OVERRIDE;
-  virtual void Pause() OVERRIDE;
+  void Start() override;
+  void Stop() override;
+  void Play() override;
+  void Pause() override;
 
  protected:
-  virtual ~TestVideoFrameProvider();
+  ~TestVideoFrameProvider() override;
 
  private:
   enum State {

@@ -88,7 +88,8 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_CONST_METHOD0(FirstSetupInProgress, bool());
   MOCK_CONST_METHOD0(GetLastSyncedTimeString, base::string16());
   MOCK_CONST_METHOD0(HasUnrecoverableError, bool());
-  MOCK_CONST_METHOD0(sync_initialized, bool());
+  MOCK_CONST_METHOD0(SyncActive, bool());
+  MOCK_CONST_METHOD0(backend_initialized, bool());
   MOCK_CONST_METHOD0(IsStartSuppressed, bool());
   MOCK_CONST_METHOD0(waiting_for_auth, bool());
   MOCK_METHOD1(OnActionableError, void(const syncer::SyncProtocolError&));
@@ -99,7 +100,6 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_METHOD0(OnConfigureBlocked, void());
   MOCK_METHOD1(OnConfigureDone,
                void(const sync_driver::DataTypeManager::ConfigureResult&));
-  MOCK_METHOD0(OnConfigureRetry, void());
   MOCK_METHOD0(OnConfigureStart, void());
 
   MOCK_METHOD0(IsSyncEnabledAndLoggedIn, bool());

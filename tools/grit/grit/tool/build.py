@@ -104,6 +104,11 @@ Options:
                     and {numeric_id}. E.g. "#define {textual_id} {numeric_id}"
                     Otherwise it will use the default "#define SYMBOL 1234"
 
+  --output-all-resource-defines
+  --no-output-all-resource-defines  If specified, overrides the value of the
+                    output_all_resource_defines attribute of the root <grit>
+                    element of the input .grd file.
+
 Conditional inclusion of resources only affects the output of files which
 control which resources get linked into a binary, e.g. it affects .rc files
 meant for compilation but it does not affect resource header files (that define
@@ -123,8 +128,11 @@ are exported to translation interchange files (e.g. XMB files), etc.
     depfile = None
     depdir = None
     rc_header_format = None
+    output_all_resource_defines = None
     (own_opts, args) = getopt.getopt(args, 'a:o:D:E:f:w:t:h:',
-        ('depdir=','depfile=','assert-file-list='))
+        ('depdir=','depfile=','assert-file-list=',
+         'output-all-resource-defines',
+         'no-output-all-resource-defines',))
     for (key, val) in own_opts:
       if key == '-a':
         assert_output_files.append(val)
@@ -146,6 +154,10 @@ are exported to translation interchange files (e.g. XMB files), etc.
         first_ids_file = val
       elif key == '-w':
         whitelist_filenames.append(val)
+      elif key == '--output-all-resource-defines':
+        output_all_resource_defines = True
+      elif key == '--no-output-all-resource-defines':
+        output_all_resource_defines = False
       elif key == '-t':
         target_platform = val
       elif key == '-h':
@@ -178,6 +190,12 @@ are exported to translation interchange files (e.g. XMB files), etc.
                                 first_ids_file=first_ids_file,
                                 defines=self.defines,
                                 target_platform=target_platform)
+
+    # If the output_all_resource_defines option is specified, override the value
+    # found in the grd file.
+    if output_all_resource_defines is not None:
+      self.res.SetShouldOutputAllResourceDefines(output_all_resource_defines)
+
     # Set an output context so that conditionals can use defines during the
     # gathering stage; we use a dummy language here since we are not outputting
     # a specific language.
@@ -224,11 +242,13 @@ are exported to translation interchange files (e.g. XMB files), etc.
     # be written into the target files (skip markers).
     from grit.node import include
     from grit.node import message
+    from grit.node import structure
     for node in start_node:
       # Same trick data_pack.py uses to see what nodes actually result in
       # real items.
       if (isinstance(node, include.IncludeNode) or
-          isinstance(node, message.MessageNode)):
+          isinstance(node, message.MessageNode) or
+          isinstance(node, structure.StructureNode)):
         text_ids = node.GetTextualIds()
         # Mark the item to be skipped if it wasn't in the whitelist.
         if text_ids and text_ids[0] not in whitelist_names:
@@ -363,12 +383,21 @@ are exported to translation interchange files (e.g. XMB files), etc.
         for i in self.res.GetOutputFiles()])
 
     if asserted != actual:
-      print '''Asserted file list does not match.
+      missing = list(set(actual) - set(asserted))
+      extra = list(set(asserted) - set(actual))
+      error = '''Asserted file list does not match.
 
-Expected output files: %s
-
-Actual output files: %s
-''' % (asserted, actual)
+Expected output files:
+%s
+Actual output files:
+%s
+Missing output files:
+%s
+Extra output files:
+%s
+'''
+      print error % ('\n'.join(asserted), '\n'.join(actual), '\n'.join(missing),
+          '\n'.join(extra))
       return False
     return True
 

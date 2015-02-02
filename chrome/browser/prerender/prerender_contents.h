@@ -122,7 +122,7 @@ class PrerenderContents : public content::NotificationObserver,
     MATCH_COMPLETE_REPLACEMENT_PENDING,
   };
 
-  virtual ~PrerenderContents();
+  ~PrerenderContents() override;
 
   // All observers of a PrerenderContents are removed after the OnPrerenderStop
   // event is sent, so there is no need to call RemoveObserver() in the normal
@@ -205,33 +205,31 @@ class PrerenderContents : public content::NotificationObserver,
       const content::SessionStorageNamespace* session_storage_namespace) const;
 
   // content::WebContentsObserver implementation.
-  virtual void RenderFrameCreated(
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void DidStopLoading(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
+  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
+  void DidStopLoading(content::RenderViewHost* render_view_host) override;
+  void DocumentLoadedInFrame(
+      content::RenderFrameHost* render_frame_host) override;
+  void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       bool is_error_page,
-      bool is_iframe_srcdoc) OVERRIDE;
-  virtual void DidFinishLoad(content::RenderFrameHost* render_frame_host,
-                             const GURL& validated_url) OVERRIDE;
-  virtual void DidNavigateMainFrame(
+      bool is_iframe_srcdoc) override;
+  void DidFinishLoad(content::RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override;
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void DidGetRedirectForResourceRequest(
+      const content::FrameNavigateParams& params) override;
+  void DidGetRedirectForResourceRequest(
       content::RenderViewHost* render_view_host,
-      const content::ResourceRedirectDetails& details) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+      const content::ResourceRedirectDetails& details) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
+  void RenderProcessGone(base::TerminationStatus status) override;
 
   // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Checks that a URL may be prerendered, for one of the many redirections. If
   // the URL can not be prerendered - for example, it's an ftp URL - |this| will

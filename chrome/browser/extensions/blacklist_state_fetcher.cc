@@ -46,18 +46,18 @@ class BlacklistRequestContextGetter : public net::URLRequestContextGetter {
                             base::Bind(callback, context_getter));
   }
 
-  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE {
+  net::URLRequestContext* GetURLRequestContext() override {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     return url_request_context_.get();
   }
 
-  virtual scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
-      const OVERRIDE {
+  scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
+      const override {
     return network_task_runner_;
   }
 
  protected:
-  virtual ~BlacklistRequestContextGetter() {
+  ~BlacklistRequestContextGetter() override {
     url_request_context_->AssertNoURLRequests();
   }
 

@@ -6,6 +6,7 @@
 #define SYNC_INTERNAL_API_PUBLIC_ATTACHMENTS_ATTACHMENT_UPLOADER_IMPL_H_
 
 #include "base/containers/scoped_ptr_hash_map.h"
+#include "base/gtest_prod_util.h"
 #include "base/threading/non_thread_safe.h"
 #include "google_apis/gaia/oauth2_token_service_request.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -40,15 +41,24 @@ class SYNC_EXPORT AttachmentUploaderImpl : public AttachmentUploader,
       const OAuth2TokenService::ScopeSet& scopes,
       const scoped_refptr<OAuth2TokenServiceRequest::TokenServiceProvider>&
           token_service_provider);
-  virtual ~AttachmentUploaderImpl();
+  ~AttachmentUploaderImpl() override;
 
   // AttachmentUploader implementation.
-  virtual void UploadAttachment(const Attachment& attachment,
-                                const UploadCallback& callback) OVERRIDE;
+  void UploadAttachment(const Attachment& attachment,
+                        const UploadCallback& callback) override;
 
   // Return the URL for the given |sync_service_url| and |attachment_id|.
   static GURL GetURLForAttachmentId(const GURL& sync_service_url,
                                     const AttachmentId& attachment_id);
+
+  // Return the crc32c of the memory described by |data| and |size|.
+  //
+  // The value is base64 encoded, big-endian format.  Suitable for use in the
+  // X-Goog-Hash header
+  // (https://cloud.google.com/storage/docs/reference-headers#xgooghash).
+  //
+  // Potentially expensive.
+  static std::string ComputeCrc32cHash(const char* data, size_t size);
 
  private:
   class UploadState;

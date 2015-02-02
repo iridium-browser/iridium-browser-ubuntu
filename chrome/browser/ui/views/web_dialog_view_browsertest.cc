@@ -14,10 +14,10 @@
 #include "chrome/browser/ui/webui/chrome_web_contents_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/webview/web_dialog_view.h"
@@ -50,8 +50,8 @@ class TestWebDialogView : public views::WebDialogView {
 
  private:
   // TODO(xiyuan): Update this when WidgetDelegate has bounds change hook.
-  virtual void SaveWindowPlacement(const gfx::Rect& bounds,
-                                   ui::WindowShowState show_state) OVERRIDE {
+  void SaveWindowPlacement(const gfx::Rect& bounds,
+                           ui::WindowShowState show_state) override {
     if (should_quit_on_size_change_ && last_size_ != bounds.size()) {
       // Schedule message loop quit because we could be called while
       // the bounds change call is on the stack and not in the nested message
@@ -65,7 +65,7 @@ class TestWebDialogView : public views::WebDialogView {
     last_size_ = bounds.size();
   }
 
-  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE {
+  void OnDialogClosed(const std::string& json_retval) override {
     should_quit_on_size_change_ = false;  // No quit when we are closing.
     views::WebDialogView::OnDialogClosed(json_retval);
   }

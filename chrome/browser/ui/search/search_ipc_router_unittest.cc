@@ -91,7 +91,7 @@ class SearchIPCRouterTest : public BrowserWithTestWindowTest {
  public:
   SearchIPCRouterTest() : field_trial_list_(NULL) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
     AddTab(browser(), GURL("chrome://blank"));
     SearchTabHelper::CreateForWebContents(web_contents());
@@ -140,8 +140,7 @@ class SearchIPCRouterTest : public BrowserWithTestWindowTest {
     ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
     search_tab_helper->ipc_router().set_delegate_for_testing(mock_delegate());
     search_tab_helper->ipc_router().set_policy_for_testing(
-        make_scoped_ptr(new MockSearchIPCRouterPolicy)
-            .PassAs<SearchIPCRouter::Policy>());
+        make_scoped_ptr(new MockSearchIPCRouterPolicy));
   }
 
   bool MessageWasSent(uint32 id) {
@@ -872,7 +871,7 @@ TEST_F(SearchIPCRouterTest, SendSubmitMsg) {
       .WillOnce(testing::Return(true));
 
   process()->sink().ClearMessages();
-  GetSearchIPCRouter().Submit(base::string16());
+  GetSearchIPCRouter().Submit(base::string16(), EmbeddedSearchRequestParams());
   EXPECT_TRUE(MessageWasSent(ChromeViewMsg_SearchBoxSubmit::ID));
 }
 
@@ -884,7 +883,7 @@ TEST_F(SearchIPCRouterTest, DoNotSendSubmitMsg) {
       .WillOnce(testing::Return(false));
 
   process()->sink().ClearMessages();
-  GetSearchIPCRouter().Submit(base::string16());
+  GetSearchIPCRouter().Submit(base::string16(), EmbeddedSearchRequestParams());
   EXPECT_FALSE(MessageWasSent(ChromeViewMsg_SearchBoxSubmit::ID));
 }
 

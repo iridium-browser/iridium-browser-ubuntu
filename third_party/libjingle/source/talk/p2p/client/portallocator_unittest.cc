@@ -25,15 +25,15 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "talk/p2p/base/basicpacketsocketfactory.h"
-#include "talk/p2p/base/constants.h"
-#include "talk/p2p/base/p2ptransportchannel.h"
-#include "talk/p2p/base/portallocatorsessionproxy.h"
-#include "talk/p2p/base/testrelayserver.h"
-#include "talk/p2p/base/teststunserver.h"
-#include "talk/p2p/base/testturnserver.h"
-#include "talk/p2p/client/basicportallocator.h"
-#include "talk/p2p/client/httpportallocator.h"
+#include "webrtc/p2p/base/basicpacketsocketfactory.h"
+#include "webrtc/p2p/base/constants.h"
+#include "webrtc/p2p/base/p2ptransportchannel.h"
+#include "webrtc/p2p/base/portallocatorsessionproxy.h"
+#include "webrtc/p2p/base/testrelayserver.h"
+#include "webrtc/p2p/base/teststunserver.h"
+#include "webrtc/p2p/base/testturnserver.h"
+#include "webrtc/p2p/client/basicportallocator.h"
+#include "webrtc/p2p/client/httpportallocator.h"
 #include "webrtc/base/fakenetwork.h"
 #include "webrtc/base/firewallsocketserver.h"
 #include "webrtc/base/gunit.h"
@@ -97,14 +97,6 @@ std::ostream& operator<<(std::ostream& os, const cricket::Candidate& c) {
 
 class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
  public:
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
-  }
-
   PortAllocatorTest()
       : pss_(new rtc::PhysicalSocketServer),
         vss_(new rtc::VirtualSocketServer(pss_.get())),
@@ -112,7 +104,8 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
         ss_scope_(fss_.get()),
         nat_factory_(vss_.get(), kNatAddr),
         nat_socket_factory_(&nat_factory_),
-        stun_server_(Thread::Current(), kStunAddr),
+        stun_server_(cricket::TestStunServer::Create(Thread::Current(),
+                                                     kStunAddr)),
         relay_server_(Thread::Current(), kRelayUdpIntAddr, kRelayUdpExtAddr,
                       kRelayTcpIntAddr, kRelayTcpExtAddr,
                       kRelaySslTcpIntAddr, kRelaySslTcpExtAddr),
@@ -120,6 +113,8 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
         candidate_allocation_done_(false) {
     cricket::ServerAddresses stun_servers;
     stun_servers.insert(kStunAddr);
+    // Passing the addresses of GTURN servers will enable GTURN in
+    // Basicportallocator.
     allocator_.reset(new cricket::BasicPortAllocator(
         &network_manager_,
         stun_servers,
@@ -142,6 +137,14 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
     allocator_.reset(new cricket::BasicPortAllocator(
         &network_manager_, &nat_socket_factory_, stun_servers));
     allocator().set_step_delay(cricket::kMinimumStepDelay);
+  }
+
+  // Create a BasicPortAllocator without GTURN and add the TURN servers.
+  void ResetWithTurnServers(const rtc::SocketAddress& udp_turn,
+                            const rtc::SocketAddress& tcp_turn) {
+    allocator_.reset(new cricket::BasicPortAllocator(&network_manager_));
+    allocator().set_step_delay(cricket::kMinimumStepDelay);
+    AddTurnServers(udp_turn, tcp_turn);
   }
 
   void AddTurnServers(const rtc::SocketAddress& udp_turn,
@@ -280,7 +283,7 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
   rtc::scoped_ptr<rtc::NATServer> nat_server_;
   rtc::NATSocketFactory nat_factory_;
   rtc::BasicPacketSocketFactory nat_socket_factory_;
-  cricket::TestStunServer stun_server_;
+  rtc::scoped_ptr<cricket::TestStunServer> stun_server_;
   cricket::TestRelayServer relay_server_;
   cricket::TestTurnServer turn_server_;
   rtc::FakeNetworkManager network_manager_;
@@ -572,17 +575,32 @@ TEST_F(PortAllocatorTest, TestGetAllPortsRestarts) {
 }
 
 // Test ICE candidate filter mechanism with options Relay/Host/Reflexive.
+// This test also verifies that when the allocator is only allowed to use
+// relay (i.e. IceTransportsType is relay), the raddr is an empty
+// address with the correct family. This is to prevent any local
+// reflective address leakage in the sdp line.
 TEST_F(PortAllocatorTest, TestCandidateFilterWithRelayOnly) {
   AddInterface(kClientAddr);
+  // GTURN is not configured here.
+  ResetWithTurnServers(kTurnUdpIntAddr, rtc::SocketAddress());
   allocator().set_candidate_filter(cricket::CF_RELAY);
   EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP));
   session_->StartGettingPorts();
   EXPECT_TRUE_WAIT(candidate_allocation_done_, kDefaultAllocationTimeout);
-  // Using GTURN, we will have 4 candidates.
-  EXPECT_EQ(4U, candidates_.size());
+  EXPECT_PRED5(CheckCandidate,
+               candidates_[0],
+               cricket::ICE_CANDIDATE_COMPONENT_RTP,
+               "relay",
+               "udp",
+               rtc::SocketAddress(kTurnUdpExtAddr.ipaddr(), 0));
+
+  EXPECT_EQ(1U, candidates_.size());
   EXPECT_EQ(1U, ports_.size());  // Only Relay port will be in ready state.
   for (size_t i = 0; i < candidates_.size(); ++i) {
     EXPECT_EQ(std::string(cricket::RELAY_PORT_TYPE), candidates_[i].type());
+    EXPECT_EQ(
+        candidates_[0].related_address(),
+        rtc::EmptySocketAddressWithFamily(candidates_[0].address().family()));
   }
 }
 
@@ -618,6 +636,9 @@ TEST_F(PortAllocatorTest, TestCandidateFilterWithReflexiveOnly) {
   EXPECT_EQ(1U, ports_.size());  // Only UDP port will be in ready state.
   for (size_t i = 0; i < candidates_.size(); ++i) {
     EXPECT_EQ(std::string(cricket::STUN_PORT_TYPE), candidates_[i].type());
+    EXPECT_EQ(
+        candidates_[0].related_address(),
+        rtc::EmptySocketAddressWithFamily(candidates_[0].address().family()));
   }
 }
 

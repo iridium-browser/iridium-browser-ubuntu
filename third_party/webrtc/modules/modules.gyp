@@ -95,11 +95,13 @@
             '<(DEPTH)/testing/gtest.gyp:gtest',
             '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
             '<(webrtc_root)/common_audio/common_audio.gyp:common_audio',
+            '<(webrtc_root)/modules/modules.gyp:video_capture_module_impl',
             '<(webrtc_root)/modules/video_coding/codecs/vp8/vp8.gyp:webrtc_vp8',
+            '<(webrtc_root)/modules/video_coding/codecs/vp9/vp9.gyp:webrtc_vp9',
             '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-            '<(webrtc_root)/test/test.gyp:test_support_main',
             '<(webrtc_root)/test/test.gyp:frame_generator',
-            '<(webrtc_root)/test/test.gyp:rtcp_packet_parser',
+            '<(webrtc_root)/test/test.gyp:rtp_test_utils',
+            '<(webrtc_root)/test/test.gyp:test_support_main',
           ],
           'sources': [
             'audio_coding/main/acm2/acm_opus_unittest.cc',
@@ -179,6 +181,7 @@
             'desktop_capture/win/cursor_unittest_resources.rc',
             'media_file/source/media_file_unittest.cc',
             'module_common_types_unittest.cc',
+            'pacing/bitrate_prober_unittest.cc',
             'pacing/paced_sender_unittest.cc',
             'remote_bitrate_estimator/bwe_simulations.cc',
             'remote_bitrate_estimator/include/mock/mock_remote_bitrate_observer.h',
@@ -211,6 +214,7 @@
             'rtp_rtcp/source/rtcp_packet_unittest.cc',
             'rtp_rtcp/source/rtcp_receiver_unittest.cc',
             'rtp_rtcp/source/rtcp_sender_unittest.cc',
+            'rtp_rtcp/source/rtcp_utility_unittest.cc',
             'rtp_rtcp/source/rtp_fec_unittest.cc',
             'rtp_rtcp/source/rtp_format_h264_unittest.cc',
             'rtp_rtcp/source/rtp_format_vp8_unittest.cc',
@@ -323,6 +327,7 @@
             '<(DEPTH)/testing/gtest.gyp:gtest',
             '<(webrtc_root)/common_video/common_video.gyp:common_video',
             '<(webrtc_root)/modules/video_coding/codecs/vp8/vp8.gyp:webrtc_vp8',
+            '<(webrtc_root)/modules/video_coding/codecs/vp9/vp9.gyp:webrtc_vp9',
             '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
             '<(webrtc_root)/test/metrics.gyp:metrics',
             '<(webrtc_root)/test/test.gyp:test_support',
@@ -394,7 +399,6 @@
               ],
               'includes': [
                 '../build/isolate.gypi',
-                'modules_tests.isolate',
               ],
               'sources': [
                 'modules_tests.isolate',
@@ -408,7 +412,6 @@
               ],
               'includes': [
                 '../build/isolate.gypi',
-                'modules_unittests.isolate',
               ],
               'sources': [
                 'modules_unittests.isolate',

@@ -11,9 +11,10 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread_restrictions.h"
+#include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/screen_manager.h"
+#include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
-#include "chrome/browser/chromeos/login/screens/screen_observer.h"
 #include "chrome/browser/chromeos/login/screens/update_screen_actor.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -22,6 +23,7 @@
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
+using pairing_chromeos::HostPairingController;
 
 namespace chromeos {
 
@@ -91,10 +93,10 @@ UpdateScreen* UpdateScreen::Get(ScreenManager* manager) {
       manager->GetScreen(WizardController::kUpdateScreenName));
 }
 
-UpdateScreen::UpdateScreen(
-    ScreenObserver* screen_observer,
-    UpdateScreenActor* actor)
-    : WizardScreen(screen_observer),
+UpdateScreen::UpdateScreen(BaseScreenDelegate* base_screen_delegate,
+                           UpdateScreenActor* actor,
+                           HostPairingController* remora_controller)
+    : BaseScreen(base_screen_delegate),
       state_(STATE_IDLE),
       reboot_check_delay_(0),
       is_checking_for_update_(true),
@@ -103,8 +105,10 @@ UpdateScreen::UpdateScreen(
       is_shown_(false),
       ignore_idle_status_(true),
       actor_(actor),
+      remora_controller_(remora_controller),
       is_first_detection_notification_(true),
       is_first_portal_notification_(true),
+      histogram_helper_(new ErrorScreensHistogramHelper("Update")),
       weak_factory_(this) {
   DCHECK(actor_);
   if (actor_)
@@ -138,6 +142,8 @@ void UpdateScreen::UpdateStatusChanged(
     case UpdateEngineClient::UPDATE_STATUS_CHECKING_FOR_UPDATE:
       // Do nothing in these cases, we don't want to notify the user of the
       // check unless there is an update.
+      SetHostPairingControllerStatus(
+          HostPairingController::UPDATE_STATUS_UPDATING);
       break;
     case UpdateEngineClient::UPDATE_STATUS_UPDATE_AVAILABLE:
       MakeSureScreenIsShown();
@@ -200,6 +206,8 @@ void UpdateScreen::UpdateStatusChanged(
       if (HasCriticalUpdate()) {
         actor_->ShowCurtain(false);
         VLOG(1) << "Initiate reboot after update";
+        SetHostPairingControllerStatus(
+            HostPairingController::UPDATE_STATUS_REBOOTING);
         DBusThreadManager::Get()->GetUpdateEngineClient()->RebootAfterUpdate();
         reboot_timer_.Start(FROM_HERE,
                             base::TimeDelta::FromSeconds(reboot_check_delay_),
@@ -297,6 +305,7 @@ void UpdateScreen::CancelUpdate() {
 
 void UpdateScreen::Show() {
   is_shown_ = true;
+  histogram_helper_->OnScreenShow();
   if (actor_) {
     actor_->Show();
     actor_->SetProgress(kBeforeUpdateCheckProgress);
@@ -321,14 +330,16 @@ void UpdateScreen::PrepareToShow() {
 void UpdateScreen::ExitUpdate(UpdateScreen::ExitReason reason) {
   DBusThreadManager::Get()->GetUpdateEngineClient()->RemoveObserver(this);
   NetworkPortalDetector::Get()->RemoveObserver(this);
+  SetHostPairingControllerStatus(HostPairingController::UPDATE_STATUS_UPDATED);
+
 
   switch (reason) {
     case REASON_UPDATE_CANCELED:
-      get_screen_observer()->OnExit(ScreenObserver::UPDATE_NOUPDATE);
+      get_base_screen_delegate()->OnExit(BaseScreenDelegate::UPDATE_NOUPDATE);
       break;
     case REASON_UPDATE_INIT_FAILED:
-      get_screen_observer()->OnExit(
-          ScreenObserver::UPDATE_ERROR_CHECKING_FOR_UPDATE);
+      get_base_screen_delegate()->OnExit(
+          BaseScreenDelegate::UPDATE_ERROR_CHECKING_FOR_UPDATE);
       break;
     case REASON_UPDATE_NON_CRITICAL:
     case REASON_UPDATE_ENDED:
@@ -347,13 +358,15 @@ void UpdateScreen::ExitUpdate(UpdateScreen::ExitReason reason) {
             // Noncritical update, just exit screen as if there is no update.
             // no break
           case UpdateEngineClient::UPDATE_STATUS_IDLE:
-            get_screen_observer()->OnExit(ScreenObserver::UPDATE_NOUPDATE);
+            get_base_screen_delegate()->OnExit(
+                BaseScreenDelegate::UPDATE_NOUPDATE);
             break;
           case UpdateEngineClient::UPDATE_STATUS_ERROR:
           case UpdateEngineClient::UPDATE_STATUS_REPORTING_ERROR_EVENT:
-            get_screen_observer()->OnExit(is_checking_for_update_ ?
-                ScreenObserver::UPDATE_ERROR_CHECKING_FOR_UPDATE :
-                ScreenObserver::UPDATE_ERROR_UPDATING);
+            get_base_screen_delegate()->OnExit(
+                is_checking_for_update_
+                    ? BaseScreenDelegate::UPDATE_ERROR_CHECKING_FOR_UPDATE
+                    : BaseScreenDelegate::UPDATE_ERROR_UPDATING);
             break;
           default:
             NOTREACHED();
@@ -374,7 +387,7 @@ void UpdateScreen::OnWaitForRebootTimeElapsed() {
 
 void UpdateScreen::MakeSureScreenIsShown() {
   if (!is_shown_)
-    get_screen_observer()->ShowCurrentScreen();
+    get_base_screen_delegate()->ShowCurrentScreen();
 }
 
 void UpdateScreen::SetRebootCheckDelay(int seconds) {
@@ -469,7 +482,7 @@ void UpdateScreen::OnConnectToNetworkRequested() {
 }
 
 ErrorScreen* UpdateScreen::GetErrorScreen() {
-  return get_screen_observer()->GetErrorScreen();
+  return get_base_screen_delegate()->GetErrorScreen();
 }
 
 void UpdateScreen::StartUpdateCheck() {
@@ -487,12 +500,14 @@ void UpdateScreen::ShowErrorMessage() {
   LOG(WARNING) << "UpdateScreen::ShowErrorMessage()";
   state_ = STATE_ERROR;
   GetErrorScreen()->SetUIState(ErrorScreen::UI_STATE_UPDATE);
-  get_screen_observer()->ShowErrorScreen();
+  get_base_screen_delegate()->ShowErrorScreen();
+  histogram_helper_->OnErrorShow(GetErrorScreen()->GetErrorState());
 }
 
 void UpdateScreen::HideErrorMessage() {
   LOG(WARNING) << "UpdateScreen::HideErrorMessage()";
-  get_screen_observer()->HideErrorScreen(this);
+  get_base_screen_delegate()->HideErrorScreen(this);
+  histogram_helper_->OnErrorHide();
 }
 
 void UpdateScreen::UpdateErrorMessage(
@@ -523,6 +538,13 @@ void UpdateScreen::UpdateErrorMessage(
     default:
       NOTREACHED();
       break;
+  }
+}
+
+void UpdateScreen::SetHostPairingControllerStatus(
+    HostPairingController::UpdateStatus update_status) {
+  if (remora_controller_) {
+    remora_controller_->OnUpdateStatusChanged(update_status);
   }
 }
 

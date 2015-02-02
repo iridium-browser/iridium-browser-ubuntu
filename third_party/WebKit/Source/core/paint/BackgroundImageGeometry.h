@@ -17,20 +17,11 @@ public:
         : m_hasNonLocalGeometry(false)
     { }
 
-    IntPoint destOrigin() const { return m_destOrigin; }
-    void setDestOrigin(const IntPoint& destOrigin)
-    {
-        m_destOrigin = destOrigin;
-    }
-
     IntRect destRect() const { return m_destRect; }
     void setDestRect(const IntRect& destRect)
     {
         m_destRect = destRect;
     }
-
-    // Returns the phase relative to the destination rectangle.
-    IntPoint relativePhase() const;
 
     IntPoint phase() const { return m_phase; }
     void setPhase(const IntPoint& phase)
@@ -67,13 +58,12 @@ public:
 
 private:
     IntRect m_destRect;
-    IntPoint m_destOrigin;
     IntPoint m_phase;
     IntSize m_tileSize;
     IntSize m_repeatSpacing;
     bool m_hasNonLocalGeometry; // Has background-attachment: fixed. Implies that we can't always cheaply compute destRect.
 };
 
-#endif // BackgroundImageGeometry_h
-
 } // namespace blink
+
+#endif // BackgroundImageGeometry_h

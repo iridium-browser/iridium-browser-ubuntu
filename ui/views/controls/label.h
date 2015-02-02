@@ -31,7 +31,7 @@ class VIEWS_EXPORT Label : public View {
   Label();
   explicit Label(const base::string16& text);
   Label(const base::string16& text, const gfx::FontList& font_list);
-  virtual ~Label();
+  ~Label() override;
 
   // Gets or sets the fonts used by this label.
   const gfx::FontList& font_list() const { return font_list_; }
@@ -99,6 +99,12 @@ class VIEWS_EXPORT Label : public View {
   // default behavior, call this with an empty string.
   void SetTooltipText(const base::string16& tooltip_text);
 
+  // Get or set whether this label can act as a tooltip handler; the default is
+  // true.  Set to false whenever an ancestor view should handle tooltips
+  // instead.
+  bool handles_tooltips() const { return handles_tooltips_; }
+  void SetHandlesTooltips(bool enabled);
+
   // Resizes the label so its width is set to the width of the longest line and
   // its height deduced accordingly.
   // This is only intended for multi-line labels and is useful when the label's
@@ -114,17 +120,17 @@ class VIEWS_EXPORT Label : public View {
   const base::string16& GetLayoutTextForTesting() const;
 
   // View:
-  virtual gfx::Insets GetInsets() const OVERRIDE;
-  virtual int GetBaseline() const OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual int GetHeightForWidth(int w) const OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual View* GetTooltipHandlerForPoint(const gfx::Point& point) OVERRIDE;
-  virtual bool CanProcessEventsWithinSubtree() const OVERRIDE;
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual bool GetTooltipText(const gfx::Point& p,
-                              base::string16* tooltip) const OVERRIDE;
+  gfx::Insets GetInsets() const override;
+  int GetBaseline() const override;
+  gfx::Size GetPreferredSize() const override;
+  gfx::Size GetMinimumSize() const override;
+  int GetHeightForWidth(int w) const override;
+  const char* GetClassName() const override;
+  View* GetTooltipHandlerForPoint(const gfx::Point& point) override;
+  bool CanProcessEventsWithinSubtree() const override;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  bool GetTooltipText(const gfx::Point& p,
+                      base::string16* tooltip) const override;
 
  protected:
   // Called by Paint to paint the text.
@@ -138,9 +144,9 @@ class VIEWS_EXPORT Label : public View {
   SkColor disabled_color() const { return actual_disabled_color_; }
 
   // View:
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
  private:
   // These tests call CalculateDrawStringParams in order to verify the
@@ -206,6 +212,7 @@ class VIEWS_EXPORT Label : public View {
   gfx::ElideBehavior elide_behavior_;
   gfx::HorizontalAlignment horizontal_alignment_;
   base::string16 tooltip_text_;
+  bool handles_tooltips_;
   // Whether to collapse the label when it's not visible.
   bool collapse_when_hidden_;
   gfx::ShadowValues shadows_;

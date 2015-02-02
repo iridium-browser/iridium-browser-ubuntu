@@ -298,9 +298,10 @@ static inline int next_dither_toggle16(int toggle) {
 #if SK_SUPPORT_GPU
 
 #include "GrCoordTransform.h"
+#include "GrFragmentProcessor.h"
 #include "gl/GrGLProcessor.h"
 
-class GrProcessorStage;
+class GrFragmentStage;
 class GrBackendProcessorFactory;
 
 /*
@@ -342,8 +343,6 @@ public:
     bool useAtlas() const { return SkToBool(-1 != fRow); }
     SkScalar getYCoord() const { return fYCoord; };
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     SkGradientShaderBase::GpuColorType getColorType() const { return fColorType; }
 
     enum PremulType {
@@ -374,7 +373,9 @@ protected:
                                     SkScalar** stops,
                                     SkShader::TileMode* tm);
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     const GrCoordTransform& getCoordTransform() const { return fCoordTransform; }
 
@@ -415,13 +416,13 @@ protected:
 
     // Emits the uniform used as the y-coord to texture samples in derived classes. Subclasses
     // should call this method from their emitCode().
-    void emitUniforms(GrGLProgramBuilder* builder, uint32_t baseKey);
+    void emitUniforms(GrGLFPBuilder* builder, uint32_t baseKey);
 
 
     // emit code that gets a fragment's color from an expression for t; Has branches for 3 separate
     // control flows inside -- 2 color gradients, 3 color symmetric gradients (both using
     // native GLSL mix), and 4+ color gradients that use the traditional texture lookup.
-    void emitColor(GrGLProgramBuilder* builder,
+    void emitColor(GrGLFPBuilder* builder,
                    const char* gradientTValue,
                    uint32_t baseKey,
                    const char* outputColor,

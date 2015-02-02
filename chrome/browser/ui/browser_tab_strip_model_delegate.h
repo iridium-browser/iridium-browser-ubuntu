@@ -16,30 +16,27 @@ namespace chrome {
 class BrowserTabStripModelDelegate : public TabStripModelDelegate {
  public:
   explicit BrowserTabStripModelDelegate(Browser* browser);
-  virtual ~BrowserTabStripModelDelegate();
+  ~BrowserTabStripModelDelegate() override;
 
  private:
   // Overridden from TabStripModelDelegate:
-  virtual void AddTabAt(const GURL& url,
-                           int index,
-                           bool foreground) OVERRIDE;
-  virtual Browser* CreateNewStripWithContents(
+  void AddTabAt(const GURL& url, int index, bool foreground) override;
+  Browser* CreateNewStripWithContents(
       const std::vector<NewStripContents>& contentses,
       const gfx::Rect& window_bounds,
-      bool maximize) OVERRIDE;
-  virtual void WillAddWebContents(content::WebContents* contents) OVERRIDE;
-  virtual int GetDragActions() const OVERRIDE;
-  virtual bool CanDuplicateContentsAt(int index) OVERRIDE;
-  virtual void DuplicateContentsAt(int index) OVERRIDE;
-  virtual void CreateHistoricalTab(content::WebContents* contents) OVERRIDE;
-  virtual bool RunUnloadListenerBeforeClosing(
-      content::WebContents* contents) OVERRIDE;
-  virtual bool ShouldRunUnloadListenerBeforeClosing(
-      content::WebContents* contents) OVERRIDE;
-  virtual bool CanBookmarkAllTabs() const OVERRIDE;
-  virtual void BookmarkAllTabs() OVERRIDE;
-  virtual RestoreTabType GetRestoreTabType() OVERRIDE;
-  virtual void RestoreTab() OVERRIDE;
+      bool maximize) override;
+  void WillAddWebContents(content::WebContents* contents) override;
+  int GetDragActions() const override;
+  bool CanDuplicateContentsAt(int index) override;
+  void DuplicateContentsAt(int index) override;
+  void CreateHistoricalTab(content::WebContents* contents) override;
+  bool RunUnloadListenerBeforeClosing(content::WebContents* contents) override;
+  bool ShouldRunUnloadListenerBeforeClosing(
+      content::WebContents* contents) override;
+  bool CanBookmarkAllTabs() const override;
+  void BookmarkAllTabs() override;
+  RestoreTabType GetRestoreTabType() override;
+  void RestoreTab() override;
 
   void CloseFrame();
 

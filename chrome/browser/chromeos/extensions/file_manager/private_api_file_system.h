@@ -16,11 +16,12 @@ class GURL;
 
 namespace base {
 class FilePath;
-}
+}  // namespace base
 
 namespace storage {
 class FileSystemContext;
-}
+class FileSystemURL;
+}  // namespace storage
 
 namespace file_manager {
 namespace util {
@@ -42,7 +43,7 @@ class FileManagerPrivateRequestFileSystemFunction
   virtual ~FileManagerPrivateRequestFileSystemFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
+  virtual bool RunAsync() override;
 
  private:
   void RespondSuccessOnUIThread(const std::string& name,
@@ -71,20 +72,21 @@ class FileManagerPrivateRequestFileSystemFunction
 // the class and its sub classes are used only for watching changes in
 // directories.
 class FileWatchFunctionBase : public LoggedAsyncExtensionFunction {
+ public:
+  // Calls SendResponse() with |success| converted to base::Value.
+  void Respond(bool success);
+
  protected:
   virtual ~FileWatchFunctionBase() {}
 
   // Performs a file watch operation (ex. adds or removes a file watch).
   virtual void PerformFileWatchOperation(
-      const base::FilePath& local_path,
-      const base::FilePath& virtual_path,
+      scoped_refptr<storage::FileSystemContext> file_system_context,
+      const storage::FileSystemURL& file_system_url,
       const std::string& extension_id) = 0;
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
-
-  // Calls SendResponse() with |success| converted to base::Value.
-  void Respond(bool success);
+  virtual bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.addFileWatch method.
@@ -99,9 +101,9 @@ class FileManagerPrivateAddFileWatchFunction : public FileWatchFunctionBase {
 
   // FileWatchFunctionBase override.
   virtual void PerformFileWatchOperation(
-      const base::FilePath& local_path,
-      const base::FilePath& virtual_path,
-      const std::string& extension_id) OVERRIDE;
+      scoped_refptr<storage::FileSystemContext> file_system_context,
+      const storage::FileSystemURL& file_system_url,
+      const std::string& extension_id) override;
 };
 
 
@@ -117,9 +119,9 @@ class FileManagerPrivateRemoveFileWatchFunction : public FileWatchFunctionBase {
 
   // FileWatchFunctionBase override.
   virtual void PerformFileWatchOperation(
-      const base::FilePath& local_path,
-      const base::FilePath& virtual_path,
-      const std::string& extension_id) OVERRIDE;
+      scoped_refptr<storage::FileSystemContext> file_system_context,
+      const storage::FileSystemURL& file_system_url,
+      const std::string& extension_id) override;
 };
 
 // Implements the chrome.fileManagerPrivate.getSizeStats method.
@@ -133,7 +135,7 @@ class FileManagerPrivateGetSizeStatsFunction
   virtual ~FileManagerPrivateGetSizeStatsFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
+  virtual bool RunAsync() override;
 
  private:
   void GetDriveAvailableSpaceCallback(drive::FileError error,
@@ -157,7 +159,7 @@ class FileManagerPrivateValidatePathNameLengthFunction
   void OnFilePathLimitRetrieved(size_t current_length, size_t max_length);
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
+  virtual bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.formatVolume method.
@@ -172,7 +174,7 @@ class FileManagerPrivateFormatVolumeFunction
   virtual ~FileManagerPrivateFormatVolumeFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
+  virtual bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.startCopy method.
@@ -186,7 +188,7 @@ class FileManagerPrivateStartCopyFunction
   virtual ~FileManagerPrivateStartCopyFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
+  virtual bool RunAsync() override;
 
  private:
   // Part of RunAsync(). Called after Copy() is started on IO thread.
@@ -204,7 +206,7 @@ class FileManagerPrivateCancelCopyFunction
   virtual ~FileManagerPrivateCancelCopyFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
+  virtual bool RunAsync() override;
 };
 
 // Implements the chrome.fileManagerPrivateInternal.resolveIsolatedEntries
@@ -220,7 +222,7 @@ class FileManagerPrivateInternalResolveIsolatedEntriesFunction
   virtual ~FileManagerPrivateInternalResolveIsolatedEntriesFunction() {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() OVERRIDE;
+  virtual bool RunAsync() override;
 
  private:
   void RunAsyncAfterConvertFileDefinitionListToEntryDefinitionList(scoped_ptr<

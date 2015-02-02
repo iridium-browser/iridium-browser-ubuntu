@@ -1381,18 +1381,20 @@ STACK_OF(SSL_CIPHER) *ssl_get_ciphers_by_id(SSL *s)
 	}
 
 /** The old interface to get the same thing as SSL_get_ciphers() */
-const char *SSL_get_cipher_list(const SSL *s,int n)
+const char *SSL_get_cipher_list(const SSL *s, int n)
 	{
 	const SSL_CIPHER *c;
 	STACK_OF(SSL_CIPHER) *sk;
 
-	if (s == NULL) return(NULL);
-	sk=SSL_get_ciphers(s);
-	if ((sk == NULL) || (sk_SSL_CIPHER_num(sk) <= n))
-		return(NULL);
-	c=sk_SSL_CIPHER_value(sk,n);
-	if (c == NULL) return(NULL);
-	return(c->name);
+	if (s == NULL)
+		return NULL;
+	sk = SSL_get_ciphers(s);
+	if (sk == NULL || n < 0 || (size_t)n >= sk_SSL_CIPHER_num(sk))
+		return NULL;
+	c = sk_SSL_CIPHER_value(sk, n);
+	if (c == NULL)
+		return NULL;
+	return c->name;
 	}
 
 /** specify the ciphers to be used by default by the SSL_CTX */
@@ -1452,53 +1454,12 @@ int SSL_set_cipher_list(SSL *s,const char *str)
 	return 1;
 	}
 
-/* works well for SSLv2, not so good for SSLv3 */
-char *SSL_get_shared_ciphers(const SSL *s,char *buf,int len)
+int ssl_cipher_list_to_bytes(SSL *s, STACK_OF(SSL_CIPHER) *sk, uint8_t *p)
 	{
-	char *p;
-	STACK_OF(SSL_CIPHER) *sk;
-	const SSL_CIPHER *c;
-	int i;
-
-	if ((s->session == NULL) || (s->session->ciphers == NULL) ||
-		(len < 2))
-		return(NULL);
-
-	p=buf;
-	sk=s->session->ciphers;
-
-	if (sk_SSL_CIPHER_num(sk) == 0)
-		return NULL;
-
-	for (i=0; i<sk_SSL_CIPHER_num(sk); i++)
-		{
-		int n;
-
-		c=sk_SSL_CIPHER_value(sk,i);
-		n=strlen(c->name);
-		if (n+1 > len)
-			{
-			if (p != buf)
-				--p;
-			*p='\0';
-			return buf;
-			}
-		strcpy(p,c->name);
-		p+=n;
-		*(p++)=':';
-		len-=n+1;
-		}
-	p[-1]='\0';
-	return(buf);
-	}
-
-int ssl_cipher_list_to_bytes(SSL *s,STACK_OF(SSL_CIPHER) *sk,unsigned char *p)
-	{
-	int i;
+	size_t i;
 	const SSL_CIPHER *c;
 	CERT *ct = s->cert;
-	unsigned char *q;
-	int no_scsv = s->renegotiate;
+	uint8_t *q;
 	/* Set disabled masks for this session */
 	ssl_set_client_disabled(s);
 
@@ -1513,48 +1474,28 @@ int ssl_cipher_list_to_bytes(SSL *s,STACK_OF(SSL_CIPHER) *sk,unsigned char *p)
 			c->algorithm_mkey & ct->mask_k ||
 			c->algorithm_auth & ct->mask_a)
 			continue;
-#ifdef OPENSSL_SSL_DEBUG_BROKEN_PROTOCOL
-		if (c->id == SSL3_CK_SCSV)
-			{
-			if (no_scsv)
-				continue;
-			else
-				no_scsv = 1;
-			}
-#endif
 		s2n(ssl3_get_cipher_value(c), p);
 		}
-	/* If p == q, no ciphers and caller indicates an error. Otherwise
-	 * add SCSV if not renegotiating.
-	 */
-	if (p != q)
+	/* If all ciphers were disabled, return the error to the caller. */
+	if (p == q)
 		{
-		if (!no_scsv)
-			{
-			static const SSL_CIPHER scsv =
-				{
-				0, NULL, SSL3_CK_SCSV, 0, 0, 0, 0, 0, 0, 0, 0, 0
-				};
-			s2n(ssl3_get_cipher_value(&scsv), p);
-#ifdef OPENSSL_RI_DEBUG
-			fprintf(stderr, "SCSV sent by client\n");
-#endif
-			}
-		if (s->fallback_scsv)
-			{
-			static const SSL_CIPHER fallback_scsv =
-				{
-				0, NULL, SSL3_CK_FALLBACK_SCSV, 0, 0, 0, 0, 0, 0, 0, 0, 0
-				};
-			s2n(ssl3_get_cipher_value(&fallback_scsv), p);
-			}
+		return 0;
+		}
+
+	/* Add SCSVs. */
+	if (!s->renegotiate)
+		{
+		s2n(SSL3_CK_SCSV & 0xffff, p);
+		}
+	if (s->fallback_scsv)
+		{
+		s2n(SSL3_CK_FALLBACK_SCSV & 0xffff, p);
 		}
 
 	return(p-q);
 	}
 
-STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, const CBS *cbs,
-					       STACK_OF(SSL_CIPHER) **skp)
+STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, const CBS *cbs)
 	{
 	CBS cipher_suites = *cbs;
 	const SSL_CIPHER *c;
@@ -1566,14 +1507,14 @@ STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, const CBS *cbs,
 	if (CBS_len(&cipher_suites) % 2 != 0)
 		{
 		OPENSSL_PUT_ERROR(SSL, ssl_bytes_to_cipher_list, SSL_R_ERROR_IN_RECEIVED_CIPHER_LIST);
-		return(NULL);
+		return NULL;
 		}
-	if ((skp == NULL) || (*skp == NULL))
-		sk=sk_SSL_CIPHER_new_null(); /* change perhaps later */
-	else
+
+	sk = sk_SSL_CIPHER_new_null();
+	if (sk == NULL)
 		{
-		sk= *skp;
-		sk_SSL_CIPHER_zero(sk);
+		OPENSSL_PUT_ERROR(SSL, ssl_bytes_to_cipher_list, ERR_R_MALLOC_FAILURE);
+		goto err;
 		}
 
 	if (!CBS_stow(&cipher_suites,
@@ -1593,10 +1534,10 @@ STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, const CBS *cbs,
 			goto err;
 			}
 
-		/* Check for SCSV */
+		/* Check for SCSV. */
 		if (s->s3 && cipher_suite == (SSL3_CK_SCSV & 0xffff))
 			{
-			/* SCSV fatal if renegotiating */
+			/* SCSV is fatal if renegotiating. */
 			if (s->renegotiate)
 				{
 				OPENSSL_PUT_ERROR(SSL, ssl_bytes_to_cipher_list, SSL_R_SCSV_RECEIVED_WHEN_RENEGOTIATING);
@@ -1604,25 +1545,25 @@ STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, const CBS *cbs,
 				goto err;
 				}
 			s->s3->send_connection_binding = 1;
-#ifdef OPENSSL_RI_DEBUG
-			fprintf(stderr, "SCSV received by server\n");
-#endif
 			continue;
 			}
 
-		/* Check for FALLBACK_SCSV */
-		if (s->s3 && cipher_suite == (SSL3_CK_FALLBACK_SCSV & 0xffff) &&
-			s->version < ssl_get_max_version(s))
+		/* Check for FALLBACK_SCSV. */
+		if (s->s3 && cipher_suite == (SSL3_CK_FALLBACK_SCSV & 0xffff))
 			{
-			OPENSSL_PUT_ERROR(SSL, ssl_bytes_to_cipher_list, SSL_R_INAPPROPRIATE_FALLBACK);
-			ssl3_send_alert(s,SSL3_AL_FATAL,SSL3_AD_INAPPROPRIATE_FALLBACK);
-			goto err;
+			if (s->version < ssl_get_max_version(s))
+				{
+				OPENSSL_PUT_ERROR(SSL, ssl_bytes_to_cipher_list, SSL_R_INAPPROPRIATE_FALLBACK);
+				ssl3_send_alert(s, SSL3_AL_FATAL, SSL3_AD_INAPPROPRIATE_FALLBACK);
+				goto err;
+				}
+			continue;
 			}
 
 		c = ssl3_get_cipher_by_value(cipher_suite);
 		if (c != NULL)
 			{
-			if (!sk_SSL_CIPHER_push(sk,c))
+			if (!sk_SSL_CIPHER_push(sk, c))
 				{
 				OPENSSL_PUT_ERROR(SSL, ssl_bytes_to_cipher_list, ERR_R_MALLOC_FAILURE);
 				goto err;
@@ -1630,13 +1571,12 @@ STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, const CBS *cbs,
 			}
 		}
 
-	if (skp != NULL)
-		*skp=sk;
-	return(sk);
+	return sk;
+
 err:
-	if ((skp == NULL) || (*skp == NULL))
+	if (sk != NULL)
 		sk_SSL_CIPHER_free(sk);
-	return(NULL);
+	return NULL;
 	}
 
 
@@ -2302,14 +2242,6 @@ CERT_PKEY *ssl_get_server_send_pkey(const SSL *s)
 	c = s->cert;
 	ssl_set_cert_masks(c, s->s3->tmp.new_cipher);
 
-#ifdef OPENSSL_SSL_DEBUG_BROKEN_PROTOCOL
-	/* Broken protocol test: return last used certificate: which may
-	 * mismatch the one expected.
-	 */
-	if (c->cert_flags & SSL_CERT_FLAG_BROKEN_PROTOCOL)
-		return c->key;
-#endif
-
 	i = ssl_get_server_cert_index(s);
 
 	/* This may or may not be an error. */
@@ -2328,15 +2260,6 @@ EVP_PKEY *ssl_get_sign_pkey(SSL *s,const SSL_CIPHER *cipher, const EVP_MD **pmd)
 
 	alg_a = cipher->algorithm_auth;
 	c=s->cert;
-
-#ifdef OPENSSL_SSL_DEBUG_BROKEN_PROTOCOL
-	/* Broken protocol test: use last key: which may
-	 * mismatch the one expected.
-	 */
-	if (c->cert_flags & SSL_CERT_FLAG_BROKEN_PROTOCOL)
-		idx = c->key - c->pkeys;
-	else
-#endif
 
 	if (alg_a & SSL_aRSA)
 		{

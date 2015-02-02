@@ -9,7 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "third_party/libjingle/source/talk/p2p/client/httpportallocator.h"
+#include "third_party/webrtc/p2p/client/httpportallocator.h"
 
 namespace remoting {
 
@@ -21,16 +21,16 @@ class FakePortAllocator : public cricket::HttpPortAllocatorBase {
   static scoped_ptr<FakePortAllocator> Create(
       scoped_refptr<FakeNetworkDispatcher> fake_network_dispatcher);
 
-  virtual ~FakePortAllocator();
+  ~FakePortAllocator() override;
 
   FakePacketSocketFactory* socket_factory() { return socket_factory_.get(); }
 
   // cricket::BasicPortAllocator overrides.
-  virtual cricket::PortAllocatorSession* CreateSessionInternal(
+  cricket::PortAllocatorSession* CreateSessionInternal(
       const std::string& content_name,
       int component,
       const std::string& ice_username_fragment,
-      const std::string& ice_password) OVERRIDE;
+      const std::string& ice_password) override;
 
  private:
   FakePortAllocator(scoped_ptr<rtc::NetworkManager> network_manager,

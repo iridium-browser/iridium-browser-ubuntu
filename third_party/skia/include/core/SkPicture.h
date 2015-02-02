@@ -20,6 +20,7 @@
 class GrContext;
 #endif
 
+class GrReplacements;
 class SkBBoxHierarchy;
 class SkCanvas;
 class SkData;
@@ -31,6 +32,10 @@ class SkWStream;
 struct SkPictInfo;
 
 class SkRecord;
+
+namespace SkRecords {
+    class CollectLayers;
+};
 
 /** \class SkPicture
 
@@ -103,13 +108,6 @@ public:
     static SkPicture* CreateFromBuffer(SkReadBuffer&);
 
     virtual ~SkPicture();
-
-#ifdef SK_SUPPORT_LEGACY_PICTURE_CLONE
-    /**
-     *  Creates a thread-safe clone of the picture that is ready for playback.
-     */
-    SkPicture* clone() const;
-#endif
 
     /** Replays the drawing commands on the specified canvas. Note that
         this has the effect of unfurling this picture into the destination
@@ -248,18 +246,19 @@ private:
     // V33: Serialize only public API of effects.
     // V34: Add SkTextBlob serialization.
     // V35: Store SkRect (rather then width & height) in header
+    // V36: Remove (obsolete) alphatype from SkColorTable
+    // V37: Added shadow only option to SkDropShadowImageFilter
 
     // Note: If the picture version needs to be increased then please follow the
     // steps to generate new SKPs in (only accessible to Googlers): http://goo.gl/qATVcw
 
     // Only SKPs within the min/current picture version range (inclusive) can be read.
     static const uint32_t MIN_PICTURE_VERSION = 19;
-    static const uint32_t CURRENT_PICTURE_VERSION = 35;
+    static const uint32_t CURRENT_PICTURE_VERSION = 37;
 
     mutable uint32_t      fUniqueID;
 
-    // TODO: make SkPictureData const when clone method goes away
-    SkAutoTDelete<SkPictureData> fData;
+    SkAutoTDelete<const SkPictureData>    fData;
     const SkScalar                        fCullWidth;
     const SkScalar                        fCullHeight;
     mutable SkAutoTUnref<const AccelData> fAccelData;
@@ -275,31 +274,15 @@ private:
 
     SkPicture(SkScalar width, SkScalar height, const SkPictureRecord& record, bool deepCopyOps);
 
-    // An OperationList encapsulates a set of operation offsets into the picture byte
-    // stream along with the CTMs needed for those operation.
-    class OperationList : ::SkNoncopyable {
-    public:
-        // The following three entry points should only be accessed if
-        // 'valid' returns true.
-        int numOps() const { return fOps.count(); }
-        // The offset in the picture of the operation to execute.
-        uint32_t offset(int index) const;
-        // The CTM that must be installed for the operation to behave correctly
-        const SkMatrix& matrix(int index) const;
-
-        SkTDArray<void*> fOps;
-    };
-
     void createHeader(SkPictInfo* info) const;
     static bool IsValidPictInfo(const SkPictInfo& info);
 
-    friend class SkPictureData;                // to access OperationList
-    friend class SkPictureRecorder;            // just for SkPicture-based constructor
+    friend class SkPictureRecorder;            // SkRecord-based constructor.
     friend class SkGpuDevice;                  // for fData access
     friend class GrLayerHoister;               // access to fRecord
-    friend class CollectLayers;                // access to fRecord
-    friend class SkPicturePlayback;            // to get fData & OperationList
-    friend class SkPictureReplacementPlayback; // to access OperationList
+    friend class SkRecords::CollectLayers;     // access to fRecord
+    friend class SkPicturePlayback;            // to get fData
+    friend class ReplaceDraw;
 
     typedef SkRefCnt INHERITED;
 
@@ -307,6 +290,8 @@ private:
     SkPicture(SkScalar width, SkScalar height, SkRecord*, SkBBoxHierarchy*);
     // Return as a new SkPicture that's backed by SkRecord.
     static SkPicture* Forwardport(const SkPicture&);
+    // Return as a new SkPicture that's backed by the old backend.
+    static SkPicture* Backport(const SkRecord& src, const SkRect& cullRect);
 
     SkAutoTDelete<SkRecord>       fRecord;
     SkAutoTUnref<SkBBoxHierarchy> fBBH;
@@ -325,6 +310,7 @@ private:
         int         fNumFastPathDashEffects;
         int         fNumAAConcavePaths;
         int         fNumAAHairlineConcavePaths;
+        int         fNumAADFEligibleConcavePaths;
     } fAnalysis;
 };
 

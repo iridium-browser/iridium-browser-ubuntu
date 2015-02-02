@@ -1840,10 +1840,10 @@ TEST_F(DiskCacheTest, WrongVersion) {
 
 class BadEntropyProvider : public base::FieldTrial::EntropyProvider {
  public:
-  virtual ~BadEntropyProvider() {}
+  ~BadEntropyProvider() override {}
 
-  virtual double GetEntropyForTrial(const std::string& trial_name,
-                                    uint32 randomization_seed) const OVERRIDE {
+  double GetEntropyForTrial(const std::string& trial_name,
+                            uint32 randomization_seed) const override {
     return 0.5;
   }
 };
@@ -3144,11 +3144,6 @@ TEST_F(DiskCacheBackendTest, ShaderCacheUpdateRankForExternalCacheHit) {
   entry->Close();
 }
 
-// The Simple Cache backend requires a few guarantees from the filesystem like
-// atomic renaming of recently open files. Those guarantees are not provided in
-// general on Windows.
-#if defined(OS_POSIX)
-
 TEST_F(DiskCacheBackendTest, SimpleCacheShutdownWithPendingCreate) {
   SetCacheType(net::APP_CACHE);
   SetSimpleCacheMode();
@@ -3487,4 +3482,14 @@ TEST_F(DiskCacheBackendTest, SimpleCacheEnumerationDestruction) {
   // This test passes if we don't leak memory.
 }
 
-#endif  // defined(OS_POSIX)
+// Tests that a SimpleCache doesn't crash when files are deleted very quickly
+// after closing.
+// NOTE: IF THIS TEST IS FLAKY THEN IT IS FAILING. See https://crbug.com/416940
+TEST_F(DiskCacheBackendTest, SimpleCacheDeleteQuickly) {
+  SetSimpleCacheMode();
+  for (int i = 0; i < 100; ++i) {
+    InitCache();
+    cache_.reset();
+    EXPECT_TRUE(CleanupCacheDir());
+  }
+}

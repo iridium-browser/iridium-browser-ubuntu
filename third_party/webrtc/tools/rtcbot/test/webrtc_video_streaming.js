@@ -7,14 +7,12 @@
 // be found in the AUTHORS file in the root of the source tree.
 //
 // A unidirectional video and audio flowing test from bot 1 to bot 2.
+// The test succeeds after collecting stats for 10 seconds from both bots
+// and then write these stats to a file.
 //
 // Note: the source of the video and audio stream is getUserMedia().
-//
-// TODO(houssainy): get a condition to terminate the test.
-//
-function testVideoStreaming(bot1, bot2) {
-  var pc1 = null;
-  var pc2 = null;
+function testOneWayVideo(test, bot1, bot2) {
+  var report = test.createStatisticsReport("webrtc_video_streaming");
 
   test.wait([
       createPeerConnection.bind(bot1),
@@ -22,13 +20,15 @@ function testVideoStreaming(bot1, bot2) {
     onPeerConnectionCreated);
 
   function createPeerConnection(done) {
-    this.createPeerConnection(done, test.fail);
+    test.createTurnConfig(onTurnConfig.bind(this), test.fail);
+
+    function onTurnConfig(config) {
+      this.createPeerConnection(config, done, test.fail);
+    };
   }
 
-  function onPeerConnectionCreated(peer1, peer2) {
+  function onPeerConnectionCreated(pc1, pc2) {
     test.log("RTC Peers created.");
-    pc1 = peer1;
-    pc2 = peer2;
     pc1.addEventListener('addstream', test.fail);
     pc2.addEventListener('addstream', onAddStream);
     pc1.addEventListener('icecandidate', onIceCandidate.bind(pc2));
@@ -41,7 +41,7 @@ function testVideoStreaming(bot1, bot2) {
       pc1.addStream(stream);
       bot1.showStream(stream.id, true, true);
 
-      createOfferAndAnswer();
+      createOfferAndAnswer(pc1, pc2);
     }
   }
 
@@ -51,18 +51,18 @@ function testVideoStreaming(bot1, bot2) {
   }
 
   function onIceCandidate(event) {
-    if(event.candidate){
+    if(event.candidate) {
       test.log(event.candidate.candidate);
       this.addIceCandidate(event.candidate,
          onAddIceCandidateSuccess, test.fail);
-    };
+    }
 
     function onAddIceCandidateSuccess() {
       test.log("Candidate added successfully");
-    };
+    }
   }
 
-  function createOfferAndAnswer() {
+  function createOfferAndAnswer(pc1, pc2) {
     test.log("Creating offer.");
     pc1.createOffer(gotOffer, test.fail);
 
@@ -81,14 +81,23 @@ function testVideoStreaming(bot1, bot2) {
           test.fail);
       pc1.setRemoteDescription(answer, onSetSessionDescriptionSuccess,
           test.fail);
+      collectStats();
     }
 
     function onSetSessionDescriptionSuccess() {
       test.log("Set session description success.");
     }
+
+    function collectStats() {
+      report.collectStatsFromPeerConnection("bot1", pc1);
+      report.collectStatsFromPeerConnection("bot2", pc2);
+
+      setTimeout(function() {
+        report.finish(test.done);
+        }, 10000);
+    }
   }
 }
 
-test.wait( [ test.spawnBot.bind(test, "alice"),
-             test.spawnBot.bind(test, "bob") ],
-          testVideoStreaming);
+registerBotTest('testOneWayVideo/chrome-chrome',
+                testOneWayVideo, ['chrome', 'chrome']);

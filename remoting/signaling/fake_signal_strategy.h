@@ -29,7 +29,7 @@ class FakeSignalStrategy : public SignalStrategy,
   static void Connect(FakeSignalStrategy* peer1, FakeSignalStrategy* peer2);
 
   FakeSignalStrategy(const std::string& jid);
-  virtual ~FakeSignalStrategy();
+  ~FakeSignalStrategy() override;
 
   const std::list<buzz::XmlElement*>& received_messages() {
     return received_messages_;
@@ -39,15 +39,15 @@ class FakeSignalStrategy : public SignalStrategy,
   void ConnectTo(FakeSignalStrategy* peer);
 
   // SignalStrategy interface.
-  virtual void Connect() OVERRIDE;
-  virtual void Disconnect() OVERRIDE;
-  virtual State GetState() const OVERRIDE;
-  virtual Error GetError() const OVERRIDE;
-  virtual std::string GetLocalJid() const OVERRIDE;
-  virtual void AddListener(Listener* listener) OVERRIDE;
-  virtual void RemoveListener(Listener* listener) OVERRIDE;
-  virtual bool SendStanza(scoped_ptr<buzz::XmlElement> stanza) OVERRIDE;
-  virtual std::string GetNextId() OVERRIDE;
+  void Connect() override;
+  void Disconnect() override;
+  State GetState() const override;
+  Error GetError() const override;
+  std::string GetLocalJid() const override;
+  void AddListener(Listener* listener) override;
+  void RemoveListener(Listener* listener) override;
+  bool SendStanza(scoped_ptr<buzz::XmlElement> stanza) override;
+  std::string GetNextId() override;
 
  private:
   typedef base::Callback<void(scoped_ptr<buzz::XmlElement> message)>

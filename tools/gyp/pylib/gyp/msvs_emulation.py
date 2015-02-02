@@ -13,9 +13,12 @@ import subprocess
 import sys
 
 from gyp.common import OrderedSet
+import gyp.MSVSUtil
 import gyp.MSVSVersion
 
+
 windows_quoter_regex = re.compile(r'(\\*)"')
+
 
 def QuoteForRspFile(arg):
   """Quote a command line argument so that it appears as one argument when
@@ -220,6 +223,17 @@ class MsvsSettings(object):
     if unsupported:
       raise Exception('\n'.join(unsupported))
 
+  def GetExtension(self):
+    """Returns the extension for the target, with no leading dot.
+
+    Uses 'product_extension' if specified, otherwise uses MSVS defaults based on
+    the target type.
+    """
+    ext = self.spec.get('product_extension', None)
+    if ext:
+      return ext
+    return gyp.MSVSUtil.TARGET_TYPE_EXT.get(self.spec['type'], '')
+
   def GetVSMacroEnv(self, base_to_build=None, config=None):
     """Get a dict of variables mapping internal VS macro names to their gyp
     equivalents."""
@@ -227,16 +241,22 @@ class MsvsSettings(object):
     target_name = self.spec.get('product_prefix', '') + \
         self.spec.get('product_name', self.spec['target_name'])
     target_dir = base_to_build + '\\' if base_to_build else ''
+    target_ext = '.' + self.GetExtension()
+    target_file_name = target_name + target_ext
+
     replacements = {
-        '$(OutDir)\\': target_dir,
-        '$(TargetDir)\\': target_dir,
-        '$(IntDir)': '$!INTERMEDIATE_DIR',
-        '$(InputPath)': '${source}',
         '$(InputName)': '${root}',
-        '$(ProjectName)': self.spec['target_name'],
-        '$(TargetName)': target_name,
+        '$(InputPath)': '${source}',
+        '$(IntDir)': '$!INTERMEDIATE_DIR',
+        '$(OutDir)\\': target_dir,
         '$(PlatformName)': target_platform,
         '$(ProjectDir)\\': '',
+        '$(ProjectName)': self.spec['target_name'],
+        '$(TargetDir)\\': target_dir,
+        '$(TargetExt)': target_ext,
+        '$(TargetFileName)': target_file_name,
+        '$(TargetName)': target_name,
+        '$(TargetPath)': os.path.join(target_dir, target_file_name),
     }
     replacements.update(GetGlobalVSMacroEnv(self.vs_version))
     return replacements
@@ -316,6 +336,15 @@ class MsvsSettings(object):
     includes = include_dirs + self.msvs_system_include_dirs[config]
     includes.extend(self._Setting(
       ('VCCLCompilerTool', 'AdditionalIncludeDirectories'), config, default=[]))
+    return [self.ConvertVSMacros(p, config=config) for p in includes]
+
+  def AdjustMidlIncludeDirs(self, midl_include_dirs, config):
+    """Updates midl_include_dirs to expand VS specific paths, and adds the
+    system include dirs used for platform SDK and similar."""
+    config = self._TargetConfig(config)
+    includes = midl_include_dirs + self.msvs_system_include_dirs[config]
+    includes.extend(self._Setting(
+      ('VCMIDLTool', 'AdditionalIncludeDirectories'), config, default=[]))
     return [self.ConvertVSMacros(p, config=config) for p in includes]
 
   def GetComputedDefines(self, config):
@@ -406,6 +435,8 @@ class MsvsSettings(object):
     cl('WholeProgramOptimization', map={'true': '/GL'})
     cl('WarningLevel', prefix='/W')
     cl('WarnAsError', map={'true': '/WX'})
+    cl('CallingConvention',
+        map={'0': 'd', '1': 'r', '2': 'z'}, prefix='/G')
     cl('DebugInformationFormat',
         map={'1': '7', '3': 'i', '4': 'I'}, prefix='/Z')
     cl('RuntimeTypeInfo', map={'true': '/GR', 'false': '/GR-'})
@@ -476,7 +507,8 @@ class MsvsSettings(object):
     libflags.extend(self._GetAdditionalLibraryDirectories(
         'VCLibrarianTool', config, gyp_to_build_path))
     lib('LinkTimeCodeGeneration', map={'true': '/LTCG'})
-    lib('TargetMachine', map={'1': 'X86', '17': 'X64'}, prefix='/MACHINE:')
+    lib('TargetMachine', map={'1': 'X86', '17': 'X64', '3': 'ARM'},
+        prefix='/MACHINE:')
     lib('AdditionalOptions')
     return libflags
 
@@ -519,7 +551,8 @@ class MsvsSettings(object):
                           'VCLinkerTool', append=ldflags)
     self._GetDefFileAsLdflags(ldflags, gyp_to_build_path)
     ld('GenerateDebugInformation', map={'true': '/DEBUG'})
-    ld('TargetMachine', map={'1': 'X86', '17': 'X64'}, prefix='/MACHINE:')
+    ld('TargetMachine', map={'1': 'X86', '17': 'X64', '3': 'ARM'},
+       prefix='/MACHINE:')
     ldflags.extend(self._GetAdditionalLibraryDirectories(
         'VCLinkerTool', config, gyp_to_build_path))
     ld('DelayLoadDLLs', prefix='/DELAYLOAD:')

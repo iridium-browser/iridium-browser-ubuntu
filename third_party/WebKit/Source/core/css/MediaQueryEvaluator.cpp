@@ -34,7 +34,6 @@
 #include "core/MediaFeatureNames.h"
 #include "core/MediaFeatures.h"
 #include "core/MediaTypeNames.h"
-#include "core/css/CSSAspectRatioValue.h"
 #include "core/css/CSSHelper.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSToLengthConversionData.h"
@@ -326,7 +325,7 @@ static bool gridMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePr
     return false;
 }
 
-static bool computeLength(const MediaQueryExpValue& value, const MediaValues& mediaValues, int& result)
+static bool computeLength(const MediaQueryExpValue& value, const MediaValues& mediaValues, double& result)
 {
     if (!value.isValue)
         return false;
@@ -341,12 +340,17 @@ static bool computeLength(const MediaQueryExpValue& value, const MediaValues& me
     return false;
 }
 
+static bool computeLengthAndCompare(const MediaQueryExpValue& value, MediaFeaturePrefix op, const MediaValues& mediaValues, double compareToValue)
+{
+    double length;
+    return computeLength(value, mediaValues, length) && compareValue(compareToValue, length, op);
+}
+
 static bool deviceHeightMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix op, const MediaValues& mediaValues)
 {
-    if (value.isValid()) {
-        int length;
-        return computeLength(value, mediaValues, length) && compareValue(static_cast<int>(mediaValues.deviceHeight()), length, op);
-    }
+    if (value.isValid())
+        return computeLengthAndCompare(value, op, mediaValues, mediaValues.deviceHeight());
+
     // ({,min-,max-}device-height)
     // assume if we have a device, assume non-zero
     return true;
@@ -354,10 +358,9 @@ static bool deviceHeightMediaFeatureEval(const MediaQueryExpValue& value, MediaF
 
 static bool deviceWidthMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix op, const MediaValues& mediaValues)
 {
-    if (value.isValid()) {
-        int length;
-        return computeLength(value, mediaValues, length) && compareValue(static_cast<int>(mediaValues.deviceWidth()), length, op);
-    }
+    if (value.isValid())
+        return computeLengthAndCompare(value, op, mediaValues, mediaValues.deviceWidth());
+
     // ({,min-,max-}device-width)
     // assume if we have a device, assume non-zero
     return true;
@@ -366,10 +369,8 @@ static bool deviceWidthMediaFeatureEval(const MediaQueryExpValue& value, MediaFe
 static bool heightMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix op, const MediaValues& mediaValues)
 {
     int height = mediaValues.viewportHeight();
-    if (value.isValid()) {
-        int length;
-        return computeLength(value, mediaValues, length) && compareValue(height, length, op);
-    }
+    if (value.isValid())
+        return computeLengthAndCompare(value, op, mediaValues, height);
 
     return height;
 }
@@ -377,10 +378,8 @@ static bool heightMediaFeatureEval(const MediaQueryExpValue& value, MediaFeature
 static bool widthMediaFeatureEval(const MediaQueryExpValue& value, MediaFeaturePrefix op, const MediaValues& mediaValues)
 {
     int width = mediaValues.viewportWidth();
-    if (value.isValid()) {
-        int length;
-        return computeLength(value, mediaValues, length) && compareValue(width, length, op);
-    }
+    if (value.isValid())
+        return computeLengthAndCompare(value, op, mediaValues, width);
 
     return width;
 }

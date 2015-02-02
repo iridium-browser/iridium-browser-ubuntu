@@ -86,7 +86,7 @@ TEST_F(TraceEventAnalyzerTest, TraceEvent) {
 
   int int_num = 2;
   double double_num = 3.5;
-  const char* str = "the string";
+  const char str[] = "the string";
 
   TraceEvent event;
   event.arg_numbers["false"] = 0.0;
@@ -399,7 +399,7 @@ TEST_F(TraceEventAnalyzerTest, BeginEndDuration) {
   const base::TimeDelta kSleepTime = base::TimeDelta::FromMilliseconds(200);
   // We will search for events that have a duration of greater than 90% of the
   // sleep time, so that there is no flakiness.
-  int duration_cutoff_us = (kSleepTime.InMicroseconds() * 9) / 10;
+  int64 duration_cutoff_us = (kSleepTime.InMicroseconds() * 9) / 10;
 
   BeginTracing();
   {
@@ -427,7 +427,8 @@ TEST_F(TraceEventAnalyzerTest, BeginEndDuration) {
   TraceEventVector found;
   analyzer->FindEvents(
       Query::MatchBeginWithEnd() &&
-      Query::EventDuration() > Query::Int(duration_cutoff_us) &&
+      Query::EventDuration() >
+          Query::Int(static_cast<int>(duration_cutoff_us)) &&
       (Query::EventCategory() == Query::String("cat1") ||
        Query::EventCategory() == Query::String("cat2") ||
        Query::EventCategory() == Query::String("cat3")),
@@ -444,7 +445,7 @@ TEST_F(TraceEventAnalyzerTest, CompleteDuration) {
   const base::TimeDelta kSleepTime = base::TimeDelta::FromMilliseconds(200);
   // We will search for events that have a duration of greater than 90% of the
   // sleep time, so that there is no flakiness.
-  int duration_cutoff_us = (kSleepTime.InMicroseconds() * 9) / 10;
+  int64 duration_cutoff_us = (kSleepTime.InMicroseconds() * 9) / 10;
 
   BeginTracing();
   {
@@ -467,7 +468,8 @@ TEST_F(TraceEventAnalyzerTest, CompleteDuration) {
 
   TraceEventVector found;
   analyzer->FindEvents(
-      Query::EventCompleteDuration() > Query::Int(duration_cutoff_us) &&
+      Query::EventCompleteDuration() >
+          Query::Int(static_cast<int>(duration_cutoff_us)) &&
       (Query::EventCategory() == Query::String("cat1") ||
        Query::EventCategory() == Query::String("cat2") ||
        Query::EventCategory() == Query::String("cat3")),
@@ -506,7 +508,7 @@ TEST_F(TraceEventAnalyzerTest, BeginEndAssocations) {
 TEST_F(TraceEventAnalyzerTest, MergeAssociatedEventArgs) {
   ManualSetUp();
 
-  const char* arg_string = "arg_string";
+  const char arg_string[] = "arg_string";
   BeginTracing();
   {
     TRACE_EVENT_BEGIN0("cat1", "name1");

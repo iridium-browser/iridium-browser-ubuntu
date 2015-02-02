@@ -177,6 +177,9 @@ bool CastSocket::ExtractPeerCert(std::string* cert) {
 
 bool CastSocket::VerifyChallengeReply() {
   AuthResult result = AuthenticateChallengeReply(*challenge_reply_, peer_cert_);
+  if (result.success()) {
+    VLOG(1) << result.error_message;
+  }
   logger_->LogSocketChallengeReplyEvent(channel_id_, result);
   return result.success();
 }
@@ -318,7 +321,7 @@ int CastSocket::DoSslConnect() {
   DCHECK(connect_loop_callback_.IsCancelled());
   VLOG_WITH_CONNECTION(1) << "DoSslConnect";
   SetConnectState(proto::CONN_STATE_SSL_CONNECT_COMPLETE);
-  socket_ = CreateSslSocket(tcp_socket_.PassAs<net::StreamSocket>());
+  socket_ = CreateSslSocket(tcp_socket_.Pass());
 
   int rv = socket_->Connect(
       base::Bind(&CastSocket::DoConnectLoop, base::Unretained(this)));

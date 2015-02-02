@@ -146,10 +146,6 @@ public:
     // URLs
     virtual WebVector<WebIconURL> iconURLs(int iconTypesMask) const = 0;
 
-    // Notify the WebFrame as to whether its frame will be rendered in a
-    // separate renderer process.
-    virtual void setIsRemote(bool) = 0;
-
     // For a WebFrame with contents being rendered in another process, this
     // sets a layer for use by the in-process compositor. WebLayer should be
     // null if the content is being rendered in the current process.
@@ -303,11 +299,13 @@ public:
 
     // Executes script in the context of the current page and returns the value
     // that the script evaluated to.
+    // DEPRECATED: Use WebLocalFrame::requestExecuteScriptAndReturnValue.
     virtual v8::Handle<v8::Value> executeScriptAndReturnValue(
         const WebScriptSource&) = 0;
 
     // worldID must be > 0 (as 0 represents the main world).
     // worldID must be < EmbedderWorldIdLimit, high number used internally.
+    // DEPRECATED: Use WebLocalFrame::requestExecuteScriptInIsolatedWorld.
     virtual void executeScriptInIsolatedWorld(
         int worldID, const WebScriptSource* sourcesIn, unsigned numSources,
         int extensionGroup, WebVector<v8::Local<v8::Value> >* results) = 0;
@@ -661,15 +659,31 @@ public:
 
 #if BLINK_IMPLEMENTATION
     static WebFrame* fromFrame(Frame*);
-    static void traceChildren(Visitor*, WebFrame*);
+#if ENABLE(OILPAN)
+    static void traceFrames(Visitor*, WebFrame*);
+    void clearWeakFrames(Visitor*);
+#endif
 #endif
 
 protected:
-    explicit WebFrame();
+    WebFrame();
     virtual ~WebFrame();
+
+    // Sets the parent WITHOUT fulling adding it to the frame tree.
+    // Used to lie to a local frame that is replacing a remote frame,
+    // so it can properly start a navigation but wait to swap until
+    // commit-time.
+    void setParent(WebFrame*);
 
 private:
     friend class OpenedFrameTracker;
+
+#if BLINK_IMPLEMENTATION
+#if ENABLE(OILPAN)
+    static void traceFrame(Visitor*, WebFrame*);
+    static bool isFrameAlive(Visitor*, const WebFrame*);
+#endif
+#endif
 
     WebFrame* m_parent;
     WebFrame* m_previousSibling;

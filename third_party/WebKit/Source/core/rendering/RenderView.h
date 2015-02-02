@@ -23,10 +23,12 @@
 #define RenderView_h
 
 #include "core/frame/FrameView.h"
+#include "core/paint/ViewDisplayList.h"
 #include "core/rendering/LayoutState.h"
 #include "core/rendering/PaintInvalidationState.h"
 #include "core/rendering/RenderBlockFlow.h"
 #include "platform/PODFreeListArena.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "wtf/OwnPtr.h"
 
@@ -40,11 +42,11 @@ class RenderQuote;
 // It's dimensions match that of the logical viewport (which may be different from
 // the visible viewport in fixed-layout mode), and it is always at position (0,0)
 // relative to the document (and so isn't necessarily in view).
-class RenderView FINAL : public RenderBlockFlow {
+class RenderView final : public RenderBlockFlow {
 public:
     explicit RenderView(Document*);
     virtual ~RenderView();
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     bool hitTest(const HitTestRequest&, HitTestResult&);
     bool hitTest(const HitTestRequest&, const HitTestLocation&, HitTestResult&);
@@ -52,19 +54,19 @@ public:
     // Returns the total count of calls to HitTest, for testing.
     unsigned hitTestCount() const { return m_hitTestCount; }
 
-    virtual const char* renderName() const OVERRIDE { return "RenderView"; }
+    virtual const char* renderName() const override { return "RenderView"; }
 
-    virtual bool isRenderView() const OVERRIDE { return true; }
+    virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectRenderView || RenderBlockFlow::isOfType(type); }
 
-    virtual LayerType layerTypeRequired() const OVERRIDE { return NormalLayer; }
+    virtual LayerType layerTypeRequired() const override { return NormalLayer; }
 
-    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const OVERRIDE;
+    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const override;
 
-    virtual void layout() OVERRIDE;
-    virtual void updateLogicalWidth() OVERRIDE;
-    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const OVERRIDE;
+    virtual void layout() override;
+    virtual void updateLogicalWidth() override;
+    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const override;
 
-    virtual LayoutUnit availableLogicalHeight(AvailableLogicalHeightType) const OVERRIDE;
+    virtual LayoutUnit availableLogicalHeight(AvailableLogicalHeightType) const override;
 
     // The same as the FrameView's layoutHeight/layoutWidth but with null check guards.
     int viewHeight(IncludeScrollbarsInRect = ExcludeScrollbars) const;
@@ -84,19 +86,21 @@ public:
         IsNotFixedPosition,
         IsFixedPosition,
     };
-    void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, ViewportConstrainedPosition, const PaintInvalidationState*) const;
-    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const OVERRIDE;
 
-    void invalidatePaintForRectangle(const LayoutRect&) const;
+    static ViewportConstrainedPosition viewportConstrainedPosition(EPosition position) { return position == FixedPosition ? IsFixedPosition : IsNotFixedPosition; }
+    void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, ViewportConstrainedPosition, const PaintInvalidationState*) const;
+    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override;
+    void adjustViewportConstrainedOffset(LayoutRect&, ViewportConstrainedPosition) const;
+
+    void invalidatePaintForRectangle(const LayoutRect&, PaintInvalidationReason) const;
 
     void invalidatePaintForViewAndCompositedLayers();
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) OVERRIDE;
-    virtual void paintBoxDecorationBackground(PaintInfo&, const LayoutPoint&) OVERRIDE;
+    virtual void paint(PaintInfo&, const LayoutPoint&) override;
+    virtual void paintBoxDecorationBackground(PaintInfo&, const LayoutPoint&) override;
 
-    enum SelectionPaintInvalidationMode { PaintInvalidationNewXOROld, PaintInvalidationNewMinusOld, PaintInvalidationNothing };
+    enum SelectionPaintInvalidationMode { PaintInvalidationNewXOROld, PaintInvalidationNewMinusOld };
     void setSelection(RenderObject* start, int startPos, RenderObject*, int endPos, SelectionPaintInvalidationMode = PaintInvalidationNewXOROld);
-    void getSelection(RenderObject*& startRenderer, int& startOffset, RenderObject*& endRenderer, int& endOffset) const;
     void clearSelection();
     RenderObject* selectionStart() const { return m_selectionStart; }
     RenderObject* selectionEnd() const { return m_selectionEnd; }
@@ -104,17 +108,17 @@ public:
     void selectionStartEnd(int& startPos, int& endPos) const;
     void invalidatePaintForSelection() const;
 
-    virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const OVERRIDE;
-    virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const OVERRIDE;
+    virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const override;
+    virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const override;
 
-    virtual LayoutRect viewRect() const OVERRIDE;
+    virtual LayoutRect viewRect() const override;
 
     bool shouldDoFullPaintInvalidationForNextLayout() const;
     bool doingFullPaintInvalidation() const { return m_frameView->needsFullPaintInvalidation(); }
 
     LayoutState* layoutState() const { return m_layoutState; }
 
-    virtual void updateHitTestResult(HitTestResult&, const LayoutPoint&) OVERRIDE;
+    virtual void updateHitTestResult(HitTestResult&, const LayoutPoint&) override;
 
     LayoutUnit pageLogicalHeight() const { return m_pageLogicalHeight; }
     void setPageLogicalHeight(LayoutUnit height)
@@ -155,22 +159,28 @@ public:
     void removeRenderCounter() { ASSERT(m_renderCounterCount > 0); m_renderCounterCount--; }
     bool hasRenderCounters() { return m_renderCounterCount; }
 
-    virtual bool backgroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect) const OVERRIDE;
+    virtual bool backgroundIsKnownToBeOpaqueInRect(const LayoutRect& localRect) const override;
 
     double layoutViewportWidth() const;
     double layoutViewportHeight() const;
 
     void pushLayoutState(LayoutState&);
     void popLayoutState();
-    virtual void invalidateTreeIfNeeded(const PaintInvalidationState&) OVERRIDE FINAL;
+    virtual void invalidateTreeIfNeeded(const PaintInvalidationState&) override final;
+
+    ViewDisplayList& viewDisplayList()
+    {
+        ASSERT(RuntimeEnabledFeatures::slimmingPaintEnabled());
+        if (!m_viewDisplayList)
+            m_viewDisplayList = adoptPtr(new ViewDisplayList());
+        return *m_viewDisplayList;
+    }
 
 private:
-    virtual void mapLocalToContainer(const RenderLayerModelObject* paintInvalidationContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0, const PaintInvalidationState* = 0) const OVERRIDE;
-    virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const OVERRIDE;
-    virtual void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const OVERRIDE;
-    virtual void computeSelfHitTestRects(Vector<LayoutRect>&, const LayoutPoint& layerOffset) const OVERRIDE;
-
-    bool shouldInvalidatePaint(const LayoutRect&) const;
+    virtual void mapLocalToContainer(const RenderLayerModelObject* paintInvalidationContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0, const PaintInvalidationState* = 0) const override;
+    virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const override;
+    virtual void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const override;
+    virtual void computeSelfHitTestRects(Vector<LayoutRect>&, const LayoutPoint& layerOffset) const override;
 
     void layoutContent();
 #if ENABLE(ASSERT)
@@ -202,6 +212,7 @@ private:
     unsigned m_renderCounterCount;
 
     unsigned m_hitTestCount;
+    OwnPtr<ViewDisplayList> m_viewDisplayList;
 };
 
 DEFINE_RENDER_OBJECT_TYPE_CASTS(RenderView, isRenderView());

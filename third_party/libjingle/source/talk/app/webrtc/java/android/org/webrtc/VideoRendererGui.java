@@ -78,8 +78,13 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
   //    clipped.
   // SCALE_FILL - video frame is scaled to to fill the size of the view. Video
   //    aspect ratio is changed if necessary.
-  private static enum ScalingType
+  public static enum ScalingType
       { SCALE_ASPECT_FIT, SCALE_ASPECT_FILL, SCALE_FILL };
+  private static final int EGL14_SDK_VERSION =
+      android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
+  // Current SDK version.
+  private static final int CURRENT_SDK_VERSION =
+      android.os.Build.VERSION.SDK_INT;
 
   private final String VERTEX_SHADER_STRING =
       "varying vec2 interp_tc;\n" +
@@ -244,12 +249,12 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
     private float texTop;
     private float texBottom;
     private FloatBuffer textureVertices;
-    // Texture UV coordinates offsets.
-    private float texOffsetU;
-    private float texOffsetV;
+    // Texture UV coordinates.
     private FloatBuffer textureCoords;
     // Flag if texture vertices or coordinates update is needed.
     private boolean updateTextureProperties;
+    // Texture properties update lock.
+    private final Object updateTextureLock = new Object();
     // Viewport dimensions.
     private int screenWidth;
     private int screenHeight;
@@ -279,13 +284,8 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
       };
       textureVertices = directNativeFloatBuffer(textureVeticesFloat);
       // Create texture UV coordinates.
-      texOffsetU = 0;
-      texOffsetV = 0;
       float textureCoordinatesFloat[] = new float[] {
-          texOffsetU, texOffsetV,               // left top
-          texOffsetU, 1.0f - texOffsetV,        // left bottom
-          1.0f - texOffsetU, texOffsetV,        // right top
-          1.0f - texOffsetU, 1.0f - texOffsetV  // right bottom
+          0, 0, 0, 1, 1, 0, 1, 1
       };
       textureCoords = directNativeFloatBuffer(textureCoordinatesFloat);
       updateTextureProperties = false;
@@ -321,31 +321,49 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
           scalingType == ScalingType.SCALE_FILL) {
         return;
       }
-      // Re - calculate texture vertices to preserve video aspect ratio.
-      float texRight = this.texRight;
-      float texLeft = this.texLeft;
-      float texTop = this.texTop;
-      float texBottom = this.texBottom;
-      float displayWidth = (texRight - texLeft) * screenWidth / 2;
-      float displayHeight = (texTop - texBottom) * screenHeight / 2;
-      if (displayWidth > 1 && displayHeight > 1 &&
-          videoWidth > 1 && videoHeight > 1) {
-        float displayAspectRatio = displayWidth / displayHeight;
-        float videoAspectRatio = (float)videoWidth / videoHeight;
-        if (scalingType == ScalingType.SCALE_ASPECT_FIT) {
-          // Need to re-adjust vertices width or height to match video AR.
-          if (displayAspectRatio > videoAspectRatio) {
-            float deltaX = (displayWidth - videoAspectRatio * displayHeight) /
-                    instance.screenWidth;
-            texRight -= deltaX;
-            texLeft += deltaX;
-          } else {
-            float deltaY = (displayHeight - displayWidth / videoAspectRatio) /
-                    instance.screenHeight;
-            texTop -= deltaY;
-            texBottom += deltaY;
+      synchronized(updateTextureLock) {
+        // Re - calculate texture vertices to preserve video aspect ratio.
+        float texRight = this.texRight;
+        float texLeft = this.texLeft;
+        float texTop = this.texTop;
+        float texBottom = this.texBottom;
+        float texOffsetU = 0;
+        float texOffsetV = 0;
+        float displayWidth = (texRight - texLeft) * screenWidth / 2;
+        float displayHeight = (texTop - texBottom) * screenHeight / 2;
+        Log.d(TAG, "ID: "  + id + ". Display: " + displayWidth +
+            " x " + displayHeight + ". Video: " + videoWidth +
+            " x " + videoHeight);
+        if (displayWidth > 1 && displayHeight > 1 &&
+            videoWidth > 1 && videoHeight > 1) {
+          float displayAspectRatio = displayWidth / displayHeight;
+          float videoAspectRatio = (float)videoWidth / videoHeight;
+          if (scalingType == ScalingType.SCALE_ASPECT_FIT) {
+            // Need to re-adjust vertices width or height to match video AR.
+            if (displayAspectRatio > videoAspectRatio) {
+              float deltaX = (displayWidth - videoAspectRatio * displayHeight) /
+                      instance.screenWidth;
+              texRight -= deltaX;
+              texLeft += deltaX;
+            } else {
+              float deltaY = (displayHeight - displayWidth / videoAspectRatio) /
+                      instance.screenHeight;
+              texTop -= deltaY;
+              texBottom += deltaY;
+            }
           }
-          // Re-allocate vertices buffer to adjust to video aspect ratio.
+          if (scalingType == ScalingType.SCALE_ASPECT_FILL) {
+            // Need to re-adjust UV coordinates to match display AR.
+            if (displayAspectRatio > videoAspectRatio) {
+              texOffsetV = (1.0f - videoAspectRatio / displayAspectRatio) /
+                  2.0f;
+            } else {
+              texOffsetU = (1.0f - displayAspectRatio / videoAspectRatio) /
+                  2.0f;
+            }
+          }
+          Log.d(TAG, "  Texture vertices: (" + texLeft + "," + texBottom +
+              ") - (" + texRight + "," + texTop + ")");
           float textureVeticesFloat[] = new float[] {
               texLeft, texTop,
               texLeft, texBottom,
@@ -353,15 +371,8 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
               texRight, texBottom
           };
           textureVertices = directNativeFloatBuffer(textureVeticesFloat);
-        }
-        if (scalingType == ScalingType.SCALE_ASPECT_FILL) {
-          // Need to re-adjust UV coordinates to match display AR.
-          if (displayAspectRatio > videoAspectRatio) {
-            texOffsetV = (1.0f - videoAspectRatio / displayAspectRatio) / 2.0f;
-          } else {
-            texOffsetU = (1.0f - displayAspectRatio / videoAspectRatio) / 2.0f;
-          }
-          // Re-allocate coordinates buffer to adjust to display aspect ratio.
+
+          Log.d(TAG, "  Texture UV offsets: " + texOffsetU + ", " + texOffsetV);
           float textureCoordinatesFloat[] = new float[] {
               texOffsetU, texOffsetV,               // left top
               texOffsetU, 1.0f - texOffsetV,        // left bottom
@@ -370,8 +381,8 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
           };
           textureCoords = directNativeFloatBuffer(textureCoordinatesFloat);
         }
+        updateTextureProperties = false;
       }
-      updateTextureProperties = false;
     }
 
     private void draw() {
@@ -484,9 +495,23 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
     }
 
     public void setScreenSize(final int screenWidth, final int screenHeight) {
-      this.screenWidth = screenWidth;
-      this.screenHeight = screenHeight;
-      updateTextureProperties = true;
+      synchronized(updateTextureLock) {
+        this.screenWidth = screenWidth;
+        this.screenHeight = screenHeight;
+        updateTextureProperties = true;
+      }
+    }
+
+    public void setPosition(int x, int y, int width, int height,
+        ScalingType scalingType) {
+      synchronized(updateTextureLock) {
+        texLeft = (x - 50) / 50.0f;
+        texTop = (50 - y) / 50.0f;
+        texRight = Math.min(1.0f, (x + width - 50) / 50.0f);
+        texBottom = Math.max(-1.0f, (50 - y - height) / 50.0f);
+        this.scalingType = scalingType;
+        updateTextureProperties = true;
+      }
     }
 
     @Override
@@ -575,14 +600,15 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
    * (width, height). All parameters are in percentage of screen resolution.
    */
   public static VideoRenderer createGui(
-      int x, int y, int width, int height) throws Exception {
-    YuvImageRenderer javaGuiRenderer = create(x, y, width, height);
+      int x, int y, int width, int height, ScalingType scalingType)
+          throws Exception {
+    YuvImageRenderer javaGuiRenderer = create(x, y, width, height, scalingType);
     return new VideoRenderer(javaGuiRenderer);
   }
 
   public static VideoRenderer.Callbacks createGuiRenderer(
-      int x, int y, int width, int height) {
-    return create(x, y, width, height);
+      int x, int y, int width, int height, ScalingType scalingType) {
+    return create(x, y, width, height, scalingType);
   }
 
   /**
@@ -591,7 +617,7 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
    * screen resolution.
    */
   public static YuvImageRenderer create(
-      int x, int y, int width, int height) {
+      int x, int y, int width, int height, ScalingType scalingType) {
     // Check display region parameters.
     if (x < 0 || x > 100 || y < 0 || y > 100 ||
         width < 0 || width > 100 || height < 0 || height > 100 ||
@@ -605,7 +631,7 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
     }
     final YuvImageRenderer yuvImageRenderer = new YuvImageRenderer(
         instance.surface, instance.yuvImageRenderers.size(),
-        x, y, width, height, ScalingType.SCALE_ASPECT_FIT);
+        x, y, width, height, scalingType);
     synchronized (instance.yuvImageRenderers) {
       if (instance.onSurfaceCreatedCalled) {
         // onSurfaceCreated has already been called for VideoRendererGui -
@@ -634,12 +660,31 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
     return yuvImageRenderer;
   }
 
+  public static void update(
+      VideoRenderer.Callbacks renderer,
+      int x, int y, int width, int height, ScalingType scalingType) {
+    Log.d(TAG, "VideoRendererGui.update");
+    if (instance == null) {
+      throw new RuntimeException(
+          "Attempt to update yuv renderer before setting GLSurfaceView");
+    }
+    synchronized (instance.yuvImageRenderers) {
+      for (YuvImageRenderer yuvImageRenderer : instance.yuvImageRenderers) {
+        if (yuvImageRenderer == renderer) {
+          yuvImageRenderer.setPosition(x, y, width, height, scalingType);
+        }
+      }
+    }
+  }
+
   @Override
   public void onSurfaceCreated(GL10 unused, EGLConfig config) {
     Log.d(TAG, "VideoRendererGui.onSurfaceCreated");
     // Store render EGL context
-    eglContext = EGL14.eglGetCurrentContext();
-    Log.d(TAG, "VideoRendererGui EGL Context: " + eglContext);
+    if (CURRENT_SDK_VERSION >= EGL14_SDK_VERSION) {
+      eglContext = EGL14.eglGetCurrentContext();
+      Log.d(TAG, "VideoRendererGui EGL Context: " + eglContext);
+    }
 
     // Create YUV and OES programs.
     yuvProgram = createProgram(VERTEX_SHADER_STRING,
@@ -655,7 +700,7 @@ public class VideoRendererGui implements GLSurfaceView.Renderer {
       onSurfaceCreatedCalled = true;
     }
     checkNoGLES2Error();
-    GLES20.glClearColor(0.0f, 0.0f, 0.1f, 1.0f);
+    GLES20.glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
   }
 
   @Override

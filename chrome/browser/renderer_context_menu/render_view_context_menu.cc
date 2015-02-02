@@ -104,13 +104,13 @@
 #if defined(ENABLE_PRINTING)
 #include "chrome/common/print_messages.h"
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_context_menu_observer.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
 
 using base::UserMetricsAction;
@@ -341,6 +341,7 @@ RenderViewContextMenu::~RenderViewContextMenu() {
 
 // Menu construction functions -------------------------------------------------
 
+#if defined(ENABLE_EXTENSIONS)
 // static
 bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
     const content::ContextMenuParams& params,
@@ -474,6 +475,7 @@ void RenderViewContextMenu::AppendCurrentExtensionItems() {
                                           false);  // is_action_menu
   }
 }
+#endif  // defined(ENABLE_EXTENSIONS)
 
 void RenderViewContextMenu::InitMenu() {
   RenderViewContextMenuBase::InitMenu();
@@ -544,6 +546,11 @@ void RenderViewContextMenu::InitMenu() {
     AppendPrintItem();
 
   if (content_type_->SupportsGroup(
+          ContextMenuContentType::ITEM_GROUP_MEDIA_PLUGIN)) {
+    AppendRotationItems();
+  }
+
+  if (content_type_->SupportsGroup(
           ContextMenuContentType::ITEM_GROUP_ALL_EXTENSION)) {
     DCHECK(!content_type_->SupportsGroup(
                ContextMenuContentType::ITEM_GROUP_CURRENT_EXTENSION));
@@ -609,7 +616,7 @@ void RenderViewContextMenu::HandleAuthorizeAllPlugins() {
 #endif
 
 void RenderViewContextMenu::AppendPrintPreviewItems() {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   if (!print_preview_menu_observer_.get()) {
     print_preview_menu_observer_.reset(
         new PrintPreviewContextMenuObserver(source_web_contents_));
@@ -620,14 +627,9 @@ void RenderViewContextMenu::AppendPrintPreviewItems() {
 }
 
 const Extension* RenderViewContextMenu::GetExtension() const {
-  extensions::ExtensionSystem* system =
-      extensions::ExtensionSystem::Get(browser_context_);
-  // There is no process manager in some tests.
-  if (!system->process_manager())
-    return NULL;
-
-  return system->process_manager()->GetExtensionForRenderViewHost(
-      source_web_contents_->GetRenderViewHost());
+  return extensions::ProcessManager::Get(browser_context_)
+      ->GetExtensionForRenderViewHost(
+          source_web_contents_->GetRenderViewHost());
 }
 
 void RenderViewContextMenu::AppendDeveloperItems() {
@@ -769,15 +771,12 @@ void RenderViewContextMenu::AppendPluginItems() {
   } else {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
                                     IDS_CONTENT_CONTEXT_SAVEPAGEAS);
-    menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
-  }
-
-  if (params_.media_flags & WebContextMenuData::MediaCanRotate) {
-    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECW,
-                                    IDS_CONTENT_CONTEXT_ROTATECW);
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECCW,
-                                    IDS_CONTENT_CONTEXT_ROTATECCW);
+    // The "Print" menu item should always be included for plugins. If
+    // content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_PRINT)
+    // is true the item will be added inside AppendPrintItem(). Otherwise we
+    // add "Print" here.
+    if (!content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_PRINT))
+      menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
   }
 }
 
@@ -829,6 +828,16 @@ void RenderViewContextMenu::AppendPrintItem() {
       (params_.media_type == WebContextMenuData::MediaTypeNone ||
        params_.media_flags & WebContextMenuData::MediaCanPrint)) {
     menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
+  }
+}
+
+void RenderViewContextMenu::AppendRotationItems() {
+  if (params_.media_flags & WebContextMenuData::MediaCanRotate) {
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECW,
+                                    IDS_CONTENT_CONTEXT_ROTATECW);
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ROTATECCW,
+                                    IDS_CONTENT_CONTEXT_ROTATECCW);
   }
 }
 
@@ -1137,7 +1146,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       bool can_save =
           (params_.media_flags & WebContextMenuData::MediaCanSave) &&
           url.is_valid() && ProfileIOData::IsHandledProtocol(url.scheme());
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
           // Do not save the preview PDF on the print preview page.
       can_save = can_save &&
           !(printing::PrintPreviewDialogController::IsPrintPreviewURL(url));
@@ -1488,7 +1497,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
         break;
       }
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
       printing::PrintViewManager* print_view_manager =
           printing::PrintViewManager::FromWebContents(source_web_contents_);
       if (!print_view_manager)
@@ -1498,17 +1507,17 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
         print_view_manager->PrintPreviewNow(!params_.selection_text.empty());
         break;
       }
-#else   // ENABLE_FULL_PRINTING
+#else   // ENABLE_PRINT_PREVIEW
       printing::PrintViewManagerBasic* print_view_manager =
           printing::PrintViewManagerBasic::FromWebContents(
               source_web_contents_);
       if (!print_view_manager)
         break;
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
 
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
       print_view_manager->PrintNow();
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
 
 #endif  // ENABLE_PRINTING
       break;

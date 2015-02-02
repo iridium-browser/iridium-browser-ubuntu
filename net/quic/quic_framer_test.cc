@@ -103,46 +103,34 @@ const size_t kPublicResetPacketMessageTagOffset =
 
 class TestEncrypter : public QuicEncrypter {
  public:
-  virtual ~TestEncrypter() {}
-  virtual bool SetKey(StringPiece key) OVERRIDE {
-    return true;
-  }
-  virtual bool SetNoncePrefix(StringPiece nonce_prefix) OVERRIDE {
-    return true;
-  }
-  virtual bool Encrypt(StringPiece nonce,
-                       StringPiece associated_data,
-                       StringPiece plaintext,
-                       unsigned char* output) OVERRIDE {
+  ~TestEncrypter() override {}
+  bool SetKey(StringPiece key) override { return true; }
+  bool SetNoncePrefix(StringPiece nonce_prefix) override { return true; }
+  bool Encrypt(StringPiece nonce,
+               StringPiece associated_data,
+               StringPiece plaintext,
+               unsigned char* output) override {
     CHECK(false) << "Not implemented";
     return false;
   }
-  virtual QuicData* EncryptPacket(QuicPacketSequenceNumber sequence_number,
-                                  StringPiece associated_data,
-                                  StringPiece plaintext) OVERRIDE {
+  QuicData* EncryptPacket(QuicPacketSequenceNumber sequence_number,
+                          StringPiece associated_data,
+                          StringPiece plaintext) override {
     sequence_number_ = sequence_number;
     associated_data_ = associated_data.as_string();
     plaintext_ = plaintext.as_string();
     return new QuicData(plaintext.data(), plaintext.length());
   }
-  virtual size_t GetKeySize() const OVERRIDE {
-    return 0;
-  }
-  virtual size_t GetNoncePrefixSize() const OVERRIDE {
-    return 0;
-  }
-  virtual size_t GetMaxPlaintextSize(size_t ciphertext_size) const OVERRIDE {
+  size_t GetKeySize() const override { return 0; }
+  size_t GetNoncePrefixSize() const override { return 0; }
+  size_t GetMaxPlaintextSize(size_t ciphertext_size) const override {
     return ciphertext_size;
   }
-  virtual size_t GetCiphertextSize(size_t plaintext_size) const OVERRIDE {
+  size_t GetCiphertextSize(size_t plaintext_size) const override {
     return plaintext_size;
   }
-  virtual StringPiece GetKey() const OVERRIDE {
-    return StringPiece();
-  }
-  virtual StringPiece GetNoncePrefix() const OVERRIDE {
-    return StringPiece();
-  }
+  StringPiece GetKey() const override { return StringPiece(); }
+  StringPiece GetNoncePrefix() const override { return StringPiece(); }
   QuicPacketSequenceNumber sequence_number_;
   string associated_data_;
   string plaintext_;
@@ -150,35 +138,27 @@ class TestEncrypter : public QuicEncrypter {
 
 class TestDecrypter : public QuicDecrypter {
  public:
-  virtual ~TestDecrypter() {}
-  virtual bool SetKey(StringPiece key) OVERRIDE {
-    return true;
-  }
-  virtual bool SetNoncePrefix(StringPiece nonce_prefix) OVERRIDE {
-    return true;
-  }
-  virtual bool Decrypt(StringPiece nonce,
-                       StringPiece associated_data,
-                       StringPiece ciphertext,
-                       unsigned char* output,
-                       size_t* output_length) OVERRIDE {
+  ~TestDecrypter() override {}
+  bool SetKey(StringPiece key) override { return true; }
+  bool SetNoncePrefix(StringPiece nonce_prefix) override { return true; }
+  bool Decrypt(StringPiece nonce,
+               StringPiece associated_data,
+               StringPiece ciphertext,
+               unsigned char* output,
+               size_t* output_length) override {
     CHECK(false) << "Not implemented";
     return false;
   }
-  virtual QuicData* DecryptPacket(QuicPacketSequenceNumber sequence_number,
-                                  StringPiece associated_data,
-                                  StringPiece ciphertext) OVERRIDE {
+  QuicData* DecryptPacket(QuicPacketSequenceNumber sequence_number,
+                          StringPiece associated_data,
+                          StringPiece ciphertext) override {
     sequence_number_ = sequence_number;
     associated_data_ = associated_data.as_string();
     ciphertext_ = ciphertext.as_string();
     return new QuicData(ciphertext.data(), ciphertext.length());
   }
-  virtual StringPiece GetKey() const OVERRIDE {
-    return StringPiece();
-  }
-  virtual StringPiece GetNoncePrefix() const OVERRIDE {
-    return StringPiece();
-  }
+  StringPiece GetKey() const override { return StringPiece(); }
+  StringPiece GetNoncePrefix() const override { return StringPiece(); }
   QuicPacketSequenceNumber sequence_number_;
   string associated_data_;
   string ciphertext_;
@@ -198,7 +178,7 @@ class TestQuicVisitor : public ::net::QuicFramerVisitorInterface {
         accept_public_header_(true) {
   }
 
-  virtual ~TestQuicVisitor() {
+  ~TestQuicVisitor() override {
     STLDeleteElements(&stream_frames_);
     STLDeleteElements(&ack_frames_);
     STLDeleteElements(&congestion_feedback_frames_);
@@ -207,121 +187,113 @@ class TestQuicVisitor : public ::net::QuicFramerVisitorInterface {
     STLDeleteElements(&fec_data_);
   }
 
-  virtual void OnError(QuicFramer* f) OVERRIDE {
+  void OnError(QuicFramer* f) override {
     DVLOG(1) << "QuicFramer Error: " << QuicUtils::ErrorToString(f->error())
              << " (" << f->error() << ")";
     ++error_count_;
   }
 
-  virtual void OnPacket() OVERRIDE {}
+  void OnPacket() override {}
 
-  virtual void OnPublicResetPacket(
-      const QuicPublicResetPacket& packet) OVERRIDE {
+  void OnPublicResetPacket(const QuicPublicResetPacket& packet) override {
     public_reset_packet_.reset(new QuicPublicResetPacket(packet));
   }
 
-  virtual void OnVersionNegotiationPacket(
-      const QuicVersionNegotiationPacket& packet) OVERRIDE {
+  void OnVersionNegotiationPacket(
+      const QuicVersionNegotiationPacket& packet) override {
     version_negotiation_packet_.reset(new QuicVersionNegotiationPacket(packet));
   }
 
-  virtual void OnRevivedPacket() OVERRIDE {
-    ++revived_packets_;
-  }
+  void OnRevivedPacket() override { ++revived_packets_; }
 
-  virtual bool OnProtocolVersionMismatch(QuicVersion version) OVERRIDE {
+  bool OnProtocolVersionMismatch(QuicVersion version) override {
     DVLOG(1) << "QuicFramer Version Mismatch, version: " << version;
     ++version_mismatch_;
     return true;
   }
 
-  virtual bool OnUnauthenticatedPublicHeader(
-      const QuicPacketPublicHeader& header) OVERRIDE {
+  bool OnUnauthenticatedPublicHeader(
+      const QuicPacketPublicHeader& header) override {
     public_header_.reset(new QuicPacketPublicHeader(header));
     return accept_public_header_;
   }
 
-  virtual bool OnUnauthenticatedHeader(
-      const QuicPacketHeader& header) OVERRIDE {
+  bool OnUnauthenticatedHeader(const QuicPacketHeader& header) override {
     return true;
   }
 
-  virtual void OnDecryptedPacket(EncryptionLevel level) OVERRIDE {}
+  void OnDecryptedPacket(EncryptionLevel level) override {}
 
-  virtual bool OnPacketHeader(const QuicPacketHeader& header) OVERRIDE {
+  bool OnPacketHeader(const QuicPacketHeader& header) override {
     ++packet_count_;
     header_.reset(new QuicPacketHeader(header));
     return accept_packet_;
   }
 
-  virtual bool OnStreamFrame(const QuicStreamFrame& frame) OVERRIDE {
+  bool OnStreamFrame(const QuicStreamFrame& frame) override {
     ++frame_count_;
     stream_frames_.push_back(new QuicStreamFrame(frame));
     return true;
   }
 
-  virtual void OnFecProtectedPayload(StringPiece payload) OVERRIDE {
+  void OnFecProtectedPayload(StringPiece payload) override {
     fec_protected_payload_ = payload.as_string();
   }
 
-  virtual bool OnAckFrame(const QuicAckFrame& frame) OVERRIDE {
+  bool OnAckFrame(const QuicAckFrame& frame) override {
     ++frame_count_;
     ack_frames_.push_back(new QuicAckFrame(frame));
     return true;
   }
 
-  virtual bool OnCongestionFeedbackFrame(
-      const QuicCongestionFeedbackFrame& frame) OVERRIDE {
+  bool OnCongestionFeedbackFrame(
+      const QuicCongestionFeedbackFrame& frame) override {
     ++frame_count_;
     congestion_feedback_frames_.push_back(
         new QuicCongestionFeedbackFrame(frame));
     return true;
   }
 
-  virtual bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) OVERRIDE {
+  bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override {
     ++frame_count_;
     stop_waiting_frames_.push_back(new QuicStopWaitingFrame(frame));
     return true;
   }
 
-  virtual bool OnPingFrame(const QuicPingFrame& frame) OVERRIDE {
+  bool OnPingFrame(const QuicPingFrame& frame) override {
     ++frame_count_;
     ping_frames_.push_back(new QuicPingFrame(frame));
     return true;
   }
 
-  virtual void OnFecData(const QuicFecData& fec) OVERRIDE {
+  void OnFecData(const QuicFecData& fec) override {
     ++fec_count_;
     fec_data_.push_back(new QuicFecData(fec));
   }
 
-  virtual void OnPacketComplete() OVERRIDE {
-    ++complete_packets_;
-  }
+  void OnPacketComplete() override { ++complete_packets_; }
 
-  virtual bool OnRstStreamFrame(const QuicRstStreamFrame& frame) OVERRIDE {
+  bool OnRstStreamFrame(const QuicRstStreamFrame& frame) override {
     rst_stream_frame_ = frame;
     return true;
   }
 
-  virtual bool OnConnectionCloseFrame(
-      const QuicConnectionCloseFrame& frame) OVERRIDE {
+  bool OnConnectionCloseFrame(const QuicConnectionCloseFrame& frame) override {
     connection_close_frame_ = frame;
     return true;
   }
 
-  virtual bool OnGoAwayFrame(const QuicGoAwayFrame& frame) OVERRIDE {
+  bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override {
     goaway_frame_ = frame;
     return true;
   }
 
-  virtual bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame)
-      OVERRIDE {
+  bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override {
     window_update_frame_ = frame;
     return true;
   }
 
-  virtual bool OnBlockedFrame(const QuicBlockedFrame& frame) OVERRIDE {
+  bool OnBlockedFrame(const QuicBlockedFrame& frame) override {
     blocked_frame_ = frame;
     return true;
   }
@@ -2379,7 +2351,7 @@ TEST_P(QuicFramerTest, AckFrameNoNacksv22) {
   QuicFrames frames;
   frames.push_back(QuicFrame(frame));
   scoped_ptr<QuicPacket> data(BuildDataPacket(*visitor_.header_, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -2434,7 +2406,7 @@ TEST_P(QuicFramerTest, AckFrameNoNacks) {
   QuicFrames frames;
   frames.push_back(QuicFrame(frame));
   scoped_ptr<QuicPacket> data(BuildDataPacket(*visitor_.header_, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -2507,7 +2479,7 @@ TEST_P(QuicFramerTest, AckFrame500Nacksv22) {
   QuicFrames frames;
   frames.push_back(QuicFrame(frame));
   scoped_ptr<QuicPacket> data(BuildDataPacket(*visitor_.header_, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -2582,7 +2554,7 @@ TEST_P(QuicFramerTest, AckFrame500Nacks) {
   QuicFrames frames;
   frames.push_back(QuicFrame(frame));
   scoped_ptr<QuicPacket> data(BuildDataPacket(*visitor_.header_, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3003,10 +2975,6 @@ TEST_P(QuicFramerTest, BlockedFrame) {
 }
 
 TEST_P(QuicFramerTest, PingFrame) {
-  if (version_ <= QUIC_VERSION_16) {
-    return;
-  }
-
   unsigned char packet[] = {
     // public flags (8 byte connection_id)
     0x3C,
@@ -3314,7 +3282,7 @@ TEST_P(QuicFramerTest, BuildPaddingFramePacket) {
   memset(packet + header_size + 1, 0x00, kMaxPacketSize - header_size - 1);
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3360,7 +3328,7 @@ TEST_P(QuicFramerTest, Build4ByteSequenceNumberPaddingFramePacket) {
   memset(packet + header_size + 1, 0x00, kMaxPacketSize - header_size - 1);
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3406,7 +3374,7 @@ TEST_P(QuicFramerTest, Build2ByteSequenceNumberPaddingFramePacket) {
   memset(packet + header_size + 1, 0x00, kMaxPacketSize - header_size - 1);
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3452,7 +3420,7 @@ TEST_P(QuicFramerTest, Build1ByteSequenceNumberPaddingFramePacket) {
   memset(packet + header_size + 1, 0x00, kMaxPacketSize - header_size - 1);
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3505,7 +3473,7 @@ TEST_P(QuicFramerTest, BuildStreamFramePacket) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3560,7 +3528,7 @@ TEST_P(QuicFramerTest, BuildStreamFramePacketInFecGroup) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3615,7 +3583,7 @@ TEST_P(QuicFramerTest, BuildStreamFramePacketWithVersionFlag) {
 
   QuicFramerPeer::SetIsServer(&framer_, false);
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3704,7 +3672,7 @@ TEST_P(QuicFramerTest, BuildAckFramePacketv22) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3769,7 +3737,7 @@ TEST_P(QuicFramerTest, BuildAckFramePacket) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -3887,7 +3855,7 @@ TEST_P(QuicFramerTest, BuildTruncatedAckFrameLargePacketv22) {
 
   scoped_ptr<QuicPacket> data(
       framer_.BuildDataPacket(header, frames, kMaxPacketSize).packet);
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4002,7 +3970,7 @@ TEST_P(QuicFramerTest, BuildTruncatedAckFrameLargePacket) {
 
   scoped_ptr<QuicPacket> data(
       framer_.BuildDataPacket(header, frames, kMaxPacketSize).packet);
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4071,7 +4039,7 @@ TEST_P(QuicFramerTest, BuildTruncatedAckFrameSmallPacketv22) {
 
   scoped_ptr<QuicPacket> data(
       framer_.BuildDataPacket(header, frames, 37u).packet);
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
   // Expect 1 byte unused since at least 2 bytes are needed to fit more nacks.
   EXPECT_EQ(36u, data->length());
   test::CompareCharArraysWithHexError("constructed packet",
@@ -4140,7 +4108,7 @@ TEST_P(QuicFramerTest, BuildTruncatedAckFrameSmallPacket) {
 
   scoped_ptr<QuicPacket> data(
       framer_.BuildDataPacket(header, frames, 37u).packet);
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
   // Expect 1 byte unused since at least 2 bytes are needed to fit more nacks.
   EXPECT_EQ(36u, data->length());
   test::CompareCharArraysWithHexError("constructed packet",
@@ -4186,7 +4154,7 @@ TEST_P(QuicFramerTest, BuildCongestionFeedbackFramePacketTCP) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4232,7 +4200,7 @@ TEST_P(QuicFramerTest, BuildStopWaitingPacket) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4260,7 +4228,7 @@ TEST_P(QuicFramerTest, BuildCongestionFeedbackFramePacketInvalidFeedback) {
   EXPECT_DFATAL(
       data.reset(BuildDataPacket(header, frames)),
       "AppendCongestionFeedbackFrame failed");
-  ASSERT_TRUE(data == NULL);
+  ASSERT_TRUE(data == nullptr);
 }
 
 TEST_P(QuicFramerTest, BuildRstFramePacketQuic) {
@@ -4313,7 +4281,7 @@ TEST_P(QuicFramerTest, BuildRstFramePacketQuic) {
   frames.push_back(QuicFrame(&rst_frame));
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4363,7 +4331,7 @@ TEST_P(QuicFramerTest, BuildCloseFramePacket) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4416,7 +4384,7 @@ TEST_P(QuicFramerTest, BuildGoAwayPacket) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4462,7 +4430,7 @@ TEST_P(QuicFramerTest, BuildWindowUpdatePacket) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet", data->data(),
                                       data->length(), AsChars(packet),
@@ -4504,7 +4472,7 @@ TEST_P(QuicFramerTest, BuildBlockedPacket) {
   };
 
   scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet", data->data(),
                                       data->length(), AsChars(packet),
@@ -4542,20 +4510,12 @@ TEST_P(QuicFramerTest, BuildPingPacket) {
     0x07,
   };
 
-  if (version_ >= QUIC_VERSION_18) {
-    scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
-    ASSERT_TRUE(data != NULL);
+  scoped_ptr<QuicPacket> data(BuildDataPacket(header, frames));
+  ASSERT_TRUE(data != nullptr);
 
-    test::CompareCharArraysWithHexError("constructed packet", data->data(),
-                                        data->length(), AsChars(packet),
-                                        arraysize(packet));
-  } else {
-    string expected_error =
-        "Attempt to add a PingFrame in " + QuicVersionToString(version_);
-    EXPECT_DFATAL(BuildDataPacket(header, frames),
-                  expected_error);
-    return;
-  }
+  test::CompareCharArraysWithHexError("constructed packet", data->data(),
+                                      data->length(), AsChars(packet),
+                                      arraysize(packet));
 }
 
 TEST_P(QuicFramerTest, BuildPublicResetPacket) {
@@ -4594,7 +4554,7 @@ TEST_P(QuicFramerTest, BuildPublicResetPacket) {
 
   scoped_ptr<QuicEncryptedPacket> data(
       framer_.BuildPublicResetPacket(reset_packet));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4646,7 +4606,7 @@ TEST_P(QuicFramerTest, BuildPublicResetPacketWithClientAddress) {
 
   scoped_ptr<QuicEncryptedPacket> data(
       framer_.BuildPublicResetPacket(reset_packet));
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4691,7 +4651,7 @@ TEST_P(QuicFramerTest, BuildFecPacket) {
 
   scoped_ptr<QuicPacket> data(
       framer_.BuildFecPacket(header, fec_data).packet);
-  ASSERT_TRUE(data != NULL);
+  ASSERT_TRUE(data != nullptr);
 
   test::CompareCharArraysWithHexError("constructed packet",
                                       data->data(), data->length(),
@@ -4728,7 +4688,7 @@ TEST_P(QuicFramerTest, EncryptPacket) {
   scoped_ptr<QuicEncryptedPacket> encrypted(
       framer_.EncryptPacket(ENCRYPTION_NONE, sequence_number, *raw));
 
-  ASSERT_TRUE(encrypted.get() != NULL);
+  ASSERT_TRUE(encrypted.get() != nullptr);
   EXPECT_TRUE(CheckEncryption(sequence_number, raw.get()));
 }
 
@@ -4764,7 +4724,7 @@ TEST_P(QuicFramerTest, EncryptPacketWithVersionFlag) {
   scoped_ptr<QuicEncryptedPacket> encrypted(
       framer_.EncryptPacket(ENCRYPTION_NONE, sequence_number, *raw));
 
-  ASSERT_TRUE(encrypted.get() != NULL);
+  ASSERT_TRUE(encrypted.get() != nullptr);
   EXPECT_TRUE(CheckEncryption(sequence_number, raw.get()));
 }
 
@@ -4789,7 +4749,7 @@ TEST_P(QuicFramerTest, AckTruncationLargePacket) {
   // Build an ack packet with truncation due to limit in number of nack ranges.
   scoped_ptr<QuicPacket> raw_ack_packet(
       framer_.BuildDataPacket(header, frames, kMaxPacketSize).packet);
-  ASSERT_TRUE(raw_ack_packet != NULL);
+  ASSERT_TRUE(raw_ack_packet != nullptr);
   scoped_ptr<QuicEncryptedPacket> ack_packet(
       framer_.EncryptPacket(ENCRYPTION_NONE, header.packet_sequence_number,
                             *raw_ack_packet));
@@ -4832,7 +4792,7 @@ TEST_P(QuicFramerTest, AckTruncationSmallPacketv22) {
   // Build an ack packet with truncation due to limit in number of nack ranges.
   scoped_ptr<QuicPacket> raw_ack_packet(
       framer_.BuildDataPacket(header, frames, 500).packet);
-  ASSERT_TRUE(raw_ack_packet != NULL);
+  ASSERT_TRUE(raw_ack_packet != nullptr);
   scoped_ptr<QuicEncryptedPacket> ack_packet(
       framer_.EncryptPacket(ENCRYPTION_NONE, header.packet_sequence_number,
                             *raw_ack_packet));
@@ -4876,7 +4836,7 @@ TEST_P(QuicFramerTest, AckTruncationSmallPacket) {
   // Build an ack packet with truncation due to limit in number of nack ranges.
   scoped_ptr<QuicPacket> raw_ack_packet(
       framer_.BuildDataPacket(header, frames, 500).packet);
-  ASSERT_TRUE(raw_ack_packet != NULL);
+  ASSERT_TRUE(raw_ack_packet != nullptr);
   scoped_ptr<QuicEncryptedPacket> ack_packet(
       framer_.EncryptPacket(ENCRYPTION_NONE, header.packet_sequence_number,
                             *raw_ack_packet));
@@ -4919,7 +4879,7 @@ TEST_P(QuicFramerTest, CleanTruncation) {
   frames.push_back(frame);
 
   scoped_ptr<QuicPacket> raw_ack_packet(BuildDataPacket(header, frames));
-  ASSERT_TRUE(raw_ack_packet != NULL);
+  ASSERT_TRUE(raw_ack_packet != nullptr);
 
   scoped_ptr<QuicEncryptedPacket> ack_packet(
       framer_.EncryptPacket(ENCRYPTION_NONE, header.packet_sequence_number,
@@ -4937,9 +4897,9 @@ TEST_P(QuicFramerTest, CleanTruncation) {
 
   size_t original_raw_length = raw_ack_packet->length();
   raw_ack_packet.reset(BuildDataPacket(header, frames));
-  ASSERT_TRUE(raw_ack_packet != NULL);
+  ASSERT_TRUE(raw_ack_packet != nullptr);
   EXPECT_EQ(original_raw_length, raw_ack_packet->length());
-  ASSERT_TRUE(raw_ack_packet != NULL);
+  ASSERT_TRUE(raw_ack_packet != nullptr);
 }
 
 TEST_P(QuicFramerTest, EntropyFlagTest) {

@@ -71,7 +71,7 @@ namespace content {
 class TouchActionBrowserTest : public ContentBrowserTest {
  public:
   TouchActionBrowserTest() {}
-  virtual ~TouchActionBrowserTest() {}
+  ~TouchActionBrowserTest() override {}
 
   RenderWidgetHostImpl* GetWidgetHost() {
     return RenderWidgetHostImpl::From(shell()->web_contents()->
@@ -97,7 +97,7 @@ class TouchActionBrowserTest : public ContentBrowserTest {
   }
 
   // ContentBrowserTest:
-  virtual void SetUpCommandLine(CommandLine* cmd) OVERRIDE {
+  void SetUpCommandLine(CommandLine* cmd) override {
     cmd->AppendSwitchASCII(switches::kTouchEvents,
                            switches::kTouchEventsEnabled);
     // TODO(rbyers): Remove this switch once touch-action ships.
@@ -138,9 +138,9 @@ class TouchActionBrowserTest : public ContentBrowserTest {
     scoped_ptr<SyntheticSmoothScrollGesture> gesture(
         new SyntheticSmoothScrollGesture(params));
     GetWidgetHost()->QueueSyntheticGesture(
-        gesture.PassAs<SyntheticGesture>(),
+        gesture.Pass(),
         base::Bind(&TouchActionBrowserTest::OnSyntheticGestureCompleted,
-            base::Unretained(this)));
+                   base::Unretained(this)));
 
     // Runs until we get the OnSyntheticGestureCompleted callback
     runner_->Run();

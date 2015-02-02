@@ -27,10 +27,10 @@ namespace {
 class TestBrowserContextIncognito : public TestBrowserContext {
  public:
   TestBrowserContextIncognito() {}
-  virtual ~TestBrowserContextIncognito() {}
+  ~TestBrowserContextIncognito() override {}
 
   // TestBrowserContext implementation.
-  virtual bool IsOffTheRecord() const OVERRIDE { return true; }
+  bool IsOffTheRecord() const override { return true; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestBrowserContextIncognito);
@@ -42,14 +42,14 @@ class TestProcessManagerDelegate : public ProcessManagerDelegate {
   TestProcessManagerDelegate()
       : is_background_page_allowed_(true),
         defer_creating_startup_background_hosts_(false) {}
-  virtual ~TestProcessManagerDelegate() {}
+  ~TestProcessManagerDelegate() override {}
 
   // ProcessManagerDelegate implementation.
-  virtual bool IsBackgroundPageAllowed(BrowserContext* context) const OVERRIDE {
+  bool IsBackgroundPageAllowed(BrowserContext* context) const override {
     return is_background_page_allowed_;
   }
-  virtual bool DeferCreatingStartupBackgroundHosts(
-      BrowserContext* context) const OVERRIDE {
+  bool DeferCreatingStartupBackgroundHosts(
+      BrowserContext* context) const override {
     return defer_creating_startup_background_hosts_;
   }
 
@@ -69,7 +69,7 @@ class ProcessManagerTest : public ExtensionsTest {
         &process_manager_delegate_);
   }
 
-  virtual ~ProcessManagerTest() {}
+  ~ProcessManagerTest() override {}
 
   // Use original_context() to make it clear it is a non-incognito context.
   BrowserContext* original_context() { return browser_context(); }
@@ -125,7 +125,6 @@ TEST_F(ProcessManagerTest, ExtensionNotificationRegistration) {
   scoped_ptr<ProcessManager> manager2(
       ProcessManager::CreateIncognitoForTesting(incognito_context(),
                                                 original_context(),
-                                                manager1.get(),
                                                 extension_registry()));
 
   EXPECT_EQ(incognito_context(), manager2->GetBrowserContext());

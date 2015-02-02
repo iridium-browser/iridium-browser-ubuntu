@@ -9,6 +9,7 @@
 #include "content/common/content_export.h"
 #include "content/public/common/resource_type.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_interceptor.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -48,24 +49,33 @@ class CONTENT_EXPORT AppCacheInterceptor
 
   static AppCacheInterceptor* GetInstance();
 
+  // The appcache system employs two different interceptors. The singleton
+  // AppCacheInterceptor derives URLRequest::Interceptor and is used
+  // to hijack request handling upon receipt of the response or a redirect.
+  // A separate URLRequestInterceptor derivative is used to hijack handling
+  // at the very start of request processing. The separate handler allows the
+  // content lib to order its collection of net::URLRequestInterceptors.
+  static scoped_ptr<net::URLRequestInterceptor> CreateStartInterceptor();
+
  protected:
   // Override from net::URLRequest::Interceptor:
-  virtual net::URLRequestJob* MaybeIntercept(
+  net::URLRequestJob* MaybeIntercept(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) OVERRIDE;
-  virtual net::URLRequestJob* MaybeInterceptResponse(
+      net::NetworkDelegate* network_delegate) override;
+  net::URLRequestJob* MaybeInterceptResponse(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) OVERRIDE;
-  virtual net::URLRequestJob* MaybeInterceptRedirect(
+      net::NetworkDelegate* network_delegate) override;
+  net::URLRequestJob* MaybeInterceptRedirect(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate,
-      const GURL& location) OVERRIDE;
+      const GURL& location) override;
 
  private:
   friend struct DefaultSingletonTraits<AppCacheInterceptor>;
+  class StartInterceptor;
 
   AppCacheInterceptor();
-  virtual ~AppCacheInterceptor();
+  ~AppCacheInterceptor() override;
 
   static void SetHandler(net::URLRequest* request,
                          AppCacheRequestHandler* handler);

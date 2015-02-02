@@ -34,49 +34,45 @@ class ChromeAutofillClient
       public content::WebContentsObserver,
       public ZoomObserver {
  public:
-  virtual ~ChromeAutofillClient();
+  ~ChromeAutofillClient() override;
 
   // Called when the tab corresponding to |this| instance is activated.
   void TabActivated();
 
   // AutofillClient:
-  virtual PersonalDataManager* GetPersonalDataManager() OVERRIDE;
-  virtual scoped_refptr<AutofillWebDataService> GetDatabase() OVERRIDE;
-  virtual PrefService* GetPrefs() OVERRIDE;
-  virtual void HideRequestAutocompleteDialog() OVERRIDE;
-  virtual void ShowAutofillSettings() OVERRIDE;
-  virtual void ConfirmSaveCreditCard(
-      const AutofillMetrics& metric_logger,
-      const base::Closure& save_card_callback) OVERRIDE;
-  virtual void ShowRequestAutocompleteDialog(
-      const FormData& form,
-      const GURL& source_url,
-      const ResultCallback& callback) OVERRIDE;
-  virtual void ShowAutofillPopup(
+  PersonalDataManager* GetPersonalDataManager() override;
+  scoped_refptr<AutofillWebDataService> GetDatabase() override;
+  PrefService* GetPrefs() override;
+  void HideRequestAutocompleteDialog() override;
+  void ShowAutofillSettings() override;
+  void ConfirmSaveCreditCard(const AutofillMetrics& metric_logger,
+                             const base::Closure& save_card_callback) override;
+  void ShowRequestAutocompleteDialog(const FormData& form,
+                                     const GURL& source_url,
+                                     const ResultCallback& callback) override;
+  void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
       const std::vector<base::string16>& values,
       const std::vector<base::string16>& labels,
       const std::vector<base::string16>& icons,
       const std::vector<int>& identifiers,
-      base::WeakPtr<AutofillPopupDelegate> delegate) OVERRIDE;
-  virtual void UpdateAutofillPopupDataListValues(
+      base::WeakPtr<AutofillPopupDelegate> delegate) override;
+  void UpdateAutofillPopupDataListValues(
       const std::vector<base::string16>& values,
-      const std::vector<base::string16>& labels) OVERRIDE;
-  virtual void HideAutofillPopup() OVERRIDE;
-  virtual bool IsAutocompleteEnabled() OVERRIDE;
-  virtual void DetectAccountCreationForms(
-      const std::vector<autofill::FormStructure*>& forms) OVERRIDE;
-  virtual void DidFillOrPreviewField(
-      const base::string16& autofilled_value,
-      const base::string16& profile_full_name) OVERRIDE;
+      const std::vector<base::string16>& labels) override;
+  void HideAutofillPopup() override;
+  bool IsAutocompleteEnabled() override;
+  void DetectAccountCreationForms(
+      const std::vector<autofill::FormStructure*>& forms) override;
+  void DidFillOrPreviewField(const base::string16& autofilled_value,
+                             const base::string16& profile_full_name) override;
 
   // content::WebContentsObserver implementation.
-  virtual void WebContentsDestroyed() OVERRIDE;
+  void WebContentsDestroyed() override;
 
   // ZoomObserver implementation.
-  virtual void OnZoomChanged(
-      const ZoomController::ZoomChangedEventData& data) OVERRIDE;
+  void OnZoomChanged(const ZoomController::ZoomChangedEventData& data) override;
 
   // Exposed for testing.
   AutofillDialogController* GetDialogControllerForTesting() {

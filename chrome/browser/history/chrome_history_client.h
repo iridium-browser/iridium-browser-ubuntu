@@ -7,9 +7,11 @@
 
 #include "base/macros.h"
 #include "components/history/core/browser/history_client.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/top_sites_observer.h"
 
 class BookmarkModel;
+class HistoryService;
 class Profile;
 
 namespace history {
@@ -19,32 +21,38 @@ class TopSites;
 // This class implements history::HistoryClient to abstract operations that
 // depend on Chrome environment.
 class ChromeHistoryClient : public history::HistoryClient,
+                            public history::HistoryServiceObserver,
                             public history::TopSitesObserver {
  public:
   explicit ChromeHistoryClient(BookmarkModel* bookmark_model,
                                Profile* profile,
                                history::TopSites* top_sites);
-  virtual ~ChromeHistoryClient();
+  ~ChromeHistoryClient() override;
+
+  // TODO(sdefresne): once NOTIFICATION_HISTORY_URL* notifications are no
+  // longer used, remove this reference to the HistoryService from the
+  // ChromeHistoryClient, http://crbug.com/373326
+  void SetHistoryService(HistoryService* history_service);
 
   // history::HistoryClient:
-  virtual void BlockUntilBookmarksLoaded() OVERRIDE;
-  virtual bool IsBookmarked(const GURL& url) OVERRIDE;
-  virtual void GetBookmarks(
-      std::vector<history::URLAndTitle>* bookmarks) OVERRIDE;
-  virtual void NotifyProfileError(sql::InitStatus init_status) OVERRIDE;
-  virtual bool ShouldReportDatabaseError() OVERRIDE;
+  void BlockUntilBookmarksLoaded() override;
+  bool IsBookmarked(const GURL& url) override;
+  void GetBookmarks(std::vector<history::URLAndTitle>* bookmarks) override;
+  void NotifyProfileError(sql::InitStatus init_status) override;
+  bool ShouldReportDatabaseError() override;
 
   // KeyedService:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // TopSitesObserver:
-  virtual void TopSitesLoaded(history::TopSites* top_sites) OVERRIDE;
-  virtual void TopSitesChanged(history::TopSites* top_sites) OVERRIDE;
+  void TopSitesLoaded(history::TopSites* top_sites) override;
+  void TopSitesChanged(history::TopSites* top_sites) override;
 
  private:
   // The BookmarkModel, this should outlive ChromeHistoryClient.
   BookmarkModel* bookmark_model_;
   Profile* profile_;
+  HistoryService* history_service_;
   // The TopSites object is owned by the Profile (see
   // chrome/browser/profiles/profile_impl.h)
   // and lazily constructed by the  getter.

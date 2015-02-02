@@ -34,6 +34,12 @@
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 
+#if defined(OS_WIN)
+#include "base/command_line.h"
+#include "base/win/windows_version.h"
+#include "content/public/common/content_switches.h"
+#endif
+
 using ppapi::host::ResourceHost;
 using ppapi::UnpackMessage;
 
@@ -65,19 +71,6 @@ bool CanUseCompositorAPI(const RendererPpapiHost* host, PP_Instance instance) {
   ContentRendererClient* content_renderer_client =
       GetContentClient()->renderer();
   return content_renderer_client->IsPluginAllowedToUseCompositorAPI(
-      document_url);
-}
-
-bool CanUseVideoDecodeAPI(const RendererPpapiHost* host, PP_Instance instance) {
-  blink::WebPluginContainer* container =
-      host->GetContainerForInstance(instance);
-  if (!container)
-    return false;
-
-  GURL document_url = container->element().document().url();
-  ContentRendererClient* content_renderer_client =
-      GetContentClient()->renderer();
-  return content_renderer_client->IsPluginAllowedToUseVideoDecodeAPI(
       document_url);
 }
 
@@ -142,8 +135,24 @@ scoped_ptr<ResourceHost> ContentRendererPepperHostFactory::CreateResourceHost(
         NOTREACHED();
         return scoped_ptr<ResourceHost>();
       }
+      ppapi::PPB_ImageData_Shared::ImageDataType image_type =
+          ppapi::PPB_ImageData_Shared::PLATFORM;
+#if defined(OS_WIN)
+      // If Win32K lockdown mitigations are enabled for Windows 8 and beyond
+      // we use the SIMPLE image data type as the PLATFORM image data type
+      // calls GDI functions to create DIB sections etc which fail in Win32K
+      // lockdown mode.
+      // TODO(ananta)
+      // Look into whether this causes a loss of functionality. From cursory
+      // testing things seem to work well.
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableWin32kRendererLockDown) &&
+          base::win::GetVersion() >= base::win::VERSION_WIN8) {
+        image_type = ppapi::PPB_ImageData_Shared::SIMPLE;
+      }
+#endif
       scoped_refptr<PPB_ImageData_Impl> image_data(new PPB_ImageData_Impl(
-          instance, ppapi::PPB_ImageData_Shared::PLATFORM));
+          instance, image_type));
       return scoped_ptr<ResourceHost>(
           PepperGraphics2DHost::Create(host_,
                                        instance,
@@ -155,12 +164,9 @@ scoped_ptr<ResourceHost> ContentRendererPepperHostFactory::CreateResourceHost(
     case PpapiHostMsg_URLLoader_Create::ID:
       return scoped_ptr<ResourceHost>(new PepperURLLoaderHost(
           host_, false, instance, params.pp_resource()));
-    case PpapiHostMsg_VideoDecoder_Create::ID: {
-      if (!CanUseVideoDecodeAPI(host_, instance))
-        return scoped_ptr<ResourceHost>();
+    case PpapiHostMsg_VideoDecoder_Create::ID:
       return scoped_ptr<ResourceHost>(
           new PepperVideoDecoderHost(host_, instance, params.pp_resource()));
-    }
     case PpapiHostMsg_WebSocket_Create::ID:
       return scoped_ptr<ResourceHost>(
           new PepperWebSocketHost(host_, instance, params.pp_resource()));

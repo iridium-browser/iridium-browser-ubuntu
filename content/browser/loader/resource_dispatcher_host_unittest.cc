@@ -37,10 +37,10 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/test_content_browser_client.h"
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/base/upload_bytes_element_reader.h"
-#include "net/base/upload_data_stream.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -223,7 +223,7 @@ class TestFilter : public ResourceMessageFilter {
   int received_after_canceled() const { return received_after_canceled_; }
 
   // ResourceMessageFilter override
-  virtual bool Send(IPC::Message* msg) OVERRIDE {
+  bool Send(IPC::Message* msg) override {
     // No messages should be received when the process has been canceled.
     if (canceled_)
       received_after_canceled_++;
@@ -235,7 +235,7 @@ class TestFilter : public ResourceMessageFilter {
   ResourceContext* resource_context() { return resource_context_; }
 
  protected:
-  virtual ~TestFilter() {}
+  ~TestFilter() override {}
 
  private:
   void GetContexts(const ResourceHostMsg_Request& request,
@@ -265,12 +265,10 @@ class ForwardingFilter : public TestFilter {
   }
 
   // TestFilter override
-  virtual bool Send(IPC::Message* msg) OVERRIDE {
-    return dest_->Send(msg);
-  }
+  bool Send(IPC::Message* msg) override { return dest_->Send(msg); }
 
  private:
-  virtual ~ForwardingFilter() {}
+  ~ForwardingFilter() override {}
 
   IPC::Sender* dest_;
 
@@ -286,7 +284,7 @@ class URLRequestTestDelayedNetworkJob : public net::URLRequestTestJob {
       : net::URLRequestTestJob(request, network_delegate) {}
 
   // Only start if not deferred for network start.
-  virtual void Start() OVERRIDE {
+  void Start() override {
     bool defer = false;
     NotifyBeforeNetworkStart(&defer);
     if (defer)
@@ -294,12 +292,10 @@ class URLRequestTestDelayedNetworkJob : public net::URLRequestTestJob {
     net::URLRequestTestJob::Start();
   }
 
-  virtual void ResumeNetworkStart() OVERRIDE {
-    net::URLRequestTestJob::StartAsync();
-  }
+  void ResumeNetworkStart() override { net::URLRequestTestJob::StartAsync(); }
 
  private:
-  virtual ~URLRequestTestDelayedNetworkJob() {}
+  ~URLRequestTestDelayedNetworkJob() override {}
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestTestDelayedNetworkJob);
 };
@@ -333,7 +329,7 @@ class URLRequestTestDelayedStartJob : public net::URLRequestTestJob {
   }
 
   // Do nothing until you're told to.
-  virtual void Start() OVERRIDE {}
+  void Start() override {}
 
   // Finish starting a URL request whose job is an instance of
   // URLRequestTestDelayedStartJob.  It is illegal to call this routine
@@ -364,7 +360,7 @@ class URLRequestTestDelayedStartJob : public net::URLRequestTestJob {
   }
 
  protected:
-  virtual ~URLRequestTestDelayedStartJob() {
+  ~URLRequestTestDelayedStartJob() override {
     for (URLRequestTestDelayedStartJob** job = &list_head_; *job;
          job = &(*job)->next_) {
       if (*job == this) {
@@ -411,10 +407,10 @@ class URLRequestTestDelayedCompletionJob : public net::URLRequestTestJob {
                                auto_advance) {}
 
  protected:
-  virtual ~URLRequestTestDelayedCompletionJob() {}
+  ~URLRequestTestDelayedCompletionJob() override {}
 
  private:
-  virtual bool NextReadAsync() OVERRIDE { return true; }
+  bool NextReadAsync() override { return true; }
 };
 
 class URLRequestBigJob : public net::URLRequestSimpleJob {
@@ -424,10 +420,10 @@ class URLRequestBigJob : public net::URLRequestSimpleJob {
       : net::URLRequestSimpleJob(request, network_delegate) {
   }
 
-  virtual int GetData(std::string* mime_type,
-                      std::string* charset,
-                      std::string* data,
-                      const net::CompletionCallback& callback) const OVERRIDE {
+  int GetData(std::string* mime_type,
+              std::string* charset,
+              std::string* data,
+              const net::CompletionCallback& callback) const override {
     *mime_type = "text/plain";
     *charset = "UTF-8";
 
@@ -444,7 +440,7 @@ class URLRequestBigJob : public net::URLRequestSimpleJob {
   }
 
  private:
-  virtual ~URLRequestBigJob() {}
+  ~URLRequestBigJob() override {}
 
   // big-job:substring,N
   static bool ParseURL(const GURL& url, std::string* text, int* count) {
@@ -491,20 +487,29 @@ class TestURLRequestJobFactory : public net::URLRequestJobFactory {
     network_start_notification_ = notification;
   }
 
-  virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
+  net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE;
+      net::NetworkDelegate* network_delegate) const override;
 
-  virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE {
+  net::URLRequestJob* MaybeInterceptRedirect(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const GURL& location) const override;
+
+  net::URLRequestJob* MaybeInterceptResponse(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override;
+
+  bool IsHandledProtocol(const std::string& scheme) const override {
     return supported_schemes_.count(scheme) > 0;
   }
 
-  virtual bool IsHandledURL(const GURL& url) const OVERRIDE {
+  bool IsHandledURL(const GURL& url) const override {
     return supported_schemes_.count(url.scheme()) > 0;
   }
 
-  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE {
+  bool IsSafeRedirectTarget(const GURL& location) const override {
     return false;
   }
 
@@ -526,9 +531,7 @@ class TestUserData : public base::SupportsUserData::Data {
       : was_deleted_(was_deleted) {
   }
 
-  virtual ~TestUserData() {
-    *was_deleted_ = true;
-  }
+  ~TestUserData() override { *was_deleted_ = true; }
 
  private:
   bool* was_deleted_;
@@ -537,9 +540,9 @@ class TestUserData : public base::SupportsUserData::Data {
 class TransfersAllNavigationsContentBrowserClient
     : public TestContentBrowserClient {
  public:
-  virtual bool ShouldSwapProcessesForRedirect(ResourceContext* resource_context,
-                                              const GURL& current_url,
-                                              const GURL& new_url) OVERRIDE {
+  bool ShouldSwapProcessesForRedirect(ResourceContext* resource_context,
+                                      const GURL& current_url,
+                                      const GURL& new_url) override {
     return true;
   }
 };
@@ -566,13 +569,13 @@ class GenericResourceThrottle : public ResourceThrottle {
         error_code_for_cancellation_(code) {
   }
 
-  virtual ~GenericResourceThrottle() {
+  ~GenericResourceThrottle() override {
     if (active_throttle_ == this)
       active_throttle_ = NULL;
   }
 
   // ResourceThrottle implementation:
-  virtual void WillStartRequest(bool* defer) OVERRIDE {
+  void WillStartRequest(bool* defer) override {
     ASSERT_EQ(NULL, active_throttle_);
     if (flags_ & DEFER_STARTING_REQUEST) {
       active_throttle_ = this;
@@ -588,7 +591,7 @@ class GenericResourceThrottle : public ResourceThrottle {
     }
   }
 
-  virtual void WillProcessResponse(bool* defer) OVERRIDE {
+  void WillProcessResponse(bool* defer) override {
     ASSERT_EQ(NULL, active_throttle_);
     if (flags_ & DEFER_PROCESSING_RESPONSE) {
       active_throttle_ = this;
@@ -596,7 +599,7 @@ class GenericResourceThrottle : public ResourceThrottle {
     }
   }
 
-  virtual void WillStartUsingNetwork(bool* defer) OVERRIDE {
+  void WillStartUsingNetwork(bool* defer) override {
     ASSERT_EQ(NULL, active_throttle_);
 
     if (flags_ & DEFER_NETWORK_START) {
@@ -605,7 +608,7 @@ class GenericResourceThrottle : public ResourceThrottle {
     }
   }
 
-  virtual const char* GetNameForLogging() const OVERRIDE {
+  const char* GetNameForLogging() const override {
     return "GenericResourceThrottle";
   }
 
@@ -657,12 +660,11 @@ class TestResourceDispatcherHostDelegate
 
   // ResourceDispatcherHostDelegate implementation:
 
-  virtual void RequestBeginning(
-      net::URLRequest* request,
-      ResourceContext* resource_context,
-      AppCacheService* appcache_service,
-      ResourceType resource_type,
-      ScopedVector<ResourceThrottle>* throttles) OVERRIDE {
+  void RequestBeginning(net::URLRequest* request,
+                        ResourceContext* resource_context,
+                        AppCacheService* appcache_service,
+                        ResourceType resource_type,
+                        ScopedVector<ResourceThrottle>* throttles) override {
     if (user_data_) {
       const void* key = user_data_.get();
       request->SetUserData(key, user_data_.release());
@@ -729,7 +731,7 @@ class ResourceDispatcherHostTest : public testing::Test,
   }
 
   // IPC::Sender implementation
-  virtual bool Send(IPC::Message* msg) OVERRIDE {
+  bool Send(IPC::Message* msg) override {
     accum_.AddMessage(*msg);
 
     if (send_data_received_acks_ &&
@@ -751,12 +753,12 @@ class ResourceDispatcherHostTest : public testing::Test,
   friend class TestURLRequestJobFactory;
 
   // testing::Test
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ChildProcessSecurityPolicyImpl::GetInstance()->Add(0);
     HandleScheme("test");
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     EXPECT_TRUE(URLRequestTestDelayedStartJob::DelayedStartQueueEmpty());
     URLRequestTestDelayedStartJob::ClearQueue();
 
@@ -1779,8 +1781,8 @@ TEST_F(ResourceDispatcherHostTest, CalculateApproximateMemoryCost) {
   std::fill(upload_content.begin(), upload_content.end(), 'x');
   scoped_ptr<net::UploadElementReader> reader(new net::UploadBytesElementReader(
       upload_content.data(), upload_content.size()));
-  req->set_upload(make_scoped_ptr(
-      net::UploadDataStream::CreateWithReader(reader.Pass(), 0)));
+  req->set_upload(
+      net::ElementsUploadDataStream::CreateWithReader(reader.Pass(), 0));
 
   // Since the upload throttling is disabled, this has no effect on the cost.
   EXPECT_EQ(
@@ -2284,6 +2286,88 @@ TEST_F(ResourceDispatcherHostTest, TransferNavigationHtml) {
   ASSERT_EQ(2U, msgs.size());
   EXPECT_EQ(ResourceMsg_ReceivedRedirect::ID, msgs[0][0].type());
   CheckSuccessfulRequest(msgs[1], kResponseBody);
+}
+
+// Test transferring two navigations with text/html, to ensure the resource
+// accounting works.
+TEST_F(ResourceDispatcherHostTest, TransferTwoNavigationsHtml) {
+  // This test expects the cross site request to be leaked, so it can transfer
+  // the request directly.
+  CrossSiteResourceHandler::SetLeakRequestsForTesting(true);
+
+  EXPECT_EQ(0, host_.pending_requests());
+
+  int render_view_id = 0;
+  int request_id = 1;
+
+  // Configure initial request.
+  const std::string kResponseBody = "hello world";
+  SetResponse("HTTP/1.1 200 OK\n"
+              "Content-Type: text/html\n\n",
+              kResponseBody);
+
+  HandleScheme("http");
+
+  // Temporarily replace ContentBrowserClient with one that will trigger the
+  // transfer navigation code paths.
+  TransfersAllNavigationsContentBrowserClient new_client;
+  ContentBrowserClient* old_client = SetBrowserClientForTesting(&new_client);
+
+  // Make the first request.
+  MakeTestRequestWithResourceType(filter_.get(), render_view_id, request_id,
+                                  GURL("http://example.com/blah"),
+                                  RESOURCE_TYPE_MAIN_FRAME);
+
+  // Make a second request from the same process.
+  int second_request_id = 2;
+  MakeTestRequestWithResourceType(filter_.get(), render_view_id,
+                                  second_request_id,
+                                  GURL("http://example.com/foo"),
+                                  RESOURCE_TYPE_MAIN_FRAME);
+
+  // Flush all the pending requests to get the response through the
+  // BufferedResourceHandler.
+  while (net::URLRequestTestJob::ProcessOnePendingMessage()) {}
+
+  // Restore, now that we've set up a transfer.
+  SetBrowserClientForTesting(old_client);
+
+  // This second filter is used to emulate a second process.
+  scoped_refptr<ForwardingFilter> second_filter = MakeForwardingFilter();
+
+  // Transfer the first request.
+  int new_render_view_id = 1;
+  int new_request_id = 5;
+  ResourceHostMsg_Request request =
+      CreateResourceRequest("GET", RESOURCE_TYPE_MAIN_FRAME,
+                            GURL("http://example.com/blah"));
+  request.transferred_request_child_id = filter_->child_id();
+  request.transferred_request_request_id = request_id;
+
+  ResourceHostMsg_RequestResource transfer_request_msg(
+      new_render_view_id, new_request_id, request);
+  host_.OnMessageReceived(transfer_request_msg, second_filter.get());
+  base::MessageLoop::current()->RunUntilIdle();
+
+  // Transfer the second request.
+  int new_second_request_id = 6;
+  ResourceHostMsg_Request second_request =
+      CreateResourceRequest("GET", RESOURCE_TYPE_MAIN_FRAME,
+                            GURL("http://example.com/foo"));
+  request.transferred_request_child_id = filter_->child_id();
+  request.transferred_request_request_id = second_request_id;
+
+  ResourceHostMsg_RequestResource second_transfer_request_msg(
+      new_render_view_id, new_second_request_id, second_request);
+  host_.OnMessageReceived(second_transfer_request_msg, second_filter.get());
+  base::MessageLoop::current()->RunUntilIdle();
+
+  // Check generated messages.
+  ResourceIPCAccumulator::ClassifiedMessages msgs;
+  accum_.GetClassifiedMessages(&msgs);
+
+  ASSERT_EQ(2U, msgs.size());
+  CheckSuccessfulRequest(msgs[0], kResponseBody);
 }
 
 // Test transferred navigations with text/plain, which causes
@@ -2923,6 +3007,19 @@ net::URLRequestJob* TestURLRequestJobFactory::MaybeCreateJobWithProtocolHandler(
           false);
     }
   }
+}
+
+net::URLRequestJob* TestURLRequestJobFactory::MaybeInterceptRedirect(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const GURL& location) const {
+  return nullptr;
+}
+
+net::URLRequestJob* TestURLRequestJobFactory::MaybeInterceptResponse(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate) const {
+  return nullptr;
 }
 
 }  // namespace content

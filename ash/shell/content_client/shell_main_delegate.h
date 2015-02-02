@@ -24,11 +24,11 @@ class ShellContentBrowserClient;
 class ShellMainDelegate : public content::ContentMainDelegate {
  public:
   ShellMainDelegate();
-  virtual ~ShellMainDelegate();
+  ~ShellMainDelegate() override;
 
-  virtual bool BasicStartupComplete(int* exit_code) OVERRIDE;
-  virtual void PreSandboxStartup() OVERRIDE;
-  virtual content::ContentBrowserClient* CreateContentBrowserClient() OVERRIDE;
+  bool BasicStartupComplete(int* exit_code) override;
+  void PreSandboxStartup() override;
+  content::ContentBrowserClient* CreateContentBrowserClient() override;
 
  private:
   void InitializeResourceBundle();

@@ -13,11 +13,11 @@ namespace extensions {
 class ShellExtensionsRendererClient : public ExtensionsRendererClient {
  public:
   ShellExtensionsRendererClient();
-  virtual ~ShellExtensionsRendererClient();
+  ~ShellExtensionsRendererClient() override;
 
   // ExtensionsRendererClient implementation.
-  virtual bool IsIncognitoProcess() const OVERRIDE;
-  virtual int GetLowestIsolatedWorldId() const OVERRIDE;
+  bool IsIncognitoProcess() const override;
+  int GetLowestIsolatedWorldId() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellExtensionsRendererClient);

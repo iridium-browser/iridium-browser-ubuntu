@@ -52,7 +52,7 @@ class ASH_EXPORT WebNotificationTray
       public ui::SimpleMenuModel::Delegate {
  public:
   explicit WebNotificationTray(StatusAreaWidget* status_area_widget);
-  virtual ~WebNotificationTray();
+  ~WebNotificationTray() override;
 
   // Sets the height of the system tray from the edge of the work area so that
   // the notification popups don't overlap with the tray. Passes 0 if no UI is
@@ -75,48 +75,44 @@ class ASH_EXPORT WebNotificationTray
   void UpdateAfterLoginStatusChange(user::LoginStatus login_status);
 
   // Overridden from TrayBackgroundView.
-  virtual void SetShelfAlignment(ShelfAlignment alignment) OVERRIDE;
-  virtual void AnchorUpdated() OVERRIDE;
-  virtual base::string16 GetAccessibleNameForTray() OVERRIDE;
-  virtual void HideBubbleWithView(
-      const views::TrayBubbleView* bubble_view) OVERRIDE;
-  virtual bool ClickedOutsideBubble() OVERRIDE;
+  void SetShelfAlignment(ShelfAlignment alignment) override;
+  void AnchorUpdated() override;
+  base::string16 GetAccessibleNameForTray() override;
+  void HideBubbleWithView(const views::TrayBubbleView* bubble_view) override;
+  bool ClickedOutsideBubble() override;
 
   // Overridden from ActionableView.
-  virtual bool PerformAction(const ui::Event& event) OVERRIDE;
+  bool PerformAction(const ui::Event& event) override;
 
   // Overridden from views::TrayBubbleView::Delegate.
-  virtual void BubbleViewDestroyed() OVERRIDE;
-  virtual void OnMouseEnteredView() OVERRIDE;
-  virtual void OnMouseExitedView() OVERRIDE;
-  virtual base::string16 GetAccessibleNameForBubble() OVERRIDE;
-  virtual gfx::Rect GetAnchorRect(
-      views::Widget* anchor_widget,
-      AnchorType anchor_type,
-      AnchorAlignment anchor_alignment) const OVERRIDE;
-  virtual void HideBubble(const views::TrayBubbleView* bubble_view) OVERRIDE;
+  void BubbleViewDestroyed() override;
+  void OnMouseEnteredView() override;
+  void OnMouseExitedView() override;
+  base::string16 GetAccessibleNameForBubble() override;
+  gfx::Rect GetAnchorRect(views::Widget* anchor_widget,
+                          AnchorType anchor_type,
+                          AnchorAlignment anchor_alignment) const override;
+  void HideBubble(const views::TrayBubbleView* bubble_view) override;
 
   // Overridden from ButtonListener.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from MessageCenterTrayDelegate.
-  virtual void OnMessageCenterTrayChanged() OVERRIDE;
-  virtual bool ShowMessageCenter() OVERRIDE;
-  virtual void HideMessageCenter() OVERRIDE;
-  virtual bool ShowPopups() OVERRIDE;
-  virtual void HidePopups() OVERRIDE;
-  virtual bool ShowNotifierSettings() OVERRIDE;
-  virtual bool IsContextMenuEnabled() const OVERRIDE;
-  virtual message_center::MessageCenterTray* GetMessageCenterTray() OVERRIDE;
+  void OnMessageCenterTrayChanged() override;
+  bool ShowMessageCenter() override;
+  void HideMessageCenter() override;
+  bool ShowPopups() override;
+  void HidePopups() override;
+  bool ShowNotifierSettings() override;
+  bool IsContextMenuEnabled() const override;
+  message_center::MessageCenterTray* GetMessageCenterTray() override;
 
   // Overridden from SimpleMenuModel::Delegate.
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  void ExecuteCommand(int command_id, int event_flags) override;
 
   message_center::MessageCenter* message_center() const;
 

@@ -65,7 +65,7 @@ const char kTypicalPage[] = "/focus/typical_page.html";
 class BrowserFocusTest : public InProcessBrowserTest {
  public:
    // InProcessBrowserTest overrides:
-   virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
      ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
    }
 
@@ -97,9 +97,22 @@ class BrowserFocusTest : public InProcessBrowserTest {
     for (size_t i = 0; i < 2; ++i) {
       SCOPED_TRACE(base::StringPrintf("focus outer loop: %" PRIuS, i));
       ASSERT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
+
       // Mac requires an extra Tab key press to traverse the app menu button
-      // iff "Full Keyboard Access" is enabled. This test code should probably
-      // check the setting via NSApplication's isFullKeyboardAccessEnabled.
+      // iff "Full Keyboard Access" is enabled. In reverse, four Tab key presses
+      // are required to traverse the back/forward buttons and the tab strip.
+#if defined(OS_MACOSX)
+      if (ui_controls::IsFullKeyboardAccessEnabled()) {
+        ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+            browser(), key, false, reverse, false, false));
+        if (reverse) {
+          for (int j = 0; j < 3; ++j) {
+            ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
+                browser(), key, false, reverse, false, false));
+          }
+        }
+      }
+#endif
 
       for (size_t j = 0; j < arraysize(kExpectedIDs); ++j) {
         SCOPED_TRACE(base::StringPrintf("focus inner loop %" PRIuS, j));
@@ -136,23 +149,6 @@ class BrowserFocusTest : public InProcessBrowserTest {
   }
 };
 
-// A helper class that waits for an interstitial page to attach.
-class WaitForInterstitial : public content::WebContentsObserver {
- public:
-  explicit WaitForInterstitial(content::WebContents* tab)
-      : WebContentsObserver(tab),
-        runner_(new content::MessageLoopRunner) {
-    runner_->Run();
-  }
-
-  virtual void DidAttachInterstitialPage() OVERRIDE { runner_->Quit(); }
-  virtual void DidDetachInterstitialPage() OVERRIDE { NOTREACHED(); }
-
- private:
-  scoped_refptr<content::MessageLoopRunner> runner_;
-  DISALLOW_COPY_AND_ASSIGN(WaitForInterstitial);
-};
-
 // A test interstitial page with typical HTML contents.
 class TestInterstitialPage : public content::InterstitialPageDelegate {
  public:
@@ -168,11 +164,12 @@ class TestInterstitialPage : public content::InterstitialPageDelegate {
 
     // Show the interstitial and delay return until it has attached.
     interstitial_page_->Show();
-    WaitForInterstitial wait(tab);
+    content::WaitForInterstitialAttach(tab);
+
     EXPECT_TRUE(tab->ShowingInterstitialPage());
   }
 
-  virtual std::string GetHTMLContents() OVERRIDE { return html_contents_; }
+  std::string GetHTMLContents() override { return html_contents_; }
 
   RenderViewHost* render_view_host() {
     return interstitial_page_->GetRenderViewHostForTesting();

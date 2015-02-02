@@ -30,10 +30,8 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
-#include "gin/public/gin_embedders.h"
 #include "gin/public/isolate_holder.h"
 #include "modules/indexeddb/IDBPendingTransactionMonitor.h"
-#include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
@@ -45,8 +43,6 @@ class DOMDataStore;
 class GCEventData;
 class StringCache;
 struct WrapperTypeInfo;
-
-class ExternalStringVisitor;
 
 typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
 
@@ -78,6 +74,9 @@ public:
     int decrementRecursionLevel() { return --m_recursionLevel; }
     bool isHandlingRecursionLevelError() const { return m_isHandlingRecursionLevelError; }
     void setIsHandlingRecursionLevelError(bool value) { m_isHandlingRecursionLevelError = value; }
+
+    bool isReportingException() const { return m_isReportingException; }
+    void setReportingException(bool value) { m_isReportingException = value; }
 
     bool performingMicrotaskCheckpoint() const { return m_performingMicrotaskCheckpoint; }
     void setPerformingMicrotaskCheckpoint(bool performingMicrotaskCheckpoint) { m_performingMicrotaskCheckpoint = performingMicrotaskCheckpoint; }
@@ -131,6 +130,7 @@ private:
 
     int m_recursionLevel;
     bool m_isHandlingRecursionLevelError;
+    bool m_isReportingException;
 
 #if ENABLE(ASSERT)
     int m_internalScriptRecursionLevel;

@@ -42,38 +42,29 @@ class TestingAppListServiceImpl : public AppListServiceImpl {
   }
 
   // AppListService overrides:
-  virtual Profile* GetCurrentAppListProfile() OVERRIDE {
+  Profile* GetCurrentAppListProfile() override {
     // We don't return showing_for_profile_ here because that is only defined if
     // the app list is visible.
     return NULL;
   }
 
-  virtual void CreateForProfile(Profile* requested_profile) OVERRIDE {
-  }
+  void CreateForProfile(Profile* requested_profile) override {}
 
-  virtual void ShowForProfile(Profile* requested_profile) OVERRIDE {
+  void ShowForProfile(Profile* requested_profile) override {
     showing_for_profile_ = requested_profile;
     RecordAppListLaunch();
   }
 
-  virtual void DismissAppList() OVERRIDE {
-    showing_for_profile_ = NULL;
-  }
+  void DismissAppList() override { showing_for_profile_ = NULL; }
 
-  virtual bool IsAppListVisible() const OVERRIDE {
-    return !!showing_for_profile_;
-  }
+  bool IsAppListVisible() const override { return !!showing_for_profile_; }
 
-  virtual gfx::NativeWindow GetAppListWindow() OVERRIDE {
-    return NULL;
-  }
+  gfx::NativeWindow GetAppListWindow() override { return NULL; }
 
-  virtual AppListControllerDelegate* GetControllerDelegate() OVERRIDE {
-    return NULL;
-  }
+  AppListControllerDelegate* GetControllerDelegate() override { return NULL; }
 
   // AppListServiceImpl overrides:
-  virtual void DestroyAppList() OVERRIDE { ++destroy_app_list_call_count_; }
+  void DestroyAppList() override { ++destroy_app_list_call_count_; }
 
  private:
   Profile* showing_for_profile_;
@@ -86,7 +77,7 @@ class AppListServiceUnitTest : public testing::Test {
  public:
   AppListServiceUnitTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     SetupWithCommandLine(CommandLine(CommandLine::NO_PROGRAM));
   }
 
@@ -228,8 +219,8 @@ TEST_F(AppListServiceUnitTest, UMAPrefStates) {
             local_state_->GetInteger(prefs::kAppListEnableMethod));
   EXPECT_EQ(0, local_state_->GetInt64(prefs::kAppListEnableTime));
 
-  // An auto-show here should keep the recorded enable method.
-  service_->AutoShowForProfile(profile1_.get());
+  // An app install auto-show here should keep the recorded enable method.
+  service_->ShowForAppInstall(profile1_.get(), "", false);
   EXPECT_EQ(AppListService::ENABLE_FOR_APP_INSTALL,
             local_state_->GetInteger(prefs::kAppListEnableMethod));
 
@@ -244,7 +235,7 @@ TEST_F(AppListServiceUnitTest, UMAPrefStates) {
 
   // An auto-show here should update the enable method to prevent recording it
   // as ENABLE_FOR_APP_INSTALL.
-  service_->AutoShowForProfile(profile1_.get());
+  service_->ShowForAppInstall(profile1_.get(), "", false);
   EXPECT_EQ(AppListService::ENABLE_SHOWN_UNDISCOVERED,
             local_state_->GetInteger(prefs::kAppListEnableMethod));
 }

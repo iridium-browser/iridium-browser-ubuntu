@@ -20,28 +20,27 @@ class ChromeContentClient : public content::ContentClient {
   static const char* const kPDFPluginName;
   static const char* const kRemotingViewerPluginPath;
 
-  virtual void SetActiveURL(const GURL& url) OVERRIDE;
-  virtual void SetGpuInfo(const gpu::GPUInfo& gpu_info) OVERRIDE;
-  virtual void AddPepperPlugins(
-      std::vector<content::PepperPluginInfo>* plugins) OVERRIDE;
-  virtual void AddAdditionalSchemes(
-      std::vector<std::string>* standard_schemes,
-      std::vector<std::string>* saveable_shemes) OVERRIDE;
-  virtual std::string GetProduct() const OVERRIDE;
-  virtual std::string GetUserAgent() const OVERRIDE;
-  virtual base::string16 GetLocalizedString(int message_id) const OVERRIDE;
-  virtual base::StringPiece GetDataResource(
+  void SetActiveURL(const GURL& url) override;
+  void SetGpuInfo(const gpu::GPUInfo& gpu_info) override;
+  void AddPepperPlugins(
+      std::vector<content::PepperPluginInfo>* plugins) override;
+  void AddAdditionalSchemes(std::vector<std::string>* standard_schemes,
+                            std::vector<std::string>* saveable_shemes) override;
+  std::string GetProduct() const override;
+  std::string GetUserAgent() const override;
+  base::string16 GetLocalizedString(int message_id) const override;
+  base::StringPiece GetDataResource(
       int resource_id,
-      ui::ScaleFactor scale_factor) const OVERRIDE;
-  virtual base::RefCountedStaticMemory* GetDataResourceBytes(
-      int resource_id) const OVERRIDE;
-  virtual gfx::Image& GetNativeImageNamed(int resource_id) const OVERRIDE;
-  virtual std::string GetProcessTypeNameInEnglish(int type) OVERRIDE;
+      ui::ScaleFactor scale_factor) const override;
+  base::RefCountedStaticMemory* GetDataResourceBytes(
+      int resource_id) const override;
+  gfx::Image& GetNativeImageNamed(int resource_id) const override;
+  std::string GetProcessTypeNameInEnglish(int type) override;
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
-  virtual bool GetSandboxProfileForSandboxType(
+  bool GetSandboxProfileForSandboxType(
       int sandbox_type,
-      int* sandbox_profile_resource_id) const OVERRIDE;
+      int* sandbox_profile_resource_id) const override;
 #endif
 };
 

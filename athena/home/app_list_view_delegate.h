@@ -10,62 +10,58 @@
 #include "ui/app_list/app_list_view_delegate.h"
 
 namespace app_list {
-class SearchProvider;
+class SearchController;
 }
 
 namespace athena {
 class AppModelBuilder;
+class SearchControllerFactory;
 
 class AppListViewDelegate : public app_list::AppListViewDelegate {
  public:
-  explicit AppListViewDelegate(AppModelBuilder* model_builder);
-  virtual ~AppListViewDelegate();
-
-  void RegisterSearchProvider(app_list::SearchProvider* search_provider);
+  AppListViewDelegate(AppModelBuilder* model_builder,
+                      SearchControllerFactory* search_factory);
+  ~AppListViewDelegate() override;
 
  private:
-  void SearchResultChanged();
-
   // Overridden from app_list::AppListViewDelegate:
-  virtual bool ForceNativeDesktop() const OVERRIDE;
-  virtual void SetProfileByPath(const base::FilePath& profile_path) OVERRIDE;
-  virtual app_list::AppListModel* GetModel() OVERRIDE;
-  virtual app_list::SpeechUIModel* GetSpeechUI() OVERRIDE;
-  virtual void GetShortcutPathForApp(
+  bool ForceNativeDesktop() const override;
+  void SetProfileByPath(const base::FilePath& profile_path) override;
+  app_list::AppListModel* GetModel() override;
+  app_list::SpeechUIModel* GetSpeechUI() override;
+  void GetShortcutPathForApp(
       const std::string& app_id,
-      const base::Callback<void(const base::FilePath&)>& callback) OVERRIDE;
-  virtual void StartSearch() OVERRIDE;
-  virtual void StopSearch() OVERRIDE;
-  virtual void OpenSearchResult(app_list::SearchResult* result,
-                                bool auto_launch,
-                                int event_flags) OVERRIDE;
-  virtual void InvokeSearchResultAction(app_list::SearchResult* result,
-                                        int action_index,
-                                        int event_flags) OVERRIDE;
-  virtual base::TimeDelta GetAutoLaunchTimeout() OVERRIDE;
-  virtual void AutoLaunchCanceled() OVERRIDE;
-  virtual void ViewInitialized() OVERRIDE;
-  virtual void Dismiss() OVERRIDE;
-  virtual void ViewClosing() OVERRIDE;
-  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
-  virtual void OpenSettings() OVERRIDE;
-  virtual void OpenHelp() OVERRIDE;
-  virtual void OpenFeedback() OVERRIDE;
-  virtual void ToggleSpeechRecognition() OVERRIDE;
-  virtual void ShowForProfileByPath(
-      const base::FilePath& profile_path) OVERRIDE;
-  virtual views::View* CreateStartPageWebView(const gfx::Size& size) OVERRIDE;
-  virtual std::vector<views::View*> CreateCustomPageWebViews(
-      const gfx::Size& size) OVERRIDE;
-  virtual bool IsSpeechRecognitionEnabled() OVERRIDE;
-  virtual const Users& GetUsers() const OVERRIDE;
-  virtual bool ShouldCenterWindow() const OVERRIDE;
+      const base::Callback<void(const base::FilePath&)>& callback) override;
+  void StartSearch() override;
+  void StopSearch() override;
+  void OpenSearchResult(app_list::SearchResult* result,
+                        bool auto_launch,
+                        int event_flags) override;
+  void InvokeSearchResultAction(app_list::SearchResult* result,
+                                int action_index,
+                                int event_flags) override;
+  base::TimeDelta GetAutoLaunchTimeout() override;
+  void AutoLaunchCanceled() override;
+  void ViewInitialized() override;
+  void Dismiss() override;
+  void ViewClosing() override;
+  gfx::ImageSkia GetWindowIcon() override;
+  void OpenSettings() override;
+  void OpenHelp() override;
+  void OpenFeedback() override;
+  void ToggleSpeechRecognition() override;
+  void ShowForProfileByPath(const base::FilePath& profile_path) override;
+  views::View* CreateStartPageWebView(const gfx::Size& size) override;
+  std::vector<views::View*> CreateCustomPageWebViews(
+      const gfx::Size& size) override;
+  bool IsSpeechRecognitionEnabled() override;
+  const Users& GetUsers() const override;
+  bool ShouldCenterWindow() const override;
 
   scoped_ptr<app_list::AppListModel> model_;
   scoped_ptr<app_list::SpeechUIModel> speech_ui_;
   Users users_;
-
-  std::vector<app_list::SearchProvider*> search_providers_;
+  scoped_ptr<app_list::SearchController> search_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListViewDelegate);
 };

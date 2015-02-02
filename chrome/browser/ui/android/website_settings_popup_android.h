@@ -16,6 +16,17 @@ namespace content {
 class WebContents;
 }
 
+// A Java counterpart will be generated for this enum.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser
+enum PageInfoConnectionType {
+  CONNECTION_UNKNOWN,
+  CONNECTION_ENCRYPTED,
+  CONNECTION_MIXED_CONTENT,
+  CONNECTION_UNENCRYPTED,
+  CONNECTION_ENCRYPTED_ERROR,
+  CONNECTION_INTERNAL_PAGE,
+};
+
 // Android implementation of the website settings UI.
 class WebsiteSettingsPopupAndroid : public WebsiteSettingsUI {
  public:
@@ -24,18 +35,18 @@ class WebsiteSettingsPopupAndroid : public WebsiteSettingsUI {
                               content::WebContents* web_contents);
   virtual ~WebsiteSettingsPopupAndroid();
   void Destroy(JNIEnv* env, jobject obj);
-
-  // Revokes any current user exceptions for bypassing SSL error interstitials
-  // on this page.
-  void ResetCertDecisions(JNIEnv* env, jobject obj, jobject java_web_contents);
+  void OnPermissionSettingChanged(JNIEnv* env,
+                                  jobject obj,
+                                  jint type,
+                                  jint setting);
 
   // WebsiteSettingsUI implementations.
-  virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) OVERRIDE;
+  virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) override;
   virtual void SetPermissionInfo(
-      const PermissionInfoList& permission_info_list) OVERRIDE;
-  virtual void SetIdentityInfo(const IdentityInfo& identity_info) OVERRIDE;
-  virtual void SetFirstVisit(const base::string16& first_visit) OVERRIDE;
-  virtual void SetSelectedTab(WebsiteSettingsUI::TabId tab_id) OVERRIDE;
+      const PermissionInfoList& permission_info_list) override;
+  virtual void SetIdentityInfo(const IdentityInfo& identity_info) override;
+  virtual void SetFirstVisit(const base::string16& first_visit) override;
+  virtual void SetSelectedTab(WebsiteSettingsUI::TabId tab_id) override;
 
   static bool RegisterWebsiteSettingsPopupAndroid(JNIEnv* env);
 
@@ -45,6 +56,8 @@ class WebsiteSettingsPopupAndroid : public WebsiteSettingsUI {
 
   // The java prompt implementation.
   base::android::ScopedJavaGlobalRef<jobject> popup_jobject_;
+
+  GURL url_;
 
   DISALLOW_COPY_AND_ASSIGN(WebsiteSettingsPopupAndroid);
 };

@@ -23,12 +23,12 @@ class OverflowBubbleViewTestAPI;
 class ASH_EXPORT OverflowBubbleView : public views::BubbleDelegateView {
  public:
   OverflowBubbleView();
-  virtual ~OverflowBubbleView();
+  ~OverflowBubbleView() override;
 
   void InitOverflowBubble(views::View* anchor, ShelfView* shelf_view);
 
   // views::BubbleDelegateView overrides:
-  virtual gfx::Rect GetBubbleBounds() OVERRIDE;
+  gfx::Rect GetBubbleBounds() override;
 
  private:
   friend class test::OverflowBubbleViewTestAPI;
@@ -44,13 +44,13 @@ class ASH_EXPORT OverflowBubbleView : public views::BubbleDelegateView {
   void ScrollByYOffset(int y_offset);
 
   // views::View overrides:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
-  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void Layout() override;
+  void ChildPreferredSizeChanged(views::View* child) override;
+  bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
 
   // ui::EventHandler overrides:
-  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
+  void OnScrollEvent(ui::ScrollEvent* event) override;
 
   ShelfLayoutManager* GetShelfLayoutManager() const;
 

@@ -9,10 +9,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_match_type.h"
+#include "components/omnibox/suggestion_answer.h"
 #include "url/gurl.h"
 
 class AutocompleteInput;
@@ -118,6 +118,7 @@ class SearchSuggestionParser {
                   const base::string16& annotation,
                   const base::string16& answer_contents,
                   const base::string16& answer_type,
+                  scoped_ptr<SuggestionAnswer> answer,
                   const std::string& suggest_query_params,
                   const std::string& deletion_url,
                   bool from_keyword_provider,
@@ -125,7 +126,10 @@ class SearchSuggestionParser {
                   bool relevance_from_server,
                   bool should_prefetch,
                   const base::string16& input_text);
-    virtual ~SuggestResult();
+    SuggestResult(const SuggestResult& result);
+    ~SuggestResult() override;
+
+    SuggestResult& operator=(const SuggestResult& rhs);
 
     const base::string16& suggestion() const { return suggestion_; }
     const base::string16& match_contents_prefix() const {
@@ -138,6 +142,7 @@ class SearchSuggestionParser {
 
     const base::string16& answer_contents() const { return answer_contents_; }
     const base::string16& answer_type() const { return answer_type_; }
+    const SuggestionAnswer* answer() const { return answer_.get(); }
 
     bool should_prefetch() const { return should_prefetch_; }
 
@@ -149,9 +154,8 @@ class SearchSuggestionParser {
                                const base::string16& input_text);
 
     // Result:
-    virtual int CalculateRelevance(
-        const AutocompleteInput& input,
-        bool keyword_provider_requested) const OVERRIDE;
+    int CalculateRelevance(const AutocompleteInput& input,
+                           bool keyword_provider_requested) const override;
 
    private:
     // The search terms to be used for this suggestion.
@@ -171,11 +175,16 @@ class SearchSuggestionParser {
     // Optional additional parameters to be added to the search URL.
     std::string suggest_query_params_;
 
+    // TODO(jdonnelly): Remove the following two properties once the downstream
+    // clients are using the SuggestionAnswer.
     // Optional formatted Answers result.
     base::string16 answer_contents_;
 
     // Type of optional formatted Answers result.
     base::string16 answer_type_;
+
+    // Optional short answer to the input that produced this suggestion.
+    scoped_ptr<SuggestionAnswer> answer_;
 
     // Should this result be prefetched?
     bool should_prefetch_;
@@ -193,7 +202,7 @@ class SearchSuggestionParser {
                      bool relevance_from_server,
                      const base::string16& input_text,
                      const std::string& languages);
-    virtual ~NavigationResult();
+    ~NavigationResult() override;
 
     const GURL& url() const { return url_; }
     const base::string16& description() const { return description_; }
@@ -209,9 +218,8 @@ class SearchSuggestionParser {
                                            const std::string& languages);
 
     // Result:
-    virtual int CalculateRelevance(
-        const AutocompleteInput& input,
-        bool keyword_provider_requested) const OVERRIDE;
+    int CalculateRelevance(const AutocompleteInput& input,
+                           bool keyword_provider_requested) const override;
 
    private:
     // The suggested url for navigation.
@@ -266,7 +274,7 @@ class SearchSuggestionParser {
     bool relevances_from_server;
 
     // URLs of any images in Answers results.
-    std::vector<GURL> answers_image_urls;
+    SuggestionAnswer::URLs answers_image_urls;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Results);
@@ -294,15 +302,6 @@ class SearchSuggestionParser {
       Results* results);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(SearchSuggestionParser,
-                           GetAnswersImageURLsWithoutImagelines);
-  FRIEND_TEST_ALL_PREFIXES(SearchSuggestionParser,
-                           GetAnswersImageURLsWithValidImage);
-
-  // Gets URLs of any images in Answers results.
-  static void GetAnswersImageURLs(const base::DictionaryValue* answer_json,
-                                  std::vector<GURL>* urls);
-
   DISALLOW_COPY_AND_ASSIGN(SearchSuggestionParser);
 };
 

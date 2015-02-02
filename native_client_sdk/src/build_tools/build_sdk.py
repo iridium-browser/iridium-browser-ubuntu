@@ -57,7 +57,7 @@ CYGTAR = os.path.join(BUILD_DIR, 'cygtar.py')
 PKGVER = os.path.join(BUILD_DIR, 'package_version', 'package_version.py')
 
 NACLPORTS_URL = 'https://chromium.googlesource.com/external/naclports.git'
-NACLPORTS_REV = '99f2417'
+NACLPORTS_REV = 'e53078c33d99b0b3cbadbbbbb92cccf7a48d5dc1'
 
 GYPBUILD_DIR = 'gypbuild'
 
@@ -242,6 +242,7 @@ NACL_HEADER_MAP = {
       ('native_client/src/include/nacl/nacl_minidump.h', 'nacl/'),
       ('native_client/src/untrusted/irt/irt.h', ''),
       ('native_client/src/untrusted/irt/irt_dev.h', ''),
+      ('native_client/src/untrusted/irt/irt_extension.h', ''),
       ('native_client/src/untrusted/nacl/nacl_dyncode.h', 'nacl/'),
       ('native_client/src/untrusted/nacl/nacl_startup.h', 'nacl/'),
       ('native_client/src/untrusted/pthread/pthread.h', ''),
@@ -399,6 +400,8 @@ def GypNinjaInstall(pepperdir, toolchains):
                         'nacl_helper_bootstrap_x86_32'])
     tools_files.append(['nacl_helper_bootstrap64',
                         'nacl_helper_bootstrap_x86_64'])
+    tools_files.append(['nonsfi_loader_newlib_x32_nonsfi.nexe',
+                        'nonsfi_loader_x86_32'])
 
   buildbot_common.MakeDir(os.path.join(pepperdir, 'tools'))
 
@@ -663,6 +666,7 @@ def BuildStepUpdateUserProjects(pepperdir, toolchains,
   filters['DEST'] = [
     'getting_started',
     'examples/api',
+    'examples/benchmarks',
     'examples/demo',
     'examples/tutorial',
     'src'

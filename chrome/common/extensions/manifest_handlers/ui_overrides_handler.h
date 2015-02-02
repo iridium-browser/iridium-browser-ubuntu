@@ -18,7 +18,7 @@ class ManifestPermission;
 // interface.
 struct UIOverrides : public Extension::ManifestData {
   UIOverrides();
-  virtual ~UIOverrides();
+  ~UIOverrides() override;
 
   static const UIOverrides* Get(const Extension* extension);
 
@@ -37,21 +37,21 @@ struct UIOverrides : public Extension::ManifestData {
 class UIOverridesHandler : public ManifestHandler {
  public:
   UIOverridesHandler();
-  virtual ~UIOverridesHandler();
+  ~UIOverridesHandler() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
-  virtual bool Validate(const Extension* extension,
-                        std::string* error,
-                        std::vector<InstallWarning>* warnings) const OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
+  bool Validate(const Extension* extension,
+                std::string* error,
+                std::vector<InstallWarning>* warnings) const override;
 
-  virtual ManifestPermission* CreatePermission() OVERRIDE;
-  virtual ManifestPermission* CreateInitialRequiredPermission(
-      const Extension* extension) OVERRIDE;
+  ManifestPermission* CreatePermission() override;
+  ManifestPermission* CreateInitialRequiredPermission(
+      const Extension* extension) override;
 
  private:
   class ManifestPermissionImpl;
 
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 
   DISALLOW_COPY_AND_ASSIGN(UIOverridesHandler);
 };

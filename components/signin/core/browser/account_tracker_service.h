@@ -56,10 +56,10 @@ class AccountTrackerService : public KeyedService,
   };
 
   AccountTrackerService();
-  virtual ~AccountTrackerService();
+  ~AccountTrackerService() override;
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -79,6 +79,18 @@ class AccountTrackerService : public KeyedService,
   // there are still unfininshed fetchers.
   virtual bool IsAllUserInfoFetched() const;
 
+  // Picks the correct account_id for the specified account depending on the
+  // migration state.
+  std::string PickAccountIdForAccount(const std::string& gaia,
+                                      const std::string& email);
+  static std::string PickAccountIdForAccount(PrefService* pref_service,
+                                             const std::string& gaia,
+                                             const std::string& email);
+
+  // Seeds the account whose account_id is given by PickAccountIdForAccount()
+  // with its corresponding gaia id and email address.
+  void SeedAccountInfo(const std::string& gaia, const std::string& email);
+
   AccountIdMigrationState GetMigrationState();
   static AccountIdMigrationState GetMigrationState(PrefService* pref_service);
 
@@ -91,8 +103,8 @@ class AccountTrackerService : public KeyedService,
   void OnUserInfoFetchFailure(AccountInfoFetcher* fetcher);
 
   // OAuth2TokenService::Observer implementation.
-  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE;
-  virtual void OnRefreshTokenRevoked(const std::string& account_id) OVERRIDE;
+  void OnRefreshTokenAvailable(const std::string& account_id) override;
+  void OnRefreshTokenRevoked(const std::string& account_id) override;
 
   struct AccountState {
     AccountInfo info;

@@ -35,21 +35,20 @@ class ChromeResourceDispatcherHostDelegate
   // |prerender_tracker| must outlive |this|.
   explicit ChromeResourceDispatcherHostDelegate(
       prerender::PrerenderTracker* prerender_tracker);
-  virtual ~ChromeResourceDispatcherHostDelegate();
+  ~ChromeResourceDispatcherHostDelegate() override;
 
   // ResourceDispatcherHostDelegate implementation.
-  virtual bool ShouldBeginRequest(
-      const std::string& method,
-      const GURL& url,
-      content::ResourceType resource_type,
-      content::ResourceContext* resource_context) OVERRIDE;
-  virtual void RequestBeginning(
+  bool ShouldBeginRequest(const std::string& method,
+                          const GURL& url,
+                          content::ResourceType resource_type,
+                          content::ResourceContext* resource_context) override;
+  void RequestBeginning(
       net::URLRequest* request,
       content::ResourceContext* resource_context,
       content::AppCacheService* appcache_service,
       content::ResourceType resource_type,
-      ScopedVector<content::ResourceThrottle>* throttles) OVERRIDE;
-  virtual void DownloadStarting(
+      ScopedVector<content::ResourceThrottle>* throttles) override;
+  void DownloadStarting(
       net::URLRequest* request,
       content::ResourceContext* resource_context,
       int child_id,
@@ -57,33 +56,30 @@ class ChromeResourceDispatcherHostDelegate
       int request_id,
       bool is_content_initiated,
       bool must_download,
-      ScopedVector<content::ResourceThrottle>* throttles) OVERRIDE;
-  virtual content::ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
-      net::AuthChallengeInfo* auth_info, net::URLRequest* request) OVERRIDE;
-  virtual bool HandleExternalProtocol(const GURL& url,
-                                      int child_id,
-                                      int route_id) OVERRIDE;
-  virtual bool ShouldForceDownloadResource(
-      const GURL& url, const std::string& mime_type) OVERRIDE;
-  virtual bool ShouldInterceptResourceAsStream(
-      net::URLRequest* request,
-      const std::string& mime_type,
-      GURL* origin,
-      std::string* payload) OVERRIDE;
-  virtual void OnStreamCreated(
-      net::URLRequest* request,
-      scoped_ptr<content::StreamHandle> stream) OVERRIDE;
-  virtual void OnResponseStarted(
-      net::URLRequest* request,
-      content::ResourceContext* resource_context,
-      content::ResourceResponse* response,
-      IPC::Sender* sender) OVERRIDE;
-  virtual void OnRequestRedirected(
-      const GURL& redirect_url,
-      net::URLRequest* request,
-      content::ResourceContext* resource_context,
-      content::ResourceResponse* response) OVERRIDE;
-  virtual void RequestComplete(net::URLRequest* url_request) OVERRIDE;
+      ScopedVector<content::ResourceThrottle>* throttles) override;
+  content::ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
+      net::AuthChallengeInfo* auth_info,
+      net::URLRequest* request) override;
+  bool HandleExternalProtocol(const GURL& url,
+                              int child_id,
+                              int route_id) override;
+  bool ShouldForceDownloadResource(const GURL& url,
+                                   const std::string& mime_type) override;
+  bool ShouldInterceptResourceAsStream(net::URLRequest* request,
+                                       const std::string& mime_type,
+                                       GURL* origin,
+                                       std::string* payload) override;
+  void OnStreamCreated(net::URLRequest* request,
+                       scoped_ptr<content::StreamInfo> stream) override;
+  void OnResponseStarted(net::URLRequest* request,
+                         content::ResourceContext* resource_context,
+                         content::ResourceResponse* response,
+                         IPC::Sender* sender) override;
+  void OnRequestRedirected(const GURL& redirect_url,
+                           net::URLRequest* request,
+                           content::ResourceContext* resource_context,
+                           content::ResourceResponse* response) override;
+  void RequestComplete(net::URLRequest* url_request) override;
 
   // Called on the UI thread. Allows switching out the
   // ExternalProtocolHandler::Delegate for testing code.

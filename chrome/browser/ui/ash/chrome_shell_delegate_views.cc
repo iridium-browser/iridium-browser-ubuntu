@@ -7,9 +7,7 @@
 #include <vector>
 
 #include "ash/accessibility_delegate.h"
-#include "ash/magnifier/magnifier_constants.h"
 #include "ash/media_delegate.h"
-#include "ash/system/tray/default_system_tray_delegate.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "chrome/browser/accessibility/accessibility_events.h"
@@ -23,6 +21,7 @@
 #include "chrome/browser/ui/ash/chrome_new_window_delegate.h"
 #include "chrome/browser/ui/ash/session_state_delegate_views.h"
 #include "chrome/browser/ui/ash/solid_color_user_wallpaper_delegate.h"
+#include "chrome/browser/ui/ash/system_tray_delegate_common.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -33,26 +32,19 @@
 #include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
-
-#if defined(OS_WIN)
-#include "chrome/browser/ui/ash/system_tray_delegate_win.h"
-#endif
-
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#include "chrome/browser/ui/ash/system_tray_delegate_linux.h"
-#endif
+#include "ui/chromeos/accessibility_types.h"
 
 namespace {
 
 class NewWindowDelegateImpl : public ChromeNewWindowDelegate {
  public:
   NewWindowDelegateImpl() {}
-  virtual ~NewWindowDelegateImpl() {}
+  ~NewWindowDelegateImpl() override {}
 
   // Overridden from ash::NewWindowDelegate:
-  virtual void OpenFileManager() OVERRIDE {}
-  virtual void OpenCrosh() OVERRIDE {}
-  virtual void ShowKeyboardOverlay() OVERRIDE {}
+  void OpenFileManager() override {}
+  void OpenCrosh() override {}
+  void ShowKeyboardOverlay() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NewWindowDelegateImpl);
@@ -61,12 +53,12 @@ class NewWindowDelegateImpl : public ChromeNewWindowDelegate {
 class MediaDelegateImpl : public ash::MediaDelegate {
  public:
   MediaDelegateImpl() {}
-  virtual ~MediaDelegateImpl() {}
-  virtual void HandleMediaNextTrack() OVERRIDE {}
-  virtual void HandleMediaPlayPause() OVERRIDE {}
-  virtual void HandleMediaPrevTrack() OVERRIDE {}
-  virtual ash::MediaCaptureState GetMediaCaptureState(
-      content::BrowserContext* context) OVERRIDE {
+  ~MediaDelegateImpl() override {}
+  void HandleMediaNextTrack() override {}
+  void HandleMediaPlayPause() override {}
+  void HandleMediaPrevTrack() override {}
+  ash::MediaCaptureState GetMediaCaptureState(
+      content::BrowserContext* context) override {
     return ash::MEDIA_CAPTURE_NONE;
   }
 
@@ -77,86 +69,60 @@ class MediaDelegateImpl : public ash::MediaDelegate {
 class EmptyAccessibilityDelegate : public ash::AccessibilityDelegate {
  public:
   EmptyAccessibilityDelegate() {}
-  virtual ~EmptyAccessibilityDelegate() {}
+  ~EmptyAccessibilityDelegate() override {}
 
-  virtual void ToggleHighContrast() OVERRIDE {
+  void ToggleHighContrast() override {}
+
+  bool IsHighContrastEnabled() const override { return false; }
+
+  bool IsSpokenFeedbackEnabled() const override { return false; }
+
+  void ToggleSpokenFeedback(
+      ui::AccessibilityNotificationVisibility notify) override {}
+
+  void SetLargeCursorEnabled(bool enalbed) override {}
+
+  bool IsLargeCursorEnabled() const override { return false; }
+
+  void SetMagnifierEnabled(bool enabled) override {}
+
+  void SetMagnifierType(ui::MagnifierType type) override {}
+
+  bool IsMagnifierEnabled() const override { return false; }
+
+  void SetAutoclickEnabled(bool enabled) override {}
+
+  bool IsAutoclickEnabled() const override { return false; }
+
+  ui::MagnifierType GetMagnifierType() const override {
+    return ui::kDefaultMagnifierType;
   }
 
-  virtual bool IsHighContrastEnabled() const OVERRIDE {
-    return false;
-  }
+  void SaveScreenMagnifierScale(double scale) override {}
 
-  virtual bool IsSpokenFeedbackEnabled() const OVERRIDE {
-    return false;
-  }
-
-  virtual void ToggleSpokenFeedback(
-      ash::AccessibilityNotificationVisibility notify) OVERRIDE {
-  }
-
-  virtual void SetLargeCursorEnabled(bool enalbed) OVERRIDE {
-  }
-
-  virtual bool IsLargeCursorEnabled() const OVERRIDE {
-    return false;
-  }
-
-  virtual void SetMagnifierEnabled(bool enabled) OVERRIDE {
-  }
-
-  virtual void SetMagnifierType(ash::MagnifierType type) OVERRIDE {
-  }
-
-  virtual bool IsMagnifierEnabled() const OVERRIDE {
-    return false;
-  }
-
-  virtual void SetAutoclickEnabled(bool enabled) OVERRIDE {
-  }
-
-  virtual bool IsAutoclickEnabled() const OVERRIDE {
-    return false;
-  }
-
-  virtual ash::MagnifierType GetMagnifierType() const OVERRIDE {
-    return ash::kDefaultMagnifierType;
-  }
-
-  virtual void SaveScreenMagnifierScale(double scale) OVERRIDE {
-  }
-
-  virtual double GetSavedScreenMagnifierScale() OVERRIDE {
+  double GetSavedScreenMagnifierScale() override {
     return std::numeric_limits<double>::min();
   }
 
-  virtual bool ShouldShowAccessibilityMenu() const OVERRIDE {
-    return false;
+  bool ShouldShowAccessibilityMenu() const override { return false; }
+
+  bool IsBrailleDisplayConnected() const override { return false; }
+
+  void SilenceSpokenFeedback() const override {}
+
+  void SetVirtualKeyboardEnabled(bool enabled) override {}
+
+  bool IsVirtualKeyboardEnabled() const override { return false; }
+
+  void TriggerAccessibilityAlert(ui::AccessibilityAlert alert) override {}
+
+  ui::AccessibilityAlert GetLastAccessibilityAlert() override {
+    return ui::A11Y_ALERT_NONE;
   }
 
-  virtual bool IsBrailleDisplayConnected() const OVERRIDE { return false; }
+  void PlayEarcon(int sound_key) override {}
 
-  virtual void SilenceSpokenFeedback() const OVERRIDE {
-  }
-
-  virtual void SetVirtualKeyboardEnabled(bool enabled) OVERRIDE {
-  }
-
-  virtual bool IsVirtualKeyboardEnabled() const OVERRIDE {
-    return false;
-  }
-
-  virtual void TriggerAccessibilityAlert(
-      ash::AccessibilityAlert alert) OVERRIDE {
-  }
-
-  virtual ash::AccessibilityAlert GetLastAccessibilityAlert() OVERRIDE {
-    return ash::A11Y_ALERT_NONE;
-  }
-
-  virtual void PlayEarcon(int sound_key) OVERRIDE {
-  }
-
-  virtual base::TimeDelta PlayShutdownSound() const OVERRIDE {
+  base::TimeDelta PlayShutdownSound() const override {
     return base::TimeDelta();
   }
 
@@ -189,13 +155,7 @@ ash::SessionStateDelegate* ChromeShellDelegate::CreateSessionStateDelegate() {
 }
 
 ash::SystemTrayDelegate* ChromeShellDelegate::CreateSystemTrayDelegate() {
-#if defined(OS_WIN)
-  return CreateWindowsSystemTrayDelegate();
-#elif defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  return CreateLinuxSystemTrayDelegate();
-#else
-  return new ash::DefaultSystemTrayDelegate;
-#endif
+  return new SystemTrayDelegateCommon();
 }
 
 ash::AccessibilityDelegate* ChromeShellDelegate::CreateAccessibilityDelegate() {

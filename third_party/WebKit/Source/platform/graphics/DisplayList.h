@@ -43,7 +43,7 @@ namespace blink {
 
 class IntSize;
 
-class PLATFORM_EXPORT DisplayList FINAL : public WTF::RefCounted<DisplayList> {
+class PLATFORM_EXPORT DisplayList final : public WTF::RefCounted<DisplayList> {
     WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(DisplayList);
 public:
@@ -60,7 +60,7 @@ public:
     // recording (i.e., between a GraphicsContext beginRecording/endRecording pair)
     // and if no recording has ever been completed. Otherwise it will return
     // the picture created by the last endRecording call.
-    SkPicture* picture() const { return m_picture.get(); }
+    PassRefPtr<SkPicture> picture() const { return m_picture; }
     void setPicture(SkPicture* picture) { m_picture = adoptRef(picture); }
 
     // FIXME: Need unit testing of these methods and their effect

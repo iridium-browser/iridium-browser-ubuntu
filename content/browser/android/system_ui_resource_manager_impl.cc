@@ -16,7 +16,6 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
-#include "third_party/skia/include/effects/SkPorterDuff.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/screen.h"
 
@@ -104,13 +103,13 @@ class SystemUIResourceManagerImpl::Entry
 
   // content::UIResourceClient implementation.
   virtual cc::UIResourceBitmap GetBitmap(cc::UIResourceId uid,
-                                         bool resource_lost) OVERRIDE {
+                                         bool resource_lost) override {
     DCHECK(!bitmap_.empty());
     return cc::UIResourceBitmap(bitmap_);
   }
 
   // content::UIResourceClientAndroid implementation.
-  virtual void UIResourceIsInvalid() OVERRIDE { id_ = 0; }
+  virtual void UIResourceIsInvalid() override { id_ = 0; }
 
   const SkBitmap& bitmap() const { return bitmap_; }
 

@@ -14,11 +14,11 @@ class MockBrowsingDataAppCacheHelper
   explicit MockBrowsingDataAppCacheHelper(
       content::BrowserContext* browser_context);
 
-  virtual void StartFetching(const base::Closure& completion_callback) OVERRIDE;
-  virtual void DeleteAppCacheGroup(const GURL& manifest_url) OVERRIDE;
+  void StartFetching(const base::Closure& completion_callback) override;
+  void DeleteAppCacheGroup(const GURL& manifest_url) override;
 
  private:
-  virtual ~MockBrowsingDataAppCacheHelper();
+  ~MockBrowsingDataAppCacheHelper() override;
 
   DISALLOW_COPY_AND_ASSIGN(MockBrowsingDataAppCacheHelper);
 };

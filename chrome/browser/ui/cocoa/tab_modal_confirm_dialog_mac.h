@@ -32,18 +32,17 @@ class TabModalConfirmDialogMac : public TabModalConfirmDialog,
                            content::WebContents* web_contents);
 
  private:
-  virtual ~TabModalConfirmDialogMac();
+  ~TabModalConfirmDialogMac() override;
 
   // TabModalConfirmDialog:
-  virtual void AcceptTabModalDialog() OVERRIDE;
-  virtual void CancelTabModalDialog() OVERRIDE;
+  void AcceptTabModalDialog() override;
+  void CancelTabModalDialog() override;
 
   // TabModalConfirmDialogCloseDelegate:
-  virtual void CloseDialog() OVERRIDE;
+  void CloseDialog() override;
 
   // ConstrainedWindowMacDelegate:
-  virtual void OnConstrainedWindowClosed(
-      ConstrainedWindowMac* window) OVERRIDE;
+  void OnConstrainedWindowClosed(ConstrainedWindowMac* window) override;
 
   bool closing_;
 

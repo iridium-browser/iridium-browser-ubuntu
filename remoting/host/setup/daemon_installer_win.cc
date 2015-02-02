@@ -70,7 +70,7 @@ class DaemonComInstallerWin : public DaemonInstallerWin {
                         const CompletionCallback& done);
 
   // DaemonInstallerWin implementation.
-  virtual void Install() OVERRIDE;
+  virtual void Install() override;
 
  private:
   // Polls the installation status performing state-specific actions (such as
@@ -95,10 +95,10 @@ class DaemonCommandLineInstallerWin
   ~DaemonCommandLineInstallerWin();
 
   // DaemonInstallerWin implementation.
-  virtual void Install() OVERRIDE;
+  virtual void Install() override;
 
   // base::win::ObjectWatcher::Delegate implementation.
-  virtual void OnObjectSignaled(HANDLE object) OVERRIDE;
+  virtual void OnObjectSignaled(HANDLE object) override;
 
  private:
   // Handle of the launched process.
@@ -367,23 +367,24 @@ scoped_ptr<DaemonInstallerWin> DaemonInstallerWin::Create(
                          IID_IDispatch,
                          update3.ReceiveVoid());
   }
-  if (SUCCEEDED(result)) {
-    // The machine instance of Omaha is available and we successfully passed
-    // the UAC prompt.
-    return scoped_ptr<DaemonInstallerWin>(
-        new DaemonComInstallerWin(update3, done));
-  } else if (result == CO_E_CLASSSTRING) {
+
+  if (result == CO_E_CLASSSTRING) {
     // The machine instance of Omaha is not available so we will have to run
     // GoogleUpdate.exe manually passing "needsadmin=True". This will cause
     // Omaha to install the machine instance first and then install Chromoting
     // Host.
-    return scoped_ptr<DaemonInstallerWin>(
-        new DaemonCommandLineInstallerWin(done));
-  } else {
+    return make_scoped_ptr(new DaemonCommandLineInstallerWin(done));
+  }
+
+  if (!SUCCEEDED(result)) {
     // The user declined the UAC prompt or some other error occured.
     done.Run(result);
-    return scoped_ptr<DaemonInstallerWin>();
+    return nullptr;
   }
+
+  // The machine instance of Omaha is available and we successfully passed
+  // the UAC prompt.
+  return make_scoped_ptr(new DaemonComInstallerWin(update3, done));
 }
 
 HWND GetTopLevelWindow(HWND window) {

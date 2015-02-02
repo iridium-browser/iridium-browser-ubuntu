@@ -40,7 +40,7 @@ class BluetoothEventRouter : public device::BluetoothAdapter::Observer,
                              public ExtensionRegistryObserver {
  public:
   explicit BluetoothEventRouter(content::BrowserContext* context);
-  virtual ~BluetoothEventRouter();
+  ~BluetoothEventRouter() override;
 
   // Returns true if adapter_ has been initialized for testing or bluetooth
   // adapter is available for the current platform.
@@ -91,29 +91,28 @@ class BluetoothEventRouter : public device::BluetoothAdapter::Observer,
   }
 
   // Override from device::BluetoothAdapter::Observer.
-  virtual void AdapterPresentChanged(device::BluetoothAdapter* adapter,
-                                     bool present) OVERRIDE;
-  virtual void AdapterPoweredChanged(device::BluetoothAdapter* adapter,
-                                     bool has_power) OVERRIDE;
-  virtual void AdapterDiscoveringChanged(device::BluetoothAdapter* adapter,
-                                         bool discovering) OVERRIDE;
-  virtual void DeviceAdded(device::BluetoothAdapter* adapter,
-                           device::BluetoothDevice* device) OVERRIDE;
-  virtual void DeviceChanged(device::BluetoothAdapter* adapter,
-                             device::BluetoothDevice* device) OVERRIDE;
-  virtual void DeviceRemoved(device::BluetoothAdapter* adapter,
-                             device::BluetoothDevice* device) OVERRIDE;
+  void AdapterPresentChanged(device::BluetoothAdapter* adapter,
+                             bool present) override;
+  void AdapterPoweredChanged(device::BluetoothAdapter* adapter,
+                             bool has_power) override;
+  void AdapterDiscoveringChanged(device::BluetoothAdapter* adapter,
+                                 bool discovering) override;
+  void DeviceAdded(device::BluetoothAdapter* adapter,
+                   device::BluetoothDevice* device) override;
+  void DeviceChanged(device::BluetoothAdapter* adapter,
+                     device::BluetoothDevice* device) override;
+  void DeviceRemoved(device::BluetoothAdapter* adapter,
+                     device::BluetoothDevice* device) override;
 
   // Overridden from content::NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Overridden from ExtensionRegistryObserver.
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
 
   // BrowserContextKeyedAPI implementation.
   static const char* service_name() { return "BluetoothEventRouter"; }

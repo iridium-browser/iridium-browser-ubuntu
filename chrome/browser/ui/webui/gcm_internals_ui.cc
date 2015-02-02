@@ -110,10 +110,10 @@ void SetSendingInfo(
 class GcmInternalsUIMessageHandler : public content::WebUIMessageHandler {
  public:
   GcmInternalsUIMessageHandler();
-  virtual ~GcmInternalsUIMessageHandler();
+  ~GcmInternalsUIMessageHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   // Return all of the GCM related infos to the gcm-internals page by calling
@@ -294,7 +294,6 @@ GCMInternalsUI::GCMInternalsUI(content::WebUI* web_ui)
   // Set up the chrome://gcm-internals source.
   content::WebUIDataSource* html_source =
       content::WebUIDataSource::Create(chrome::kChromeUIGCMInternalsHost);
-  html_source->SetUseJsonJSFormatV2();
 
   html_source->SetJsonPath("strings.js");
 

@@ -52,25 +52,23 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
   };
 
   explicit CreateApplicationShortcutView(Profile* profile);
-  virtual ~CreateApplicationShortcutView();
+  ~CreateApplicationShortcutView() override;
 
   // Initialize the controls on the dialog.
   void InitControls(DialogLayout dialog_layout);
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
 
   // Overridden from views::DialogDelegate:
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
+  ui::ModalType GetModalType() const override;
+  base::string16 GetWindowTitle() const override;
+  bool Accept() override;
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
  protected:
   // Adds a new check-box as a child to the view.
@@ -100,9 +98,9 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
 class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
  public:
   explicit CreateUrlApplicationShortcutView(content::WebContents* web_contents);
-  virtual ~CreateUrlApplicationShortcutView();
+  ~CreateUrlApplicationShortcutView() override;
 
-  virtual bool Accept() OVERRIDE;
+  bool Accept() override;
 
  private:
   // Fetch the largest unprocessed icon.
@@ -140,9 +138,9 @@ class CreateChromeApplicationShortcutView
       Profile* profile,
       const extensions::Extension* app,
       const base::Callback<void(bool)>& close_callback);
-  virtual ~CreateChromeApplicationShortcutView();
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
+  ~CreateChromeApplicationShortcutView() override;
+  bool Accept() override;
+  bool Cancel() override;
 
  private:
   // Called when the app's ShortcutInfo (with icon) and FileHandlersInfo is

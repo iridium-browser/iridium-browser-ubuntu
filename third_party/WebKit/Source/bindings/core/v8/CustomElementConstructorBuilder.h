@@ -35,7 +35,6 @@
 #include "bindings/core/v8/V8CustomElementLifecycleCallbacks.h"
 #include "core/dom/QualifiedName.h"
 #include "core/dom/custom/CustomElementLifecycleCallbacks.h"
-#include "wtf/Noncopyable.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/AtomicString.h"
@@ -44,12 +43,10 @@
 namespace blink {
 
 class CustomElementDefinition;
-class Dictionary;
 class Document;
-class Element;
+class ElementRegistrationOptions;
 class ExceptionState;
 class QualifiedName;
-class V8PerContextData;
 struct WrapperTypeInfo;
 
 // Handles the scripting-specific parts of the Custom Elements element
@@ -59,7 +56,7 @@ struct WrapperTypeInfo;
 class CustomElementConstructorBuilder {
     WTF_MAKE_NONCOPYABLE(CustomElementConstructorBuilder);
 public:
-    CustomElementConstructorBuilder(ScriptState*, const Dictionary* options);
+    CustomElementConstructorBuilder(ScriptState*, const ElementRegistrationOptions&);
 
     // The builder accumulates state and may run script at specific
     // points. These methods must be called in order. When one fails
@@ -82,7 +79,7 @@ private:
     v8::Handle<v8::Function> retrieveCallback(v8::Isolate*, const char* name);
 
     RefPtr<ScriptState> m_scriptState;
-    const Dictionary* m_options;
+    const ElementRegistrationOptions& m_options;
     v8::Handle<v8::Object> m_prototype;
     v8::Handle<v8::Function> m_constructor;
     RefPtr<V8CustomElementLifecycleCallbacks> m_callbacks;

@@ -14,7 +14,6 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/translate/core/browser/translate_prefs.h"
 
 using bookmarks_helper::AddURL;
@@ -70,14 +69,14 @@ MigrationList MakeList(syncer::ModelType type1,
 class MigrationTest : public SyncTest  {
  public:
   explicit MigrationTest(TestType test_type) : SyncTest(test_type) {}
-  virtual ~MigrationTest() {}
+  ~MigrationTest() override {}
 
   enum TriggerMethod { MODIFY_PREF, MODIFY_BOOKMARK, TRIGGER_NOTIFICATION };
 
   // Set up sync for all profiles and initialize all MigrationWatchers. This
   // helps ensure that all migration events are captured, even if they were to
   // occur before a test calls AwaitMigration for a specific profile.
-  virtual bool SetupSync() OVERRIDE {
+  bool SetupSync() override {
     if (!SyncTest::SetupSync())
       return false;
 
@@ -216,7 +215,7 @@ class MigrationTest : public SyncTest  {
 class MigrationSingleClientTest : public MigrationTest {
  public:
   MigrationSingleClientTest() : MigrationTest(SINGLE_CLIENT_LEGACY) {}
-  virtual ~MigrationSingleClientTest() {}
+  ~MigrationSingleClientTest() override {}
 
   void RunSingleClientMigrationTest(const MigrationList& migration_list,
                                     TriggerMethod trigger_method) {
@@ -283,7 +282,7 @@ IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest, PrefsNigoriBoth) {
 }
 
 // The whole shebang -- all data types.
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
 // http://crbug.com/403778
 #define MAYBE_AllTypesIndividually DISABLED_AllTypesIndividually
 #else
@@ -294,7 +293,7 @@ IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest, MAYBE_AllTypesIndividually) {
   RunSingleClientMigrationTest(GetPreferredDataTypesList(), MODIFY_BOOKMARK);
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
 // http://crbug.com/403778
 #define MAYBE_AllTypesIndividuallyTriggerNotification DISABLED_AllTypesIndividuallyTriggerNotification
 #else
@@ -341,7 +340,7 @@ IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest, AllTypesWithNigoriAtOnce) {
 class MigrationTwoClientTest : public MigrationTest {
  public:
   MigrationTwoClientTest() : MigrationTest(TWO_CLIENT_LEGACY) {}
-  virtual ~MigrationTwoClientTest() {}
+  ~MigrationTwoClientTest() override {}
 
   // Helper function that verifies that preferences sync still works.
   void VerifyPrefSync() {
@@ -421,12 +420,12 @@ class MigrationReconfigureTest : public MigrationTwoClientTest {
  public:
   MigrationReconfigureTest() {}
 
-  virtual void SetUpCommandLine(base::CommandLine* cl) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* cl) override {
     AddTestSwitches(cl);
     // Do not add optional datatypes.
   }
 
-  virtual ~MigrationReconfigureTest() {}
+  ~MigrationReconfigureTest() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MigrationReconfigureTest);

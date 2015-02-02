@@ -15,6 +15,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -32,6 +33,7 @@
 #include "components/autofill/core/browser/test_autofill_external_delegate.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "grit/components_strings.h"
@@ -91,7 +93,7 @@ class TestPersonalDataManager : public PersonalDataManager {
     credit_cards_.push_back(credit_card);
   }
 
-  virtual void RemoveByGUID(const std::string& guid) OVERRIDE {
+  virtual void RemoveByGUID(const std::string& guid) override {
     CreditCard* credit_card = GetCreditCardWithGUID(guid.c_str());
     if (credit_card) {
       credit_cards_.erase(
@@ -107,7 +109,7 @@ class TestPersonalDataManager : public PersonalDataManager {
 
   // Do nothing (auxiliary profiles will be created in
   // CreateTestAuxiliaryProfile).
-  virtual void LoadAuxiliaryProfiles(bool record_metrics) const OVERRIDE {}
+  virtual void LoadAuxiliaryProfiles(bool record_metrics) const override {}
 
   void ClearAutofillProfiles() {
     web_profiles_.clear();
@@ -358,6 +360,15 @@ class MockAutocompleteHistoryManager : public AutocompleteHistoryManager {
   MockAutocompleteHistoryManager(AutofillDriver* driver, AutofillClient* client)
       : AutocompleteHistoryManager(driver, client) {}
 
+  MOCK_METHOD8(OnGetAutocompleteSuggestions, void(
+      int query_id,
+      const base::string16& name,
+      const base::string16& prefix,
+      const std::string& form_control_type,
+      const std::vector<base::string16>& autofill_values,
+      const std::vector<base::string16>& autofill_labels,
+      const std::vector<base::string16>& autofill_icons,
+      const std::vector<int>& autofill_unique_ids));
   MOCK_METHOD1(OnFormSubmitted, void(const FormData& form));
 
  private:
@@ -385,9 +396,9 @@ class TestAutofillManager : public AutofillManager {
       : AutofillManager(driver, client, personal_data),
         personal_data_(personal_data),
         autofill_enabled_(true) {}
-  virtual ~TestAutofillManager() {}
+  ~TestAutofillManager() override {}
 
-  virtual bool IsAutofillEnabled() const OVERRIDE { return autofill_enabled_; }
+  bool IsAutofillEnabled() const override { return autofill_enabled_; }
 
   void set_autofill_enabled(bool autofill_enabled) {
     autofill_enabled_ = autofill_enabled;
@@ -398,11 +409,11 @@ class TestAutofillManager : public AutofillManager {
     expected_submitted_field_types_ = expected_types;
   }
 
-  virtual void UploadFormDataAsyncCallback(
+  void UploadFormDataAsyncCallback(
       const FormStructure* submitted_form,
       const base::TimeTicks& load_time,
       const base::TimeTicks& interaction_time,
-      const base::TimeTicks& submission_time) OVERRIDE {
+      const base::TimeTicks& submission_time) override {
     run_loop_->Quit();
 
     // If we have expected field types set, make sure they match.
@@ -440,7 +451,7 @@ class TestAutofillManager : public AutofillManager {
   // Wait for the asynchronous OnFormSubmitted() call to complete.
   void WaitForAsyncFormSubmit() { run_loop_->Run(); }
 
-  virtual void UploadFormData(const FormStructure& submitted_form) OVERRIDE {
+  void UploadFormData(const FormStructure& submitted_form) override {
     submitted_form_signature_ = submitted_form.FormSignature();
   }
 
@@ -500,23 +511,23 @@ class TestAutofillExternalDelegate : public AutofillExternalDelegate {
       : AutofillExternalDelegate(autofill_manager, autofill_driver),
         on_query_seen_(false),
         on_suggestions_returned_seen_(false) {}
-  virtual ~TestAutofillExternalDelegate() {}
+  ~TestAutofillExternalDelegate() override {}
 
-  virtual void OnQuery(int query_id,
-                       const FormData& form,
-                       const FormFieldData& field,
-                       const gfx::RectF& bounds,
-                       bool display_warning) OVERRIDE {
+  void OnQuery(int query_id,
+               const FormData& form,
+               const FormFieldData& field,
+               const gfx::RectF& bounds,
+               bool display_warning) override {
     on_query_seen_ = true;
     on_suggestions_returned_seen_ = false;
   }
 
-  virtual void OnSuggestionsReturned(
+  void OnSuggestionsReturned(
       int query_id,
       const std::vector<base::string16>& autofill_values,
       const std::vector<base::string16>& autofill_labels,
       const std::vector<base::string16>& autofill_icons,
-      const std::vector<int>& autofill_unique_ids) OVERRIDE {
+      const std::vector<int>& autofill_unique_ids) override {
     on_suggestions_returned_seen_ = true;
 
     query_id_ = query_id;
@@ -581,7 +592,7 @@ class TestAutofillExternalDelegate : public AutofillExternalDelegate {
 
 class AutofillManagerTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     autofill_client_.SetPrefs(test::PrefServiceForTesting());
     personal_data_.set_database(autofill_client_.GetDatabase());
     personal_data_.SetPrefService(autofill_client_.GetPrefs());
@@ -595,7 +606,7 @@ class AutofillManagerTest : public testing::Test {
     autofill_manager_->SetExternalDelegate(external_delegate_.get());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Order of destruction is important as AutofillManager relies on
     // PersonalDataManager to be around when it gets destroyed.
     autofill_manager_.reset();
@@ -680,7 +691,7 @@ class TestFormStructure : public FormStructure {
  public:
   explicit TestFormStructure(const FormData& form)
       : FormStructure(form) {}
-  virtual ~TestFormStructure() {}
+  ~TestFormStructure() override {}
 
   void SetFieldTypes(const std::vector<ServerFieldType>& heuristic_types,
                      const std::vector<ServerFieldType>& server_types) {
@@ -888,7 +899,7 @@ TEST_F(AutofillManagerTest, GetCreditCardSuggestionsMatchCharacter) {
   FormsSeen(forms);
 
   FormFieldData field;
-  test::CreateTestFormField("Card Number", "cardnumber", "4", "text", &field);
+  test::CreateTestFormField("Card Number", "cardnumber", "78", "text", &field);
   GetAutofillSuggestions(form, field);
 
   // No suggestions provided, so send an empty vector as the results.
@@ -1493,7 +1504,7 @@ TEST_F(AutofillManagerTest, GetProfileSuggestionsForPhonePrefixOrSuffix) {
                      {"Phone Extension", "ext", 5, "tel-extension"}};
 
   FormFieldData field;
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_fields); ++i) {
+  for (size_t i = 0; i < arraysize(test_fields); ++i) {
     test::CreateTestFormField(
         test_fields[i].label, test_fields[i].name, "", "text", &field);
     field.max_length = test_fields[i].max_length;
@@ -2135,7 +2146,7 @@ TEST_F(AutofillManagerTest, FillPhoneNumber) {
 
   FormFieldData field;
   const size_t default_max_length = field.max_length;
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_fields); ++i) {
+  for (size_t i = 0; i < arraysize(test_fields); ++i) {
     test::CreateTestFormField(
         test_fields[i].label, test_fields[i].name, "", "text", &field);
     field.max_length = test_fields[i].max_length;
@@ -2390,6 +2401,66 @@ TEST_F(AutofillManagerTest, AutocompleteSuggestionsWhenAutofillDisabled) {
   external_delegate_->CheckSuggestions(
       kDefaultPageID, arraysize(expected_values), expected_values,
       expected_labels, expected_icons, expected_unique_ids);
+}
+
+TEST_F(AutofillManagerTest, AutocompleteOffRespected) {
+  TestAutofillClient client;
+  autofill_manager_.reset(
+      new TestAutofillManager(autofill_driver_.get(), &client, NULL));
+  autofill_manager_->set_autofill_enabled(false);
+  autofill_manager_->SetExternalDelegate(external_delegate_.get());
+
+  scoped_ptr<MockAutocompleteHistoryManager> autocomplete_history_manager;
+  autocomplete_history_manager.reset(
+      new MockAutocompleteHistoryManager(autofill_driver_.get(), &client));
+  autofill_manager_->autocomplete_history_manager_ =
+      autocomplete_history_manager.Pass();
+  MockAutocompleteHistoryManager* m = static_cast<
+      MockAutocompleteHistoryManager*>(
+          autofill_manager_->autocomplete_history_manager_.get());
+  EXPECT_CALL(*m,
+      OnGetAutocompleteSuggestions(_, _, _, _, _, _, _, _)).Times(0);
+
+  // Set up our form data.
+  FormData form;
+  test::CreateTestAddressFormData(&form);
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+  FormFieldData* field = &form.fields[0];
+  field->should_autocomplete = false;
+  GetAutofillSuggestions(form, *field);
+}
+
+// Duplicate of the above test with the ignore-autocomplete-off-autofill switch.
+TEST_F(AutofillManagerTest, AutocompleteOffRespectedWithFlag) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kIgnoreAutocompleteOffForAutofill);
+
+  TestAutofillClient client;
+  autofill_manager_.reset(
+      new TestAutofillManager(autofill_driver_.get(), &client, NULL));
+  autofill_manager_->set_autofill_enabled(false);
+  autofill_manager_->SetExternalDelegate(external_delegate_.get());
+
+  scoped_ptr<MockAutocompleteHistoryManager> autocomplete_history_manager;
+  autocomplete_history_manager.reset(
+      new MockAutocompleteHistoryManager(autofill_driver_.get(), &client));
+  autofill_manager_->autocomplete_history_manager_ =
+      autocomplete_history_manager.Pass();
+  MockAutocompleteHistoryManager* m = static_cast<
+      MockAutocompleteHistoryManager*>(
+          autofill_manager_->autocomplete_history_manager_.get());
+  EXPECT_CALL(*m,
+      OnGetAutocompleteSuggestions(_, _, _, _, _, _, _, _)).Times(0);
+
+  // Set up our form data.
+  FormData form;
+  test::CreateTestAddressFormData(&form);
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+  FormFieldData* field = &form.fields[0];
+  field->should_autocomplete = false;
+  GetAutofillSuggestions(form, *field);
 }
 
 // Test that we are able to save form data when forms are submitted and we only
@@ -2883,12 +2954,11 @@ class MockAutofillClient : public TestAutofillClient {
  public:
   MockAutofillClient() {}
 
-  virtual ~MockAutofillClient() {}
+  ~MockAutofillClient() override {}
 
-  virtual void ShowRequestAutocompleteDialog(
-      const FormData& form,
-      const GURL& source_url,
-      const ResultCallback& callback) OVERRIDE {
+  void ShowRequestAutocompleteDialog(const FormData& form,
+                                     const GURL& source_url,
+                                     const ResultCallback& callback) override {
     callback.Run(user_supplied_data_ ? AutocompleteResultSuccess :
                                        AutocompleteResultErrorDisabled,
                  base::string16(),
@@ -2917,6 +2987,69 @@ TEST_F(AutofillManagerTest, TestExternalDelegate) {
   GetAutofillSuggestions(form, field);  // should call the delegate's OnQuery()
 
   EXPECT_TRUE(external_delegate_->on_query_seen());
+}
+
+// Test to verify suggestions appears for forms having credit card number split
+// across fields.
+TEST_F(AutofillManagerTest, GetCreditCardSuggestionsForNumberSpitAcrossFields) {
+  // Set up our form data with credit card number split across fields.
+  FormData form;
+  form.name = ASCIIToUTF16("MyForm");
+  form.origin = GURL("https://myform.com/form.html");
+  form.action = GURL("https://myform.com/submit.html");
+  form.user_submitted = true;
+
+  FormFieldData name_field;
+  test::CreateTestFormField("Name on Card", "nameoncard", "", "text",
+                            &name_field);
+  form.fields.push_back(name_field);
+
+  // Add new 4 |card_number_field|s to the |form|.
+  FormFieldData card_number_field;
+  card_number_field.max_length = 4;
+  test::CreateTestFormField("Card Number", "cardnumber_1", "", "text",
+                            &card_number_field);
+  form.fields.push_back(card_number_field);
+
+  test::CreateTestFormField("", "cardnumber_2", "", "text", &card_number_field);
+  form.fields.push_back(card_number_field);
+
+  test::CreateTestFormField("", "cardnumber_3", "", "text", &card_number_field);
+  form.fields.push_back(card_number_field);
+
+  test::CreateTestFormField("", "cardnumber_4", "", "text", &card_number_field);
+  form.fields.push_back(card_number_field);
+
+  FormFieldData exp_field;
+  test::CreateTestFormField("Expiration Date", "ccmonth", "", "text",
+                            &exp_field);
+  form.fields.push_back(exp_field);
+
+  test::CreateTestFormField("", "ccyear", "", "text", &exp_field);
+  form.fields.push_back(exp_field);
+
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+
+  // Verify whether suggestions are populated correctly for one of the middle
+  // credit card number fields when filled partially.
+  FormFieldData number_field = form.fields[3];
+  number_field.value = ASCIIToUTF16("901");
+
+  // Get the suggestions for already filled credit card |number_field|.
+  GetAutofillSuggestions(form, number_field);
+
+  // No autocomplete suggestions provided, so send an empty vector as the
+  // results. This triggers the combined message send.
+  AutocompleteSuggestionsReturned(std::vector<base::string16>());
+
+  base::string16 expected_values[] = {ASCIIToUTF16("************3456")};
+  base::string16 expected_labels[] = {ASCIIToUTF16("04/12")};
+  base::string16 expected_icons[] = {ASCIIToUTF16(kVisaCard)};
+  int expected_unique_ids[] = {autofill_manager_->GetPackedCreditCardID(4)};
+  external_delegate_->CheckSuggestions(
+      kDefaultPageID, arraysize(expected_values), expected_values,
+      expected_labels, expected_icons, expected_unique_ids);
 }
 
 }  // namespace autofill

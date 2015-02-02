@@ -57,17 +57,60 @@
 
 namespace blink {
 
-class FrontendMenuProvider FINAL : public ContextMenuProvider {
+class FrontendMenuProvider final : public ContextMenuProvider {
 public:
-    static PassRefPtr<FrontendMenuProvider> create(InspectorFrontendHost* frontendHost, ScriptValue frontendApiObject, const Vector<ContextMenuItem>& items)
+    static PassRefPtrWillBeRawPtr<FrontendMenuProvider> create(InspectorFrontendHost* frontendHost, ScriptValue frontendApiObject, const Vector<ContextMenuItem>& items)
     {
-        return adoptRef(new FrontendMenuProvider(frontendHost, frontendApiObject, items));
+        return adoptRefWillBeNoop(new FrontendMenuProvider(frontendHost, frontendApiObject, items));
+    }
+
+    virtual ~FrontendMenuProvider()
+    {
+        // Verify that this menu provider has been detached.
+        ASSERT(!m_frontendHost);
+    }
+
+    virtual void trace(Visitor* visitor) override
+    {
+        visitor->trace(m_frontendHost);
+        ContextMenuProvider::trace(visitor);
     }
 
     void disconnect()
     {
         m_frontendApiObject = ScriptValue();
-        m_frontendHost = 0;
+        m_frontendHost = nullptr;
+    }
+
+    virtual void contextMenuCleared() override
+    {
+        if (m_frontendHost) {
+            ScriptFunctionCall function(m_frontendApiObject, "contextMenuCleared");
+            function.call();
+
+            m_frontendHost->clearMenuProvider();
+            m_frontendHost = nullptr;
+        }
+        m_items.clear();
+    }
+
+    virtual void populateContextMenu(ContextMenu* menu) override
+    {
+        for (size_t i = 0; i < m_items.size(); ++i)
+            menu->appendItem(m_items[i]);
+    }
+
+    virtual void contextMenuItemSelected(const ContextMenuItem* item) override
+    {
+        if (!m_frontendHost)
+            return;
+
+        UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
+        int itemNumber = item->action() - ContextMenuItemBaseCustomTag;
+
+        ScriptFunctionCall function(m_frontendApiObject, "contextMenuItemSelected");
+        function.appendArgument(itemNumber);
+        function.call();
     }
 
 private:
@@ -78,50 +121,19 @@ private:
     {
     }
 
-    virtual ~FrontendMenuProvider()
-    {
-        contextMenuCleared();
-    }
-
-    virtual void populateContextMenu(ContextMenu* menu) OVERRIDE
-    {
-        for (size_t i = 0; i < m_items.size(); ++i)
-            menu->appendItem(m_items[i]);
-    }
-
-    virtual void contextMenuItemSelected(const ContextMenuItem* item) OVERRIDE
-    {
-        if (m_frontendHost) {
-            UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
-            int itemNumber = item->action() - ContextMenuItemBaseCustomTag;
-
-            ScriptFunctionCall function(m_frontendApiObject, "contextMenuItemSelected");
-            function.appendArgument(itemNumber);
-            function.call();
-        }
-    }
-
-    virtual void contextMenuCleared() OVERRIDE
-    {
-        if (m_frontendHost) {
-            ScriptFunctionCall function(m_frontendApiObject, "contextMenuCleared");
-            function.call();
-
-            m_frontendHost->m_menuProvider = 0;
-        }
-        m_items.clear();
-        m_frontendHost = 0;
-    }
-
-    InspectorFrontendHost* m_frontendHost;
+    RawPtrWillBeMember<InspectorFrontendHost> m_frontendHost;
     ScriptValue m_frontendApiObject;
+
+    // FIXME: Oilpan: remove when http://crbug.com/424962 Blink GC plugin
+    // changes have been deployed. ContextMenuItem triggers looping behavior.
+    GC_PLUGIN_IGNORE("crbug.com/424962")
     Vector<ContextMenuItem> m_items;
 };
 
 InspectorFrontendHost::InspectorFrontendHost(InspectorFrontendClient* client, Page* frontendPage)
     : m_client(client)
     , m_frontendPage(frontendPage)
-    , m_menuProvider(0)
+    , m_menuProvider(nullptr)
 {
 }
 
@@ -133,13 +145,16 @@ InspectorFrontendHost::~InspectorFrontendHost()
 void InspectorFrontendHost::trace(Visitor* visitor)
 {
     visitor->trace(m_frontendPage);
+    visitor->trace(m_menuProvider);
 }
 
 void InspectorFrontendHost::disconnectClient()
 {
     m_client = 0;
-    if (m_menuProvider)
+    if (m_menuProvider) {
         m_menuProvider->disconnect();
+        m_menuProvider = nullptr;
+    }
     m_frontendPage = nullptr;
 }
 
@@ -216,7 +231,7 @@ void InspectorFrontendHost::showContextMenu(Page* page, float x, float y, const 
     ScriptValue frontendApiObject = frontendScriptState->getFromGlobalObject("InspectorFrontendAPI");
     ASSERT(frontendApiObject.isObject());
 
-    RefPtr<FrontendMenuProvider> menuProvider = FrontendMenuProvider::create(this, frontendApiObject, items);
+    RefPtrWillBeRawPtr<FrontendMenuProvider> menuProvider = FrontendMenuProvider::create(this, frontendApiObject, items);
     m_menuProvider = menuProvider.get();
     float zoom = page->deprecatedLocalMainFrame()->pageZoomFactor();
     page->inspectorController().showContextMenu(x * zoom, y * zoom, menuProvider);
@@ -239,7 +254,7 @@ void InspectorFrontendHost::showContextMenu(Event* event, const Vector<ContextMe
             targetPage = window->document()->page();
     }
 
-    RefPtr<FrontendMenuProvider> menuProvider = FrontendMenuProvider::create(this, frontendApiObject, items);
+    RefPtrWillBeRawPtr<FrontendMenuProvider> menuProvider = FrontendMenuProvider::create(this, frontendApiObject, items);
     targetPage->contextMenuController().showContextMenu(event, menuProvider);
     m_menuProvider = menuProvider.get();
 }

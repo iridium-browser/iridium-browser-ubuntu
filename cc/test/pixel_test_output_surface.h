@@ -12,12 +12,14 @@ namespace cc {
 class PixelTestOutputSurface : public OutputSurface {
  public:
   explicit PixelTestOutputSurface(
-      scoped_refptr<ContextProvider> context_provider);
+      scoped_refptr<ContextProvider> context_provider,
+      bool flipped_output_surface);
   explicit PixelTestOutputSurface(
       scoped_ptr<SoftwareOutputDevice> software_device);
 
-  virtual void Reshape(const gfx::Size& size, float scale_factor) OVERRIDE;
-  virtual bool HasExternalStencilTest() const OVERRIDE;
+  void Reshape(const gfx::Size& size, float scale_factor) override;
+  bool HasExternalStencilTest() const override;
+  void SwapBuffers(CompositorFrame* frame) override;
 
   void set_surface_expansion_size(const gfx::Size& surface_expansion_size) {
     surface_expansion_size_ = surface_expansion_size;

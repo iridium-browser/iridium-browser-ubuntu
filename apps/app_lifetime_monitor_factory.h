@@ -27,14 +27,14 @@ class AppLifetimeMonitorFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<AppLifetimeMonitorFactory>;
 
   AppLifetimeMonitorFactory();
-  virtual ~AppLifetimeMonitorFactory();
+  ~AppLifetimeMonitorFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-    content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 }  // namespace apps

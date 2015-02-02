@@ -58,7 +58,7 @@ class DialRegistry : public DialService::Observer,
                const base::TimeDelta& expiration,
                const size_t max_devices);
 
-  virtual ~DialRegistry();
+  ~DialRegistry() override;
 
   // Called by the DIAL API when event listeners are added or removed. The dial
   // service is started after the first listener is added and stopped after the
@@ -88,16 +88,16 @@ class DialRegistry : public DialService::Observer,
   typedef std::map<std::string, linked_ptr<DialDeviceData> > DeviceByLabelMap;
 
   // DialService::Observer:
-  virtual void OnDiscoveryRequest(DialService* service) OVERRIDE;
-  virtual void OnDeviceDiscovered(DialService* service,
-                                  const DialDeviceData& device) OVERRIDE;
-  virtual void OnDiscoveryFinished(DialService* service) OVERRIDE;
-  virtual void OnError(DialService* service,
-                       const DialService::DialServiceErrorCode& code) OVERRIDE;
+  void OnDiscoveryRequest(DialService* service) override;
+  void OnDeviceDiscovered(DialService* service,
+                          const DialDeviceData& device) override;
+  void OnDiscoveryFinished(DialService* service) override;
+  void OnError(DialService* service,
+               const DialService::DialServiceErrorCode& code) override;
 
   // net::NetworkChangeObserver:
-  virtual void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) OVERRIDE;
+  void OnNetworkChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override;
 
   // Starts and stops periodic discovery.  Periodic discovery is done when there
   // are registered event listeners.

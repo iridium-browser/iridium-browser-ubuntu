@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="hr">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="hr">
 <translation id="777702478322588152">Prefektura</translation>
 <translation id="3713769522066937702">Format ZIP koda nije prepoznat. Primjer važećeg ZIP koda: <ph name="EXAMPLE"/>. Ne znate svoj ZIP kôd? Saznajte ga <ph name="BEGIN_LINK"/>ovdje<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Ulica i kućni broj</translation>

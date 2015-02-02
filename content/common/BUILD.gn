@@ -7,6 +7,32 @@ import("//build/config/ui.gni")
 import("//content/common/common.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
+if (is_chromeos && use_x11 && cpu_arch != "arm") {
+  action("libva_generate_stubs") {
+    extra_header = "gpu/media/va_stub_header.fragment"
+
+    script = "../../tools/generate_stubs/generate_stubs.py"
+    sources = [ "gpu/media/va.sigs" ]
+    source_prereqs = [ extra_header ]
+    stubs_filename_root = "va_stubs"
+
+    outputs = [
+      "$target_gen_dir/gpu/media/$stubs_filename_root.cc",
+      "$target_gen_dir/gpu/media/$stubs_filename_root.h",
+    ]
+    args = [
+      "-i", rebase_path("$target_gen_dir/gpu/media", root_build_dir),
+      "-o", rebase_path("$target_gen_dir/gpu/media", root_build_dir),
+      "-t", "posix_stubs",
+      "-e", rebase_path(extra_header, root_build_dir),
+      "-s", stubs_filename_root,
+      "-p", "content/common/gpu/media",
+    ]
+
+    args += rebase_path(sources, root_build_dir)
+  }
+}
+
 source_set("common") {
   # Only the public target should depend on this. All other targets (even
   # internal content ones) should depend on the public one.
@@ -28,11 +54,13 @@ source_set("common") {
     "//build/util:webkit_version",
     "//components/tracing",
     "//gpu/command_buffer/client:gles2_interface",
+    "//gpu/command_buffer/client:gpu_memory_buffer_manager",
     "//net",
     "//skia",
     "//third_party/icu",
     "//ui/accessibility",
     "//ui/base",
+    "//ui/events/ipc",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/gfx/ipc",
@@ -57,9 +85,9 @@ source_set("common") {
       "//gpu/skia_bindings",
       "//media",
       "//media:shared_memory_support",
+      "//mojo/edk/system",
       "//mojo/environment:chromium",
       "//mojo/public/interfaces/application",
-      "//mojo/system",
       "//sandbox",
       "//storage/browser",
       "//storage/common",
@@ -104,6 +132,8 @@ source_set("common") {
     sources += [
       "gpu/client/gpu_memory_buffer_impl_surface_texture.cc",
       "gpu/client/gpu_memory_buffer_impl_surface_texture.h",
+      "gpu/gpu_memory_buffer_factory_surface_texture.cc",
+      "gpu/gpu_memory_buffer_factory_surface_texture.h",
     ]
 
     deps += [
@@ -124,6 +154,13 @@ source_set("common") {
       "cursors/webcursor_ozone.cc",
       "font_list_ozone.cc",
       "gpu/gpu_memory_buffer_factory_ozone.cc",
+    ]
+  } else {
+    sources -= [
+      "gpu/gpu_memory_buffer_factory_linux.cc",
+    ]
+    deps += [
+      "//ui/ozone/gpu",
     ]
   }
 
@@ -149,10 +186,6 @@ source_set("common") {
   }
 
   if (use_x11) {
-    sources += [
-      "gpu/gpu_memory_buffer_factory_x11_pixmap.cc",
-      "common/gpu/gpu_memory_buffer_factory_x11_pixmap.h",
-    ]
     include_dirs += [ "//third_party/khronos" ]
     configs += [ "//build/config/linux:xcomposite" ]
 
@@ -162,10 +195,6 @@ source_set("common") {
         "gpu/x_util.h",
       ]
     }
-  } else {
-    sources -= [
-      "gpu/gpu_memory_buffer_factory_x11.cc",
-    ]
   }
 
   if (enable_plugins) {
@@ -225,10 +254,20 @@ source_set("common") {
         "gpu/media/vaapi_h264_decoder.h",
         "gpu/media/vaapi_video_decode_accelerator.cc",
         "gpu/media/vaapi_video_decode_accelerator.h",
+        "gpu/media/vaapi_video_encode_accelerator.cc",
+        "gpu/media/vaapi_video_encode_accelerator.h",
         "gpu/media/vaapi_wrapper.cc",
         "gpu/media/vaapi_wrapper.h",
+      ] + get_target_outputs(":libva_generate_stubs")
+      configs += [
+        "//third_party/libva:libva_config",
+        "//third_party/libyuv:libyuv_config",
       ]
-      assert(false, "Implement generate_stubs for libva")
+      deps += [
+        ":libva_generate_stubs",
+        "//media",
+        "//third_party/libyuv",
+      ]
     }
   }
 
@@ -279,10 +318,12 @@ source_set("common") {
 
 mojom("mojo_bindings") {
   sources = [
+    "geolocation_service.mojom",
     "render_frame_setup.mojom",
   ]
 
   deps = [
+    "//content/public/common:mojo_bindings",
     "//mojo/public/interfaces/application:application",
   ]
 }

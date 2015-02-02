@@ -62,7 +62,9 @@ scoped_refptr<cc::ContextProvider> CreateContext(
       false /* share_resources */,
       attribs_for_gles2,
       gpu_preference,
-      gpu::GLInProcessContextSharedMemoryLimits()));
+      gpu::GLInProcessContextSharedMemoryLimits(),
+      nullptr,
+      nullptr));
   DCHECK(context.get());
 
   return webkit::gpu::ContextProviderInProcess::Create(
@@ -76,8 +78,6 @@ scoped_refptr<cc::ContextProvider> CreateContext(
 HardwareRenderer::HardwareRenderer(SharedRendererState* state)
     : shared_renderer_state_(state),
       last_egl_context_(eglGetCurrentContext()),
-      width_(0),
-      height_(0),
       stencil_enabled_(false),
       viewport_clip_valid_for_dcheck_(false),
       gl_surface_(new AwGLSurface),
@@ -100,8 +100,8 @@ HardwareRenderer::HardwareRenderer(SharedRendererState* state)
   // TODO(enne): Update this this compositor to use a synchronous scheduler.
   settings.single_thread_proxy_scheduler = false;
 
-  layer_tree_host_ =
-      cc::LayerTreeHost::CreateSingleThreaded(this, this, NULL, settings, NULL);
+  layer_tree_host_ = cc::LayerTreeHost::CreateSingleThreaded(
+      this, this, NULL, NULL, settings, NULL);
   layer_tree_host_->SetRootLayer(root_layer_);
   layer_tree_host_->SetLayerTreeHostClientReady();
   layer_tree_host_->set_has_transparent_background(true);
@@ -127,7 +127,7 @@ HardwareRenderer::~HardwareRenderer() {
   resource_collection_->SetClient(NULL);
 
   // Reset draw constraints.
-  shared_renderer_state_->UpdateDrawConstraints(
+  shared_renderer_state_->UpdateDrawConstraintsOnRT(
       ParentCompositorDrawConstraints());
 }
 
@@ -141,16 +141,16 @@ void HardwareRenderer::DidBeginMainFrame() {
 }
 
 void HardwareRenderer::CommitFrame() {
-  scroll_offset_ = shared_renderer_state_->GetScrollOffset();
+  scroll_offset_ = shared_renderer_state_->GetScrollOffsetOnRT();
   if (committed_frame_.get()) {
     TRACE_EVENT_INSTANT0("android_webview",
                          "EarlyOut_PreviousFrameUnconsumed",
                          TRACE_EVENT_SCOPE_THREAD);
-    shared_renderer_state_->DidSkipCommitFrame();
+    shared_renderer_state_->DidSkipCommitFrameOnRT();
     return;
   }
 
-  committed_frame_ = shared_renderer_state_->PassCompositorFrame();
+  committed_frame_ = shared_renderer_state_->PassCompositorFrameOnRT();
   // Happens with empty global visible rect.
   if (!committed_frame_.get())
     return;
@@ -176,8 +176,8 @@ void HardwareRenderer::SetFrameData() {
   bool size_changed = frame_size != frame_size_;
   frame_size_ = frame_size;
 
-  if (!frame_provider_ || size_changed) {
-    if (delegated_layer_) {
+  if (!frame_provider_.get() || size_changed) {
+    if (delegated_layer_.get()) {
       delegated_layer_->RemoveFromParent();
     }
 
@@ -209,7 +209,7 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
     DLOG(WARNING) << "EGLContextChanged";
 
   SetFrameData();
-  if (shared_renderer_state_->ForceCommit()) {
+  if (shared_renderer_state_->ForceCommitOnRT()) {
     CommitFrame();
     SetFrameData();
   }
@@ -225,7 +225,7 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
       draw_info->is_layer, transform, gfx::Rect(viewport_));
 
   draw_constraints_ = draw_constraints;
-  shared_renderer_state_->PostExternalDrawConstraintsToChildCompositor(
+  shared_renderer_state_->PostExternalDrawConstraintsToChildCompositorOnRT(
       draw_constraints);
 
   if (!delegated_layer_.get())
@@ -260,15 +260,14 @@ void HardwareRenderer::RequestNewOutputSurface(bool fallback) {
   scoped_ptr<ParentOutputSurface> output_surface_holder(
       new ParentOutputSurface(context_provider));
   output_surface_ = output_surface_holder.get();
-  layer_tree_host_->SetOutputSurface(
-      output_surface_holder.PassAs<cc::OutputSurface>());
+  layer_tree_host_->SetOutputSurface(output_surface_holder.Pass());
 }
 
 void HardwareRenderer::UnusedResourcesAreAvailable() {
   cc::ReturnedResourceArray returned_resources;
   resource_collection_->TakeUnusedResourcesForChildCompositor(
       &returned_resources);
-  shared_renderer_state_->InsertReturnedResources(returned_resources);
+  shared_renderer_state_->InsertReturnedResourcesOnRT(returned_resources);
 }
 
 }  // namespace android_webview

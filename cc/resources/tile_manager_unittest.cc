@@ -22,465 +22,6 @@
 namespace cc {
 namespace {
 
-class TileManagerTest : public testing::TestWithParam<bool>,
-                        public TileManagerClient {
- public:
-  typedef std::vector<scoped_refptr<Tile> > TileVector;
-
-  TileManagerTest()
-      : memory_limit_policy_(ALLOW_ANYTHING),
-        max_tiles_(0),
-        ready_to_activate_(false) {}
-
-  void Initialize(int max_tiles,
-                  TileMemoryLimitPolicy memory_limit_policy,
-                  TreePriority tree_priority) {
-    output_surface_ = FakeOutputSurface::Create3d();
-    CHECK(output_surface_->BindToClient(&output_surface_client_));
-
-    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    resource_provider_ = ResourceProvider::Create(output_surface_.get(),
-                                                  shared_bitmap_manager_.get(),
-                                                  NULL,
-                                                  0,
-                                                  false,
-                                                  1,
-                                                  false);
-    resource_pool_ = ResourcePool::Create(
-        resource_provider_.get(), GL_TEXTURE_2D, RGBA_8888);
-    tile_manager_ =
-        make_scoped_ptr(new FakeTileManager(this, resource_pool_.get()));
-
-    memory_limit_policy_ = memory_limit_policy;
-    max_tiles_ = max_tiles;
-    picture_pile_ = FakePicturePileImpl::CreateInfiniteFilledPile();
-
-    SetTreePriority(tree_priority);
-  }
-
-  void SetTreePriority(TreePriority tree_priority) {
-    GlobalStateThatImpactsTilePriority state;
-    gfx::Size tile_size = settings_.default_tile_size;
-
-    if (UsingMemoryLimit()) {
-      state.soft_memory_limit_in_bytes =
-          max_tiles_ * 4 * tile_size.width() * tile_size.height();
-      state.num_resources_limit = 100;
-    } else {
-      state.soft_memory_limit_in_bytes = 100 * 1000 * 1000;
-      state.num_resources_limit = max_tiles_;
-    }
-    state.hard_memory_limit_in_bytes = state.soft_memory_limit_in_bytes * 2;
-    state.memory_limit_policy = memory_limit_policy_;
-    state.tree_priority = tree_priority;
-
-    global_state_ = state;
-    resource_pool_->SetResourceUsageLimits(state.soft_memory_limit_in_bytes,
-                                           state.soft_memory_limit_in_bytes,
-                                           state.num_resources_limit);
-    tile_manager_->SetGlobalStateForTesting(state);
-  }
-
-  virtual void TearDown() OVERRIDE {
-    tile_manager_.reset(NULL);
-    picture_pile_ = NULL;
-
-    testing::Test::TearDown();
-  }
-
-  // TileManagerClient implementation.
-  virtual const std::vector<PictureLayerImpl*>& GetPictureLayers()
-      const OVERRIDE {
-    return picture_layers_;
-  }
-  virtual void NotifyReadyToActivate() OVERRIDE { ready_to_activate_ = true; }
-  virtual void NotifyTileStateChanged(const Tile* tile) OVERRIDE {}
-  virtual void BuildRasterQueue(RasterTilePriorityQueue* queue,
-                                TreePriority priority) OVERRIDE {}
-  virtual void BuildEvictionQueue(EvictionTilePriorityQueue* queue,
-                                  TreePriority priority) OVERRIDE {}
-
-  TileVector CreateTilesWithSize(int count,
-                                 TilePriority active_priority,
-                                 TilePriority pending_priority,
-                                 const gfx::Size& tile_size) {
-    TileVector tiles;
-    for (int i = 0; i < count; ++i) {
-      scoped_refptr<Tile> tile = tile_manager_->CreateTile(picture_pile_.get(),
-                                                           tile_size,
-                                                           gfx::Rect(),
-                                                           1.0,
-                                                           0,
-                                                           0,
-                                                           0);
-      tile->SetPriority(ACTIVE_TREE, active_priority);
-      tile->SetPriority(PENDING_TREE, pending_priority);
-      tiles.push_back(tile);
-    }
-    return tiles;
-  }
-
-  TileVector CreateTiles(int count,
-                         TilePriority active_priority,
-                         TilePriority pending_priority) {
-    return CreateTilesWithSize(
-        count, active_priority, pending_priority, settings_.default_tile_size);
-  }
-
-  void ReleaseTiles(TileVector* tiles) {
-    for (TileVector::iterator it = tiles->begin(); it != tiles->end(); it++) {
-      Tile* tile = it->get();
-      tile->SetPriority(ACTIVE_TREE, TilePriority());
-      tile->SetPriority(PENDING_TREE, TilePriority());
-    }
-  }
-
-  FakeTileManager* tile_manager() { return tile_manager_.get(); }
-
-  int AssignedMemoryCount(const TileVector& tiles) {
-    int has_memory_count = 0;
-    for (TileVector::const_iterator it = tiles.begin(); it != tiles.end();
-         ++it) {
-      if (tile_manager_->HasBeenAssignedMemory(it->get()))
-        ++has_memory_count;
-    }
-    return has_memory_count;
-  }
-
-  bool ready_to_activate() const { return ready_to_activate_; }
-
-  // The parametrization specifies whether the max tile limit should
-  // be applied to memory or resources.
-  bool UsingResourceLimit() { return !GetParam(); }
-  bool UsingMemoryLimit() { return GetParam(); }
-
- protected:
-  GlobalStateThatImpactsTilePriority global_state_;
-
- private:
-  LayerTreeSettings settings_;
-  scoped_ptr<FakeTileManager> tile_manager_;
-  scoped_refptr<FakePicturePileImpl> picture_pile_;
-  FakeOutputSurfaceClient output_surface_client_;
-  scoped_ptr<FakeOutputSurface> output_surface_;
-  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
-  scoped_ptr<ResourceProvider> resource_provider_;
-  scoped_ptr<ResourcePool> resource_pool_;
-  TileMemoryLimitPolicy memory_limit_policy_;
-  int max_tiles_;
-  bool ready_to_activate_;
-  std::vector<PictureLayerImpl*> picture_layers_;
-};
-
-TEST_P(TileManagerTest, EnoughMemoryAllowAnything) {
-  // A few tiles of each type of priority, with enough memory for all tiles.
-
-  Initialize(10, ALLOW_ANYTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_now =
-      CreateTiles(3, TilePriorityForNowBin(), TilePriority());
-  TileVector pending_now =
-      CreateTiles(3, TilePriority(), TilePriorityForNowBin());
-  TileVector active_pending_soon =
-      CreateTiles(3, TilePriorityForSoonBin(), TilePriorityForSoonBin());
-  TileVector never_bin = CreateTiles(1, TilePriority(), TilePriority());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(3, AssignedMemoryCount(active_now));
-  EXPECT_EQ(3, AssignedMemoryCount(pending_now));
-  EXPECT_EQ(3, AssignedMemoryCount(active_pending_soon));
-  EXPECT_EQ(0, AssignedMemoryCount(never_bin));
-
-  ReleaseTiles(&active_now);
-  ReleaseTiles(&pending_now);
-  ReleaseTiles(&active_pending_soon);
-  ReleaseTiles(&never_bin);
-}
-
-TEST_P(TileManagerTest, EnoughMemoryAllowPrepaintOnly) {
-  // A few tiles of each type of priority, with enough memory for all tiles,
-  // with the exception of never bin.
-
-  Initialize(10, ALLOW_PREPAINT_ONLY, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_now =
-      CreateTiles(3, TilePriorityForNowBin(), TilePriority());
-  TileVector pending_now =
-      CreateTiles(3, TilePriority(), TilePriorityForNowBin());
-  TileVector active_pending_soon =
-      CreateTiles(3, TilePriorityForSoonBin(), TilePriorityForSoonBin());
-  TileVector never_bin = CreateTiles(1, TilePriority(), TilePriority());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(3, AssignedMemoryCount(active_now));
-  EXPECT_EQ(3, AssignedMemoryCount(pending_now));
-  EXPECT_EQ(3, AssignedMemoryCount(active_pending_soon));
-  EXPECT_EQ(0, AssignedMemoryCount(never_bin));
-
-  ReleaseTiles(&active_now);
-  ReleaseTiles(&pending_now);
-  ReleaseTiles(&active_pending_soon);
-  ReleaseTiles(&never_bin);
-}
-
-TEST_P(TileManagerTest, EnoughMemoryPendingLowResAllowAbsoluteMinimum) {
-  // A few low-res tiles required for activation, with enough memory for all
-  // tiles.
-
-  Initialize(5, ALLOW_ABSOLUTE_MINIMUM, SAME_PRIORITY_FOR_BOTH_TREES);
-  TileVector pending_low_res =
-      CreateTiles(5, TilePriority(), TilePriorityLowRes());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(5, AssignedMemoryCount(pending_low_res));
-  ReleaseTiles(&pending_low_res);
-}
-
-TEST_P(TileManagerTest, EnoughMemoryAllowAbsoluteMinimum) {
-  // A few tiles of each type of priority, with enough memory for all tiles,
-  // with the exception of never and soon bins.
-
-  Initialize(10, ALLOW_ABSOLUTE_MINIMUM, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_now =
-      CreateTiles(3, TilePriorityForNowBin(), TilePriority());
-  TileVector pending_now =
-      CreateTiles(3, TilePriority(), TilePriorityForNowBin());
-  TileVector active_pending_soon =
-      CreateTiles(3, TilePriorityForSoonBin(), TilePriorityForSoonBin());
-  TileVector never_bin = CreateTiles(1, TilePriority(), TilePriority());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(3, AssignedMemoryCount(active_now));
-  EXPECT_EQ(3, AssignedMemoryCount(pending_now));
-  EXPECT_EQ(0, AssignedMemoryCount(active_pending_soon));
-  EXPECT_EQ(0, AssignedMemoryCount(never_bin));
-
-  ReleaseTiles(&active_now);
-  ReleaseTiles(&pending_now);
-  ReleaseTiles(&active_pending_soon);
-  ReleaseTiles(&never_bin);
-}
-
-TEST_P(TileManagerTest, EnoughMemoryAllowNothing) {
-  // A few tiles of each type of priority, with enough memory for all tiles,
-  // but allow nothing should not assign any memory.
-
-  Initialize(10, ALLOW_NOTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_now =
-      CreateTiles(3, TilePriorityForNowBin(), TilePriority());
-  TileVector pending_now =
-      CreateTiles(3, TilePriority(), TilePriorityForNowBin());
-  TileVector active_pending_soon =
-      CreateTiles(3, TilePriorityForSoonBin(), TilePriorityForSoonBin());
-  TileVector never_bin = CreateTiles(1, TilePriority(), TilePriority());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(0, AssignedMemoryCount(active_now));
-  EXPECT_EQ(0, AssignedMemoryCount(pending_now));
-  EXPECT_EQ(0, AssignedMemoryCount(active_pending_soon));
-  EXPECT_EQ(0, AssignedMemoryCount(never_bin));
-
-  ReleaseTiles(&active_now);
-  ReleaseTiles(&pending_now);
-  ReleaseTiles(&active_pending_soon);
-  ReleaseTiles(&never_bin);
-}
-
-TEST_P(TileManagerTest, PartialOOMMemoryToPending) {
-  // 5 tiles on active tree eventually bin, 5 tiles on pending tree that are
-  // required for activation, but only enough memory for 8 tiles. The result
-  // is all pending tree tiles get memory, and 3 of the active tree tiles
-  // get memory. None of these tiles is needed to avoid calimity (flickering or
-  // raster-on-demand) so the soft memory limit is used.
-
-  Initialize(8, ALLOW_ANYTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_tree_tiles =
-      CreateTiles(5, TilePriorityForEventualBin(), TilePriority());
-  TileVector pending_tree_tiles =
-      CreateTiles(5, TilePriority(), TilePriorityRequiredForActivation());
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(5, AssignedMemoryCount(active_tree_tiles));
-  EXPECT_EQ(3, AssignedMemoryCount(pending_tree_tiles));
-
-  SetTreePriority(SAME_PRIORITY_FOR_BOTH_TREES);
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(3, AssignedMemoryCount(active_tree_tiles));
-  EXPECT_EQ(5, AssignedMemoryCount(pending_tree_tiles));
-
-  ReleaseTiles(&active_tree_tiles);
-  ReleaseTiles(&pending_tree_tiles);
-}
-
-TEST_P(TileManagerTest, PartialOOMMemoryToActive) {
-  // 5 tiles on active tree eventually bin, 5 tiles on pending tree now bin,
-  // but only enough memory for 8 tiles. The result is all active tree tiles
-  // get memory, and 3 of the pending tree tiles get memory.
-  // The pending tiles are not needed to avoid calimity (flickering or
-  // raster-on-demand) and the active tiles fit, so the soft limit is used.
-
-  Initialize(8, ALLOW_ANYTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_tree_tiles =
-      CreateTiles(5, TilePriorityForNowBin(), TilePriority());
-  TileVector pending_tree_tiles =
-      CreateTiles(5, TilePriority(), TilePriorityForNowBin());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(5, AssignedMemoryCount(active_tree_tiles));
-  EXPECT_EQ(3, AssignedMemoryCount(pending_tree_tiles));
-
-  ReleaseTiles(&active_tree_tiles);
-  ReleaseTiles(&pending_tree_tiles);
-}
-
-TEST_P(TileManagerTest, TotalOOMMemoryToPending) {
-  // 10 tiles on active tree eventually bin, 10 tiles on pending tree that are
-  // required for activation, but only enough tiles for 4 tiles. The result
-  // is 4 pending tree tiles get memory, and none of the active tree tiles
-  // get memory.
-
-  Initialize(4, ALLOW_ANYTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_tree_tiles =
-      CreateTiles(10, TilePriorityForEventualBin(), TilePriority());
-  TileVector pending_tree_tiles =
-      CreateTiles(10, TilePriority(), TilePriorityRequiredForActivation());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(4, AssignedMemoryCount(active_tree_tiles));
-  EXPECT_EQ(0, AssignedMemoryCount(pending_tree_tiles));
-
-  SetTreePriority(SAME_PRIORITY_FOR_BOTH_TREES);
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  if (UsingResourceLimit()) {
-    EXPECT_EQ(0, AssignedMemoryCount(active_tree_tiles));
-    EXPECT_EQ(4, AssignedMemoryCount(pending_tree_tiles));
-  } else {
-    // Pending tiles are now required to avoid calimity (flickering or
-    // raster-on-demand). Hard-limit is used and double the tiles fit.
-    EXPECT_EQ(0, AssignedMemoryCount(active_tree_tiles));
-    EXPECT_EQ(8, AssignedMemoryCount(pending_tree_tiles));
-  }
-
-  ReleaseTiles(&active_tree_tiles);
-  ReleaseTiles(&pending_tree_tiles);
-}
-
-TEST_P(TileManagerTest, TotalOOMActiveSoonMemoryToPending) {
-  // 10 tiles on active tree soon bin, 10 tiles on pending tree that are
-  // required for activation, but only enough tiles for 4 tiles. The result
-  // is 4 pending tree tiles get memory, and none of the active tree tiles
-  // get memory.
-
-  Initialize(4, ALLOW_ANYTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_tree_tiles =
-      CreateTiles(10, TilePriorityForSoonBin(), TilePriority());
-  TileVector pending_tree_tiles =
-      CreateTiles(10, TilePriority(), TilePriorityRequiredForActivation());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  EXPECT_EQ(4, AssignedMemoryCount(active_tree_tiles));
-  EXPECT_EQ(0, AssignedMemoryCount(pending_tree_tiles));
-
-  SetTreePriority(SAME_PRIORITY_FOR_BOTH_TREES);
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  if (UsingResourceLimit()) {
-    EXPECT_EQ(0, AssignedMemoryCount(active_tree_tiles));
-    EXPECT_EQ(4, AssignedMemoryCount(pending_tree_tiles));
-  } else {
-    // Pending tiles are now required to avoid calimity (flickering or
-    // raster-on-demand). Hard-limit is used and double the tiles fit.
-    EXPECT_EQ(0, AssignedMemoryCount(active_tree_tiles));
-    EXPECT_EQ(8, AssignedMemoryCount(pending_tree_tiles));
-  }
-
-  ReleaseTiles(&active_tree_tiles);
-  ReleaseTiles(&pending_tree_tiles);
-}
-
-TEST_P(TileManagerTest, TotalOOMMemoryToActive) {
-  // 10 tiles on active tree eventually bin, 10 tiles on pending tree now bin,
-  // but only enough memory for 4 tiles. The result is 4 active tree tiles
-  // get memory, and none of the pending tree tiles get memory.
-
-  Initialize(4, ALLOW_ANYTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_tree_tiles =
-      CreateTiles(10, TilePriorityForNowBin(), TilePriority());
-  TileVector pending_tree_tiles =
-      CreateTiles(10, TilePriority(), TilePriorityForNowBin());
-
-  tile_manager()->AssignMemoryToTiles(global_state_);
-
-  if (UsingResourceLimit()) {
-    EXPECT_EQ(4, AssignedMemoryCount(active_tree_tiles));
-    EXPECT_EQ(0, AssignedMemoryCount(pending_tree_tiles));
-  } else {
-    // Active tiles are required to avoid calimity (flickering or
-    // raster-on-demand). Hard-limit is used and double the tiles fit.
-    EXPECT_EQ(8, AssignedMemoryCount(active_tree_tiles));
-    EXPECT_EQ(0, AssignedMemoryCount(pending_tree_tiles));
-  }
-
-  ReleaseTiles(&active_tree_tiles);
-  ReleaseTiles(&pending_tree_tiles);
-}
-
-TEST_P(TileManagerTest, TotalOOMMemoryToNewContent) {
-  // 10 tiles on active tree now bin, 10 tiles on pending tree now bin,
-  // but only enough memory for 8 tiles. Any tile missing would cause
-  // a calamity (flickering or raster-on-demand). Depending on mode,
-  // we should use varying amounts of the higher hard memory limit.
-  if (UsingResourceLimit())
-    return;
-
-  Initialize(8, ALLOW_ANYTHING, SMOOTHNESS_TAKES_PRIORITY);
-  TileVector active_tree_tiles =
-      CreateTiles(10, TilePriorityForNowBin(), TilePriority());
-  TileVector pending_tree_tiles =
-      CreateTiles(10, TilePriority(), TilePriorityForNowBin());
-
-  // Active tiles are required to avoid calimity. The hard-limit is used and all
-  // active-tiles fit. No pending tiles are needed to avoid calamity so only 10
-  // tiles total are used.
-  tile_manager()->AssignMemoryToTiles(global_state_);
-  EXPECT_EQ(10, AssignedMemoryCount(active_tree_tiles));
-  EXPECT_EQ(0, AssignedMemoryCount(pending_tree_tiles));
-
-  // Even the hard-limit won't save us now. All tiles are required to avoid
-  // a clamity but we only have 16. The tiles will be distribted randomly
-  // given they are identical, in practice depending on their screen location.
-  SetTreePriority(SAME_PRIORITY_FOR_BOTH_TREES);
-  tile_manager()->AssignMemoryToTiles(global_state_);
-  EXPECT_EQ(16,
-            AssignedMemoryCount(active_tree_tiles) +
-                AssignedMemoryCount(pending_tree_tiles));
-
-  // The pending tree is now more important. Active tiles will take higher
-  // priority if they are ready-to-draw in practice. Importantly though,
-  // pending tiles also utilize the hard-limit.
-  SetTreePriority(NEW_CONTENT_TAKES_PRIORITY);
-  tile_manager()->AssignMemoryToTiles(global_state_);
-  EXPECT_EQ(0, AssignedMemoryCount(active_tree_tiles));
-  EXPECT_EQ(10, AssignedMemoryCount(pending_tree_tiles));
-
-  ReleaseTiles(&active_tree_tiles);
-  ReleaseTiles(&pending_tree_tiles);
-}
-
-// If true, the max tile limit should be applied as bytes; if false,
-// as num_resources_limit.
-INSTANTIATE_TEST_CASE_P(TileManagerTests,
-                        TileManagerTest,
-                        ::testing::Values(true, false));
-
 class LowResTilingsSettings : public ImplSidePaintingSettings {
  public:
   LowResTilingsSettings() { create_low_res_tiling = true; }
@@ -514,14 +55,13 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
     host_impl_.tile_manager()->SetGlobalStateForTesting(state);
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     InitializeRenderer();
     SetTreePriority(SAME_PRIORITY_FOR_BOTH_TREES);
   }
 
   virtual void InitializeRenderer() {
-    host_impl_.InitializeRenderer(
-        FakeOutputSurface::Create3d().PassAs<OutputSurface>());
+    host_impl_.InitializeRenderer(FakeOutputSurface::Create3d());
   }
 
   void SetupDefaultTrees(const gfx::Size& layer_bounds) {
@@ -560,13 +100,24 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
   void SetupPendingTree(scoped_refptr<PicturePileImpl> pile) {
     host_impl_.CreatePendingTree();
     LayerTreeImpl* pending_tree = host_impl_.pending_tree();
-    // Clear recycled tree.
-    pending_tree->DetachLayerTree();
 
-    scoped_ptr<FakePictureLayerImpl> pending_layer =
-        FakePictureLayerImpl::CreateWithPile(pending_tree, id_, pile);
-    pending_layer->SetDrawsContent(true);
-    pending_tree->SetRootLayer(pending_layer.PassAs<LayerImpl>());
+    // Steal from the recycled tree.
+    scoped_ptr<LayerImpl> old_pending_root = pending_tree->DetachLayerTree();
+    DCHECK_IMPLIES(old_pending_root, old_pending_root->id() == id_);
+
+    scoped_ptr<FakePictureLayerImpl> pending_layer;
+    if (old_pending_root) {
+      pending_layer.reset(
+          static_cast<FakePictureLayerImpl*>(old_pending_root.release()));
+      pending_layer->SetPile(pile);
+    } else {
+      pending_layer =
+          FakePictureLayerImpl::CreateWithPile(pending_tree, id_, pile);
+      pending_layer->SetDrawsContent(true);
+    }
+    // The bounds() just mirror the pile size.
+    pending_layer->SetBounds(pending_layer->pile()->tiling_size());
+    pending_tree->SetRootLayer(pending_layer.Pass());
 
     pending_layer_ = static_cast<FakePictureLayerImpl*>(
         host_impl_.pending_tree()->LayerById(id_));
@@ -598,7 +149,9 @@ class TileManagerTilePriorityQueueTest : public testing::Test {
 };
 
 TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
-  SetupDefaultTrees(gfx::Size(1000, 1000));
+  const gfx::Size layer_bounds(1000, 1000);
+  host_impl_.SetViewportSize(layer_bounds);
+  SetupDefaultTrees(layer_bounds);
 
   active_layer_->CreateDefaultTilingsAndTiles();
   pending_layer_->CreateDefaultTilingsAndTiles();
@@ -617,21 +170,26 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
   }
 
   EXPECT_EQ(tile_count, all_tiles.size());
-  EXPECT_EQ(17u, tile_count);
+  EXPECT_EQ(16u, tile_count);
 
   // Sanity check, all tiles should be visible.
   std::set<Tile*> smoothness_tiles;
   queue.Reset();
   host_impl_.BuildRasterQueue(&queue, SMOOTHNESS_TAKES_PRIORITY);
+  bool had_low_res = false;
   while (!queue.IsEmpty()) {
     Tile* tile = queue.Top();
     EXPECT_TRUE(tile);
     EXPECT_EQ(TilePriority::NOW, tile->priority(ACTIVE_TREE).priority_bin);
     EXPECT_EQ(TilePriority::NOW, tile->priority(PENDING_TREE).priority_bin);
-    smoothness_tiles.insert(tile);
+    if (tile->priority(ACTIVE_TREE).resolution == LOW_RESOLUTION)
+      had_low_res = true;
+    else
+      smoothness_tiles.insert(tile);
     queue.Pop();
   }
   EXPECT_EQ(all_tiles, smoothness_tiles);
+  EXPECT_TRUE(had_low_res);
 
   Region invalidation(gfx::Rect(0, 0, 500, 500));
 
@@ -647,21 +205,24 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
 
   // Renew all of the tile priorities.
   gfx::Rect viewport(50, 50, 100, 100);
-  pending_layer_->HighResTiling()->UpdateTilePriorities(
+  pending_layer_->HighResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
-  pending_layer_->LowResTiling()->UpdateTilePriorities(
+  pending_layer_->LowResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
-  active_layer_->HighResTiling()->UpdateTilePriorities(
+  active_layer_->HighResTiling()->ComputeTilePriorityRects(
       ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
-  active_layer_->LowResTiling()->UpdateTilePriorities(
+  active_layer_->LowResTiling()->ComputeTilePriorityRects(
       ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
 
   // Populate all tiles directly from the tilings.
   all_tiles.clear();
+  std::set<Tile*> high_res_tiles;
   std::vector<Tile*> pending_high_res_tiles =
       pending_layer_->HighResTiling()->AllTilesForTesting();
-  for (size_t i = 0; i < pending_high_res_tiles.size(); ++i)
+  for (size_t i = 0; i < pending_high_res_tiles.size(); ++i) {
     all_tiles.insert(pending_high_res_tiles[i]);
+    high_res_tiles.insert(pending_high_res_tiles[i]);
+  }
 
   std::vector<Tile*> pending_low_res_tiles =
       pending_layer_->LowResTiling()->AllTilesForTesting();
@@ -670,8 +231,10 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
 
   std::vector<Tile*> active_high_res_tiles =
       active_layer_->HighResTiling()->AllTilesForTesting();
-  for (size_t i = 0; i < active_high_res_tiles.size(); ++i)
+  for (size_t i = 0; i < active_high_res_tiles.size(); ++i) {
     all_tiles.insert(active_high_res_tiles[i]);
+    high_res_tiles.insert(active_high_res_tiles[i]);
+  }
 
   std::vector<Tile*> active_low_res_tiles =
       active_layer_->LowResTiling()->AllTilesForTesting();
@@ -681,7 +244,7 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
   Tile* last_tile = NULL;
   smoothness_tiles.clear();
   tile_count = 0;
-  size_t increasing_distance_tiles = 0u;
+  size_t correct_order_tiles = 0u;
   // Here we expect to get increasing ACTIVE_TREE priority_bin.
   queue.Reset();
   host_impl_.BuildRasterQueue(&queue, SMOOTHNESS_TAKES_PRIORITY);
@@ -694,11 +257,19 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
 
     EXPECT_LE(last_tile->priority(ACTIVE_TREE).priority_bin,
               tile->priority(ACTIVE_TREE).priority_bin);
+    bool skip_updating_last_tile = false;
     if (last_tile->priority(ACTIVE_TREE).priority_bin ==
         tile->priority(ACTIVE_TREE).priority_bin) {
-      increasing_distance_tiles +=
+      correct_order_tiles +=
           last_tile->priority(ACTIVE_TREE).distance_to_visible <=
           tile->priority(ACTIVE_TREE).distance_to_visible;
+    } else if (tile->priority(ACTIVE_TREE).priority_bin ==
+                   TilePriority::EVENTUALLY &&
+               tile->priority(PENDING_TREE).priority_bin == TilePriority::NOW) {
+      // Since we'd return pending tree now tiles before the eventually tiles on
+      // the active tree, update the value.
+      ++correct_order_tiles;
+      skip_updating_last_tile = true;
     }
 
     if (tile->priority(ACTIVE_TREE).priority_bin == TilePriority::NOW &&
@@ -708,7 +279,8 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
       EXPECT_EQ(LOW_RESOLUTION, last_tile->priority(ACTIVE_TREE).resolution);
     }
 
-    last_tile = tile;
+    if (!skip_updating_last_tile)
+      last_tile = tile;
     ++tile_count;
     smoothness_tiles.insert(tile);
     queue.Pop();
@@ -718,14 +290,15 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
   EXPECT_EQ(all_tiles, smoothness_tiles);
   // Since we don't guarantee increasing distance due to spiral iterator, we
   // should check that we're _mostly_ right.
-  EXPECT_GT(increasing_distance_tiles, 3 * tile_count / 4);
+  EXPECT_GT(correct_order_tiles, 3 * tile_count / 4);
 
   std::set<Tile*> new_content_tiles;
   last_tile = NULL;
-  increasing_distance_tiles = 0u;
+  size_t increasing_distance_tiles = 0u;
   // Here we expect to get increasing PENDING_TREE priority_bin.
   queue.Reset();
   host_impl_.BuildRasterQueue(&queue, NEW_CONTENT_TAKES_PRIORITY);
+  tile_count = 0;
   while (!queue.IsEmpty()) {
     Tile* tile = queue.Top();
     EXPECT_TRUE(tile);
@@ -751,18 +324,78 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueue) {
 
     last_tile = tile;
     new_content_tiles.insert(tile);
+    ++tile_count;
     queue.Pop();
   }
 
   EXPECT_EQ(tile_count, new_content_tiles.size());
-  EXPECT_EQ(all_tiles, new_content_tiles);
+  EXPECT_EQ(high_res_tiles, new_content_tiles);
   // Since we don't guarantee increasing distance due to spiral iterator, we
   // should check that we're _mostly_ right.
-  EXPECT_GT(increasing_distance_tiles, 3 * tile_count / 4);
+  EXPECT_GE(increasing_distance_tiles, 3 * tile_count / 4);
+}
+
+TEST_F(TileManagerTilePriorityQueueTest, ActivationComesBeforeEventually) {
+  SetupDefaultTrees(gfx::Size(1000, 1000));
+
+  active_layer_->CreateDefaultTilingsAndTiles();
+  pending_layer_->CreateDefaultTilingsAndTiles();
+
+  // Create a pending child layer.
+  gfx::Size tile_size(256, 256);
+  scoped_refptr<FakePicturePileImpl> pending_pile =
+      FakePicturePileImpl::CreateFilledPile(tile_size, gfx::Size(1000, 1000));
+  scoped_ptr<FakePictureLayerImpl> pending_child =
+      FakePictureLayerImpl::CreateWithPile(
+          host_impl_.pending_tree(), id_ + 1, pending_pile);
+  pending_layer_->AddChild(pending_child.Pass());
+  FakePictureLayerImpl* pending_child_raw = static_cast<FakePictureLayerImpl*>(
+      host_impl_.pending_tree()->LayerById(id_ + 1));
+  ASSERT_TRUE(pending_child_raw);
+
+  pending_child_raw->SetDrawsContent(true);
+  pending_child_raw->DoPostCommitInitializationIfNeeded();
+  pending_child_raw->CreateDefaultTilingsAndTiles();
+  ASSERT_TRUE(pending_child_raw->HighResTiling());
+
+  // Set a small viewport, so we have soon and eventually tiles.
+  gfx::Rect viewport(200, 200);
+  active_layer_->draw_properties().visible_content_rect = viewport;
+  active_layer_->UpdateTiles(Occlusion(), false);
+  pending_layer_->draw_properties().visible_content_rect = viewport;
+  pending_layer_->UpdateTiles(Occlusion(), false);
+  pending_child_raw->draw_properties().visible_content_rect = viewport;
+  pending_child_raw->UpdateTiles(Occlusion(), false);
+
+  RasterTilePriorityQueue queue;
+  host_impl_.SetRequiresHighResToDraw();
+  host_impl_.BuildRasterQueue(&queue, SMOOTHNESS_TAKES_PRIORITY);
+  EXPECT_FALSE(queue.IsEmpty());
+
+  // Get all the tiles that are NOW or SOON and make sure they are ready to
+  // draw.
+  std::vector<Tile*> all_tiles;
+  while (!queue.IsEmpty()) {
+    Tile* tile = queue.Top();
+    if (tile->combined_priority().priority_bin >= TilePriority::EVENTUALLY)
+      break;
+
+    all_tiles.push_back(tile);
+    queue.Pop();
+  }
+
+  tile_manager()->InitializeTilesWithResourcesForTesting(
+      std::vector<Tile*>(all_tiles.begin(), all_tiles.end()));
+
+  // Ensure we can activate.
+  EXPECT_TRUE(pending_layer_->AllTilesRequiredForActivationAreReadyToDraw());
+  EXPECT_TRUE(pending_child_raw->AllTilesRequiredForActivationAreReadyToDraw());
 }
 
 TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueue) {
-  SetupDefaultTrees(gfx::Size(1000, 1000));
+  const gfx::Size layer_bounds(1000, 1000);
+  host_impl_.SetViewportSize(layer_bounds);
+  SetupDefaultTrees(layer_bounds);
 
   active_layer_->CreateDefaultTilingsAndTiles();
   pending_layer_->CreateDefaultTilingsAndTiles();
@@ -783,7 +416,7 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueue) {
   }
 
   EXPECT_EQ(tile_count, all_tiles.size());
-  EXPECT_EQ(17u, tile_count);
+  EXPECT_EQ(16u, tile_count);
 
   tile_manager()->InitializeTilesWithResourcesForTesting(
       std::vector<Tile*>(all_tiles.begin(), all_tiles.end()));
@@ -822,13 +455,13 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueue) {
 
   // Renew all of the tile priorities.
   gfx::Rect viewport(50, 50, 100, 100);
-  pending_layer_->HighResTiling()->UpdateTilePriorities(
+  pending_layer_->HighResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
-  pending_layer_->LowResTiling()->UpdateTilePriorities(
+  pending_layer_->LowResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
-  active_layer_->HighResTiling()->UpdateTilePriorities(
+  active_layer_->HighResTiling()->ComputeTilePriorityRects(
       ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
-  active_layer_->LowResTiling()->UpdateTilePriorities(
+  active_layer_->LowResTiling()->ComputeTilePriorityRects(
       ACTIVE_TREE, viewport, 1.0f, 1.0, Occlusion());
 
   // Populate all tiles directly from the tilings.
@@ -855,8 +488,6 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueue) {
 
   tile_manager()->InitializeTilesWithResourcesForTesting(
       std::vector<Tile*>(all_tiles.begin(), all_tiles.end()));
-
-  pending_layer_->MarkVisibleResourcesAsRequired();
 
   Tile* last_tile = NULL;
   smoothness_tiles.clear();
@@ -933,6 +564,8 @@ TEST_F(TileManagerTilePriorityQueueTest,
   gfx::Size tile_size(102, 102);
   gfx::Size layer_bounds(1000, 1000);
 
+  host_impl_.SetViewportSize(layer_bounds);
+
   scoped_refptr<FakePicturePileImpl> pending_pile =
       FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
   SetupPendingTree(pending_pile);
@@ -941,7 +574,7 @@ TEST_F(TileManagerTilePriorityQueueTest,
   scoped_ptr<FakePictureLayerImpl> pending_child =
       FakePictureLayerImpl::CreateWithPile(
           host_impl_.pending_tree(), 2, pending_pile);
-  pending_layer_->AddChild(pending_child.PassAs<LayerImpl>());
+  pending_layer_->AddChild(pending_child.Pass());
 
   FakePictureLayerImpl* pending_child_layer =
       static_cast<FakePictureLayerImpl*>(pending_layer_->children()[0]);
@@ -960,47 +593,44 @@ TEST_F(TileManagerTilePriorityQueueTest,
     raster_queue.Pop();
   }
   EXPECT_EQ(tile_count, all_tiles.size());
-  EXPECT_EQ(34u, tile_count);
+  EXPECT_EQ(32u, tile_count);
 
   pending_layer_->ResetAllTilesPriorities();
 
   // Renew all of the tile priorities.
   gfx::Rect viewport(layer_bounds);
-  pending_layer_->HighResTiling()->UpdateTilePriorities(
+  pending_layer_->HighResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
-  pending_layer_->LowResTiling()->UpdateTilePriorities(
+  pending_layer_->LowResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
-  pending_child_layer->HighResTiling()->UpdateTilePriorities(
+  pending_child_layer->HighResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
-  pending_child_layer->LowResTiling()->UpdateTilePriorities(
+  pending_child_layer->LowResTiling()->ComputeTilePriorityRects(
       PENDING_TREE, viewport, 1.0f, 1.0, Occlusion());
 
   // Populate all tiles directly from the tilings.
   all_tiles.clear();
   std::vector<Tile*> pending_high_res_tiles =
       pending_layer_->HighResTiling()->AllTilesForTesting();
-  for (size_t i = 0; i < pending_high_res_tiles.size(); ++i)
-    all_tiles.insert(pending_high_res_tiles[i]);
+  all_tiles.insert(pending_high_res_tiles.begin(),
+                   pending_high_res_tiles.end());
 
   std::vector<Tile*> pending_low_res_tiles =
       pending_layer_->LowResTiling()->AllTilesForTesting();
-  for (size_t i = 0; i < pending_low_res_tiles.size(); ++i)
-    all_tiles.insert(pending_low_res_tiles[i]);
+  all_tiles.insert(pending_low_res_tiles.begin(), pending_low_res_tiles.end());
 
   // Set all tiles on the pending_child_layer as occluded on the pending tree.
   std::vector<Tile*> pending_child_high_res_tiles =
       pending_child_layer->HighResTiling()->AllTilesForTesting();
-  for (size_t i = 0; i < pending_child_high_res_tiles.size(); ++i) {
-    pending_child_high_res_tiles[i]->set_is_occluded(PENDING_TREE, true);
-    all_tiles.insert(pending_child_high_res_tiles[i]);
-  }
+  pending_child_layer->HighResTiling()->SetAllTilesOccludedForTesting();
+  all_tiles.insert(pending_child_high_res_tiles.begin(),
+                   pending_child_high_res_tiles.end());
 
   std::vector<Tile*> pending_child_low_res_tiles =
       pending_child_layer->LowResTiling()->AllTilesForTesting();
-  for (size_t i = 0; i < pending_child_low_res_tiles.size(); ++i) {
-    pending_child_low_res_tiles[i]->set_is_occluded(PENDING_TREE, true);
-    all_tiles.insert(pending_child_low_res_tiles[i]);
-  }
+  pending_child_layer->LowResTiling()->SetAllTilesOccludedForTesting();
+  all_tiles.insert(pending_child_low_res_tiles.begin(),
+                   pending_child_low_res_tiles.end());
 
   tile_manager()->InitializeTilesWithResourcesForTesting(
       std::vector<Tile*>(all_tiles.begin(), all_tiles.end()));
@@ -1046,7 +676,9 @@ TEST_F(TileManagerTilePriorityQueueTest,
 }
 
 TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueueEmptyLayers) {
-  SetupDefaultTrees(gfx::Size(1000, 1000));
+  const gfx::Size layer_bounds(1000, 1000);
+  host_impl_.SetViewportSize(layer_bounds);
+  SetupDefaultTrees(layer_bounds);
 
   active_layer_->CreateDefaultTilingsAndTiles();
   pending_layer_->CreateDefaultTilingsAndTiles();
@@ -1065,7 +697,7 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueueEmptyLayers) {
   }
 
   EXPECT_EQ(tile_count, all_tiles.size());
-  EXPECT_EQ(17u, tile_count);
+  EXPECT_EQ(16u, tile_count);
 
   queue.Reset();
   for (int i = 1; i < 10; ++i) {
@@ -1074,7 +706,7 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueueEmptyLayers) {
     pending_layer->SetDrawsContent(true);
     pending_layer->DoPostCommitInitializationIfNeeded();
     pending_layer->set_has_valid_tile_priorities(true);
-    pending_layer_->AddChild(pending_layer.PassAs<LayerImpl>());
+    pending_layer_->AddChild(pending_layer.Pass());
   }
 
   host_impl_.BuildRasterQueue(&queue, SAME_PRIORITY_FOR_BOTH_TREES);
@@ -1089,11 +721,13 @@ TEST_F(TileManagerTilePriorityQueueTest, RasterTilePriorityQueueEmptyLayers) {
     queue.Pop();
   }
   EXPECT_EQ(tile_count, all_tiles.size());
-  EXPECT_EQ(17u, tile_count);
+  EXPECT_EQ(16u, tile_count);
 }
 
 TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueueEmptyLayers) {
-  SetupDefaultTrees(gfx::Size(1000, 1000));
+  const gfx::Size layer_bounds(1000, 1000);
+  host_impl_.SetViewportSize(layer_bounds);
+  SetupDefaultTrees(layer_bounds);
 
   active_layer_->CreateDefaultTilingsAndTiles();
   pending_layer_->CreateDefaultTilingsAndTiles();
@@ -1111,7 +745,7 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueueEmptyLayers) {
     raster_queue.Pop();
   }
   EXPECT_EQ(tile_count, all_tiles.size());
-  EXPECT_EQ(17u, tile_count);
+  EXPECT_EQ(16u, tile_count);
 
   std::vector<Tile*> tiles(all_tiles.begin(), all_tiles.end());
   host_impl_.tile_manager()->InitializeTilesWithResourcesForTesting(tiles);
@@ -1123,7 +757,7 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueueEmptyLayers) {
     pending_layer->SetDrawsContent(true);
     pending_layer->DoPostCommitInitializationIfNeeded();
     pending_layer->set_has_valid_tile_priorities(true);
-    pending_layer_->AddChild(pending_layer.PassAs<LayerImpl>());
+    pending_layer_->AddChild(pending_layer.Pass());
   }
 
   host_impl_.BuildEvictionQueue(&queue, SAME_PRIORITY_FOR_BOTH_TREES);
@@ -1138,7 +772,7 @@ TEST_F(TileManagerTilePriorityQueueTest, EvictionTilePriorityQueueEmptyLayers) {
     queue.Pop();
   }
   EXPECT_EQ(tile_count, all_tiles.size());
-  EXPECT_EQ(17u, tile_count);
+  EXPECT_EQ(16u, tile_count);
 }
 
 }  // namespace

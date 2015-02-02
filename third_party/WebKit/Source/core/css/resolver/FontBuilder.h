@@ -41,25 +41,23 @@ class FontBuilder {
     STACK_ALLOCATED();
     WTF_MAKE_NONCOPYABLE(FontBuilder);
 public:
-    FontBuilder();
+    FontBuilder(const Document&);
 
-    // FIXME: The name is probably wrong, but matches StyleResolverState callsite for consistency.
-    void initForStyleResolve(const Document&, RenderStyle*);
-
+    void setStyle(RenderStyle* style) { m_style = style; }
     void setInitial(float effectiveZoom);
 
     void didChangeFontParameters(bool);
 
     void inheritFrom(const FontDescription&);
-    void fromSystemFont(CSSValueID, float effectiveZoom);
 
-    void setFontFamilyInitial();
-    void setFontFamilyInherit(const FontDescription&);
-    void setFontFamilyValue(CSSValue*);
+    FontFamily standardFontFamily() const;
+    AtomicString standardFontFamilyName() const;
+    AtomicString genericFontFamilyName(FontDescription::GenericFamilyType) const;
 
     void setWeight(FontWeight);
     void setSize(const FontDescription::Size&);
     void setStretch(FontStretch);
+    void setFamilyDescription(const FontDescription::FamilyDescription&);
     void setFeatureSettings(PassRefPtr<FontFeatureSettings>);
     void setScript(const String& locale);
     void setStyle(FontStyle);
@@ -79,8 +77,9 @@ public:
     // FIXME: This is only used by an ASSERT in StyleResolver. Remove?
     bool fontDirty() const { return m_fontDirty; }
 
+    static FontDescription::FamilyDescription initialFamilyDescription() { return FontDescription::FamilyDescription(initialGenericFamily()); }
     static FontFeatureSettings* initialFeatureSettings() { return nullptr; }
-    static FontDescription::GenericFamilyType initialGenericFamily() { return FontDescription::NoFamily; }
+    static FontDescription::GenericFamilyType initialGenericFamily() { return FontDescription::StandardFamily; }
     static FontDescription::Size initialSize() { return FontDescription::Size(FontSize::initialKeywordSize(), 0.0f, false); }
     static TextRenderingMode initialTextRendering() { return AutoTextRendering; }
     static FontVariant initialVariant() { return FontVariantNormal; }
@@ -95,7 +94,7 @@ public:
 
 private:
 
-    // FIXME: "size" arg should be first for consistency with other similar functions.
+    void setFamilyDescription(FontDescription&, const FontDescription::FamilyDescription&);
     void setSize(FontDescription&, const FontDescription::Size&);
     void checkForOrientationChange(RenderStyle*);
     // This function fixes up the default font size if it detects that the current generic font family has changed. -dwh
@@ -105,7 +104,7 @@ private:
 
     float getComputedSizeFromSpecifiedSize(FontDescription&, float effectiveZoom, float specifiedSize);
 
-    RawPtrWillBeMember<const Document> m_document;
+    const Document& m_document;
     // FIXME: This member is here on a short-term lease. The plan is to remove
     // any notion of RenderStyle from here, allowing FontBuilder to build Font objects
     // directly, rather than as a byproduct of calling RenderStyle::setFontDescription.

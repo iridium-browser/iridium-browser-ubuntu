@@ -2,10 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_COPRESENCE_PUBLIC_COPRESENCE_CONSTANTS_
-#define COMPONENTS_COPRESENCE_PUBLIC_COPRESENCE_CONSTANTS_
+#ifndef COMPONENTS_COPRESENCE_PUBLIC_COPRESENCE_CONSTANTS_H_
+#define COMPONENTS_COPRESENCE_PUBLIC_COPRESENCE_CONSTANTS_H_
 
+#include <string>
+#include <vector>
+
+#include "base/callback_forward.h"
+#include "base/memory/ref_counted.h"
 #include "media/base/channel_layout.h"
+
+namespace media {
+class AudioBusRefCounted;
+}
 
 namespace copresence {
 
@@ -27,6 +36,42 @@ extern const float kDefaultCarrierFrequency;
 extern const int kDefaultChannels;
 extern const media::ChannelLayout kDefaultChannelLayout;
 
+// These constants are used from everywhere.
+// Particularly, these are used to index the directive lists in the
+// audio manager, so do not change these enums without changing
+// audio_directive_list.[h|cc].
+enum AudioType {
+  AUDIBLE = 0,
+  INAUDIBLE = 1,
+  BOTH = 2,
+  AUDIO_TYPE_UNKNOWN = 3,
+};
+
+struct AudioToken {
+  AudioToken(const std::string& token, bool audible)
+      : token(token), audible(audible) {}
+  std::string token;
+  bool audible;
+};
+
+// These callbacks are used from various places in Copresence.
+
+// Generic callback to indicate a boolean success or failure.
+using SuccessCallback = base::Callback<void(bool)>;
+
+// Callback to pass around found tokens.
+// Arguments:
+// const std::vector<AudioToken>& tokens - List of found tokens.
+using TokensCallback = base::Callback<void(const std::vector<AudioToken>&)>;
+
+// Callback to receive encoded samples from Whispernet.
+// AudioType type: Type of audio encoding - AUDIBLE or INAUDIBLE.
+// const std::string& token: The token that we encoded.
+// const scoped_refptr<media::AudioBusRefCounted>& samples - Encoded samples.
+using SamplesCallback =
+    base::Callback<void(AudioType,
+                        const std::string&,
+                        const scoped_refptr<media::AudioBusRefCounted>&)>;
 }  // namespace copresence
 
-#endif  // COMPONENTS_COPRESENCE_PUBLIC_COPRESENCE_CONSTANTS_
+#endif  // COMPONENTS_COPRESENCE_PUBLIC_COPRESENCE_CONSTANTS_H_

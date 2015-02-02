@@ -45,6 +45,7 @@
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/Chrome.h"
 #include "core/page/Page.h"
+#include "core/paint/LayerPainter.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderView.h"
 #include "core/testing/URLTestHelpers.h"
@@ -190,7 +191,7 @@ public:
     }
 
     // WebViewClient methods
-    virtual bool openDateTimeChooser(const WebDateTimeChooserParams&, WebDateTimeChooserCompletion* chooser_completion) OVERRIDE
+    virtual bool openDateTimeChooser(const WebDateTimeChooserParams&, WebDateTimeChooserCompletion* chooser_completion) override
     {
         m_chooserCompletion = chooser_completion;
         return true;
@@ -353,7 +354,7 @@ TEST_F(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent)
     RenderLayer* rootLayer = view->renderView()->layer();
     IntRect paintRect(0, 0, kWidth, kHeight);
     LayerPaintingInfo paintingInfo(rootLayer, paintRect, PaintBehaviorNormal, LayoutSize());
-    rootLayer->paintLayerContents(&context, paintingInfo, PaintLayerPaintingCompositingAllPhases);
+    LayerPainter(*rootLayer).paintLayerContents(&context, paintingInfo, PaintLayerPaintingCompositingAllPhases);
 
     // The result should be a blend of red and green.
     SkColor color = bitmap.getColor(kWidth / 2, kHeight / 2);
@@ -890,24 +891,24 @@ TEST_F(WebViewTest, BackForwardRestoreScroll)
     // Emulate a user scroll
     webViewImpl->setMainFrameScrollOffset(WebPoint(0, 900));
     LocalFrame* mainFrameLocal = toLocalFrame(webViewImpl->page()->mainFrame());
-    RefPtr<HistoryItem> item1 = mainFrameLocal->loader().currentItem();
+    RefPtrWillBePersistent<HistoryItem> item1 = mainFrameLocal->loader().currentItem();
 
     // Click an anchor
     mainFrameLocal->loader().load(FrameLoadRequest(mainFrameLocal->document(), ResourceRequest(mainFrameLocal->document()->completeURL("#a"))));
-    RefPtr<HistoryItem> item2 = mainFrameLocal->loader().currentItem();
+    RefPtrWillBePersistent<HistoryItem> item2 = mainFrameLocal->loader().currentItem();
 
     // Go back, then forward, then back again.
-    mainFrameLocal->loader().loadHistoryItem(item1.get(), HistorySameDocumentLoad);
-    mainFrameLocal->loader().loadHistoryItem(item2.get(), HistorySameDocumentLoad);
-    mainFrameLocal->loader().loadHistoryItem(item1.get(), HistorySameDocumentLoad);
+    mainFrameLocal->loader().loadHistoryItem(item1.get(), FrameLoadTypeBackForward, HistorySameDocumentLoad);
+    mainFrameLocal->loader().loadHistoryItem(item2.get(), FrameLoadTypeBackForward, HistorySameDocumentLoad);
+    mainFrameLocal->loader().loadHistoryItem(item1.get(), FrameLoadTypeBackForward, HistorySameDocumentLoad);
 
     // Click a different anchor
     mainFrameLocal->loader().load(FrameLoadRequest(mainFrameLocal->document(), ResourceRequest(mainFrameLocal->document()->completeURL("#b"))));
-    RefPtr<HistoryItem> item3 = mainFrameLocal->loader().currentItem();
+    RefPtrWillBePersistent<HistoryItem> item3 = mainFrameLocal->loader().currentItem();
 
     // Go back, then forward. The scroll position should be properly set on the forward navigation.
-    mainFrameLocal->loader().loadHistoryItem(item1.get(), HistorySameDocumentLoad);
-    mainFrameLocal->loader().loadHistoryItem(item3.get(), HistorySameDocumentLoad);
+    mainFrameLocal->loader().loadHistoryItem(item1.get(), FrameLoadTypeBackForward, HistorySameDocumentLoad);
+    mainFrameLocal->loader().loadHistoryItem(item3.get(), FrameLoadTypeBackForward, HistorySameDocumentLoad);
     EXPECT_EQ(0, webViewImpl->mainFrame()->scrollOffset().width);
     EXPECT_GT(webViewImpl->mainFrame()->scrollOffset().height, 2000);
 }
@@ -966,7 +967,7 @@ public:
     }
 
     // WebViewClient methods
-    virtual void printPage(WebLocalFrame*) OVERRIDE
+    virtual void printPage(WebLocalFrame*) override
     {
         m_printCalled = true;
     }
@@ -995,7 +996,7 @@ public:
     {
     }
 
-    virtual void run() OVERRIDE
+    virtual void run() override
     {
         const WebPoint clientPoint(0, 0);
         const WebPoint screenPoint(0, 0);
@@ -1055,18 +1056,18 @@ class ContentDetectorClient : public FrameTestHelpers::TestWebViewClient {
 public:
     ContentDetectorClient() { reset(); }
 
-    virtual WebContentDetectionResult detectContentAround(const WebHitTestResult& hitTest) OVERRIDE
+    virtual WebContentDetectionResult detectContentAround(const WebHitTestResult& hitTest) override
     {
         m_contentDetectionRequested = true;
         return m_contentDetectionResult;
     }
 
-    virtual void scheduleContentIntent(const WebURL& url) OVERRIDE
+    virtual void scheduleContentIntent(const WebURL& url) override
     {
         m_scheduledIntentURL = url;
     }
 
-    virtual void cancelScheduledContentIntents() OVERRIDE
+    virtual void cancelScheduledContentIntents() override
     {
         m_pendingIntentsCancelled = true;
     }
@@ -1268,7 +1269,7 @@ TEST_F(WebViewTest, ShowPressOnTransformedLink)
     webViewImpl->resize(WebSize(pageWidth, pageHeight));
 
     WebURL baseURL = URLTestHelpers::toKURL("http://example.com/");
-    FrameTestHelpers::loadHTMLString(webViewImpl->mainFrame(), "<a href='http://www.test.com' style='position: absolute; left: 20px; top: 20px; width: 200px; -webkit-transform:translateZ(0);'>A link to highlight</a>", baseURL);
+    FrameTestHelpers::loadHTMLString(webViewImpl->mainFrame(), "<a href='http://www.test.com' style='position: absolute; left: 20px; top: 20px; width: 200px; transform:translateZ(0);'>A link to highlight</a>", baseURL);
 
     WebGestureEvent event;
     event.type = WebInputEvent::GestureShowPress;
@@ -1289,15 +1290,15 @@ public:
 
     virtual ~MockAutofillClient() { }
 
-    virtual void setIgnoreTextChanges(bool ignore) OVERRIDE { m_ignoreTextChanges = ignore; }
-    virtual void textFieldDidChange(const WebFormControlElement&) OVERRIDE
+    virtual void setIgnoreTextChanges(bool ignore) override { m_ignoreTextChanges = ignore; }
+    virtual void textFieldDidChange(const WebFormControlElement&) override
     {
         if (m_ignoreTextChanges)
             ++m_textChangesWhileIgnored;
         else
             ++m_textChangesWhileNotIgnored;
     }
-    virtual void firstUserGestureObserved() OVERRIDE { ++m_userGestureNotificationsCount; }
+    virtual void firstUserGestureObserved() override { ++m_userGestureNotificationsCount; }
 
     void clearChangeCounts()
     {
@@ -1430,13 +1431,13 @@ public:
     }
 
     // WebViewClient methods
-    virtual WebView* createView(WebLocalFrame*, const WebURLRequest&, const WebWindowFeatures&, const WebString& name, WebNavigationPolicy, bool) OVERRIDE
+    virtual WebView* createView(WebLocalFrame*, const WebURLRequest&, const WebWindowFeatures&, const WebString& name, WebNavigationPolicy, bool) override
     {
         return m_webViewHelper.initialize(true, 0, 0);
     }
 
     // WebWidgetClient methods
-    virtual void didFocus() OVERRIDE
+    virtual void didFocus() override
     {
         m_didFocusCalled = true;
     }
@@ -1657,7 +1658,7 @@ TEST_F(WebViewTest, SmartClipReturnsEmptyStringsWhenUserSelectIsNone)
 class CreateChildCounterFrameClient : public FrameTestHelpers::TestWebFrameClient {
 public:
     CreateChildCounterFrameClient() : m_count(0) { }
-    virtual WebFrame* createChildFrame(WebLocalFrame* parent, const WebString& frameName) OVERRIDE;
+    virtual WebFrame* createChildFrame(WebLocalFrame* parent, const WebString& frameName) override;
 
     int count() const { return m_count; }
 
@@ -1714,7 +1715,7 @@ TEST_F(WebViewTest, AddFrameInChildInNavigateUnload)
 class TouchEventHandlerWebViewClient : public FrameTestHelpers::TestWebViewClient {
 public:
     // WebWidgetClient methods
-    virtual void hasTouchEventHandlers(bool state) OVERRIDE
+    virtual void hasTouchEventHandlers(bool state) override
     {
         m_hasTouchEventHandlerCount[state]++;
     }
@@ -2005,7 +2006,7 @@ public:
     NonUserInputTextUpdateWebViewClient() : m_textIsUpdated(false) { }
 
     // WebWidgetClient methods
-    virtual void didUpdateTextOfFocusedElementByNonUserInput() OVERRIDE
+    virtual void didUpdateTextOfFocusedElementByNonUserInput() override
     {
         m_textIsUpdated = true;
     }

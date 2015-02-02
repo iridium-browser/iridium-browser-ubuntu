@@ -25,6 +25,7 @@ from chromite.lib import git
 from chromite.lib import parallel
 from chromite.lib import parallel_unittest
 from chromite.lib import partial_mock
+from chromite.lib import portage_util
 
 from chromite.cbuildbot.stages.generic_stages_unittest import patch
 from chromite.cbuildbot.stages.generic_stages_unittest import patches
@@ -180,17 +181,12 @@ class UprevStageTest(generic_stages_unittest.AbstractStageTest):
     self.mox.VerifyAll()
 
 
-class BuildPackagesStageTest(generic_stages_unittest.AbstractStageTest):
-  """Tests BuildPackagesStage."""
-
-  def setUp(self):
-    self._release_tag = None
-
-    self.StartPatcher(BuilderRunMock())
+class AllConfigsTestCase(generic_stages_unittest.AbstractStageTest):
+  """Test case for testing against all bot configs."""
 
   def ConstructStage(self):
-    self._run.attrs.release_tag = self._release_tag
-    return build_stages.BuildPackagesStage(self._run, self._current_board)
+    """Bypass lint warning"""
+    generic_stages_unittest.AbstractStageTest.ConstructStage(self)
 
   @contextlib.contextmanager
   def RunStageWithConfig(self, mock_configurator=None):
@@ -210,6 +206,42 @@ class BuildPackagesStageTest(generic_stages_unittest.AbstractStageTest):
       msg = '%s failed the following test:\n%s' % (self._bot_id, ex)
       raise AssertionError(msg)
 
+  def RunAllConfigs(self, task, skip_missing=False):
+    """Run |task| against all major configurations"""
+    with parallel.BackgroundTaskRunner(task) as queue:
+      # Loop through all major configuration types and pick one from each.
+      for bot_type in config.CONFIG_TYPE_DUMP_ORDER:
+        for bot_id in config.config:
+          if bot_id.endswith(bot_type):
+            # Skip any config without a board, since those configs do not
+            # build packages.
+            cfg = config.config[bot_id]
+            if cfg.boards:
+              # Skip boards w/out a local overlay.  Like when running a
+              # public manifest and testing private-only boards.
+              if skip_missing:
+                try:
+                  for b in cfg.boards:
+                    portage_util.FindPrimaryOverlay(constants.BOTH_OVERLAYS, b)
+                except portage_util.MissingOverlayException:
+                  continue
+
+              queue.put([bot_id])
+              break
+
+
+class BuildPackagesStageTest(AllConfigsTestCase):
+  """Tests BuildPackagesStage."""
+
+  def setUp(self):
+    self._release_tag = None
+
+    self.StartPatcher(BuilderRunMock())
+
+  def ConstructStage(self):
+    self._run.attrs.release_tag = self._release_tag
+    return build_stages.BuildPackagesStage(self._run, self._current_board)
+
   def RunTestsWithBotId(self, bot_id, options_tests=True):
     """Test with the config for the specified bot_id."""
     self._Prepare(bot_id)
@@ -227,18 +259,7 @@ class BuildPackagesStageTest(generic_stages_unittest.AbstractStageTest):
 
   def testAllConfigs(self):
     """Test all major configurations"""
-    task = self.RunTestsWithBotId
-    with parallel.BackgroundTaskRunner(task) as queue:
-      # Loop through all major configuration types and pick one from each.
-      for bot_type in config.CONFIG_TYPE_DUMP_ORDER:
-        for bot_id in config.config:
-          if bot_id.endswith(bot_type):
-            # Skip any config without a board, since those configs do not
-            # build packages.
-            cfg = config.config[bot_id]
-            if cfg.boards:
-              queue.put([bot_id])
-              break
+    self.RunAllConfigs(self.RunTestsWithBotId)
 
   def testNoTests(self):
     """Test that self.options.tests = False works."""

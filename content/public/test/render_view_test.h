@@ -19,6 +19,8 @@
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 
+struct ViewMsg_Resize_Params;
+
 namespace blink {
 class WebWidget;
 }
@@ -34,26 +36,27 @@ class ContentRendererClient;
 class MockRenderProcess;
 class PageState;
 class RendererMainPlatformDelegate;
-class RendererWebKitPlatformSupportImplNoSandboxImpl;
+class RendererBlinkPlatformImplNoSandboxImpl;
+class RendererScheduler;
 class RenderView;
 
 class RenderViewTest : public testing::Test {
  public:
-  // A special WebKitPlatformSupportImpl class for getting rid off the
-  // dependency to the sandbox, which is not available in RenderViewTest.
-  class RendererWebKitPlatformSupportImplNoSandbox {
+  // A special BlinkPlatformImpl class for getting rid off the dependency to the
+  // sandbox, which is not available in RenderViewTest.
+  class RendererBlinkPlatformImplNoSandbox {
    public:
-    RendererWebKitPlatformSupportImplNoSandbox();
-    ~RendererWebKitPlatformSupportImplNoSandbox();
+    RendererBlinkPlatformImplNoSandbox();
+    ~RendererBlinkPlatformImplNoSandbox();
     blink::Platform* Get();
 
    private:
-    scoped_ptr<RendererWebKitPlatformSupportImplNoSandboxImpl>
-        webkit_platform_support_;
+    scoped_ptr<RendererScheduler> renderer_scheduler_;
+    scoped_ptr<RendererBlinkPlatformImplNoSandboxImpl> blink_platform_impl_;
   };
 
   RenderViewTest();
-  virtual ~RenderViewTest();
+  ~RenderViewTest() override;
 
  protected:
   // Spins the message loop to process all messages that are currently pending.
@@ -132,17 +135,20 @@ class RenderViewTest : public testing::Test {
   virtual ContentBrowserClient* CreateContentBrowserClient();
   virtual ContentRendererClient* CreateContentRendererClient();
 
-  // testing::Test
-  virtual void SetUp() OVERRIDE;
+  // Allows a subclass to customize the initial size of the RenderView.
+  virtual scoped_ptr<ViewMsg_Resize_Params> InitialSizeParams();
 
-  virtual void TearDown() OVERRIDE;
+  // testing::Test
+  void SetUp() override;
+
+  void TearDown() override;
 
   base::MessageLoop msg_loop_;
   scoped_ptr<MockRenderProcess> mock_process_;
   // We use a naked pointer because we don't want to expose RenderViewImpl in
   // the embedder's namespace.
   RenderView* view_;
-  RendererWebKitPlatformSupportImplNoSandbox webkit_platform_support_;
+  RendererBlinkPlatformImplNoSandbox blink_platform_impl_;
   scoped_ptr<ContentClient> content_client_;
   scoped_ptr<ContentBrowserClient> content_browser_client_;
   scoped_ptr<ContentRendererClient> content_renderer_client_;

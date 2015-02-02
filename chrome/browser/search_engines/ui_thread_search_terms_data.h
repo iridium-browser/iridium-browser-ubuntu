@@ -21,22 +21,19 @@ class UIThreadSearchTermsData : public SearchTermsData {
   // values, and NTPIsThemedParam() will return an empty string.
   explicit UIThreadSearchTermsData(Profile* profile);
 
-  virtual std::string GoogleBaseURLValue() const OVERRIDE;
-  virtual std::string GetApplicationLocale() const OVERRIDE;
-  virtual base::string16 GetRlzParameterValue(bool from_app_list) const
-      OVERRIDE;
-  virtual std::string GetSearchClient() const OVERRIDE;
-  virtual std::string GetSuggestClient() const OVERRIDE;
-  virtual std::string GetSuggestRequestIdentifier() const OVERRIDE;
-  virtual bool EnableAnswersInSuggest() const OVERRIDE;
-  virtual bool IsShowingSearchTermsOnSearchResultsPages() const OVERRIDE;
-  virtual std::string InstantExtendedEnabledParam(
-      bool for_search) const OVERRIDE;
-  virtual std::string ForceInstantResultsParam(
-      bool for_prerender) const OVERRIDE;
-  virtual int OmniboxStartMargin() const OVERRIDE;
-  virtual std::string NTPIsThemedParam() const OVERRIDE;
-  virtual std::string GoogleImageSearchSource() const OVERRIDE;
+  std::string GoogleBaseURLValue() const override;
+  std::string GetApplicationLocale() const override;
+  base::string16 GetRlzParameterValue(bool from_app_list) const override;
+  std::string GetSearchClient() const override;
+  std::string GetSuggestClient() const override;
+  std::string GetSuggestRequestIdentifier() const override;
+  bool EnableAnswersInSuggest() const override;
+  bool IsShowingSearchTermsOnSearchResultsPages() const override;
+  std::string InstantExtendedEnabledParam(bool for_search) const override;
+  std::string ForceInstantResultsParam(bool for_prerender) const override;
+  int OmniboxStartMargin() const override;
+  std::string NTPIsThemedParam() const override;
+  std::string GoogleImageSearchSource() const override;
 
   // Used by tests to override the value for the Google base URL.  Passing the
   // empty string cancels this override.

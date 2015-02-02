@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -57,11 +58,17 @@ class EventRouter : public KeyedService,
                     public VolumeManagerObserver,
                     public content::NotificationObserver {
  public:
+  typedef base::Callback<void(const base::FilePath& virtual_path,
+                              const drive::FileChange* list,
+                              bool got_error,
+                              const std::vector<std::string>& extension_ids)>
+      DispatchDirectoryChangeEventImplCallback;
+
   explicit EventRouter(Profile* profile);
   virtual ~EventRouter();
 
   // KeyedService overrides.
-  virtual void Shutdown() OVERRIDE;
+  virtual void Shutdown() override;
 
   typedef base::Callback<void(bool success)> BoolCallback;
 
@@ -70,12 +77,18 @@ class EventRouter : public KeyedService,
   //
   // |callback| will be called with true on success, or false on failure.
   // |callback| must not be null.
+  //
+  // Obsolete. Used as fallback for files which backends do not implement the
+  // storage::WatcherManager interface.
   void AddFileWatch(const base::FilePath& local_path,
                     const base::FilePath& virtual_path,
                     const std::string& extension_id,
                     const BoolCallback& callback);
 
   // Removes a file watch at |local_path| for an extension with |extension_id|.
+  //
+  // Obsolete. Used as fallback for files which backends do not implement the
+  // storage::WatcherManager interface.
   void RemoveFileWatch(const base::FilePath& local_path,
                        const std::string& extension_id);
 
@@ -91,46 +104,59 @@ class EventRouter : public KeyedService,
                       const GURL& destination_url,
                       int64 size);
 
+  // Called when a notification from a watcher manager arrives.
+  void OnWatcherManagerNotification(
+      const storage::FileSystemURL& file_system_url,
+      const std::string& extension_id,
+      storage::WatcherManager::ChangeType change_type);
+
   // chromeos::NetworkStateHandlerObserver overrides.
   virtual void DefaultNetworkChanged(
-      const chromeos::NetworkState* network) OVERRIDE;
+      const chromeos::NetworkState* network) override;
 
   // drive::JobListObserver overrides.
-  virtual void OnJobAdded(const drive::JobInfo& job_info) OVERRIDE;
-  virtual void OnJobUpdated(const drive::JobInfo& job_info) OVERRIDE;
+  virtual void OnJobAdded(const drive::JobInfo& job_info) override;
+  virtual void OnJobUpdated(const drive::JobInfo& job_info) override;
   virtual void OnJobDone(const drive::JobInfo& job_info,
-                         drive::FileError error) OVERRIDE;
+                         drive::FileError error) override;
 
   // drive::DriveServiceObserver overrides.
-  virtual void OnRefreshTokenInvalid() OVERRIDE;
+  virtual void OnRefreshTokenInvalid() override;
 
   // drive::FileSystemObserver overrides.
-  virtual void OnDirectoryChanged(const base::FilePath& drive_path) OVERRIDE;
-  virtual void OnFileChanged(const drive::FileChange& changed_files) OVERRIDE;
+  virtual void OnDirectoryChanged(const base::FilePath& drive_path) override;
+  virtual void OnFileChanged(const drive::FileChange& changed_files) override;
   virtual void OnDriveSyncError(drive::file_system::DriveSyncErrorType type,
-                                const base::FilePath& drive_path) OVERRIDE;
+                                const base::FilePath& drive_path) override;
 
   // VolumeManagerObserver overrides.
   virtual void OnDiskAdded(
       const chromeos::disks::DiskMountManager::Disk& disk,
-      bool mounting) OVERRIDE;
+      bool mounting) override;
   virtual void OnDiskRemoved(
-      const chromeos::disks::DiskMountManager::Disk& disk) OVERRIDE;
-  virtual void OnDeviceAdded(const std::string& device_path) OVERRIDE;
-  virtual void OnDeviceRemoved(const std::string& device_path) OVERRIDE;
+      const chromeos::disks::DiskMountManager::Disk& disk) override;
+  virtual void OnDeviceAdded(const std::string& device_path) override;
+  virtual void OnDeviceRemoved(const std::string& device_path) override;
   virtual void OnVolumeMounted(chromeos::MountError error_code,
-                               const VolumeInfo& volume_info) OVERRIDE;
+                               const VolumeInfo& volume_info) override;
   virtual void OnVolumeUnmounted(chromeos::MountError error_code,
-                                 const VolumeInfo& volume_info) OVERRIDE;
+                                 const VolumeInfo& volume_info) override;
   virtual void OnFormatStarted(
-      const std::string& device_path, bool success) OVERRIDE;
+      const std::string& device_path, bool success) override;
   virtual void OnFormatCompleted(
-      const std::string& device_path, bool success) OVERRIDE;
+      const std::string& device_path, bool success) override;
 
   // content::NotificationObserver overrides.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details) override;
+
+  // Set custom dispatch directory change event implementation for testing.
+  void SetDispatchDirectoryChangeEventImplForTesting(
+      const DispatchDirectoryChangeEventImplCallback& callback);
+
+  // Returns a weak pointer for the event router.
+  base::WeakPtr<EventRouter> GetWeakPtr();
 
  private:
   typedef std::map<base::FilePath, FileWatcher*> WatcherMap;
@@ -148,6 +174,13 @@ class EventRouter : public KeyedService,
 
   // Sends directory change event.
   void DispatchDirectoryChangeEvent(
+      const base::FilePath& path,
+      const drive::FileChange* list,
+      bool got_error,
+      const std::vector<std::string>& extension_ids);
+
+  // Default implementation of DispatchDirectoryChangeEvent.
+  void DispatchDirectoryChangeEventImpl(
       const base::FilePath& path,
       const drive::FileChange* list,
       bool got_error,
@@ -210,9 +243,13 @@ class EventRouter : public KeyedService,
 
   scoped_ptr<DeviceEventRouter> device_event_router_;
 
+  DispatchDirectoryChangeEventImplCallback
+      dispatch_directory_change_event_impl_;
+
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.
   base::WeakPtrFactory<EventRouter> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(EventRouter);
 };
 

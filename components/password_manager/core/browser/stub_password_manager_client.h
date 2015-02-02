@@ -15,22 +15,20 @@ namespace password_manager {
 class StubPasswordManagerClient : public PasswordManagerClient {
  public:
   StubPasswordManagerClient();
-  virtual ~StubPasswordManagerClient();
+  ~StubPasswordManagerClient() override;
 
   // PasswordManagerClient:
-  virtual bool IsSyncAccountCredential(
-      const std::string& username, const std::string& origin) const OVERRIDE;
-  virtual bool ShouldFilterAutofillResult(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual bool PromptUserToSavePassword(
-      scoped_ptr<PasswordFormManager> form_to_save) OVERRIDE;
-  virtual void AutomaticPasswordSave(
-      scoped_ptr<PasswordFormManager> saved_manager) OVERRIDE;
-  virtual void AuthenticateAutofillAndFillForm(
-      scoped_ptr<autofill::PasswordFormFillData> fill_data) OVERRIDE;
-  virtual PrefService* GetPrefs() OVERRIDE;
-  virtual PasswordStore* GetPasswordStore() OVERRIDE;
-  virtual PasswordManagerDriver* GetDriver() OVERRIDE;
+  std::string GetSyncUsername() const override;
+  bool IsSyncAccountCredential(const std::string& username,
+                               const std::string& origin) const override;
+  bool ShouldFilterAutofillResult(const autofill::PasswordForm& form) override;
+  bool PromptUserToSavePassword(
+      scoped_ptr<PasswordFormManager> form_to_save) override;
+  void AutomaticPasswordSave(
+      scoped_ptr<PasswordFormManager> saved_manager) override;
+  PrefService* GetPrefs() override;
+  PasswordStore* GetPasswordStore() override;
+  PasswordManagerDriver* GetDriver() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StubPasswordManagerClient);

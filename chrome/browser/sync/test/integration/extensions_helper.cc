@@ -141,28 +141,25 @@ class ExtensionsMatchChecker : public StatusChangeChecker,
                                public extensions::ExtensionRegistryObserver {
  public:
   explicit ExtensionsMatchChecker(const std::vector<Profile*>& profiles);
-  virtual ~ExtensionsMatchChecker();
+  ~ExtensionsMatchChecker() override;
 
   // StatusChangeChecker implementation.
-  virtual std::string GetDebugMessage() const OVERRIDE;
-  virtual bool IsExitConditionSatisfied() OVERRIDE;
+  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied() override;
 
   // extensions::ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
+  void OnExtensionLoaded(content::BrowserContext* context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
       content::BrowserContext* context,
       const extensions::Extension* extenion,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
-  virtual void OnExtensionInstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      bool is_update) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionInstalled(content::BrowserContext* browser_context,
+                            const extensions::Extension* extension,
+                            bool is_update) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
 
   void Wait();
 
@@ -251,11 +248,11 @@ void ExtensionsMatchChecker::Wait() {
   observing_ = true;
 
   if (IsExitConditionSatisfied()) {
-    VLOG(1) << "Extensions matched without waiting";
+    DVLOG(1) << "Extensions matched without waiting";
     return;
   }
 
-  VLOG(1) << "Starting Wait: " << GetDebugMessage();
+  DVLOG(1) << "Starting Wait: " << GetDebugMessage();
   StartBlockingWait();
 }
 

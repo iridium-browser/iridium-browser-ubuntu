@@ -4,7 +4,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "ui/ozone/platform/dri/crtc_state.h"
+#include "ui/ozone/platform/dri/crtc_controller.h"
 #include "ui/ozone/platform/dri/dri_buffer.h"
 #include "ui/ozone/platform/dri/dri_wrapper.h"
 #include "ui/ozone/platform/dri/hardware_display_controller.h"
@@ -30,12 +30,12 @@ class MockScanoutBuffer : public ui::ScanoutBuffer {
   MockScanoutBuffer(const gfx::Size& size) : size_(size) {}
 
   // ScanoutBuffer:
-  virtual uint32_t GetFramebufferId() const OVERRIDE {return 0; }
-  virtual uint32_t GetHandle() const OVERRIDE { return 0; }
-  virtual gfx::Size GetSize() const OVERRIDE { return size_; }
+  uint32_t GetFramebufferId() const override { return 0; }
+  uint32_t GetHandle() const override { return 0; }
+  gfx::Size GetSize() const override { return size_; }
 
  private:
-  virtual ~MockScanoutBuffer() {}
+  ~MockScanoutBuffer() override {}
 
   gfx::Size size_;
 
@@ -47,10 +47,11 @@ class MockScanoutBuffer : public ui::ScanoutBuffer {
 class HardwareDisplayControllerTest : public testing::Test {
  public:
   HardwareDisplayControllerTest() {}
-  virtual ~HardwareDisplayControllerTest() {}
+  ~HardwareDisplayControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
+
  protected:
   scoped_ptr<ui::HardwareDisplayController> controller_;
   scoped_ptr<ui::MockDriWrapper> drm_;
@@ -62,9 +63,8 @@ class HardwareDisplayControllerTest : public testing::Test {
 void HardwareDisplayControllerTest::SetUp() {
   drm_.reset(new ui::MockDriWrapper(3));
   controller_.reset(new ui::HardwareDisplayController(
-      drm_.get(),
-      scoped_ptr<ui::CrtcState>(
-          new ui::CrtcState(drm_.get(), kPrimaryCrtc, kPrimaryConnector))));
+      scoped_ptr<ui::CrtcController>(new ui::CrtcController(
+          drm_.get(), kPrimaryCrtc, kPrimaryConnector))));
 }
 
 void HardwareDisplayControllerTest::TearDown() {
@@ -170,9 +170,8 @@ TEST_F(HardwareDisplayControllerTest, CheckOverlayPresent) {
 }
 
 TEST_F(HardwareDisplayControllerTest, PageflipMirroredControllers) {
-  controller_->AddCrtc(
-      scoped_ptr<ui::CrtcState>(
-          new ui::CrtcState(drm_.get(), kSecondaryCrtc, kSecondaryConnector)));
+  controller_->AddCrtc(scoped_ptr<ui::CrtcController>(
+      new ui::CrtcController(drm_.get(), kSecondaryCrtc, kSecondaryConnector)));
 
   ui::OverlayPlane plane1(scoped_refptr<ui::ScanoutBuffer>(
       new MockScanoutBuffer(kDefaultModeSize)));
@@ -184,4 +183,38 @@ TEST_F(HardwareDisplayControllerTest, PageflipMirroredControllers) {
   controller_->QueueOverlayPlane(plane2);
   EXPECT_TRUE(controller_->SchedulePageFlip());
   EXPECT_EQ(2, drm_->get_page_flip_call_count());
+
+  controller_->WaitForPageFlipEvent();
+  EXPECT_EQ(2, drm_->get_handle_events_count());
+}
+
+TEST_F(HardwareDisplayControllerTest,
+       PageflipMirroredControllersWithInvertedCrtcOrder) {
+  scoped_ptr<ui::CrtcController> crtc1(
+      new ui::CrtcController(drm_.get(), kPrimaryCrtc, kPrimaryConnector));
+  scoped_ptr<ui::CrtcController> crtc2(
+      new ui::CrtcController(drm_.get(), kSecondaryCrtc, kSecondaryConnector));
+
+  // Make sure that if the order is reversed everything is still fine.
+  std::queue<ui::CrtcController*> crtc_queue;
+  crtc_queue.push(crtc2.get());
+  crtc_queue.push(crtc1.get());
+
+  controller_.reset(new ui::HardwareDisplayController(crtc1.Pass()));
+  controller_->AddCrtc(crtc2.Pass());
+
+  ui::OverlayPlane plane1(scoped_refptr<ui::ScanoutBuffer>(
+      new MockScanoutBuffer(kDefaultModeSize)));
+  EXPECT_TRUE(controller_->Modeset(plane1, kDefaultMode));
+  EXPECT_EQ(2, drm_->get_set_crtc_call_count());
+
+  ui::OverlayPlane plane2(scoped_refptr<ui::ScanoutBuffer>(
+      new MockScanoutBuffer(kDefaultModeSize)));
+  controller_->QueueOverlayPlane(plane2);
+  EXPECT_TRUE(controller_->SchedulePageFlip());
+  EXPECT_EQ(2, drm_->get_page_flip_call_count());
+
+  drm_->set_controllers(crtc_queue);
+  controller_->WaitForPageFlipEvent();
+  EXPECT_EQ(2, drm_->get_handle_events_count());
 }

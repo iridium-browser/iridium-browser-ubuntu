@@ -9,7 +9,6 @@
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/strings/grit/ash_strings.h"
-#include "ash/system/chromeos/network/network_connect.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
@@ -29,6 +28,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/chromeos/network/network_connect.h"
 #include "ui/chromeos/network/network_icon.h"
 #include "ui/chromeos/strings/grit/ui_chromeos_strings.h"
 #include "ui/gfx/image/image_skia.h"
@@ -61,7 +61,7 @@ bool ShouldHighlightNetwork(const NetworkState* network) {
 void ToggleTechnology(const NetworkTypePattern& technology) {
   NetworkStateHandler* handler = NetworkHandler::Get()->network_state_handler();
   bool is_enabled = handler->IsTechnologyEnabled(technology);
-  ash::network_connect::SetTechnologyEnabled(technology, !is_enabled);
+  ui::NetworkConnect::Get()->SetTechnologyEnabled(technology, !is_enabled);
 }
 
 }  // namespace
@@ -122,27 +122,27 @@ class NetworkMenuModel : public ui::MenuModel {
 
   // ui::MenuModel implementation
   // GetCommandIdAt() must be implemented by subclasses.
-  virtual bool HasIcons() const OVERRIDE;
-  virtual int GetItemCount() const OVERRIDE;
-  virtual ui::MenuModel::ItemType GetTypeAt(int index) const OVERRIDE;
-  virtual ui::MenuSeparatorType GetSeparatorTypeAt(int index) const OVERRIDE;
-  virtual base::string16 GetLabelAt(int index) const OVERRIDE;
-  virtual bool IsItemDynamicAt(int index) const OVERRIDE;
-  virtual const gfx::FontList* GetLabelFontListAt(int index) const OVERRIDE;
+  virtual bool HasIcons() const override;
+  virtual int GetItemCount() const override;
+  virtual ui::MenuModel::ItemType GetTypeAt(int index) const override;
+  virtual ui::MenuSeparatorType GetSeparatorTypeAt(int index) const override;
+  virtual base::string16 GetLabelAt(int index) const override;
+  virtual bool IsItemDynamicAt(int index) const override;
+  virtual const gfx::FontList* GetLabelFontListAt(int index) const override;
   virtual bool GetAcceleratorAt(int index,
-                                ui::Accelerator* accelerator) const OVERRIDE;
-  virtual bool IsItemCheckedAt(int index) const OVERRIDE;
-  virtual int GetGroupIdAt(int index) const OVERRIDE;
-  virtual bool GetIconAt(int index, gfx::Image* icon) OVERRIDE;
+                                ui::Accelerator* accelerator) const override;
+  virtual bool IsItemCheckedAt(int index) const override;
+  virtual int GetGroupIdAt(int index) const override;
+  virtual bool GetIconAt(int index, gfx::Image* icon) override;
   virtual ui::ButtonMenuItemModel* GetButtonMenuItemAt(
-      int index) const OVERRIDE;
-  virtual bool IsEnabledAt(int index) const OVERRIDE;
-  virtual bool IsVisibleAt(int index) const OVERRIDE;
-  virtual ui::MenuModel* GetSubmenuModelAt(int index) const OVERRIDE;
-  virtual void HighlightChangedTo(int index) OVERRIDE;
-  virtual void ActivatedAt(int index) OVERRIDE;
-  virtual void SetMenuModelDelegate(ui::MenuModelDelegate* delegate) OVERRIDE;
-  virtual ui::MenuModelDelegate* GetMenuModelDelegate() const OVERRIDE;
+      int index) const override;
+  virtual bool IsEnabledAt(int index) const override;
+  virtual bool IsVisibleAt(int index) const override;
+  virtual ui::MenuModel* GetSubmenuModelAt(int index) const override;
+  virtual void HighlightChangedTo(int index) override;
+  virtual void ActivatedAt(int index) override;
+  virtual void SetMenuModelDelegate(ui::MenuModelDelegate* delegate) override;
+  virtual ui::MenuModelDelegate* GetMenuModelDelegate() const override;
 
  protected:
   enum MenuItemFlags {
@@ -180,10 +180,10 @@ class MoreMenuModel : public NetworkMenuModel {
   virtual ~MoreMenuModel() {}
 
   // NetworkMenuModel implementation.
-  virtual void InitMenuItems(bool should_open_button_options) OVERRIDE;
+  virtual void InitMenuItems(bool should_open_button_options) override;
 
   // ui::MenuModel implementation
-  virtual int GetCommandIdAt(int index) const OVERRIDE;
+  virtual int GetCommandIdAt(int index) const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MoreMenuModel);
@@ -198,10 +198,10 @@ class MainMenuModel : public NetworkMenuModel {
   virtual ~MainMenuModel() {}
 
   // NetworkMenuModel implementation.
-  virtual void InitMenuItems(bool should_open_button_options) OVERRIDE;
+  virtual void InitMenuItems(bool should_open_button_options) override;
 
   // ui::MenuModel implementation
-  virtual int GetCommandIdAt(int index) const OVERRIDE;
+  virtual int GetCommandIdAt(int index) const override;
 
  private:
   void AddWirelessNetworkMenuItem(const NetworkState* wifi_network, int flag);
@@ -217,7 +217,7 @@ class MainMenuModel : public NetworkMenuModel {
 
 void NetworkMenuModel::ConnectToNetworkAt(int index) {
   const std::string& service_path = menu_items_[index].service_path;
-  ash::network_connect::ConnectToNetwork(service_path);
+  ui::NetworkConnect::Get()->ConnectToNetwork(service_path);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

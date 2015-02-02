@@ -25,9 +25,11 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   """The backend for controlling a locally-executed browser instance, on Linux,
   Mac or Windows.
   """
-  def __init__(self, browser_options, executable, flash_path, is_content_shell,
-               browser_directory, output_profile_path, extensions_to_load):
+  def __init__(self, desktop_platform_backend, browser_options, executable,
+               flash_path, is_content_shell, browser_directory,
+               output_profile_path, extensions_to_load):
     super(DesktopBrowserBackend, self).__init__(
+        desktop_platform_backend,
         supports_tab_control=not is_content_shell,
         supports_extensions=not is_content_shell,
         browser_options=browser_options,
@@ -96,11 +98,12 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     return r'\\.\pipe\%s_service' % os.path.basename(self._tmp_minidump_dir)
 
   def _StartCrashService(self):
-    os_name = self._browser.platform.GetOSName()
+    os_name = self.browser.platform.GetOSName()
     if os_name != 'win':
       return None
+    arch_name = self.browser.platform.GetArchName()
     return subprocess.Popen([
-        support_binaries.FindPath('crash_service', os_name),
+        support_binaries.FindPath('crash_service', arch_name, os_name),
         '--no-window',
         '--dumps-dir=%s' % self._tmp_minidump_dir,
         '--pipe-name=%s' % self._GetCrashServicePipeName()])
@@ -184,7 +187,9 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     env['CHROME_HEADLESS'] = '1'  # Don't upload minidumps.
     env['BREAKPAD_DUMP_LOCATION'] = self._tmp_minidump_dir
     env['CHROME_BREAKPAD_PIPE_NAME'] = self._GetCrashServicePipeName()
-    self._crash_service = self._StartCrashService()
+    # TODO(nednguyen): maybe remove this after crbug.com/424024 is resolved.
+    if not self.browser_options.disable_crash_service:
+      self._crash_service = self._StartCrashService()
     logging.debug('Starting Chrome %s', args)
     if not self.browser_options.show_stdout:
       self._tmp_output_file = tempfile.NamedTemporaryFile('w', 0)
@@ -241,7 +246,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     return most_recent_dump
 
   def _GetStackFromMinidump(self, minidump):
-    os_name = self._browser.platform.GetOSName()
+    os_name = self.browser.platform.GetOSName()
     if os_name == 'win':
       cdb = self._GetCdbPath()
       if not cdb:
@@ -253,7 +258,9 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       stack_end = output.find('quit:')
       return output[stack_start:stack_end]
 
-    stackwalk = support_binaries.FindPath('minidump_stackwalk', os_name)
+    arch_name = self.browser.platform.GetArchName()
+    stackwalk = support_binaries.FindPath(
+        'minidump_stackwalk', arch_name, os_name)
     if not stackwalk:
       logging.warning('minidump_stackwalk binary not found.')
       return None

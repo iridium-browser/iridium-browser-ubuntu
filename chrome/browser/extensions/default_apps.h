@@ -51,8 +51,8 @@ class Provider : public extensions::ExternalProviderImpl {
   bool ShouldInstallInProfile();
 
   // ExternalProviderImpl overrides:
-  virtual void VisitRegisteredExtension() OVERRIDE;
-  virtual void SetPrefs(base::DictionaryValue* prefs) OVERRIDE;
+  void VisitRegisteredExtension() override;
+  void SetPrefs(base::DictionaryValue* prefs) override;
 
  private:
   Profile* profile_;

@@ -24,11 +24,13 @@ class String {
       value_ = chars;
   }
   String(const char* chars, size_t num_chars)
-      : value_(chars, num_chars),
-        is_null_(false) {
-  }
+      : value_(chars, num_chars), is_null_(false) {}
+  String(const mojo::String& str)
+      : value_(str.value_), is_null_(str.is_null_) {}
+
   template <size_t N>
-  String(const char chars[N]) : value_(chars, N-1), is_null_(false) {}
+  String(const char chars[N])
+      : value_(chars, N - 1), is_null_(false) {}
 
   template <typename U>
   static String From(const U& other) {
@@ -40,6 +42,11 @@ class String {
     return TypeConverter<U, String>::Convert(*this);
   }
 
+  String& operator=(const mojo::String& str) {
+    value_ = str.value_;
+    is_null_ = str.is_null_;
+    return *this;
+  }
   String& operator=(const std::string& str) {
     value_ = str;
     is_null_ = false;
@@ -102,12 +109,27 @@ inline bool operator==(const char* a, const String& b) {
 inline bool operator==(const String& a, const char* b) {
   return !a.is_null() && a.get() == b;
 }
-inline bool operator!=(const String& a, const String& b) { return !(a == b); }
-inline bool operator!=(const char* a, const String& b) { return !(a == b); }
-inline bool operator!=(const String& a, const char* b) { return !(a == b); }
+inline bool operator!=(const String& a, const String& b) {
+  return !(a == b);
+}
+inline bool operator!=(const char* a, const String& b) {
+  return !(a == b);
+}
+inline bool operator!=(const String& a, const char* b) {
+  return !(a == b);
+}
 
 inline std::ostream& operator<<(std::ostream& out, const String& s) {
   return out << s.get();
+}
+
+inline bool operator<(const String& a, const String& b) {
+  if (a.is_null())
+    return !b.is_null();
+  if (b.is_null())
+    return false;
+
+  return a.get() < b.get();
 }
 
 // TODO(darin): Add similar variants of operator<,<=,>,>=
@@ -126,7 +148,7 @@ template <size_t N>
 struct TypeConverter<String, char[N]> {
   static String Convert(const char input[N]) {
     MOJO_DCHECK(input);
-    return String(input, N-1);
+    return String(input, N - 1);
   }
 };
 
@@ -135,7 +157,7 @@ template <size_t N>
 struct TypeConverter<String, const char[N]> {
   static String Convert(const char input[N]) {
     MOJO_DCHECK(input);
-    return String(input, N-1);
+    return String(input, N - 1);
   }
 };
 

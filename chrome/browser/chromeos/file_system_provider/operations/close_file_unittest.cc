@@ -35,13 +35,11 @@ class FileSystemProviderOperationsCloseFileTest : public testing::Test {
   FileSystemProviderOperationsCloseFileTest() {}
   virtual ~FileSystemProviderOperationsCloseFileTest() {}
 
-  virtual void SetUp() OVERRIDE {
-    file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* display_name */,
-                               false /* writable */,
-                               base::FilePath() /* mount_path */);
+  virtual void SetUp() override {
+    file_system_info_ = ProvidedFileSystemInfo(
+        kExtensionId,
+        MountOptions(kFileSystemId, "" /* display_name */),
+        base::FilePath());
   }
 
   ProvidedFileSystemInfo file_system_info_;

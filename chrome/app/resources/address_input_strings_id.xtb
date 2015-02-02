@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="id">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="id">
 <translation id="777702478322588152">Prefektur</translation>
 <translation id="3713769522066937702">Format kode pos ini tidak dikenali. Contoh kode pos yang valid: <ph name="EXAMPLE"/>. Tidak tahu kode pos Anda? Temukan <ph name="BEGIN_LINK"/>di sini<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Alamat</translation>

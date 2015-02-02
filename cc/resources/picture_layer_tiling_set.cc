@@ -19,12 +19,8 @@ class LargestToSmallestScaleFunctor {
 
 }  // namespace
 
-
-PictureLayerTilingSet::PictureLayerTilingSet(
-    PictureLayerTilingClient* client,
-    const gfx::Size& layer_bounds)
-    : client_(client),
-      layer_bounds_(layer_bounds) {
+PictureLayerTilingSet::PictureLayerTilingSet(PictureLayerTilingClient* client)
+    : client_(client) {
 }
 
 PictureLayerTilingSet::~PictureLayerTilingSet() {
@@ -47,7 +43,6 @@ bool PictureLayerTilingSet::SyncTilings(const PictureLayerTilingSet& other,
                                         float minimum_contents_scale) {
   if (new_layer_bounds.IsEmpty()) {
     RemoveAllTilings();
-    layer_bounds_ = new_layer_bounds;
     return false;
   }
 
@@ -99,17 +94,17 @@ bool PictureLayerTilingSet::SyncTilings(const PictureLayerTilingSet& other,
   }
   tilings_.sort(LargestToSmallestScaleFunctor());
 
-  layer_bounds_ = new_layer_bounds;
   return have_high_res_tiling;
 }
 
-PictureLayerTiling* PictureLayerTilingSet::AddTiling(float contents_scale) {
+PictureLayerTiling* PictureLayerTilingSet::AddTiling(
+    float contents_scale,
+    const gfx::Size& layer_bounds) {
   for (size_t i = 0; i < tilings_.size(); ++i)
     DCHECK_NE(tilings_[i]->contents_scale(), contents_scale);
 
-  tilings_.push_back(PictureLayerTiling::Create(contents_scale,
-                                                layer_bounds_,
-                                                client_));
+  tilings_.push_back(
+      PictureLayerTiling::Create(contents_scale, layer_bounds, client_));
   PictureLayerTiling* appended = tilings_.back();
 
   tilings_.sort(LargestToSmallestScaleFunctor());
@@ -218,7 +213,14 @@ Tile* PictureLayerTilingSet::CoverageIterator::operator*() const {
   return *tiling_iter_;
 }
 
-PictureLayerTiling* PictureLayerTilingSet::CoverageIterator::CurrentTiling() {
+TileResolution PictureLayerTilingSet::CoverageIterator::resolution() const {
+  const PictureLayerTiling* tiling = CurrentTiling();
+  DCHECK(tiling);
+  return tiling->resolution();
+}
+
+PictureLayerTiling* PictureLayerTilingSet::CoverageIterator::CurrentTiling()
+    const {
   if (current_tiling_ < 0)
     return NULL;
   if (static_cast<size_t>(current_tiling_) >= set_->tilings_.size())
@@ -307,16 +309,6 @@ PictureLayerTilingSet::CoverageIterator::operator bool() const {
       region_iter_.has_rect();
 }
 
-void PictureLayerTilingSet::DidBecomeActive() {
-  for (size_t i = 0; i < tilings_.size(); ++i)
-    tilings_[i]->DidBecomeActive();
-}
-
-void PictureLayerTilingSet::DidBecomeRecycled() {
-  for (size_t i = 0; i < tilings_.size(); ++i)
-    tilings_[i]->DidBecomeRecycled();
-}
-
 void PictureLayerTilingSet::AsValueInto(base::debug::TracedValue* state) const {
   for (size_t i = 0; i < tilings_.size(); ++i) {
     state->BeginDictionary();
@@ -347,21 +339,36 @@ PictureLayerTilingSet::TilingRange PictureLayerTilingSet::GetTilingRange(
       low_res_range = TilingRange(i, i + 1);
   }
 
+  TilingRange range(0, 0);
   switch (type) {
     case HIGHER_THAN_HIGH_RES:
-      return TilingRange(0, high_res_range.start);
+      range = TilingRange(0, high_res_range.start);
+      break;
     case HIGH_RES:
-      return high_res_range;
+      range = high_res_range;
+      break;
     case BETWEEN_HIGH_AND_LOW_RES:
-      return TilingRange(high_res_range.end, low_res_range.start);
+      // TODO(vmpstr): This code assumes that high res tiling will come before
+      // low res tiling, however there are cases where this assumption is
+      // violated. As a result, it's better to be safe in these situations,
+      // since otherwise we can end up accessing a tiling that doesn't exist.
+      // See crbug.com/429397 for high res tiling appearing after low res
+      // tiling discussion/fixes.
+      if (high_res_range.start <= low_res_range.start)
+        range = TilingRange(high_res_range.end, low_res_range.start);
+      else
+        range = TilingRange(low_res_range.end, high_res_range.start);
+      break;
     case LOW_RES:
-      return low_res_range;
+      range = low_res_range;
+      break;
     case LOWER_THAN_LOW_RES:
-      return TilingRange(low_res_range.end, tilings_.size());
+      range = TilingRange(low_res_range.end, tilings_.size());
+      break;
   }
 
-  NOTREACHED();
-  return TilingRange(0, 0);
+  DCHECK_LE(range.start, range.end);
+  return range;
 }
 
 }  // namespace cc

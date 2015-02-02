@@ -20,6 +20,14 @@ cr.define('options', function() {
 
   cr.addSingletonGetter(ImportDataOverlay);
 
+  /**
+  * @param {string} type The type of data to import. Used in the element's ID.
+  */
+  function importable(type) {
+    var id = 'import-' + type;
+    return $(id).checked && !$(id + '-with-label').hidden;
+  }
+
   ImportDataOverlay.prototype = {
     // Inherit from Page.
     __proto__: Page.prototype,
@@ -32,8 +40,10 @@ cr.define('options', function() {
       var checkboxes =
           document.querySelectorAll('#import-checkboxes input[type=checkbox]');
       for (var i = 0; i < checkboxes.length; i++) {
-        checkboxes[i].onchange = function() {
+        checkboxes[i].customPrefChangeHandler = function(e) {
+          options.PrefCheckbox.prototype.defaultPrefChangeHandler.call(this, e);
           self.validateCommitButton_();
+          return true;
         };
       }
 
@@ -75,9 +85,9 @@ cr.define('options', function() {
      */
     validateCommitButton_: function() {
       var somethingToImport =
-          $('import-history').checked || $('import-favorites').checked ||
-          $('import-passwords').checked || $('import-search').checked ||
-          $('import-autofill-form-data').checked;
+          importable('history') || importable('favorites') ||
+          importable('passwords') || importable('search') ||
+          importable('autofill-form-data');
       $('import-data-commit').disabled = !somethingToImport;
       $('import-choose-file').disabled = !$('import-favorites').checked;
     },
@@ -128,11 +138,10 @@ cr.define('options', function() {
                            'search',
                            'autofill-form-data'];
       for (var i = 0; i < importOptions.length; i++) {
-        var checkbox = $('import-' + importOptions[i]);
+        var id = 'import-' + importOptions[i];
         var enable = browserProfile && browserProfile[importOptions[i]];
-        this.setUpCheckboxState_(checkbox, enable);
-        var checkboxWithLabel = $('import-' + importOptions[i] + '-with-label');
-        checkboxWithLabel.style.display = enable ? '' : 'none';
+        this.setUpCheckboxState_($(id), enable);
+        $(id + '-with-label').hidden = !enable;
       }
     },
 

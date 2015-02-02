@@ -30,9 +30,8 @@ namespace {
 // Test delegate which quits the message loop when an alarm fires.
 class AlarmDelegate : public AlarmManager::Delegate {
  public:
-  virtual ~AlarmDelegate() {}
-  virtual void OnAlarm(const std::string& extension_id,
-                       const Alarm& alarm) OVERRIDE {
+  ~AlarmDelegate() override {}
+  void OnAlarm(const std::string& extension_id, const Alarm& alarm) override {
     alarms_seen.push_back(alarm.js_alarm->name);
     if (base::MessageLoop::current()->is_running())
       base::MessageLoop::current()->Quit();
@@ -51,7 +50,7 @@ class ExtensionAlarmsTest : public ExtensionApiUnittest {
  public:
   using ExtensionApiUnittest::RunFunction;
 
-  virtual void SetUp() {
+  void SetUp() override {
     ExtensionApiUnittest::SetUp();
 
     test_clock_ = new base::SimpleTestClock();
@@ -90,9 +89,9 @@ class ExtensionAlarmsTest : public ExtensionApiUnittest {
 
   // Creates up to 3 alarms using the extension API.
   void CreateAlarms(size_t num_alarms) {
-    CHECK(num_alarms <= 3);
+    CHECK_LE(num_alarms, 3U);
 
-    const char* kCreateArgs[] = {
+    const char* const kCreateArgs[] = {
       "[null, {\"periodInMinutes\": 0.001}]",
       "[\"7\", {\"periodInMinutes\": 7}]",
       "[\"0\", {\"delayInMinutes\": 0}]",
@@ -461,8 +460,9 @@ class ExtensionAlarmsSchedulingTest : public ExtensionAlarmsTest {
     EXPECT_EQ(scheduled_time, alarm_manager_->next_poll_time_);
   }
 
-  static void RemoveAlarmCallback (bool success) { EXPECT_TRUE(success); }
-  static void RemoveAllAlarmsCallback () {}
+  static void RemoveAlarmCallback(bool success) { EXPECT_TRUE(success); }
+  static void RemoveAllAlarmsCallback() {}
+
  public:
   // Get the time that the alarm named is scheduled to run.
   void VerifyScheduledTime(const std::string& alarm_name) {
@@ -478,7 +478,7 @@ class ExtensionAlarmsSchedulingTest : public ExtensionAlarmsTest {
         base::Bind(&ExtensionAlarmsSchedulingTest::RemoveAlarmCallback));
   }
 
-  void RemoveAllAlarms () {
+  void RemoveAllAlarms() {
     alarm_manager_->RemoveAllAlarms(extension()->id(), base::Bind(
         &ExtensionAlarmsSchedulingTest::RemoveAllAlarmsCallback));
   }

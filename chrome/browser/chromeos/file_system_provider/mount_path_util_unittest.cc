@@ -69,7 +69,7 @@ class FileSystemProviderMountPathUtilTest : public testing::Test {
   FileSystemProviderMountPathUtilTest() {}
   virtual ~FileSystemProviderMountPathUtilTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
     ASSERT_TRUE(profile_manager_->SetUp());
@@ -83,7 +83,7 @@ class FileSystemProviderMountPathUtilTest : public testing::Test {
         base::Bind(&FakeProvidedFileSystem::Create));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     // Setting the testing factory to NULL will destroy the created service
     // associated with the testing profile.
     ServiceFactory::GetInstance()->SetTestingFactory(profile_, NULL);
@@ -128,7 +128,7 @@ TEST_F(FileSystemProviderMountPathUtilTest, IsFileSystemProviderLocalPath) {
 
 TEST_F(FileSystemProviderMountPathUtilTest, Parser) {
   const bool result = file_system_provider_service_->MountFileSystem(
-      kExtensionId, kFileSystemId, kDisplayName, false /* writable */);
+      kExtensionId, MountOptions(kFileSystemId, kDisplayName));
   ASSERT_TRUE(result);
   const ProvidedFileSystemInfo file_system_info =
       file_system_provider_service_->GetProvidedFileSystem(kExtensionId,
@@ -152,7 +152,7 @@ TEST_F(FileSystemProviderMountPathUtilTest, Parser) {
 
 TEST_F(FileSystemProviderMountPathUtilTest, Parser_RootPath) {
   const bool result = file_system_provider_service_->MountFileSystem(
-      kExtensionId, kFileSystemId, kDisplayName, false /* writable */);
+      kExtensionId, MountOptions(kFileSystemId, kDisplayName));
   ASSERT_TRUE(result);
   const ProvidedFileSystemInfo file_system_info =
       file_system_provider_service_->GetProvidedFileSystem(kExtensionId,
@@ -176,9 +176,7 @@ TEST_F(FileSystemProviderMountPathUtilTest, Parser_RootPath) {
 TEST_F(FileSystemProviderMountPathUtilTest, Parser_WrongUrl) {
   const ProvidedFileSystemInfo file_system_info(
       kExtensionId,
-      kFileSystemId,
-      kDisplayName,
-      false /* writable */,
+      MountOptions(kFileSystemId, kDisplayName),
       GetMountPath(profile_, kExtensionId, kFileSystemId));
 
   const base::FilePath kFilePath = base::FilePath::FromUTF8Unsafe("/hello");
@@ -194,7 +192,7 @@ TEST_F(FileSystemProviderMountPathUtilTest, Parser_WrongUrl) {
 
 TEST_F(FileSystemProviderMountPathUtilTest, Parser_IsolatedURL) {
   const bool result = file_system_provider_service_->MountFileSystem(
-      kExtensionId, kFileSystemId, kDisplayName, false /* writable */);
+      kExtensionId, MountOptions(kFileSystemId, kDisplayName));
   ASSERT_TRUE(result);
   const ProvidedFileSystemInfo file_system_info =
       file_system_provider_service_->GetProvidedFileSystem(kExtensionId,
@@ -240,7 +238,7 @@ TEST_F(FileSystemProviderMountPathUtilTest, Parser_IsolatedURL) {
 
 TEST_F(FileSystemProviderMountPathUtilTest, LocalPathParser) {
   const bool result = file_system_provider_service_->MountFileSystem(
-      kExtensionId, kFileSystemId, kDisplayName, false /* writable */);
+      kExtensionId, MountOptions(kFileSystemId, kDisplayName));
   ASSERT_TRUE(result);
   const ProvidedFileSystemInfo file_system_info =
       file_system_provider_service_->GetProvidedFileSystem(kExtensionId,
@@ -264,7 +262,7 @@ TEST_F(FileSystemProviderMountPathUtilTest, LocalPathParser) {
 
 TEST_F(FileSystemProviderMountPathUtilTest, LocalPathParser_RootPath) {
   const bool result = file_system_provider_service_->MountFileSystem(
-      kExtensionId, kFileSystemId, kDisplayName, false /* writable */);
+      kExtensionId, MountOptions(kFileSystemId, kDisplayName));
   ASSERT_TRUE(result);
   const ProvidedFileSystemInfo file_system_info =
       file_system_provider_service_->GetProvidedFileSystem(kExtensionId,

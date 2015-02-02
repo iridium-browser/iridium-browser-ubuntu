@@ -235,7 +235,7 @@
     'sources/': [
       # Exclude all platform specific things, reinclude them below on a per-platform basis
       # FIXME: Figure out how to store these patterns in a variable.
-      ['exclude', '(cf|cg|harfbuzz|mac|opentype|win)/'],
+      ['exclude', '(cf|cg|mac|opentype|win)/'],
       ['exclude', '(?<!Chromium)(CF|CG|Mac|Win)\\.(cpp|mm?)$'],
 
       # *NEON.cpp files need special compile options.
@@ -251,22 +251,14 @@
       ['OS=="linux" or OS=="android" or OS=="win"', {
         'sources/': [
           # Cherry-pick files excluded by the broader regular expressions above.
-          ['include', 'fonts/harfbuzz/FontHarfBuzz\\.cpp$'],
-          ['include', 'fonts/harfbuzz/HarfBuzzFace\\.(cpp|h)$'],
-          ['include', 'fonts/harfbuzz/HarfBuzzFaceSkia\\.cpp$'],
-          ['include', 'fonts/harfbuzz/HarfBuzzShaper\\.(cpp|h)$'],
           ['include', 'fonts/opentype/OpenTypeTypes\\.h$'],
           ['include', 'fonts/opentype/OpenTypeVerticalData\\.(cpp|h)$'],
-          ['include', 'fonts/skia/SimpleFontDataSkia\\.cpp$'],
         ],
         'dependencies': [
           '<(DEPTH)/third_party/harfbuzz-ng/harfbuzz.gyp:harfbuzz-ng',
         ],
-      }, { # OS!="linux" and OS!="android" and OS!="win"
-        'sources/': [
-          ['exclude', 'Harfbuzz[^/]+\\.(cpp|h)$'],
-        ],
-      }],
+      },
+      ],
       ['OS=="linux" or OS=="android"', {
         'sources/': [
           ['include', 'fonts/linux/FontPlatformDataLinux\\.cpp$'],
@@ -301,13 +293,16 @@
 
           # Use native Mac font code from core.
           ['include', '(fonts/)?mac/[^/]*Font[^/]*\\.(cpp|mm?)$'],
-          ['include', 'fonts/mac/ComplexText[^/]*\\.(cpp|h)$'],
+
+          # TODO(dro): Merge the opentype vertical data files inclusion across all platforms.
+          ['include', 'fonts/opentype/OpenTypeTypes\\.h$'],
+          ['include', 'fonts/opentype/OpenTypeVerticalData\\.(cpp|h)$'],
 
           # Cherry-pick some files that can't be included by broader regexps.
           # Some of these are used instead of Chromium platform files, see
           # the specific exclusions in the "exclude" list below.
           ['include', 'audio/mac/FFTFrameMac\\.cpp$'],
-          ['include', 'fonts/mac/ComplexTextControllerCoreText\\.mm$'],
+          ['include', 'fonts/mac/GlyphPageTreeNodeMac\\.cpp$'],
           ['include', 'mac/ColorMac\\.mm$'],
           ['include', 'mac/BlockExceptions\\.mm$'],
           ['include', 'mac/KillRingMac\\.mm$'],
@@ -330,12 +325,6 @@
           ['exclude', 'fonts/skia/FontCustomPlatformDataSkia\\.cpp$'],
 
           ['exclude', 'fonts/skia/FontCacheSkia\\.cpp$'],
-          ['exclude', 'fonts/skia/SimpleFontDataSkia\\.cpp$'],
-
-          # Mac uses Harfbuzz.
-          ['include', 'fonts/harfbuzz/HarfBuzzFaceCoreText\\.cpp$'],
-          ['include', 'fonts/harfbuzz/HarfBuzzFace\\.(cpp|h)$'],
-          ['include', 'fonts/harfbuzz/HarfBuzzShaper\\.(cpp|h)$'],
 
           ['include', 'geometry/mac/FloatPointMac\\.mm$'],
           ['include', 'geometry/mac/FloatRectMac\\.mm$'],
@@ -359,8 +348,6 @@
           ['exclude', 'geometry/mac/'],
           ['exclude', 'geometry/cg/'],
           ['exclude', 'scroll/ScrollbarThemeMac'],
-
-          ['exclude', 'fonts/harfbuzz/HarfBuzzFaceCoreText\\.cpp$'],
         ],
       }],
       ['OS != "linux" and OS != "mac" and OS != "win"', {
@@ -379,7 +366,6 @@
           ['include', 'fonts/opentype/'],
           ['include', 'fonts/skia/FontCustomPlatformDataSkia\\.cpp$'],
           ['include', 'fonts/skia/FontCustomPlatformDataSkia\\.cpp$'],
-          ['include', 'fonts/skia/SimpleFontDataSkia\\.cpp$'],
           ['include', 'fonts/win/FontCacheSkiaWin\\.cpp$'],
           ['include', 'fonts/win/FontFallbackWin\\.(cpp|h)$'],
           ['include', 'fonts/win/FontPlatformDataWin\\.cpp$'],

@@ -43,7 +43,7 @@ namespace blink {
 class SVGElement;
 class SVGAnimationElement;
 
-class SVGPropertyBase : public RefCountedWillBeRefCountedGarbageCollected<SVGPropertyBase> {
+class SVGPropertyBase : public RefCounted<SVGPropertyBase> {
     WTF_MAKE_NONCOPYABLE(SVGPropertyBase);
 
 public:
@@ -84,11 +84,6 @@ public:
         m_ownerList = ownerList;
     }
 
-    virtual void trace(Visitor* visitor)
-    {
-        visitor->trace(m_ownerList);
-    }
-
 protected:
     explicit SVGPropertyBase(AnimatedPropertyType type)
         : m_type(type)
@@ -99,7 +94,7 @@ protected:
 private:
     const AnimatedPropertyType m_type;
 
-    RawPtrWillBeMember<SVGPropertyBase> m_ownerList;
+    SVGPropertyBase* m_ownerList;
 };
 
 }

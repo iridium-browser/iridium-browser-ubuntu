@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/test_utils.h"
@@ -39,14 +38,14 @@ class TabScrubberTest : public InProcessBrowserTest,
       : target_index_(-1) {
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
 #if defined(OS_CHROMEOS)
     command_line->AppendSwitch(chromeos::switches::kNaturalScrollDefault);
 #endif
     command_line->AppendSwitch(switches::kOpenAsh);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     TabScrubber::GetInstance()->set_activation_delay(0);
 
     // Disable external monitor scaling of coordinates.
@@ -55,7 +54,7 @@ class TabScrubberTest : public InProcessBrowserTest,
         ash::EventTransformationHandler::TRANSFORM_NONE);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     browser()->tab_strip_model()->RemoveObserver(this);
   }
 
@@ -64,15 +63,16 @@ class TabScrubberTest : public InProcessBrowserTest,
     return BrowserView::GetBrowserViewForNativeWindow(window)->tabstrip();
   }
 
-  int GetStartX(Browser* browser,
-                int index,
-                TabScrubber::Direction direction) {
-    return TabScrubber::GetStartPoint(
-        GetTabStrip(browser), index, direction).x();
+  float GetStartX(Browser* browser,
+                  int index,
+                  TabScrubber::Direction direction) {
+    return static_cast<float>(TabScrubber::GetStartPoint(
+        GetTabStrip(browser), index, direction).x());
   }
 
-  int GetTabCenter(Browser* browser, int index) {
-    return GetTabStrip(browser)->tab_at(index)->bounds().CenterPoint().x();
+  float GetTabCenter(Browser* browser, int index) {
+    return static_cast<float>(
+        GetTabStrip(browser)->tab_at(index)->bounds().CenterPoint().x());
   }
 
   // Sends one scroll event synchronously without initial or final
@@ -84,10 +84,10 @@ class TabScrubberTest : public InProcessBrowserTest,
     int active_index = browser->tab_strip_model()->active_index();
     TabScrubber::Direction direction = index < active_index ?
         TabScrubber::LEFT : TabScrubber::RIGHT;
-    int offset = GetTabCenter(browser, index) -
+    float offset = GetTabCenter(browser, index) -
         GetStartX(browser, active_index, direction);
     ui::ScrollEvent scroll_event(ui::ET_SCROLL,
-                                 gfx::Point(0, 0),
+                                 gfx::PointF(0, 0),
                                  ui::EventTimeForNow(),
                                  0,
                                  offset, 0,
@@ -124,15 +124,15 @@ class TabScrubberTest : public InProcessBrowserTest,
     }
     if (scrub_type == SKIP_TABS)
       increment *= 2;
-    int last = GetStartX(browser, active_index, direction);
-    std::vector<gfx::Point> offsets;
+    float last = GetStartX(browser, active_index, direction);
+    std::vector<gfx::PointF> offsets;
     for (int i = active_index + increment; i != (index + increment);
-        i += increment) {
-      int tab_center = GetTabCenter(browser, i);
-      offsets.push_back(gfx::Point(tab_center - last, 0));
+         i += increment) {
+      float tab_center = GetTabCenter(browser, i);
+      offsets.push_back(gfx::PointF(tab_center - last, 0));
       last = GetStartX(browser, i, direction);
       if (scrub_type == REPEAT_TABS) {
-        offsets.push_back(gfx::Point(increment, 0));
+        offsets.push_back(gfx::PointF(static_cast<float>(increment), 0));
         last += increment;
       }
     }
@@ -147,7 +147,7 @@ class TabScrubberTest : public InProcessBrowserTest,
   // if it's different from the currently active tab.
   // If the active tab is expected to stay the same, send events
   // synchronously (as we don't have anything to wait for).
-  void SendScrubSequence(Browser* browser, int x_offset, int index) {
+  void SendScrubSequence(Browser* browser, float x_offset, int index) {
     aura::Window* window = browser->window()->GetNativeWindow();
     aura::Window* root = window->GetRootWindow();
     ui::test::EventGenerator event_generator(root, window);
@@ -177,46 +177,43 @@ class TabScrubberTest : public InProcessBrowserTest,
   }
 
   // TabStripModelObserver overrides.
-  virtual void TabInsertedAt(content::WebContents* contents,
-                             int index,
-                             bool foreground) OVERRIDE {}
-  virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            content::WebContents* contents,
-                            int index) OVERRIDE {}
-  virtual void TabDetachedAt(content::WebContents* contents,
-                             int index) OVERRIDE {}
-  virtual void TabDeactivated(content::WebContents* contents) OVERRIDE {}
-  virtual void ActiveTabChanged(content::WebContents* old_contents,
-                                content::WebContents* new_contents,
-                                int index,
-                                int reason) OVERRIDE {
+  void TabInsertedAt(content::WebContents* contents,
+                     int index,
+                     bool foreground) override {}
+  void TabClosingAt(TabStripModel* tab_strip_model,
+                    content::WebContents* contents,
+                    int index) override {}
+  void TabDetachedAt(content::WebContents* contents, int index) override {}
+  void TabDeactivated(content::WebContents* contents) override {}
+  void ActiveTabChanged(content::WebContents* old_contents,
+                        content::WebContents* new_contents,
+                        int index,
+                        int reason) override {
     activation_order_.push_back(index);
     if (index == target_index_)
       quit_closure_.Run();
   }
 
-  virtual void TabSelectionChanged(
-      TabStripModel* tab_strip_model,
-      const ui::ListSelectionModel& old_model) OVERRIDE {}
-  virtual void TabMoved(content::WebContents* contents,
-                        int from_index,
-                        int to_index) OVERRIDE {}
-  virtual void TabChangedAt(content::WebContents* contents,
-                            int index,
-                            TabChangeType change_type) OVERRIDE {}
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             content::WebContents* old_contents,
-                             content::WebContents* new_contents,
-                             int index) OVERRIDE {}
-  virtual void TabPinnedStateChanged(content::WebContents* contents,
-                                     int index) OVERRIDE {}
-  virtual void TabMiniStateChanged(content::WebContents* contents,
-                                   int index) OVERRIDE {
+  void TabSelectionChanged(TabStripModel* tab_strip_model,
+                           const ui::ListSelectionModel& old_model) override {}
+  void TabMoved(content::WebContents* contents,
+                int from_index,
+                int to_index) override {}
+  void TabChangedAt(content::WebContents* contents,
+                    int index,
+                    TabChangeType change_type) override {}
+  void TabReplacedAt(TabStripModel* tab_strip_model,
+                     content::WebContents* old_contents,
+                     content::WebContents* new_contents,
+                     int index) override {}
+  void TabPinnedStateChanged(content::WebContents* contents,
+                             int index) override {}
+  void TabMiniStateChanged(content::WebContents* contents, int index) override {
   }
-  virtual void TabBlockedStateChanged(content::WebContents* contents,
-                                      int index) OVERRIDE {}
-  virtual void TabStripEmpty() OVERRIDE {}
-  virtual void TabStripModelDeleted() OVERRIDE {}
+  void TabBlockedStateChanged(content::WebContents* contents,
+                              int index) override {}
+  void TabStripEmpty() override {}
+  void TabStripModelDeleted() override {}
 
   // History of tab activation. Scrub() resets it.
   std::vector<int> activation_order_;

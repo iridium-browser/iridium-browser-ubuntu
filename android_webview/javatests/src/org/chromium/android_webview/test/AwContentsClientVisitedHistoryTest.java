@@ -58,7 +58,7 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
     }
 
     private VisitedHistoryTestAwContentsClient mContentsClient =
-        new VisitedHistoryTestAwContentsClient();
+            new VisitedHistoryTestAwContentsClient();
 
     @Feature({"AndroidWebView"})
     @SmallTest
@@ -69,12 +69,11 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
         final String path = "/testUpdateVisitedHistoryCallback.html";
         final String html = "testUpdateVisitedHistoryCallback";
 
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String pageUrl = webServer.setResponse(path, html, null);
             final DoUpdateVisitedHistoryHelper doUpdateVisitedHistoryHelper =
-                mContentsClient.getDoUpdateVisitedHistoryHelper();
+                    mContentsClient.getDoUpdateVisitedHistoryHelper();
             int callCount = doUpdateVisitedHistoryHelper.getCallCount();
             loadUrlAsync(awContents, pageUrl);
             doUpdateVisitedHistoryHelper.waitForCallback(callCount);
@@ -88,7 +87,7 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
             assertEquals(pageUrl, doUpdateVisitedHistoryHelper.getUrl());
             assertEquals(true, doUpdateVisitedHistoryHelper.getIsReload());
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
@@ -99,7 +98,7 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
         // possible test this end to end without using the flaky and brittle capturing picture of
         // the web page. So we are doing the next best thing, exercising all the code paths.
         final GetVisitedHistoryHelper visitedHistoryHelper =
-            mContentsClient.getGetVisitedHistoryHelper();
+                mContentsClient.getGetVisitedHistoryHelper();
         final int callCount = visitedHistoryHelper.getCallCount();
         visitedHistoryHelper.setSaveCallback(true);
 
@@ -110,9 +109,8 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
         final String visitedLinks[] = {"http://foo.com", "http://bar.com", null};
         final String html = "<a src=\"http://foo.com\">foo</a><a src=\"http://bar.com\">bar</a>";
 
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String pageUrl = webServer.setResponse(path, html, null);
             loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
             visitedHistoryHelper.waitForCallback(callCount);
@@ -123,7 +121,7 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
 
             loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
@@ -131,7 +129,7 @@ public class AwContentsClientVisitedHistoryTest extends AwTestBase {
     @SmallTest
     public void testGetVisitedHistoryCallbackAfterDestroy() throws Throwable {
         GetVisitedHistoryHelper visitedHistoryHelper =
-            mContentsClient.getGetVisitedHistoryHelper();
+                mContentsClient.getGetVisitedHistoryHelper();
         visitedHistoryHelper.setSaveCallback(true);
         final int callCount = visitedHistoryHelper.getCallCount();
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);

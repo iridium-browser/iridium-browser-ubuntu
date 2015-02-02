@@ -23,7 +23,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/search_box_model.h"
 
@@ -145,7 +145,7 @@ class ShowAppListInteractiveTest : public InProcessBrowserTest {
  public:
   ShowAppListInteractiveTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kShowAppList);
   }
 
@@ -197,7 +197,7 @@ class ShowAppListNonDefaultInteractiveTest : public ShowAppListInteractiveTest {
       : second_profile_name_(FILE_PATH_LITERAL("Profile 1")) {
   }
 
-  virtual bool SetUpUserDataDirectory() OVERRIDE {
+  bool SetUpUserDataDirectory() override {
     // Create a temp dir for "Profile 1" and seed the user data dir with a Local
     // State file configuring the app list to use it.
     base::FilePath user_data_dir;

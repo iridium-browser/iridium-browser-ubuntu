@@ -123,7 +123,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 277
+#   For your editing convenience: highest ID currently used: 281
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -1050,12 +1050,15 @@
         'dynamic_refresh': True,
         'per_profile': True,
       },
+      'deprecated': True,
       'example_value': True,
       'id': 190,
       'caption': '''Allows sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>''',
-      'desc': '''Allows the user to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
+      'desc': '''This policy is deprecated, consider using SyncDisabled instead.
 
-      If you set this policy, you can configure if a user is allowed to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> or not.''',
+      Allows the user to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+      If you set this policy, you can configure whether a user is allowed to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. Setting this policy to 'False' will prevent apps and extensions that use the chrome.identity API from functioning, so you may want to use SyncDisabled instead.''',
     },
     {
       'name': 'EnableWebBasedSignin',
@@ -1677,6 +1680,7 @@
           'schema': {
             'type': 'array',
             'items': { 'type': 'string' },
+            'id': 'ExtensionInstallSources',
           },
           'supported_on': ['chrome.*:21-', 'chrome_os:21-'],
           'features': {
@@ -1711,6 +1715,7 @@
                 'platform_app'
               ],
             },
+            'id': 'ExtensionAllowedTypes',
           },
           'supported_on': ['chrome.*:25-', 'chrome_os:25-'],
           'features': {
@@ -1730,6 +1735,129 @@
 
           If this settings is left not-configured, no restrictions on the acceptable extension/app types are enforced.''',
           'label': '''Types of extensions/apps that are allowed to be installed''',
+        },
+        {
+          'name': 'ExtensionSettings',
+          'type': 'dict',
+          'schema': {
+            'type': 'object',
+            'patternProperties': {
+              '^[a-p]{32}$': {
+                'type': 'object',
+                'properties': {
+                  'installation_mode': {
+                    'type': 'string',
+                    'enum': ['blocked', 'allowed', 'force_installed', 'normal_installed']
+                  },
+                  'update_url': { 'type': 'string' },
+                  'blocked_permissions': {
+                    'type': 'array',
+                    'items': {
+                      'type': 'string',
+                      'pattern': '^[a-z][a-zA-Z.]*$',
+                    },
+                    'id': 'ListOfPermissions',
+                  },
+                  'allowed_permissions': {
+                    '$ref': 'ListOfPermissions',
+                  },
+                },
+              },
+              '^update_url:': {
+                'type': 'object',
+                'properties': {
+                  'installation_mode': {
+                    'type': 'string',
+                    'enum': ['blocked', 'allowed']
+                  },
+                  'blocked_permissions': {
+                    '$ref': 'ListOfPermissions',
+                  },
+                  'allowed_permissions': {
+                    '$ref': 'ListOfPermissions',
+                  },
+                },
+              },
+            },
+            'properties': {
+              '*': {
+                'type': 'object',
+                'properties': {
+                  'installation_mode': {
+                    'type': 'string',
+                    'enum': ['blocked', 'allowed']
+                  },
+                  'blocked_permissions': {
+                    '$ref': 'ListOfPermissions',
+                  },
+                  'install_sources': {
+                    '$ref': 'ExtensionInstallSources',
+                  },
+                  'allowed_types': {
+                    '$ref': 'ExtensionAllowedTypes',
+                  },
+                },
+              },
+            },
+          },
+          'future': True,
+          'supported_on': ['chrome.*:40-', 'chrome_os:40-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': {
+            'abcdefghijklmnopabcdefghijklmnop' : {
+              'installation_mode': 'allowed',
+              'blocked_permissions': ['history'],
+            },
+            'bcdefghijklmnopabcdefghijklmnopa' : {
+              'installation_mode': 'force_installed',
+              'update_url': 'http://example.com/update_url',
+              'allowed_permissions': ['downloads'],
+            },
+            'update_url:http://www.example.com/update.xml': {
+              'blocked_permissions': ['wallpaper'],
+            },
+            '*': {
+              'installation_mode': 'blocked',
+              'blocked_permissions': ['downloads', 'bookmarks'],
+              'install_sources': ['http://company-intranet/chromeapps'],
+              'allowed_types': ['hosted_app'],
+            },
+          },
+          'id': 278,
+          'caption': 'Extension management settings',
+          'desc': '''Configures extension management settings for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+          This policy controls multiple settings, including settings controlled by any existing extension-related policies. This policy will override any legacy policies if both are set.
+
+          This policy maps an extension ID or an update URL to its configuration. With an extension ID, configuration will be applied to the specified extension only. A default configuration can be set for the special ID "*", which will apply to all extensions that don't have a custom configuration set in this policy. With an update URL, configuration will be applied to all extensions with the exact update URL stated in manifest of this extension, as described at <ph name="LINK_TO_EXTENSION_DOC1">https://developer.chrome.com/extensions/autoupdate</ph>.
+
+          The configuration for each extension (or extensions with same update URL) is another dictionary that can contain the fields documented below.
+
+          "installation_mode": maps to a string indicating the installation mode for the extension. The valid strings are:
+          * "allowed": allows the extension to be installed by the user. This is the default behavior.
+          * "blocked": blocks installation of the extension.
+          * "force_installed": the extension is automatically installed and can't be removed by the user.
+          * "normal_installed": the extension is automatically installed but can be disabled by the user.
+
+          The "installation_mode" can also be configured for multiple extensions as well, including the "*" extension (as default settings) and extensions with same update URL. Only the "allowed" and "blocked" values can be used in this case.
+
+          If the mode is set to "force_installed" or "normal_installed" then an "update_url" must be configured too. Note that the update URL set in this policy is only used for the initial installation; subsequent updates of the extension will use the update URL indicated in the extension's manifest. The update URL should point to an Update Manifest XML document as mentioned above.
+
+          "blocked_permissions": maps to a list of strings indicating the blocked API permissions for the extension. The permissions names are same as the permission strings declared in manifest of extension as described at <ph name="LINK_TO_EXTENSION_DOC3">https://developer.chrome.com/extensions/declare_permissions</ph>. This setting also can be configured for "*" extension. If the extension requires a permission which is on the blocklist, it will not be allowed to load. If it contains a blocked permission as optional requirement, it will be handled in the normal way, but requesting conflicting permissions will be declined automatically at runtime.
+
+          "allowed_permissions": similar to "blocked_permissions", but instead explicitly allow some permissions which might be blocked by global blocked permission list, thus can not be configured for "*" extension. Note that this setting doesn't give granted permissions to extensions automatically.
+
+          The following settings can be used only for the default "*" configuration:
+
+          "install_sources": Each item in this list is an extension-style match pattern (see https://developer.chrome.com/extensions/match_patterns). Users will be able to easily install items from any URL that matches an item in this list. Both the location of the *.crx file and the page where the download is started from (i.e.  the referrer) must be allowed by these patterns.
+
+          "allowed_types": This setting whitelists the allowed types of extension/apps that can be installed in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.  The value is a list of strings, each of which should be one of the following: "extension", "theme", "user_script", "hosted_app", "legacy_packaged_app", "platform_app". See the <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> extensions documentation for more information on these types.
+
+          This policy isn't ready for usage yet, please don't use it.
+          '''
         },
       ],
     },
@@ -2244,6 +2372,8 @@
           'caption': '''Default cookies setting''',
           'desc': '''Allows you to set whether websites are allowed to set local data. Setting local data can be either allowed for all websites or denied for all websites.
 
+          If this policy is set to 'Keep cookies for the duration of the session' then cookies will be cleared when the session closes. Note that if <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is running in 'background mode', the session may not close when the last window is closed. Please see the 'BackgroundModeEnabled' policy for more information about configuring this behavior.
+
           If this policy is left not set, 'AllowCookies' will be used and the user will be able to change it.''',
         },
         {
@@ -2576,6 +2706,8 @@
           'desc': '''Allows you to set a list of url patterns that specify sites which are allowed to set session only cookies.
 
           If this policy is left not set the global default value will be used for all sites either from the 'DefaultCookiesSetting' policy if it is set, or the user's personal configuration otherwise.
+
+          Note that if <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is running in 'background mode', the session may not be closed when the last browser window is closed, but will instead stay active until the browser exits. Please see the 'BackgroundModeEnabled' policy for more information about configuring this behavior.
 
           If the "RestoreOnStartup" policy is set to restore URLs from previous sessions this policy will not be respected and cookies will be stored permanently for those sites.''',
         },
@@ -4459,7 +4591,7 @@
       'example_value': True,
       'id': 138,
       'caption': '''Continue running background apps when <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is closed''',
-      'desc': '''Determines whether a <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> process is started on OS login and keeps running when the last browser window is closed, allowing background apps to remain active. The background process displays an icon in the system tray and can always be closed from there.
+      'desc': '''Determines whether a <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> process is started on OS login and keeps running when the last browser window is closed, allowing background apps and the current browsing session to remain active, including any session cookies. The background process displays an icon in the system tray and can always be closed from there.
 
       If this policy is set to True, background mode is enabled and cannot be controlled by the user in the browser settings.
 
@@ -6437,21 +6569,27 @@
         }, {
           "name": "Youtube",
           "url": "youtube.com"
+        }, {
+          "name": "Chrome links",
+          "children": [
+            {
+              "name": "Chromium",
+              "url": "chromium.org"
+            },
+            {
+              "name": "Chromium Developers",
+              "url": "dev.chromium.org"
+            }
+          ]
         }
       ],
       'id': 227,
       'caption': '''Managed Bookmarks''',
       'desc': '''Configures a list of managed bookmarks.
 
-      The policy is a list of bookmarks, and each bookmark is a dictionary containing the bookmark "name" and target "url".
+      The policy is a list of bookmarks, and each bookmark is a dictionary containing the bookmark "name" and the target "url". A bookmark can also be configured as a folder. In that case, define the folder "name" but don't define an "url"; instead, define the folder contents as another list of bookmarks under the "children" key. Chrome will amend incomplete URLs as if they were submitted via the Omnibox. For example, "google.com" becomes "http://google.com/".
 
-      A bookmark can also be configured as a folder. In that case, define the folder "name" but don't define an "url"; instead, define the folder contents as another list of bookmarks under the "children" key.
-
-      These bookmarks are placed in a Managed bookmarks folder inside the Mobile bookmarks. These bookmarks can't be modified by the user.
-
-      When this policy is set then the Managed bookmarks are the default folder opened when the bookmarks view is opened in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
-
-      Managed bookmarks are not synced to the user account.''',
+      These bookmarks are placed in a Managed bookmarks folder that can't be modified by the user, but the user can choose to hide it from the bookmark bar. Managed bookmarks are not synced to the user account and can't be modified by extensions.''',
     },
     {
       'name': 'DataCompressionProxyEnabled',
@@ -6538,7 +6676,7 @@
       'caption': '''Wallpaper image''',
       'desc': '''Configure wallpaper image.
 
-      This policy allows you to configure the wallpaper image that is shown on the desktop and on the login screen background for the user. The policy is set by specifying the URL from which <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> can download the wallpaper image and a cryptographic hash used to verify the integrity of the download. The image must be in JPEG format, its file size must not exceed 16MB and its dimension must not exceed 32 megapixels. The URL must be accessible without any authentication.
+      This policy allows you to configure the wallpaper image that is shown on the desktop and on the login screen background for the user. The policy is set by specifying the URL from which <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> can download the wallpaper image and a cryptographic hash used to verify the integrity of the download. The image must be in JPEG format, its file size must not exceed 16MB. The URL must be accessible without any authentication.
 
       The wallpaper image is downloaded and cached. It will be re-downloaded whenever the URL or the hash changes.
 
@@ -6758,7 +6896,7 @@
 
       Otherwise it may be set to one of the following values: "sslv3", "tls1", "tls1.1" or "tls1.2". When set, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will not use SSL/TLS versions less than the specified version. An unrecognized value will be ignored.
 
-      Note that, despite the number, "sslv3" is an earier version than "tls1".''',
+      Note that, despite the number, "sslv3" is an earlier version than "tls1".''',
     },
     {
       'name': 'SSLVersionFallbackMin',
@@ -6807,7 +6945,7 @@
       'example_value': 'tls1',
       'id': 280,
       'caption': '''Minimum SSL version to fallback to''',
-      'desc': '''When an SSL/TLS handshake fails, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retry the connection with a lesser version of SSL/TLS in order to work around bugs in HTTPS servers. This setting configures the version at which this fallback process will stop. If a server performs version negotiation correctly then this setting doesn't apply and SSLVersionMin controls.
+      'desc': '''When an SSL/TLS handshake fails, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will retry the connection with a lesser version of SSL/TLS in order to work around bugs in HTTPS servers. This setting configures the version at which this fallback process will stop. If a server performs version negotiation correctly (i.e. without breaking the connection) then this setting doesn't apply. Regardless, the resulting connection must still comply with SSLVersionMin.
 
       If this policy is not configured then <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use a default minimum version, which was SSLv3 in Chrome 38 but is TLS 1.0 in Chrome 39.
 
@@ -6816,6 +6954,28 @@
       A setting of "tls1.2" disables all fallback but this may have a significant compatibility impact.
 
       Note that, despite the number, "sslv3" is an earier version than "tls1".''',
+    },
+    {
+      'name': 'ContextualSearchEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': [
+        'android:40-',
+      ],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 281,
+      'caption': '''Enable Touch to Search''',
+      'desc': '''Enables the availability of Touch to Search in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>'s content view.
+
+      If you enable this setting, Touch to Search will be available to the user and they can choose to turn the feature on or off.
+
+      If you disable this setting, Touch to Search will be disabled completely.
+
+      If this policy is left not set, it is equivalent to being enabled, see description above.''',
     },
   ],
   'messages': {

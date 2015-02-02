@@ -6,8 +6,9 @@
 
 #include <algorithm>
 
+#include "cc/layers/append_quads_data.h"
 #include "cc/quads/solid_color_draw_quad.h"
-#include "cc/trees/occlusion_tracker.h"
+#include "cc/trees/occlusion.h"
 
 namespace cc {
 
@@ -23,19 +24,16 @@ SolidColorLayerImpl::~SolidColorLayerImpl() {}
 
 scoped_ptr<LayerImpl> SolidColorLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return SolidColorLayerImpl::Create(tree_impl, id()).PassAs<LayerImpl>();
+  return SolidColorLayerImpl::Create(tree_impl, id());
 }
 
 void SolidColorLayerImpl::AppendSolidQuads(
     RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
+    const Occlusion& occlusion_in_content_space,
     SharedQuadState* shared_quad_state,
     const gfx::Rect& visible_content_rect,
-    const gfx::Transform& target_space_transform,
-    SkColor color) {
-  Occlusion occlusion =
-      occlusion_tracker.GetCurrentOcclusionForLayer(target_space_transform);
-
+    SkColor color,
+    AppendQuadsData* append_quads_data) {
   // We create a series of smaller quads instead of just one large one so that
   // the culler can reduce the total pixels drawn.
   int right = visible_content_rect.right();
@@ -49,9 +47,12 @@ void SolidColorLayerImpl::AppendSolidQuads(
                           std::min(right - x, kSolidQuadTileSize),
                           std::min(bottom - y, kSolidQuadTileSize));
       gfx::Rect visible_quad_rect =
-          occlusion.GetUnoccludedContentRect(quad_rect);
+          occlusion_in_content_space.GetUnoccludedContentRect(quad_rect);
       if (visible_quad_rect.IsEmpty())
         continue;
+
+      append_quads_data->visible_content_area +=
+          visible_quad_rect.width() * visible_quad_rect.height();
 
       SolidColorDrawQuad* quad =
           render_pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
@@ -63,7 +64,7 @@ void SolidColorLayerImpl::AppendSolidQuads(
 
 void SolidColorLayerImpl::AppendQuads(
     RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
+    const Occlusion& occlusion_in_content_space,
     AppendQuadsData* append_quads_data) {
   SharedQuadState* shared_quad_state =
       render_pass->CreateAndAppendSharedQuadState();
@@ -75,11 +76,11 @@ void SolidColorLayerImpl::AppendQuads(
   // TODO(hendrikw): We need to pass the visible content rect rather than
   // |content_bounds()| here.
   AppendSolidQuads(render_pass,
-                   occlusion_tracker,
+                   occlusion_in_content_space,
                    shared_quad_state,
                    gfx::Rect(content_bounds()),
-                   draw_properties().target_space_transform,
-                   background_color());
+                   background_color(),
+                   append_quads_data);
 }
 
 const char* SolidColorLayerImpl::LayerTypeAsString() const {

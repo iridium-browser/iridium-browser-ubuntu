@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SYNC_SERVICE_H_
 #define CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SYNC_SERVICE_H_
 
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -45,7 +46,7 @@ class SupervisedUserSyncService : public KeyedService,
   // Represents a non-existing avatar on Chrome and Chrome OS.
   static const int kNoAvatar;
 
-  virtual ~SupervisedUserSyncService();
+  ~SupervisedUserSyncService() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
@@ -106,20 +107,19 @@ class SupervisedUserSyncService : public KeyedService,
   void GetSupervisedUsersAsync(const SupervisedUsersCallback& callback);
 
   // KeyedService implementation:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // SyncableService implementation:
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const
-      OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
  private:
   friend class SupervisedUserSyncServiceFactory;

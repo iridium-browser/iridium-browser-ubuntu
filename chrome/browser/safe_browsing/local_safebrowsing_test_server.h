@@ -17,18 +17,17 @@ class LocalSafeBrowsingTestServer : public net::LocalTestServer {
   // Initialize a safebrowsing server using the given |data_file|.
   explicit LocalSafeBrowsingTestServer(const base::FilePath& data_file);
 
-  virtual ~LocalSafeBrowsingTestServer();
+  ~LocalSafeBrowsingTestServer() override;
 
-  virtual bool SetPythonPath() const OVERRIDE;
+  bool SetPythonPath() const override;
 
   // Returns the path to safe_browsing_testserver.py.
-  virtual bool GetTestServerPath(
-      base::FilePath* testserver_path) const OVERRIDE;
+  bool GetTestServerPath(base::FilePath* testserver_path) const override;
 
  protected:
   // Adds the --data-file switch. Returns true on success.
-  virtual bool GenerateAdditionalArguments(
-      base::DictionaryValue* arguments) const OVERRIDE;
+  bool GenerateAdditionalArguments(
+      base::DictionaryValue* arguments) const override;
 
  private:
   base::FilePath data_file_;

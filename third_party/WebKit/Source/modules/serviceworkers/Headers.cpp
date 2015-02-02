@@ -7,15 +7,70 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/Iterator.h"
 #include "core/fetch/FetchUtils.h"
-#include "core/xml/XMLHttpRequest.h"
-#include "modules/serviceworkers/HeadersForEachCallback.h"
 #include "wtf/NotFound.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
+
+namespace {
+
+class HeadersIterator final : public Iterator {
+public:
+    // Only KeyValue is currently used; the other types are to support
+    // Map-like iteration with entries(), keys() and values(), but this has
+    // not yet been added to any spec.
+    enum IterationType { KeyValue, Key, Value };
+
+    HeadersIterator(FetchHeaderList* headers, IterationType type) : m_headers(headers), m_type(type), m_current(0) { }
+
+    virtual ScriptValue next(ScriptState* scriptState, ExceptionState& exception) override
+    {
+        // FIXME: This simply advances an index and returns the next value if
+        // any, so if the iterated object is mutated values may be skipped.
+        v8::Isolate* isolate = scriptState->isolate();
+        if (m_current >= m_headers->size())
+            return ScriptValue(scriptState, v8DoneIteratorResult(isolate));
+
+        const FetchHeaderList::Header& header = m_headers->entry(m_current++);
+        switch (m_type) {
+        case KeyValue: {
+            Vector<String> pair;
+            pair.append(header.first);
+            pair.append(header.second);
+            return ScriptValue(scriptState, v8IteratorResult(scriptState, pair));
+        }
+        case Key:
+            return ScriptValue(scriptState, v8IteratorResult(scriptState, header.first));
+
+        case Value:
+            return ScriptValue(scriptState, v8IteratorResult(scriptState, header.second));
+        }
+        ASSERT_NOT_REACHED();
+        return ScriptValue();
+    }
+
+    virtual ScriptValue next(ScriptState* scriptState, ScriptValue, ExceptionState& exceptionState) override
+    {
+        return next(scriptState, exceptionState);
+    }
+
+    virtual void trace(Visitor* visitor)
+    {
+        Iterator::trace(visitor);
+        visitor->trace(m_headers);
+    }
+
+private:
+    const Member<FetchHeaderList> m_headers;
+    const IterationType m_type;
+    size_t m_current;
+};
+
+} // namespace
 
 Headers* Headers::create()
 {
@@ -35,6 +90,14 @@ Headers* Headers::create(const Headers* init, ExceptionState& exceptionState)
     // "2. If |init| is given, fill headers with |init|. Rethrow any exception."
     headers->fillWith(init, exceptionState);
     // "3. Return |headers|."
+    return headers;
+}
+
+Headers* Headers::create(const Vector<Vector<String> >& init, ExceptionState& exceptionState)
+{
+    // The same steps as above.
+    Headers* headers = create();
+    headers->fillWith(init, exceptionState);
     return headers;
 }
 
@@ -60,11 +123,6 @@ Headers* Headers::createCopy() const
     Headers* headers = create(headerList);
     headers->m_guard = m_guard;
     return headers;
-}
-
-unsigned long Headers::size() const
-{
-    return m_headerList->size();
 }
 
 void Headers::append(const String& name, const String& value, ExceptionState& exceptionState)
@@ -208,16 +266,6 @@ void Headers::set(const String& name, const String& value, ExceptionState& excep
     m_headerList->set(name, value);
 }
 
-void Headers::forEach(HeadersForEachCallback* callback, const ScriptValue& thisArg)
-{
-    forEachInternal(callback, &thisArg);
-}
-
-void Headers::forEach(HeadersForEachCallback* callback)
-{
-    forEachInternal(callback, 0);
-}
-
 void Headers::fillWith(const Headers* object, ExceptionState& exceptionState)
 {
     ASSERT(m_headerList->size() == 0);
@@ -234,46 +282,34 @@ void Headers::fillWith(const Headers* object, ExceptionState& exceptionState)
     }
 }
 
+void Headers::fillWith(const Vector<Vector<String> >& object, ExceptionState& exceptionState)
+{
+    ASSERT(!m_headerList->size());
+    // "2. Otherwise, if |object| is a sequence, then for each |header| in
+    //     |object|, run these substeps:
+    //    1. If |header| does not contain exactly two items, throw a
+    //       TypeError.
+    //    2. Append |header|'s first item/|header|'s second item to
+    //       |headers|. Rethrow any exception."
+    for (size_t i = 0; i < object.size(); ++i) {
+        if (object[i].size() != 2) {
+            exceptionState.throwTypeError("Invalid value");
+            return;
+        }
+        append(object[i][0], object[i][1], exceptionState);
+        if (exceptionState.hadException())
+            return;
+    }
+}
+
 void Headers::fillWith(const Dictionary& object, ExceptionState& exceptionState)
 {
-    ASSERT(m_headerList->size() == 0);
+    ASSERT(!m_headerList->size());
     Vector<String> keys;
     object.getOwnPropertyNames(keys);
-    if (keys.size() == 0)
+    if (!keys.size())
         return;
 
-    // Because of the restrictions in IDL compiler of blink we recieve
-    // sequence<sequence<ByteString>> as a Dictionary, which is a type of union
-    // type of HeadersInit defined in the spec.
-    // http://fetch.spec.whatwg.org/#headers-class
-    // FIXME: Support sequence<sequence<ByteString>>.
-    Vector<String> keyValuePair;
-    if (DictionaryHelper::get(object, keys[0], keyValuePair)) {
-        // "2. Otherwise, if |object| is a sequence, then for each |header| in
-        //     |object|, run these substeps:
-        //    1. If |header| does not contain exactly two items, throw a
-        //       TypeError.
-        //    2. Append |header|'s first item/|header|'s second item to
-        //       |headers|. Rethrow any exception."
-        for (size_t i = 0; i < keys.size(); ++i) {
-            // We've already got the keyValuePair for key[0].
-            if (i > 0) {
-                if (!DictionaryHelper::get(object, keys[i], keyValuePair)) {
-                    exceptionState.throwTypeError("Invalid value");
-                    return;
-                }
-            }
-            if (keyValuePair.size() != 2) {
-                exceptionState.throwTypeError("Invalid value");
-                return;
-            }
-            append(keyValuePair[0], keyValuePair[1], exceptionState);
-            if (exceptionState.hadException())
-                return;
-            keyValuePair.clear();
-        }
-        return;
-    }
     // "3. Otherwise, if |object| is an open-ended dictionary, then for each
     //    |header| in object, run these substeps:
     //    1. Set |header|'s key to |header|'s key, converted to ByteString.
@@ -305,17 +341,9 @@ Headers::Headers(FetchHeaderList* headerList)
 {
 }
 
-void Headers::forEachInternal(HeadersForEachCallback* callback, const ScriptValue* thisArg)
+Iterator* Headers::iterator(ScriptState*, ExceptionState&)
 {
-    TrackExceptionState exceptionState;
-    for (size_t i = 0; i < m_headerList->size(); ++i) {
-        if (thisArg)
-            callback->handleItem(*thisArg, m_headerList->list()[i]->second, m_headerList->list()[i]->first, this);
-        else
-            callback->handleItem(m_headerList->list()[i]->second, m_headerList->list()[i]->first, this);
-        if (exceptionState.hadException())
-            break;
-    }
+    return new HeadersIterator(m_headerList, HeadersIterator::KeyValue);
 }
 
 void Headers::trace(Visitor* visitor)

@@ -11,6 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "cc/debug/traced_value.h"
 #include "cc/resources/raster_buffer.h"
+#include "cc/resources/raster_source.h"
 #include "cc/resources/resource.h"
 
 namespace cc {
@@ -23,10 +24,11 @@ class RasterBufferImpl : public RasterBuffer {
       : lock_(resource_provider, resource->id()) {}
 
   // Overridden from RasterBuffer:
-  virtual skia::RefPtr<SkCanvas> AcquireSkCanvas() OVERRIDE {
-    return skia::SharePtr(lock_.sk_canvas());
+  void Playback(const RasterSource* raster_source,
+                const gfx::Rect& rect,
+                float scale) override {
+    raster_source->PlaybackToCanvas(lock_.sk_canvas(), rect, scale);
   }
-  virtual void ReleaseSkCanvas(const skia::RefPtr<SkCanvas>& canvas) OVERRIDE {}
 
  private:
   ResourceProvider::ScopedWriteLockSoftware lock_;

@@ -249,13 +249,12 @@ class GLHelper::CopyTextureToImpl
                     bool flip_vertically,
                     ReadbackSwizzle swizzle);
 
-    virtual void ReadbackYUV(const gpu::Mailbox& mailbox,
-                             uint32 sync_point,
-                             const scoped_refptr<media::VideoFrame>& target,
-                             const base::Callback<void(bool)>& callback)
-        OVERRIDE;
+    void ReadbackYUV(const gpu::Mailbox& mailbox,
+                     uint32 sync_point,
+                     const scoped_refptr<media::VideoFrame>& target,
+                     const base::Callback<void(bool)>& callback) override;
 
-    virtual ScalerInterface* scaler() OVERRIDE { return scaler_.scaler(); }
+    ScalerInterface* scaler() override { return scaler_.scaler(); }
 
    private:
     GLES2Interface* gl_;
@@ -287,13 +286,12 @@ class GLHelper::CopyTextureToImpl
                     bool flip_vertically,
                     ReadbackSwizzle swizzle);
 
-    virtual void ReadbackYUV(const gpu::Mailbox& mailbox,
-                             uint32 sync_point,
-                             const scoped_refptr<media::VideoFrame>& target,
-                             const base::Callback<void(bool)>& callback)
-        OVERRIDE;
+    void ReadbackYUV(const gpu::Mailbox& mailbox,
+                     uint32 sync_point,
+                     const scoped_refptr<media::VideoFrame>& target,
+                     const base::Callback<void(bool)>& callback) override;
 
-    virtual ScalerInterface* scaler() OVERRIDE { return scaler_.scaler(); }
+    ScalerInterface* scaler() override { return scaler_.scaler(); }
 
    private:
     GLES2Interface* gl_;

@@ -42,8 +42,7 @@ gfx::Size SurfaceSize() {
 
 class EmptySurfaceFactoryClient : public SurfaceFactoryClient {
  public:
-  virtual void ReturnResources(
-      const ReturnedResourceArray& resources) OVERRIDE {}
+  void ReturnResources(const ReturnedResourceArray& resources) override {}
 };
 
 class SurfaceAggregatorTest : public testing::Test {
@@ -68,7 +67,7 @@ TEST_F(SurfaceAggregatorTest, ValidSurfaceNoFrame) {
 
 class SurfaceAggregatorValidSurfaceTest : public SurfaceAggregatorTest {
  public:
-  SurfaceAggregatorValidSurfaceTest() : allocator_(1u) {}
+  SurfaceAggregatorValidSurfaceTest() : allocator_(1u), child_allocator_(2u) {}
 
   virtual void SetUp() {
     SurfaceAggregatorTest::SetUp();
@@ -96,6 +95,12 @@ class SurfaceAggregatorValidSurfaceTest : public SurfaceAggregatorTest {
 
     TestPassesMatchExpectations(
         expected_passes, expected_pass_count, &frame_data->render_pass_list);
+
+    // Ensure no duplicate pass ids output.
+    std::set<RenderPassId> used_passes;
+    for (auto* pass : frame_data->render_pass_list) {
+      EXPECT_TRUE(used_passes.insert(pass->id).second);
+    }
 
     EXPECT_EQ(expected_surface_count,
               aggregator_.previous_contained_surfaces().size());
@@ -134,6 +139,7 @@ class SurfaceAggregatorValidSurfaceTest : public SurfaceAggregatorTest {
  protected:
   SurfaceId root_surface_id_;
   SurfaceIdAllocator allocator_;
+  SurfaceIdAllocator child_allocator_;
 };
 
 // Tests that a very simple frame containing only two solid color quads makes it
@@ -154,8 +160,9 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, MultiPassSimpleFrame) {
                             test::Quad::SolidColorQuad(SK_ColorLTGRAY)},
                            {test::Quad::SolidColorQuad(SK_ColorGRAY),
                             test::Quad::SolidColorQuad(SK_ColorDKGRAY)}};
-  test::Pass passes[] = {test::Pass(quads[0], arraysize(quads[0])),
-                         test::Pass(quads[1], arraysize(quads[1]))};
+  test::Pass passes[] = {
+      test::Pass(quads[0], arraysize(quads[0]), RenderPassId(1, 1)),
+      test::Pass(quads[1], arraysize(quads[1]), RenderPassId(1, 2))};
 
   SubmitFrame(passes, arraysize(passes), root_surface_id_);
 
@@ -252,9 +259,97 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, CopyRequest) {
   factory_.Destroy(embedded_surface_id);
 }
 
+// Root surface may contain copy requests.
+TEST_F(SurfaceAggregatorValidSurfaceTest, RootCopyRequest) {
+  SurfaceId embedded_surface_id = allocator_.GenerateId();
+  factory_.Create(embedded_surface_id, SurfaceSize());
+
+  test::Quad embedded_quads[] = {test::Quad::SolidColorQuad(SK_ColorGREEN)};
+  test::Pass embedded_passes[] = {
+      test::Pass(embedded_quads, arraysize(embedded_quads))};
+
+  SubmitFrame(embedded_passes, arraysize(embedded_passes), embedded_surface_id);
+  scoped_ptr<CopyOutputRequest> copy_request(
+      CopyOutputRequest::CreateEmptyRequest());
+  CopyOutputRequest* copy_request_ptr = copy_request.get();
+  scoped_ptr<CopyOutputRequest> copy_request2(
+      CopyOutputRequest::CreateEmptyRequest());
+  CopyOutputRequest* copy_request2_ptr = copy_request2.get();
+
+  test::Quad root_quads[] = {test::Quad::SolidColorQuad(SK_ColorWHITE),
+                             test::Quad::SurfaceQuad(embedded_surface_id),
+                             test::Quad::SolidColorQuad(SK_ColorBLACK)};
+  test::Quad root_quads2[] = {test::Quad::SolidColorQuad(SK_ColorRED)};
+  test::Pass root_passes[] = {
+      test::Pass(root_quads, arraysize(root_quads), RenderPassId(1, 1)),
+      test::Pass(root_quads2, arraysize(root_quads2), RenderPassId(1, 2))};
+  {
+    RenderPassList pass_list;
+    AddPasses(&pass_list,
+              gfx::Rect(SurfaceSize()),
+              root_passes,
+              arraysize(root_passes));
+    pass_list[0]->copy_requests.push_back(copy_request.Pass());
+    pass_list[1]->copy_requests.push_back(copy_request2.Pass());
+
+    scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
+    pass_list.swap(frame_data->render_pass_list);
+
+    scoped_ptr<CompositorFrame> frame(new CompositorFrame);
+    frame->delegated_frame_data = frame_data.Pass();
+
+    factory_.SubmitFrame(root_surface_id_, frame.Pass(), base::Closure());
+  }
+
+  scoped_ptr<CompositorFrame> aggregated_frame =
+      aggregator_.Aggregate(root_surface_id_);
+
+  ASSERT_TRUE(aggregated_frame);
+  ASSERT_TRUE(aggregated_frame->delegated_frame_data);
+
+  DelegatedFrameData* frame_data = aggregated_frame->delegated_frame_data.get();
+
+  test::Quad expected_quads[] = {test::Quad::SolidColorQuad(SK_ColorWHITE),
+                                 test::Quad::SolidColorQuad(SK_ColorGREEN),
+                                 test::Quad::SolidColorQuad(SK_ColorBLACK)};
+  test::Pass expected_passes[] = {
+      test::Pass(expected_quads, arraysize(expected_quads)),
+      test::Pass(root_quads2, arraysize(root_quads2))};
+  TestPassesMatchExpectations(expected_passes,
+                              arraysize(expected_passes),
+                              &frame_data->render_pass_list);
+  ASSERT_EQ(2u, frame_data->render_pass_list.size());
+  ASSERT_EQ(1u, frame_data->render_pass_list[0]->copy_requests.size());
+  DCHECK_EQ(copy_request_ptr,
+            frame_data->render_pass_list[0]->copy_requests[0]);
+  ASSERT_EQ(1u, frame_data->render_pass_list[1]->copy_requests.size());
+  DCHECK_EQ(copy_request2_ptr,
+            frame_data->render_pass_list[1]->copy_requests[0]);
+
+  SurfaceId surface_ids[] = {root_surface_id_, embedded_surface_id};
+  EXPECT_EQ(arraysize(surface_ids),
+            aggregator_.previous_contained_surfaces().size());
+  for (size_t i = 0; i < arraysize(surface_ids); i++) {
+    EXPECT_TRUE(
+        aggregator_.previous_contained_surfaces().find(surface_ids[i]) !=
+        aggregator_.previous_contained_surfaces().end());
+  }
+
+  // Ensure copy requests have been removed from root surface.
+  const CompositorFrame* original_frame =
+      manager_.GetSurfaceForId(root_surface_id_)->GetEligibleFrame();
+  RenderPassList& original_pass_list =
+      original_frame->delegated_frame_data->render_pass_list;
+  ASSERT_EQ(2u, original_pass_list.size());
+  DCHECK(original_pass_list[0]->copy_requests.empty());
+  DCHECK(original_pass_list[1]->copy_requests.empty());
+
+  factory_.Destroy(embedded_surface_id);
+}
+
 // This tests referencing a surface that has multiple render passes.
 TEST_F(SurfaceAggregatorValidSurfaceTest, MultiPassSurfaceReference) {
-  SurfaceId embedded_surface_id = allocator_.GenerateId();
+  SurfaceId embedded_surface_id = child_allocator_.GenerateId();
   factory_.Create(embedded_surface_id, SurfaceSize());
 
   RenderPassId pass_ids[] = {RenderPassId(1, 1), RenderPassId(1, 2),
@@ -698,12 +793,11 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateSharedQuadStateProperties) {
 
   ASSERT_EQ(7u, aggregated_quad_list.size());
 
-  size_t i = 0;
-  for (QuadList::ConstIterator iter = aggregated_quad_list.begin();
-       iter != aggregated_quad_list.end();
+  for (auto iter = aggregated_quad_list.cbegin();
+       iter != aggregated_quad_list.cend();
        ++iter) {
-    EXPECT_EQ(blend_modes[i], iter->shared_quad_state->blend_mode) << i;
-    ++i;
+    EXPECT_EQ(blend_modes[iter.index()], iter->shared_quad_state->blend_mode)
+        << iter.index();
   }
   factory_.Destroy(child_one_surface_id);
   factory_.Destroy(child_two_surface_id);
@@ -745,12 +839,12 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateMultiplePassWithTransform) {
   RenderPass* child_nonroot_pass = child_pass_list.at(0u);
   child_nonroot_pass->transform_to_root_target.Translate(8, 0);
   SharedQuadState* child_nonroot_pass_sqs =
-      child_nonroot_pass->shared_quad_state_list[0];
+      child_nonroot_pass->shared_quad_state_list.front();
   child_nonroot_pass_sqs->content_to_target_transform.Translate(5, 0);
 
   RenderPass* child_root_pass = child_pass_list.at(1u);
   SharedQuadState* child_root_pass_sqs =
-      child_root_pass->shared_quad_state_list[0];
+      child_root_pass->shared_quad_state_list.front();
   child_root_pass_sqs->content_to_target_transform.Translate(8, 0);
   child_root_pass_sqs->is_clipped = true;
   child_root_pass_sqs->clip_rect = gfx::Rect(0, 0, 5, 5);
@@ -774,10 +868,10 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateMultiplePassWithTransform) {
             arraysize(root_passes));
 
   root_pass_list.at(0)
-      ->shared_quad_state_list[0]
+      ->shared_quad_state_list.front()
       ->content_to_target_transform.Translate(0, 7);
   root_pass_list.at(0)
-      ->shared_quad_state_list[1]
+      ->shared_quad_state_list.ElementAt(1)
       ->content_to_target_transform.Translate(0, 10);
 
   scoped_ptr<DelegatedFrameData> root_frame_data(new DelegatedFrameData);
@@ -838,24 +932,23 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateMultiplePassWithTransform) {
   // and the child surface draw quad's translation (8, 0).
   expected_root_pass_quad_transforms[1].Translate(8, 10);
 
-  size_t i = 0;
-  for (QuadList::Iterator iter = aggregated_pass_list[1]->quad_list.begin();
-       iter != aggregated_pass_list[1]->quad_list.end();
+  for (auto iter = aggregated_pass_list[1]->quad_list.cbegin();
+       iter != aggregated_pass_list[1]->quad_list.cend();
        ++iter) {
-    EXPECT_EQ(expected_root_pass_quad_transforms[i].ToString(),
+    EXPECT_EQ(expected_root_pass_quad_transforms[iter.index()].ToString(),
               iter->quadTransform().ToString())
-        << i;
-    i++;
+        << iter.index();
   }
 
-  EXPECT_EQ(true,
-            aggregated_pass_list[1]->shared_quad_state_list[1]->is_clipped);
+  EXPECT_TRUE(
+      aggregated_pass_list[1]->shared_quad_state_list.ElementAt(1)->is_clipped);
 
   // The second quad in the root pass is aggregated from the child, so its
   // clip rect must be transformed by the child's translation.
-  EXPECT_EQ(
-      gfx::Rect(0, 10, 5, 5).ToString(),
-      aggregated_pass_list[1]->shared_quad_state_list[1]->clip_rect.ToString());
+  EXPECT_EQ(gfx::Rect(0, 10, 5, 5).ToString(),
+            aggregated_pass_list[1]
+                ->shared_quad_state_list.ElementAt(1)
+                ->clip_rect.ToString());
 
   factory_.Destroy(child_surface_id);
 }
@@ -877,7 +970,7 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateDamageRect) {
 
   RenderPass* child_root_pass = child_pass_list.at(0u);
   SharedQuadState* child_root_pass_sqs =
-      child_root_pass->shared_quad_state_list[0];
+      child_root_pass->shared_quad_state_list.front();
   child_root_pass_sqs->content_to_target_transform.Translate(8, 0);
 
   scoped_ptr<DelegatedFrameData> child_frame_data(new DelegatedFrameData);
@@ -898,7 +991,7 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateDamageRect) {
             arraysize(root_passes));
 
   root_pass_list.at(0)
-      ->shared_quad_state_list[0]
+      ->shared_quad_state_list.front()
       ->content_to_target_transform.Translate(0, 10);
   root_pass_list.at(0)->damage_rect = gfx::Rect(5, 5, 10, 10);
 
@@ -934,7 +1027,7 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateDamageRect) {
 
     RenderPass* child_root_pass = child_pass_list.at(0u);
     SharedQuadState* child_root_pass_sqs =
-        child_root_pass->shared_quad_state_list[0];
+        child_root_pass->shared_quad_state_list.front();
     child_root_pass_sqs->content_to_target_transform.Translate(8, 0);
     child_root_pass->damage_rect = gfx::Rect(10, 10, 10, 10);
 
@@ -973,7 +1066,7 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateDamageRect) {
               arraysize(root_passes));
 
     root_pass_list.at(0)
-        ->shared_quad_state_list[0]
+        ->shared_quad_state_list.front()
         ->content_to_target_transform.Translate(0, 10);
     root_pass_list.at(0)->damage_rect = gfx::Rect(0, 0, 1, 1);
 
@@ -994,7 +1087,7 @@ TEST_F(SurfaceAggregatorValidSurfaceTest, AggregateDamageRect) {
               arraysize(root_passes));
 
     root_pass_list.at(0)
-        ->shared_quad_state_list[0]
+        ->shared_quad_state_list.front()
         ->content_to_target_transform.Translate(0, 10);
     root_pass_list.at(0)->damage_rect = gfx::Rect(1, 1, 1, 1);
 
@@ -1039,10 +1132,10 @@ class SurfaceAggregatorWithResourcesTest : public testing::Test {
     resource_provider_ = ResourceProvider::Create(output_surface_.get(),
                                                   shared_bitmap_manager_.get(),
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false);
+                                                  1);
 
     aggregator_.reset(
         new SurfaceAggregator(&manager_, resource_provider_.get()));
@@ -1060,10 +1153,9 @@ class SurfaceAggregatorWithResourcesTest : public testing::Test {
 class ResourceTrackingSurfaceFactoryClient : public SurfaceFactoryClient {
  public:
   ResourceTrackingSurfaceFactoryClient() {}
-  virtual ~ResourceTrackingSurfaceFactoryClient() {}
+  ~ResourceTrackingSurfaceFactoryClient() override {}
 
-  virtual void ReturnResources(
-      const ReturnedResourceArray& resources) OVERRIDE {
+  void ReturnResources(const ReturnedResourceArray& resources) override {
     returned_resources_ = resources;
   }
 

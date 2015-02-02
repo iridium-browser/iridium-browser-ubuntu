@@ -113,7 +113,7 @@ config("mesa_internal_config") {
   if (is_win) {
     # TODO(scottmg): http://crbug.com/143877 These should be removed if
     # Mesa is ever rolled and the warnings are fixed.
-    cflags = [
+    cflags += [
       "/wd4005",  # Macro defined twice.
       "/wd4065",  # Switch statement contains 'default' but no 'case' labels.
       "/wd4090",  # 'Operation' : different 'modifier' qualifiers
@@ -272,7 +272,6 @@ static_library("mesa") {
     "src/src/mesa/main/api_arrayelt.h",
     "src/src/mesa/main/api_exec.c",
     "src/src/mesa/main/api_exec.h",
-    "$generated_src_dir/mesa/api_exec_es1.c",
     "src/src/mesa/main/api_loopback.c",
     "src/src/mesa/main/api_loopback.h",
     "src/src/mesa/main/api_validate.c",
@@ -321,8 +320,6 @@ static_library("mesa") {
     "src/src/mesa/main/enums.h",
     "src/src/mesa/main/errors.c",
     "src/src/mesa/main/errors.h",
-    "src/src/mesa/main/es1_conversion.c",
-    "src/src/mesa/main/es1_conversion.h",
     "src/src/mesa/main/eval.c",
     "src/src/mesa/main/eval.h",
     "src/src/mesa/main/execmem.c",
@@ -388,7 +385,6 @@ static_library("mesa") {
     "src/src/mesa/main/points.h",
     "src/src/mesa/main/polygon.c",
     "src/src/mesa/main/polygon.h",
-    "src/src/mesa/main/querymatrix.c",
     "src/src/mesa/main/queryobj.c",
     "src/src/mesa/main/queryobj.h",
     "src/src/mesa/main/rastpos.c",

@@ -8,6 +8,7 @@
 #include <openssl/rand.h>
 
 #include "content/child/webcrypto/crypto_data.h"
+#include "content/child/webcrypto/generate_key_result.h"
 #include "content/child/webcrypto/openssl/key_openssl.h"
 #include "content/child/webcrypto/status.h"
 #include "crypto/openssl_util.h"
@@ -19,9 +20,9 @@ namespace webcrypto {
 
 Status GenerateSecretKeyOpenSsl(const blink::WebCryptoKeyAlgorithm& algorithm,
                                 bool extractable,
-                                blink::WebCryptoKeyUsageMask usage_mask,
+                                blink::WebCryptoKeyUsageMask usages,
                                 unsigned keylen_bytes,
-                                blink::WebCryptoKey* key) {
+                                GenerateKeyResult* result) {
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
   std::vector<unsigned char> random_bytes(keylen_bytes, 0);
@@ -31,25 +32,26 @@ Status GenerateSecretKeyOpenSsl(const blink::WebCryptoKeyAlgorithm& algorithm,
       return Status::OperationError();
   }
 
-  *key =
+  result->AssignSecretKey(
       blink::WebCryptoKey::create(new SymKeyOpenSsl(CryptoData(random_bytes)),
                                   blink::WebCryptoKeyTypeSecret,
                                   extractable,
                                   algorithm,
-                                  usage_mask);
+                                  usages));
+
   return Status::Success();
 }
 
 Status ImportKeyRawOpenSsl(const CryptoData& key_data,
                            const blink::WebCryptoKeyAlgorithm& algorithm,
                            bool extractable,
-                           blink::WebCryptoKeyUsageMask usage_mask,
+                           blink::WebCryptoKeyUsageMask usages,
                            blink::WebCryptoKey* key) {
   *key = blink::WebCryptoKey::create(new SymKeyOpenSsl(key_data),
                                      blink::WebCryptoKeyTypeSecret,
                                      extractable,
                                      algorithm,
-                                     usage_mask);
+                                     usages);
   return Status::Success();
 }
 

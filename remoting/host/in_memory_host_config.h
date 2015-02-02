@@ -22,21 +22,19 @@ class InMemoryHostConfig : public MutableHostConfig,
                            public base::NonThreadSafe {
  public:
   InMemoryHostConfig();
-  virtual ~InMemoryHostConfig();
+  ~InMemoryHostConfig() override;
 
   // MutableHostConfig interface.
-  virtual bool GetString(const std::string& path,
-                         std::string* out_value) const OVERRIDE;
-  virtual bool GetBoolean(const std::string& path,
-                          bool* out_value) const OVERRIDE;
+  bool GetString(const std::string& path,
+                 std::string* out_value) const override;
+  bool GetBoolean(const std::string& path, bool* out_value) const override;
 
-  virtual void SetString(const std::string& path,
-                         const std::string& in_value) OVERRIDE;
-  virtual void SetBoolean(const std::string& path, bool in_value) OVERRIDE;
+  void SetString(const std::string& path, const std::string& in_value) override;
+  void SetBoolean(const std::string& path, bool in_value) override;
 
-  virtual bool CopyFrom(const base::DictionaryValue* dictionary) OVERRIDE;
+  bool CopyFrom(const base::DictionaryValue* dictionary) override;
 
-  virtual bool Save() OVERRIDE;
+  bool Save() override;
 
  protected:
   scoped_ptr<base::DictionaryValue> values_;

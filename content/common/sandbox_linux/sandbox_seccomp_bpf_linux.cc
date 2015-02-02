@@ -34,6 +34,10 @@
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
 #include "sandbox/linux/services/linux_syscalls.h"
 
+#if !defined(IN_NACL_HELPER)
+#include "ui/gl/gl_switches.h"
+#endif
+
 using sandbox::BaselinePolicy;
 using sandbox::SandboxBPF;
 using sandbox::SyscallSets;
@@ -55,7 +59,7 @@ namespace content {
 #if defined(USE_SECCOMP_BPF)
 namespace {
 
-void StartSandboxWithPolicy(sandbox::SandboxBPFPolicy* policy);
+void StartSandboxWithPolicy(sandbox::bpf_dsl::Policy* policy);
 
 inline bool IsChromeOS() {
 #if defined(OS_CHROMEOS)
@@ -76,9 +80,9 @@ inline bool IsArchitectureArm() {
 class BlacklistDebugAndNumaPolicy : public SandboxBPFBasePolicy {
  public:
   BlacklistDebugAndNumaPolicy() {}
-  virtual ~BlacklistDebugAndNumaPolicy() {}
+  ~BlacklistDebugAndNumaPolicy() override {}
 
-  virtual ResultExpr EvaluateSyscall(int system_call_number) const OVERRIDE;
+  ResultExpr EvaluateSyscall(int system_call_number) const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BlacklistDebugAndNumaPolicy);
@@ -94,9 +98,9 @@ ResultExpr BlacklistDebugAndNumaPolicy::EvaluateSyscall(int sysno) const {
 class AllowAllPolicy : public SandboxBPFBasePolicy {
  public:
   AllowAllPolicy() {}
-  virtual ~AllowAllPolicy() {}
+  ~AllowAllPolicy() override {}
 
-  virtual ResultExpr EvaluateSyscall(int system_call_number) const OVERRIDE;
+  ResultExpr EvaluateSyscall(int system_call_number) const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AllowAllPolicy);
@@ -140,7 +144,7 @@ void RunSandboxSanityChecks(const std::string& process_type) {
 
 
 // This function takes ownership of |policy|.
-void StartSandboxWithPolicy(sandbox::SandboxBPFPolicy* policy) {
+void StartSandboxWithPolicy(sandbox::bpf_dsl::Policy* policy) {
   // Starting the sandbox is a one-way operation. The kernel doesn't allow
   // us to unload a sandbox policy after it has been started. Nonetheless,
   // in order to make the use of the "Sandbox" object easier, we allow for
@@ -167,7 +171,11 @@ scoped_ptr<SandboxBPFBasePolicy> GetGpuProcessSandbox() {
     return scoped_ptr<SandboxBPFBasePolicy>(
         new CrosArmGpuProcessPolicy(allow_sysv_shm));
   } else {
-    return scoped_ptr<SandboxBPFBasePolicy>(new GpuProcessPolicy);
+    bool allow_mincore = command_line.HasSwitch(switches::kUseGL) &&
+                         command_line.GetSwitchValueASCII(switches::kUseGL) ==
+                             gfx::kGLImplementationEGLName;
+    return scoped_ptr<SandboxBPFBasePolicy>(
+        new GpuProcessPolicy(allow_mincore));
   }
 }
 
@@ -272,7 +280,7 @@ bool SandboxSeccompBPF::StartSandbox(const std::string& process_type) {
 }
 
 bool SandboxSeccompBPF::StartSandboxWithExternalPolicy(
-    scoped_ptr<sandbox::bpf_dsl::SandboxBPFDSLPolicy> policy) {
+    scoped_ptr<sandbox::bpf_dsl::Policy> policy) {
 #if defined(USE_SECCOMP_BPF)
   if (IsSeccompBPFDesired() && SupportsSandbox()) {
     CHECK(policy);
@@ -283,12 +291,11 @@ bool SandboxSeccompBPF::StartSandboxWithExternalPolicy(
   return false;
 }
 
-scoped_ptr<sandbox::bpf_dsl::SandboxBPFDSLPolicy>
-SandboxSeccompBPF::GetBaselinePolicy() {
+scoped_ptr<sandbox::bpf_dsl::Policy> SandboxSeccompBPF::GetBaselinePolicy() {
 #if defined(USE_SECCOMP_BPF)
-  return scoped_ptr<sandbox::bpf_dsl::SandboxBPFDSLPolicy>(new BaselinePolicy);
+  return scoped_ptr<sandbox::bpf_dsl::Policy>(new BaselinePolicy);
 #else
-  return scoped_ptr<sandbox::bpf_dsl::SandboxBPFDSLPolicy>();
+  return scoped_ptr<sandbox::bpf_dsl::Policy>();
 #endif  // defined(USE_SECCOMP_BPF)
 }
 

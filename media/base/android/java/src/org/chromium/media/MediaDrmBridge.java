@@ -118,9 +118,17 @@ public class MediaDrmBridge {
             mMimeType = mimeType;
         }
 
-        private int sessionId() { return mSessionId; }
-        private byte[] initData() { return mInitData; }
-        private String mimeType() { return mMimeType; }
+        private int sessionId() {
+            return mSessionId;
+        }
+
+        private byte[] initData() {
+            return mInitData;
+        }
+
+        private String mimeType() {
+            return mMimeType;
+        }
     }
 
     private static UUID getUUIDFromBytes(byte[] data) {
@@ -493,7 +501,7 @@ public class MediaDrmBridge {
         try {
             // Create MediaCrypto if necessary.
             if (mMediaCrypto == null && !createMediaCrypto()) {
-              onSessionError(sessionId);
+                onSessionError(sessionId);
                 return;
             }
             assert mMediaCrypto != null;

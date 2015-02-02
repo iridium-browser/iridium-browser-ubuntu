@@ -27,17 +27,17 @@ class DrawWaiterForTest : public CompositorObserver {
 
  private:
   DrawWaiterForTest();
-  virtual ~DrawWaiterForTest();
+  ~DrawWaiterForTest() override;
 
   void WaitImpl(Compositor* compositor);
 
   // CompositorObserver implementation.
-  virtual void OnCompositingDidCommit(Compositor* compositor) OVERRIDE;
-  virtual void OnCompositingStarted(Compositor* compositor,
-                                    base::TimeTicks start_time) OVERRIDE;
-  virtual void OnCompositingEnded(Compositor* compositor) OVERRIDE;
-  virtual void OnCompositingAborted(Compositor* compositor) OVERRIDE;
-  virtual void OnCompositingLockStateChanged(Compositor* compositor) OVERRIDE;
+  void OnCompositingDidCommit(Compositor* compositor) override;
+  void OnCompositingStarted(Compositor* compositor,
+                            base::TimeTicks start_time) override;
+  void OnCompositingEnded(Compositor* compositor) override;
+  void OnCompositingAborted(Compositor* compositor) override;
+  void OnCompositingLockStateChanged(Compositor* compositor) override;
 
   scoped_ptr<base::RunLoop> wait_run_loop_;
 

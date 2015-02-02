@@ -22,7 +22,7 @@ namespace sandbox {
 
 class XPCMessageServerTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     if (!RunXPCTest())
       return;
     ASSERT_TRUE(InitializeXPC());
@@ -43,7 +43,7 @@ class BlockDemuxer : public MessageDemuxer {
         pipe_(NULL) {
   }
 
-  virtual ~BlockDemuxer() {
+  ~BlockDemuxer() override {
     if (pipe_)
       xpc_release(pipe_);
     if (demux_block_)
@@ -68,7 +68,7 @@ class BlockDemuxer : public MessageDemuxer {
     return true;
   }
 
-  virtual void DemuxMessage(IPCMessage request) OVERRIDE {
+  void DemuxMessage(IPCMessage request) override {
     demux_block_(request);
   }
 

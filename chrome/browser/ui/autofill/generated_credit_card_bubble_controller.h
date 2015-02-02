@@ -52,7 +52,7 @@ class GeneratedCreditCardBubbleController
     : public content::WebContentsObserver,
       public content::WebContentsUserData<GeneratedCreditCardBubbleController> {
  public:
-  virtual ~GeneratedCreditCardBubbleController();
+  ~GeneratedCreditCardBubbleController() override;
 
   // Registers preferences this class cares about.
   static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -64,9 +64,9 @@ class GeneratedCreditCardBubbleController
                    const base::string16& backing_card_name);
 
   // content::WebContentsObserver:
-  virtual void DidNavigateMainFrame(
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
+      const content::FrameNavigateParams& params) override;
 
   // Returns whether |bubble_| is currently in the process of hiding.
   bool IsHiding() const;

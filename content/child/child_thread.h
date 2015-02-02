@@ -36,15 +36,18 @@ class WebFrame;
 }  // namespace blink
 
 namespace content {
+class ChildDiscardableSharedMemoryManager;
+class ChildGpuMemoryBufferManager;
 class ChildHistogramMessageFilter;
 class ChildResourceMessageFilter;
 class ChildSharedBitmapManager;
 class FileSystemDispatcher;
+class GeofencingMessageFilter;
+class NotificationDispatcher;
 class ServiceWorkerMessageFilter;
 class QuotaDispatcher;
 class QuotaMessageFilter;
 class ResourceDispatcher;
-class SocketStreamDispatcher;
 class ThreadSafeSender;
 class WebSocketDispatcher;
 struct RequestInfo;
@@ -71,11 +74,11 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   // must be terminated before Shutdown returns. In particular, if a subsystem
   // has a thread that post tasks to ChildProcess::main_thread(), that thread
   // should be joined in Shutdown().
-  virtual ~ChildThread();
+  ~ChildThread() override;
   virtual void Shutdown();
 
   // IPC::Sender implementation:
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+  bool Send(IPC::Message* msg) override;
 
   IPC::SyncChannel* channel() { return channel_.get(); }
 
@@ -96,12 +99,17 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
     return shared_bitmap_manager_.get();
   }
 
-  ResourceDispatcher* resource_dispatcher() const {
-    return resource_dispatcher_.get();
+  ChildGpuMemoryBufferManager* gpu_memory_buffer_manager() const {
+    return gpu_memory_buffer_manager_.get();
   }
 
-  SocketStreamDispatcher* socket_stream_dispatcher() const {
-    return socket_stream_dispatcher_.get();
+  ChildDiscardableSharedMemoryManager* discardable_shared_memory_manager()
+      const {
+    return discardable_shared_memory_manager_.get();
+  }
+
+  ResourceDispatcher* resource_dispatcher() const {
+    return resource_dispatcher_.get();
   }
 
   WebSocketDispatcher* websocket_dispatcher() const {
@@ -114,6 +122,10 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 
   QuotaDispatcher* quota_dispatcher() const {
     return quota_dispatcher_.get();
+  }
+
+  NotificationDispatcher* notification_dispatcher() const {
+    return notification_dispatcher_.get();
   }
 
   IPC::SyncMessageFilter* sync_message_filter() const {
@@ -167,16 +179,16 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   }
 
   // IPC::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
+  void OnChannelConnected(int32 peer_pid) override;
+  void OnChannelError() override;
 
  private:
   class ChildThreadMessageRouter : public MessageRouter {
    public:
     // |sender| must outlive this object.
     explicit ChildThreadMessageRouter(IPC::Sender* sender);
-    virtual bool Send(IPC::Message* msg) OVERRIDE;
+    bool Send(IPC::Message* msg) override;
 
    private:
     IPC::Sender* const sender_;
@@ -216,9 +228,6 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
   // Handles resource loads for this process.
   scoped_ptr<ResourceDispatcher> resource_dispatcher_;
 
-  // Handles SocketStream for this process.
-  scoped_ptr<SocketStreamDispatcher> socket_stream_dispatcher_;
-
   scoped_ptr<WebSocketDispatcher> websocket_dispatcher_;
 
   // The OnChannelError() callback was invoked - the channel is dead, don't
@@ -239,13 +248,22 @@ class CONTENT_EXPORT ChildThread : public IPC::Listener, public IPC::Sender {
 
   scoped_refptr<QuotaMessageFilter> quota_message_filter_;
 
+  scoped_refptr<NotificationDispatcher> notification_dispatcher_;
+
   scoped_ptr<ChildSharedBitmapManager> shared_bitmap_manager_;
+
+  scoped_ptr<ChildGpuMemoryBufferManager> gpu_memory_buffer_manager_;
+
+  scoped_ptr<ChildDiscardableSharedMemoryManager>
+      discardable_shared_memory_manager_;
 
   // Observes the trace event system. When tracing is enabled, optionally
   // starts profiling the tcmalloc heap.
   scoped_ptr<base::debug::TraceMemoryController> trace_memory_controller_;
 
   scoped_ptr<base::PowerMonitor> power_monitor_;
+
+  scoped_refptr<GeofencingMessageFilter> geofencing_message_filter_;
 
   bool in_browser_process_;
 

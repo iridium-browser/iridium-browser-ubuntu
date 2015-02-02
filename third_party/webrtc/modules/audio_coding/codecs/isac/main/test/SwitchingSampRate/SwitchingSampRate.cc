@@ -287,8 +287,10 @@ int main(int argc, char* argv[])
                                     (uint8_t*)bitStream);
       int16_t ggg;
       if (streamLen > 0) {
-        if((  WebRtcIsac_ReadFrameLen(codecInstance[receiverIdx],
-                                      (short *) bitStream, &ggg))<0)
+        if ((WebRtcIsac_ReadFrameLen(
+                codecInstance[receiverIdx],
+                reinterpret_cast<const uint8_t*>(bitStream),
+                &ggg)) < 0)
           printf("ERROR\n");
       }
 
@@ -409,19 +411,24 @@ int main(int argc, char* argv[])
         }
 
         // BWE
-        if(WebRtcIsac_UpdateBwEstimate(codecInstance[receiverIdx],
-                                       bitStream,  streamLen, packetData[senderIdx]->rtp_number,
-                                       packetData[senderIdx]->sample_count,
-                                       packetData[senderIdx]->arrival_time) < 0)
-        {
+        if (WebRtcIsac_UpdateBwEstimate(
+                codecInstance[receiverIdx],
+                reinterpret_cast<const uint8_t*>(bitStream),
+                streamLen,
+                packetData[senderIdx]->rtp_number,
+                packetData[senderIdx]->sample_count,
+                packetData[senderIdx]->arrival_time) < 0) {
           printf(" BWE Error at client %d \n", receiverIdx + 1);
           return -1;
         }
         /**/
         // Decode
         lenDecodedAudio = WebRtcIsac_Decode(
-            codecInstance[receiverIdx], bitStream, streamLen,
-            audioBuff60ms, speechType);
+            codecInstance[receiverIdx],
+            reinterpret_cast<const uint8_t*>(bitStream),
+            streamLen,
+            audioBuff60ms,
+            speechType);
         if(lenDecodedAudio < 0)
         {
           printf(" Decoder error in client %d \n", receiverIdx + 1);

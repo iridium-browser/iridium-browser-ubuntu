@@ -15,9 +15,7 @@
 
 namespace blink {
 
-class MIDIAccess;
 class MIDIOptions;
-class Navigator;
 class ScriptState;
 
 class MIDIAccessInitializer : public ScriptPromiseResolver, public MIDIAccessorClient {
@@ -28,13 +26,15 @@ public:
         String name;
         MIDIPort::MIDIPortTypeCode type;
         String version;
+        bool isActive;
 
-        PortDescriptor(const String& id, const String& manufacturer, const String& name, MIDIPort::MIDIPortTypeCode type, const String& version)
+        PortDescriptor(const String& id, const String& manufacturer, const String& name, MIDIPort::MIDIPortTypeCode type, const String& version, bool isActive)
             : id(id)
             , manufacturer(manufacturer)
             , name(name)
             , type(type)
-            , version(version) { }
+            , version(version)
+            , isActive(isActive) { }
     };
 
     static ScriptPromise start(ScriptState* scriptState, const MIDIOptions& options)
@@ -48,10 +48,12 @@ public:
     virtual ~MIDIAccessInitializer();
 
     // MIDIAccessorClient
-    virtual void didAddInputPort(const String& id, const String& manufacturer, const String& name, const String& version) OVERRIDE;
-    virtual void didAddOutputPort(const String& id, const String& manufacturer, const String& name, const String& version) OVERRIDE;
-    virtual void didStartSession(bool success, const String& error, const String& message) OVERRIDE;
-    virtual void didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp) OVERRIDE { }
+    virtual void didAddInputPort(const String& id, const String& manufacturer, const String& name, const String& version, bool isActive) override;
+    virtual void didAddOutputPort(const String& id, const String& manufacturer, const String& name, const String& version, bool isActive) override;
+    virtual void didSetInputPortState(unsigned portIndex, bool isActive) override;
+    virtual void didSetOutputPortState(unsigned portIndex, bool isActive) override;
+    virtual void didStartSession(bool success, const String& error, const String& message) override;
+    virtual void didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp) override { }
 
     void resolveSysexPermission(bool allowed);
     SecurityOrigin* securityOrigin() const;

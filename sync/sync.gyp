@@ -34,7 +34,7 @@
     {
       'target_name': 'sync_core',
       'type': '<(component)',
-      'variables': { 'enable_wexit_time_desctructors': 1, },
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'defines': [
         'SYNC_IMPLEMENTATION',
       ],
@@ -48,9 +48,11 @@
         '../google_apis/google_apis.gyp:google_apis',
         '../net/net.gyp:net',
         '../sql/sql.gyp:sql',
+        '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../third_party/zlib/zlib.gyp:zlib',
         '../url/url.gyp:url_lib',
+        'attachment_store_proto',
         'sync_proto',
       ],
       'export_dependent_settings': [
@@ -63,8 +65,6 @@
         'api/attachments/attachment_id.h',
         'api/attachments/attachment_store.cc',
         'api/attachments/attachment_store.h',
-        'api/attachments/fake_attachment_store.cc',
-        'api/attachments/fake_attachment_store.h',
         'api/string_ordinal.h',
         'api/sync_change.cc',
         'api/sync_change.h',
@@ -165,10 +165,13 @@
         'internal_api/attachments/attachment_service_impl.cc',
         'internal_api/attachments/attachment_service_proxy.cc',
         'internal_api/attachments/attachment_service_proxy_for_test.cc',
+        'internal_api/attachments/attachment_store_handle.cc',
         'internal_api/attachments/attachment_uploader.cc',
         'internal_api/attachments/attachment_uploader_impl.cc',
         'internal_api/attachments/fake_attachment_downloader.cc',
         'internal_api/attachments/fake_attachment_uploader.cc',
+        'internal_api/attachments/in_memory_attachment_store.cc',
+        'internal_api/attachments/on_disk_attachment_store.cc',
         'internal_api/attachments/task_queue.cc',
         'internal_api/base_node.cc',
         'internal_api/base_transaction.cc',
@@ -196,16 +199,19 @@
         'internal_api/js_sync_manager_observer.h',
         'internal_api/protocol_event_buffer.cc',
         'internal_api/protocol_event_buffer.h',
-        'internal_api/attachments/public/attachment_downloader.h',
-        'internal_api/attachments/public/attachment_service.h',
-        'internal_api/attachments/public/attachment_service_impl.h',
-        'internal_api/attachments/public/attachment_service_proxy_for_test.h',
-        'internal_api/attachments/public/attachment_service_proxy.h',
-        'internal_api/attachments/public/attachment_uploader.h',
+        'internal_api/public/attachments/attachment_downloader.h',
         'internal_api/public/attachments/attachment_downloader_impl.h',
+        'internal_api/public/attachments/attachment_service.h',
+        'internal_api/public/attachments/attachment_service_impl.h',
+        'internal_api/public/attachments/attachment_service_proxy.h',
+        'internal_api/public/attachments/attachment_service_proxy_for_test.h',
+        'internal_api/public/attachments/attachment_store_handle.h',
+        'internal_api/public/attachments/attachment_uploader.h',
         'internal_api/public/attachments/attachment_uploader_impl.h',
         'internal_api/public/attachments/fake_attachment_downloader.h',
         'internal_api/public/attachments/fake_attachment_uploader.h',
+        'internal_api/public/attachments/in_memory_attachment_store.h',
+        'internal_api/public/attachments/on_disk_attachment_store.h',
         'internal_api/public/attachments/task_queue.h',
         'internal_api/public/base/attachment_id_proto.cc',
         'internal_api/public/base/attachment_id_proto.h',
@@ -500,9 +506,10 @@
         'protocol/theme_specifics.proto',
         'protocol/typed_url_specifics.proto',
         'protocol/unique_position.proto',
+	'protocol/wifi_credential_specifics.proto',
       ],
       'variables': {
-        'enable_wexit_time_desctructors': 1,
+        'enable_wexit_time_destructors': 1,
         'proto_in_dir': './protocol',
         'proto_out_dir': 'sync/protocol',
         'cc_generator_options': 'dllexport_decl=SYNC_PROTO_EXPORT:',
@@ -510,6 +517,33 @@
       },
       'includes': [
         '../build/protoc.gypi'
+      ],
+    },
+    {
+      # Contains attachment_store protobuf definitions.  Do not depend on this
+      # directly.
+      # Depend on the 'sync' target to get the relevant C++ code, too.
+      #
+      # GN version: //sync/internal_api/attachments/proto
+      'target_name': 'attachment_store_proto',
+      'type': 'static_library',
+      'sources': [
+        # NOTE: If you add a file to this list, also add it to
+        # sync/internal_api/attachments/proto/BUILD.gn
+        'internal_api/attachments/proto/attachment_store.proto',
+      ],
+      'variables': {
+        'enable_wexit_time_destructors': 1,
+        'proto_in_dir': 'internal_api/attachments/proto',
+        'proto_out_dir': 'sync/internal_api/attachments/proto',
+        'cc_generator_options': 'dllexport_decl=SYNC_EXPORT_PRIVATE:',
+        'cc_include': 'sync/base/sync_export.h',
+      },
+      'includes': [
+        '../build/protoc.gypi'
+      ],
+      'defines': [
+        'SYNC_IMPLEMENTATION'
       ],
     },
   ],

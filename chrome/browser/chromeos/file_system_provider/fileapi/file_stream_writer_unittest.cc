@@ -68,7 +68,7 @@ class FileSystemProviderFileStreamWriter : public testing::Test {
   FileSystemProviderFileStreamWriter() {}
   virtual ~FileSystemProviderFileStreamWriter() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
@@ -80,10 +80,8 @@ class FileSystemProviderFileStreamWriter : public testing::Test {
     service->SetFileSystemFactoryForTesting(
         base::Bind(&FakeProvidedFileSystem::Create));
 
-    const bool result = service->MountFileSystem(kExtensionId,
-                                                 kFileSystemId,
-                                                 "Testing File System",
-                                                 false /* writable */);
+    const bool result = service->MountFileSystem(
+        kExtensionId, MountOptions(kFileSystemId, "Testing File System"));
     ASSERT_TRUE(result);
     provided_file_system_ = static_cast<FakeProvidedFileSystem*>(
         service->GetProvidedFileSystem(kExtensionId, kFileSystemId));
@@ -101,7 +99,7 @@ class FileSystemProviderFileStreamWriter : public testing::Test {
     ASSERT_TRUE(wrong_file_url_.is_valid());
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     // Setting the testing factory to NULL will destroy the created service
     // associated with the testing profile.
     ServiceFactory::GetInstance()->SetTestingFactory(profile_, NULL);

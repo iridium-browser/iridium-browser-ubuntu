@@ -75,7 +75,7 @@ class Panel : public ui::BaseWindow,
     USE_SYSTEM_ATTENTION = 0x02
   };
 
-  virtual ~Panel();
+  ~Panel() override;
 
   // Returns the PanelManager associated with this panel.
   PanelManager* manager() const;
@@ -116,43 +116,42 @@ class Panel : public ui::BaseWindow,
   bool CanShowRestoreButton() const;
 
   // ui::BaseWindow overrides.
-  virtual bool IsActive() const OVERRIDE;
-  virtual bool IsMaximized() const OVERRIDE;
-  virtual bool IsMinimized() const OVERRIDE;
-  virtual bool IsFullscreen() const OVERRIDE;
-  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
-  virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
-  virtual ui::WindowShowState GetRestoredState() const OVERRIDE;
-  virtual gfx::Rect GetBounds() const OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void ShowInactive() OVERRIDE;
-  virtual void Close() OVERRIDE;
-  virtual void Activate() OVERRIDE;
-  virtual void Deactivate() OVERRIDE;
-  virtual void Maximize() OVERRIDE;
-  virtual void Minimize() OVERRIDE;
-  virtual void Restore() OVERRIDE;
-  virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual void FlashFrame(bool flash) OVERRIDE;
-  virtual bool IsAlwaysOnTop() const OVERRIDE;
-  virtual void SetAlwaysOnTop(bool on_top) OVERRIDE;
+  bool IsActive() const override;
+  bool IsMaximized() const override;
+  bool IsMinimized() const override;
+  bool IsFullscreen() const override;
+  gfx::NativeWindow GetNativeWindow() const override;
+  gfx::Rect GetRestoredBounds() const override;
+  ui::WindowShowState GetRestoredState() const override;
+  gfx::Rect GetBounds() const override;
+  void Show() override;
+  void Hide() override;
+  void ShowInactive() override;
+  void Close() override;
+  void Activate() override;
+  void Deactivate() override;
+  void Maximize() override;
+  void Minimize() override;
+  void Restore() override;
+  void SetBounds(const gfx::Rect& bounds) override;
+  void FlashFrame(bool flash) override;
+  bool IsAlwaysOnTop() const override;
+  void SetAlwaysOnTop(bool on_top) override;
 
   // Overridden from CommandUpdaterDelegate:
-  virtual void ExecuteCommandWithDisposition(
-      int id,
-      WindowOpenDisposition disposition) OVERRIDE;
+  void ExecuteCommandWithDisposition(int id, WindowOpenDisposition disposition)
+      override;
 
   // content::NotificationObserver overrides.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   //  extensions::ExtensionRegistryObserver.
-  virtual void OnExtensionUnloaded(
+  void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
 
   // Construct a native panel implementation.
   static NativePanel* CreateNativePanel(Panel* panel,

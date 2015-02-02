@@ -7,9 +7,12 @@ found in the LICENSE file.
 <link rel="import" href="ct-commit-list.html">
 
 <script>
-function CTFailureGroup(key, data, category) {
-  this.key = key;
+function CTFailureGroup(tree, data, category) {
+  this.key = data.key;
+  this.tree = tree;
+  this.examineUrl = this.tree + '/failure/' + encodeURIComponent(this.key);
   this.data = data;
+
   this._annotation = CTFailureGroup._mergeAnnotations(data.getAnnotations());
   this._originalCategory = category || 'default';
   this._computeProperties();
@@ -41,6 +44,10 @@ CTFailureGroup.prototype.clearBug = function(bug) {
   });
 };
 
+CTFailureGroup.prototype._isTreeCloser = function() {
+  return this.data.isTreeCloser && this.data.isTreeCloser();
+}
+
 CTFailureGroup.prototype._failedOnce = function() {
   return this.data.failedOnce && this.data.failedOnce();
 }
@@ -49,13 +56,12 @@ CTFailureGroup.prototype._computeProperties = function() {
   this.isSnoozed = Date.now() < this._annotation.snoozeTime;
   if (this.isSnoozed) {
     this.category = 'snoozed';
+  } else if (this._isTreeCloser()) {
+    this.category = 'treeCloser';
+  } else if (this._failedOnce()) {
+    this.category = 'failedOnce';
   } else {
-    if (this._failedOnce()) {
-      this.category = 'failedOnce';
-    } else {
-      this.category = this._originalCategory;
-    }
-    // FIXME: crbug.com/400397 Split Tree closers into their own list.
+    this.category = this._originalCategory;
   }
 
   this.bug = this._annotation.bug;

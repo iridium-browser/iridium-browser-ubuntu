@@ -66,8 +66,8 @@ class TestGuestViewManager : public extensions::GuestViewManager {
 
  private:
   // GuestViewManager override:
-  virtual void AddGuest(int guest_instance_id,
-                        content::WebContents* guest_web_contents) OVERRIDE{
+  void AddGuest(int guest_instance_id,
+                content::WebContents* guest_web_contents) override {
     GuestViewManager::AddGuest(guest_instance_id, guest_web_contents);
     web_contents_ = guest_web_contents;
     ++guest_add_count_;
@@ -76,7 +76,7 @@ class TestGuestViewManager : public extensions::GuestViewManager {
       add_message_loop_runner_->Quit();
   }
 
-  virtual void RemoveGuest(int guest_instance_id) OVERRIDE {
+  void RemoveGuest(int guest_instance_id) override {
     GuestViewManager::RemoveGuest(guest_instance_id);
     ++guest_remove_count_;
 
@@ -97,10 +97,10 @@ class TestGuestViewManagerFactory : public extensions::GuestViewManagerFactory {
   TestGuestViewManagerFactory() :
       test_guest_view_manager_(NULL) {}
 
-  virtual ~TestGuestViewManagerFactory() {}
+  ~TestGuestViewManagerFactory() override {}
 
-  virtual extensions::GuestViewManager* CreateGuestViewManager(
-      content::BrowserContext* context) OVERRIDE {
+  extensions::GuestViewManager* CreateGuestViewManager(
+      content::BrowserContext* context) override {
     return GetManager(context);
   }
 
@@ -846,6 +846,11 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
              NEEDS_TEST_SERVER);
 }
 
+// There is a problem of missing keyup events with the command key after
+// the NSEvent is sent to NSApplication in ui/base/test/ui_controls_mac.mm .
+// This test is disabled on only the Mac until the problem is resolved.
+// See http://crbug.com/425859 for more information.
+#if !defined(OS_MACOSX)
 // Tests that Ctrl+Click/Cmd+Click on a link fires up the newwindow API.
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_OpenInNewTab) {
   content::WebContents* embedder_web_contents = NULL;
@@ -871,6 +876,7 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_OpenInNewTab) {
   // Wait for the embedder to receive a 'newwindow' event.
   ASSERT_TRUE(done_listener->WaitUntilSatisfied());
 }
+#endif
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
                        NewWindow_OpenerDestroyedWhileUnattached) {

@@ -49,7 +49,7 @@ class MockDownloadFileObserver : public ui::DownloadFileObserver {
 class DragDownloadFileTest : public ContentBrowserTest {
  public:
   DragDownloadFileTest() {}
-  virtual ~DragDownloadFileTest() {}
+  ~DragDownloadFileTest() override {}
 
   void Succeed() {
     BrowserThread::PostTask(BrowserThread::UI,
@@ -62,7 +62,7 @@ class DragDownloadFileTest : public ContentBrowserTest {
   }
 
  protected:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(downloads_directory_.CreateUniqueTempDir());
     ShellDownloadManagerDelegate* delegate =
         static_cast<ShellDownloadManagerDelegate*>(

@@ -22,7 +22,6 @@
 #include "core/svg/SVGTextPathElement.h"
 
 #include "core/XLinkNames.h"
-#include "core/rendering/svg/RenderSVGResource.h"
 #include "core/rendering/svg/RenderSVGTextPath.h"
 #include "core/svg/SVGDocumentExtensions.h"
 
@@ -86,25 +85,6 @@ bool SVGTextPathElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGTextPathElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    SVGParsingError parseError = NoError;
-
-    if (!isSupportedAttribute(name))
-        SVGTextContentElement::parseAttribute(name, value);
-    else if (name == SVGNames::startOffsetAttr)
-        m_startOffset->setBaseValueAsString(value, parseError);
-    else if (name == SVGNames::methodAttr)
-        m_method->setBaseValueAsString(value, parseError);
-    else if (name == SVGNames::spacingAttr)
-        m_spacing->setBaseValueAsString(value, parseError);
-    else if (SVGURIReference::parseAttribute(name, value, parseError)) {
-    } else
-        ASSERT_NOT_REACHED();
-
-    reportAttributeParsingError(parseError, name, value);
-}
-
 void SVGTextPathElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -123,7 +103,7 @@ void SVGTextPathElement::svgAttributeChanged(const QualifiedName& attrName)
         updateRelativeLengthsInformation();
 
     if (RenderObject* object = renderer())
-        RenderSVGResource::markForLayoutAndParentResourceInvalidation(object);
+        markForLayoutAndParentResourceInvalidation(object);
 }
 
 RenderObject* SVGTextPathElement::createRenderer(RenderStyle*)

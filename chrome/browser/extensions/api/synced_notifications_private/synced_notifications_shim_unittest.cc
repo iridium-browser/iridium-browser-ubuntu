@@ -71,7 +71,7 @@ testing::AssertionResult ChangeSpecificsMatch(const syncer::SyncChange& change,
 class SyncedNotificationsShimTest : public testing::Test {
  public:
   SyncedNotificationsShimTest();
-  virtual ~SyncedNotificationsShimTest();
+  ~SyncedNotificationsShimTest() override;
 
   // Starts sync for both sync types.
   void StartSync();
@@ -149,10 +149,7 @@ void SyncedNotificationsShimTest::StartSync(syncer::ModelType type) {
     app_info_processor_ = change_processor.get();
   syncer::SyncDataList sync_data;
   shim_.MergeDataAndStartSyncing(
-      type,
-      sync_data,
-      change_processor.PassAs<syncer::SyncChangeProcessor>(),
-      scoped_ptr<syncer::SyncErrorFactory>());
+      type, sync_data, change_processor.Pass(), nullptr);
 }
 
 // Starting sync should fire the sync started event, but only after both types

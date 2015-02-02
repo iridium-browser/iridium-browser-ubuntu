@@ -18,26 +18,24 @@ namespace chrome {
 class MultiUserWindowManagerStub : public MultiUserWindowManager {
  public:
   MultiUserWindowManagerStub() {}
-  virtual ~MultiUserWindowManagerStub() {}
+  ~MultiUserWindowManagerStub() override {}
 
   // MultiUserWindowManager overrides:
-  virtual void SetWindowOwner(
-      aura::Window* window, const std::string& user_id) OVERRIDE;
-  virtual const std::string& GetWindowOwner(
-      aura::Window* window) const OVERRIDE;
-  virtual void ShowWindowForUser(
-      aura::Window* window, const std::string& user_id) OVERRIDE;
-  virtual bool AreWindowsSharedAmongUsers() const OVERRIDE;
-  virtual void GetOwnersOfVisibleWindows(
-      std::set<std::string>* user_ids) const OVERRIDE;
-  virtual bool IsWindowOnDesktopOfUser(
-      aura::Window* window,
-      const std::string& user_id) const OVERRIDE;
-  virtual const std::string& GetUserPresentingWindow(
-      aura::Window* window) const OVERRIDE;
-  virtual void AddUser(content::BrowserContext* context) OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
+  void SetWindowOwner(aura::Window* window,
+                      const std::string& user_id) override;
+  const std::string& GetWindowOwner(aura::Window* window) const override;
+  void ShowWindowForUser(aura::Window* window,
+                         const std::string& user_id) override;
+  bool AreWindowsSharedAmongUsers() const override;
+  void GetOwnersOfVisibleWindows(
+      std::set<std::string>* user_ids) const override;
+  bool IsWindowOnDesktopOfUser(aura::Window* window,
+                               const std::string& user_id) const override;
+  const std::string& GetUserPresentingWindow(
+      aura::Window* window) const override;
+  void AddUser(content::BrowserContext* context) override;
+  void AddObserver(Observer* observer) override;
+  void RemoveObserver(Observer* observer) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MultiUserWindowManagerStub);

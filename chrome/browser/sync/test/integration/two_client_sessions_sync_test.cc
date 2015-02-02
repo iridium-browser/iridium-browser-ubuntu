@@ -24,7 +24,7 @@ using sessions_helper::WindowsMatch;
 class TwoClientSessionsSyncTest : public SyncTest {
  public:
   TwoClientSessionsSyncTest() : SyncTest(TWO_CLIENT) {}
-  virtual ~TwoClientSessionsSyncTest() {}
+  ~TwoClientSessionsSyncTest() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TwoClientSessionsSyncTest);
@@ -40,12 +40,10 @@ static const char* kURL2 = "http://127.0.0.1/bubba2";
 // Fails on Win, see http://crbug.com/232313
 #if defined(OS_WIN)
 #define MAYBE_SingleClientChanged DISABLED_SingleClientChanged
-#define MAYBE_SingleClientEnabledEncryptionAndChanged DISABLED_SingleClientEnabledEncryptionAndChanged
 #define MAYBE_BothChanged DISABLED_BothChanged
 #define MAYBE_DeleteIdleSession DISABLED_DeleteIdleSession
 #else
 #define MAYBE_SingleClientChanged SingleClientChanged
-#define MAYBE_SingleClientEnabledEncryptionAndChanged SingleClientEnabledEncryptionAndChanged
 #define MAYBE_BothChanged BothChanged
 #define MAYBE_DeleteIdleSession DeleteIdleSession
 #endif
@@ -86,8 +84,11 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(IsEncryptionComplete(1));
 }
 
+// This test is flaky on several platforms:
+//    http://crbug.com/420979
+//    http://crbug.com/421167
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
-                       MAYBE_SingleClientEnabledEncryptionAndChanged) {
+                       DISABLED_SingleClientEnabledEncryptionAndChanged) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));

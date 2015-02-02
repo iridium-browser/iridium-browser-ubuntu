@@ -24,6 +24,9 @@ base::LazyInstance<ScreenlockBridge> g_screenlock_bridge_bridge_instance =
 // account picker as user pod custom icons.
 // The id's should be kept in sync with values used by user_pod_row.js.
 const char kLockedUserPodCustomIconId[] = "locked";
+const char kLockedToBeActivatedUserPodCustomIconId[] = "locked-to-be-activated";
+const char kLockedWithProximityHintUserPodCustomIconId[] =
+    "locked-with-proximity-hint";
 const char kUnlockedUserPodCustomIconId[] = "unlocked";
 const char kHardlockedUserPodCustomIconId[] = "hardlocked";
 const char kSpinnerUserPodCustomIconId[] = "spinner";
@@ -33,6 +36,10 @@ std::string GetIdForIcon(ScreenlockBridge::UserPodCustomIcon icon) {
   switch (icon) {
     case ScreenlockBridge::USER_POD_CUSTOM_ICON_LOCKED:
       return kLockedUserPodCustomIconId;
+    case ScreenlockBridge::USER_POD_CUSTOM_ICON_LOCKED_TO_BE_ACTIVATED:
+      return kLockedToBeActivatedUserPodCustomIconId;
+    case ScreenlockBridge::USER_POD_CUSTOM_ICON_LOCKED_WITH_PROXIMITY_HINT:
+      return kLockedWithProximityHintUserPodCustomIconId;
     case ScreenlockBridge::USER_POD_CUSTOM_ICON_UNLOCKED:
       return kUnlockedUserPodCustomIconId;
     case ScreenlockBridge::USER_POD_CUSTOM_ICON_HARDLOCKED:

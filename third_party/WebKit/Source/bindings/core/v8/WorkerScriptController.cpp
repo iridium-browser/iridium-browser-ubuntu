@@ -43,7 +43,6 @@
 #include "bindings/core/v8/V8SharedWorkerGlobalScope.h"
 #include "bindings/core/v8/V8WorkerGlobalScope.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
-#include "bindings/modules/v8/V8ServiceWorkerGlobalScope.h"
 #include "core/events/ErrorEvent.h"
 #include "core/frame/DOMTimer.h"
 #include "core/inspector/ScriptCallStack.h"
@@ -58,7 +57,7 @@
 
 namespace blink {
 
-class WorkerScriptController::WorkerGlobalScopeExecutionState FINAL {
+class WorkerScriptController::WorkerGlobalScopeExecutionState final {
     STACK_ALLOCATED();
 public:
     explicit WorkerGlobalScopeExecutionState(WorkerScriptController* controller)
@@ -116,6 +115,7 @@ WorkerScriptController::WorkerScriptController(WorkerGlobalScope& workerGlobalSc
     m_world = DOMWrapperWorld::create(WorkerWorldId);
     m_interruptor = adoptPtr(new V8IsolateInterruptor(m_isolate));
     ThreadState::current()->addInterruptor(m_interruptor.get());
+    ThreadState::current()->registerTraceDOMWrappers(m_isolate, V8GCController::traceDOMWrappers);
 }
 
 // We need to postpone V8 Isolate destruction until the very end of
@@ -185,7 +185,7 @@ bool WorkerScriptController::initializeContextIfNeeded()
         return false;
     }
 
-    V8DOMWrapper::associateObjectWithWrapperNonTemplate(&m_workerGlobalScope, wrapperTypeInfo, jsWorkerGlobalScope, m_isolate);
+    V8DOMWrapper::associateObjectWithWrapper(m_isolate, &m_workerGlobalScope, wrapperTypeInfo, jsWorkerGlobalScope);
 
     // Insert the object instance as the prototype of the shadow object.
     v8::Handle<v8::Object> globalObject = v8::Handle<v8::Object>::Cast(m_scriptState->context()->Global()->GetPrototype());
@@ -211,7 +211,7 @@ ScriptValue WorkerScriptController::evaluate(const String& script, const String&
 
     v8::Handle<v8::String> scriptString = v8String(m_isolate, script);
     v8::Handle<v8::Script> compiledScript = V8ScriptRunner::compileScript(scriptString, fileName, scriptStartPosition, 0, 0, m_isolate);
-    v8::Local<v8::Value> result = V8ScriptRunner::runCompiledScript(compiledScript, &m_workerGlobalScope, m_isolate);
+    v8::Local<v8::Value> result = V8ScriptRunner::runCompiledScript(m_isolate, compiledScript, &m_workerGlobalScope);
 
     if (!block.CanContinue()) {
         m_workerGlobalScope.script()->forbidExecution();
@@ -238,10 +238,10 @@ ScriptValue WorkerScriptController::evaluate(const String& script, const String&
     return ScriptValue(m_scriptState.get(), result);
 }
 
-void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, RefPtrWillBeRawPtr<ErrorEvent>* errorEvent)
+bool WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, RefPtrWillBeRawPtr<ErrorEvent>* errorEvent)
 {
     if (isExecutionForbidden())
-        return;
+        return false;
 
     WorkerGlobalScopeExecutionState state(this);
     evaluate(sourceCode.source(), sourceCode.url().string(), sourceCode.startPosition());
@@ -250,13 +250,13 @@ void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, RefPtr
             if (state.m_errorEventFromImportedScript) {
                 // Propagate inner error event outwards.
                 *errorEvent = state.m_errorEventFromImportedScript.release();
-                return;
+                return false;
             }
             if (m_workerGlobalScope.shouldSanitizeScriptError(state.sourceURL, NotSharableCrossOrigin))
                 *errorEvent = ErrorEvent::createSanitizedError(m_world.get());
             else
                 *errorEvent = ErrorEvent::create(state.errorMessage, state.sourceURL, state.lineNumber, state.columnNumber, m_world.get());
-            V8ErrorHandler::storeExceptionOnErrorEventWrapper(errorEvent->get(), state.exception.v8Value(), m_scriptState->context()->Global(), m_isolate);
+            V8ErrorHandler::storeExceptionOnErrorEventWrapper(m_isolate, errorEvent->get(), state.exception.v8Value(), m_scriptState->context()->Global());
         } else {
             ASSERT(!m_workerGlobalScope.shouldSanitizeScriptError(state.sourceURL, NotSharableCrossOrigin));
             RefPtrWillBeRawPtr<ErrorEvent> event = nullptr;
@@ -266,7 +266,9 @@ void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, RefPtr
                 event = ErrorEvent::create(state.errorMessage, state.sourceURL, state.lineNumber, state.columnNumber, m_world.get());
             m_workerGlobalScope.reportException(event, 0, nullptr, NotSharableCrossOrigin);
         }
+        return false;
     }
+    return true;
 }
 
 void WorkerScriptController::scheduleExecutionTermination()
@@ -310,7 +312,7 @@ void WorkerScriptController::rethrowExceptionFromImportedScript(PassRefPtrWillBe
     const String& errorMessage = errorEvent->message();
     if (m_globalScopeExecutionState)
         m_globalScopeExecutionState->m_errorEventFromImportedScript = errorEvent;
-    exceptionState.rethrowV8Exception(V8ThrowException::createGeneralError(errorMessage, m_isolate));
+    exceptionState.rethrowV8Exception(V8ThrowException::createGeneralError(m_isolate, errorMessage));
 }
 
 } // namespace blink

@@ -33,11 +33,11 @@
 #include "core/css/CSSSelector.h"
 #include "core/css/MediaQuery.h"
 #include "core/css/StylePropertySet.h"
+#include "core/css/parser/BisonCSSTokenizer.h"
 #include "core/css/parser/CSSParserMode.h"
 #include "core/css/parser/CSSParserObserver.h"
 #include "core/css/parser/CSSParserValues.h"
 #include "core/css/parser/CSSPropertyParser.h"
-#include "core/css/parser/CSSTokenizer.h"
 #include "platform/graphics/Color.h"
 #include "wtf/HashSet.h"
 #include "wtf/OwnPtr.h"
@@ -63,7 +63,7 @@ class StyleRuleKeyframes;
 class StyleKeyframe;
 class StyleSheetContents;
 
-// FIXME: This class is shared with CSSTokenizer so should we rename it to CSSSourceLocation?
+// FIXME: This class is shared with BisonCSSTokenizer so should we rename it to CSSSourceLocation?
 struct CSSParserLocation {
     unsigned offset;
     unsigned lineNumber;
@@ -85,7 +85,6 @@ public:
     PassRefPtrWillBeRawPtr<StyleKeyframe> parseKeyframeRule(StyleSheetContents*, const String&);
     bool parseSupportsCondition(const String&);
     static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, const CSSParserContext&);
-    static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, CSSParserMode, StyleSheetContents*);
     static bool parseColor(RGBA32& color, const String&, bool strict = false);
     static StyleColor colorFromRGBColorString(const String&);
     static bool parseSystemColor(RGBA32& color, const String&);
@@ -107,7 +106,6 @@ public:
     CSSParserValueList* createFloatingValueList();
     PassOwnPtr<CSSParserValueList> sinkFloatingValueList(CSSParserValueList*);
 
-    CSSParserFunction* createFloatingFunction();
     CSSParserFunction* createFloatingFunction(const CSSParserString& name, PassOwnPtr<CSSParserValueList> args);
     PassOwnPtr<CSSParserFunction> sinkFloatingFunction(CSSParserFunction*);
 
@@ -135,6 +133,9 @@ public:
     void startDeclarationsForMarginBox();
     void endDeclarationsForMarginBox();
 
+    void startMediaValue();
+    void endMediaValue();
+    void startMediaQuery();
     MediaQueryExp* createFloatingMediaQueryExp(const AtomicString&, CSSParserValueList*);
     PassOwnPtrWillBeRawPtr<MediaQueryExp> sinkFloatingMediaQueryExp(MediaQueryExp*);
     WillBeHeapVector<OwnPtrWillBeMember<MediaQueryExp> >* createFloatingMediaQueryExpList();
@@ -255,7 +256,7 @@ private:
     }
     void setupParser(const char* prefix, unsigned prefixLength, const String&, const char* suffix, unsigned suffixLength);
 
-    bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, StyleSheetContents* contextStyleSheet);
+    bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important);
     PassRefPtrWillBeRawPtr<ImmutableStylePropertySet> parseDeclaration(const String&, StyleSheetContents* contextStyleSheet);
 
     bool parseColor(const String&);
@@ -285,6 +286,8 @@ private:
     Vector<CSSParserValueList*> m_floatingValueLists;
     Vector<CSSParserFunction*> m_floatingFunctions;
 
+    unsigned m_mediaQueryValueStartOffset;
+    unsigned m_mediaQueryValueEndOffset;
     OwnPtrWillBeMember<MediaQuery> m_floatingMediaQuery;
     OwnPtrWillBeMember<MediaQueryExp> m_floatingMediaQueryExp;
     OwnPtrWillBeMember<WillBeHeapVector<OwnPtrWillBeMember<MediaQueryExp> > > m_floatingMediaQueryExpList;
@@ -298,7 +301,7 @@ private:
     bool isLoggingErrors();
     void logError(const String& message, const CSSParserLocation&);
 
-    CSSTokenizer m_tokenizer;
+    BisonCSSTokenizer m_tokenizer;
 
     friend class TransformOperationInfo;
     friend class FilterOperationInfo;

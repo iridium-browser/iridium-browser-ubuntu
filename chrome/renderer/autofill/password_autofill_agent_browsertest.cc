@@ -12,7 +12,6 @@
 #include "components/autofill/content/renderer/test_password_autofill_agent.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "components/autofill/core/common/password_autofill_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
@@ -36,6 +35,8 @@ using blink::WebString;
 using blink::WebView;
 
 namespace {
+
+const int kPasswordFillFormDataId = 1234;
 
 // The name of the username/password element in the form.
 const char kUsernameName[] = "username";
@@ -176,7 +177,7 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
   // protected.
   void SimulateOnFillPasswordForm(
       const PasswordFormFillData& fill_data) {
-    AutofillMsg_FillPasswordForm msg(0, fill_data);
+    AutofillMsg_FillPasswordForm msg(0, kPasswordFillFormDataId, fill_data);
     static_cast<content::RenderViewObserver*>(password_autofill_agent_)
         ->OnMessageReceived(msg);
   }
@@ -186,7 +187,7 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
         ->DidFinishLoad(GetMainFrame());
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     ChromeRenderViewTest::SetUp();
 
     // Add a preferred login and an additional login to the FillData.
@@ -233,7 +234,7 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
     UpdateUsernameAndPasswordElements();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     username_element_.reset();
     password_element_.reset();
     ChromeRenderViewTest::TearDown();
@@ -325,37 +326,6 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
                                   is_user_input);
   }
 
-  // Tests that no suggestion popup is generated when the username_element_ is
-  // edited.
-  void ExpectNoSuggestionsPopup() {
-    // The first test below ensures that the suggestions have been handled by
-    // the password_autofill_agent, even though autocomplete='off' is set. The
-    // second check ensures that, although handled, no "show suggestions" IPC to
-    // the browser was generated.
-    //
-    // This is interesting in the specific case of an autocomplete='off' form
-    // that also has a remembered username and password
-    // (http://crbug.com/326679). To fix the DCHECK that this case used to hit,
-    // |true| is returned from ShowSuggestions for all forms with valid
-    // usersnames that are autocomplete='off', prentending that a selection box
-    // has been shown to the user. Of course, it hasn't, so a message is never
-    // sent to the browser on acceptance, and the DCHECK isn't hit (and nothing
-    // is filled).
-    //
-    // These tests only make sense in the context of not ignoring
-    // autocomplete='off', so only test them if the disable autocomplete='off'
-    // flag is not enabled.
-    // TODO(jww): Remove this function and callers once autocomplete='off' is
-    // permanently ignored.
-    if (!ShouldIgnoreAutocompleteOffForPasswordFields()) {
-      EXPECT_TRUE(
-          password_autofill_agent_->ShowSuggestions(username_element_, false));
-
-      EXPECT_FALSE(render_thread_->sink().GetFirstMessageMatching(
-          AutofillHostMsg_ShowPasswordSuggestions::ID));
-    }
-  }
-
   void SimulateKeyDownEvent(const WebInputElement& element,
                             ui::KeyboardCode key_code) {
     blink::WebKeyboardEvent key_event;
@@ -417,47 +387,22 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
     EXPECT_EQ(end, username_element_.selectionEnd());
   }
 
-  void ExpectOneCredential(const base::string16& username) {
+  // Checks the message sent to PasswordAutofillManager to build the suggestion
+  // list. |username| is the expected username field value, and |show_all| is
+  // the expected flag for the PasswordAutofillManager, whether to show all
+  // suggestions, or only those starting with |username|.
+  void CheckSuggestions(const std::string& username, bool show_all) {
     const IPC::Message* message =
         render_thread_->sink().GetFirstMessageMatching(
             AutofillHostMsg_ShowPasswordSuggestions::ID);
-    ASSERT_TRUE(message);
-    Tuple4<autofill::FormFieldData,
-           gfx::RectF,
-           std::vector<base::string16>,
-           std::vector<base::string16> > args;
+    EXPECT_TRUE(message);
+    Tuple5<int, base::i18n::TextDirection, base::string16, bool, gfx::RectF>
+        args;
     AutofillHostMsg_ShowPasswordSuggestions::Read(message, &args);
-    ASSERT_EQ(1u, args.c.size());
-    EXPECT_TRUE(args.c[0] == username);
-  }
-
-  void ExpectAllCredentials() {
-    std::set<base::string16> usernames;
-    usernames.insert(username1_);
-    usernames.insert(username2_);
-    usernames.insert(username3_);
-    usernames.insert(alternate_username3_);
-
-    const IPC::Message* message =
-        render_thread_->sink().GetFirstMessageMatching(
-            AutofillHostMsg_ShowPasswordSuggestions::ID);
-    ASSERT_TRUE(message);
-    Tuple4<autofill::FormFieldData,
-           gfx::RectF,
-           std::vector<base::string16>,
-           std::vector<base::string16> > args;
-    AutofillHostMsg_ShowPasswordSuggestions::Read(message, &args);
-    ASSERT_EQ(4u, args.c.size());
-    std::set<base::string16>::iterator it;
-
-    for (int i = 0; i < 4; i++) {
-      it = usernames.find(args.c[i]);
-      EXPECT_TRUE(it != usernames.end());
-      if (it != usernames.end())
-        usernames.erase(it);
-    }
-
-    EXPECT_TRUE(usernames.empty());
+    EXPECT_EQ(2u, fill_data_.basic_data.fields.size());
+    EXPECT_EQ(kPasswordFillFormDataId, args.a);
+    EXPECT_EQ(ASCIIToUTF16(username), args.c);
+    EXPECT_EQ(show_all, args.d);
 
     render_thread_->sink().ClearMessages();
   }
@@ -970,68 +915,6 @@ TEST_F(PasswordAutofillAgentTest, NoDOMActivationTest) {
   CheckTextFieldsDOMState(kAliceUsername, true, "", true);
 }
 
-// Regression test for http://crbug.com/326679
-TEST_F(PasswordAutofillAgentTest, SelectUsernameWithUsernameAutofillOff) {
-  // Simulate the browser sending back the login info.
-  SimulateOnFillPasswordForm(fill_data_);
-
-  // Set the username element to autocomplete='off'
-  username_element_.setAttribute(WebString::fromUTF8("autocomplete"),
-                                 WebString::fromUTF8("off"));
-
-  // Simulate the user changing the username to some known username.
-  SimulateUsernameChange(kAliceUsername, true);
-
-  ExpectNoSuggestionsPopup();
-}
-
-// Regression test for http://crbug.com/326679
-TEST_F(PasswordAutofillAgentTest,
-       SelectUnknownUsernameWithUsernameAutofillOff) {
-  // Simulate the browser sending back the login info.
-  SimulateOnFillPasswordForm(fill_data_);
-
-  // Set the username element to autocomplete='off'
-  username_element_.setAttribute(WebString::fromUTF8("autocomplete"),
-                                 WebString::fromUTF8("off"));
-
-  // Simulate the user changing the username to some unknown username.
-  SimulateUsernameChange("foo", true);
-
-  ExpectNoSuggestionsPopup();
-}
-
-// Regression test for http://crbug.com/326679
-TEST_F(PasswordAutofillAgentTest, SelectUsernameWithPasswordAutofillOff) {
-  // Simulate the browser sending back the login info.
-  SimulateOnFillPasswordForm(fill_data_);
-
-  // Set the main password element to autocomplete='off'
-  password_element_.setAttribute(WebString::fromUTF8("autocomplete"),
-                                 WebString::fromUTF8("off"));
-
-  // Simulate the user changing the username to some known username.
-  SimulateUsernameChange(kAliceUsername, true);
-
-  ExpectNoSuggestionsPopup();
-}
-
-// Regression test for http://crbug.com/326679
-TEST_F(PasswordAutofillAgentTest,
-       SelectUnknownUsernameWithPasswordAutofillOff) {
-  // Simulate the browser sending back the login info.
-  SimulateOnFillPasswordForm(fill_data_);
-
-  // Set the main password element to autocomplete='off'
-  password_element_.setAttribute(WebString::fromUTF8("autocomplete"),
-                                 WebString::fromUTF8("off"));
-
-  // Simulate the user changing the username to some unknown username.
-  SimulateUsernameChange("foo", true);
-
-  ExpectNoSuggestionsPopup();
-}
-
 // Verifies that password autofill triggers onChange events in JavaScript for
 // forms that are filled on page load.
 TEST_F(PasswordAutofillAgentTest,
@@ -1458,7 +1341,7 @@ TEST_F(PasswordAutofillAgentTest, ClickAndSelect) {
   SimulateOnFillPasswordForm(fill_data_);
   SimulateElementClick(kUsernameName);
   SimulateSuggestionChoice(username_element_);
-  ExpectAllCredentials();
+  CheckSuggestions(kAliceUsername, true);
 
   CheckTextFieldsDOMState(kAliceUsername, true, kAlicePassword, true);
 }
@@ -1484,7 +1367,7 @@ TEST_F(PasswordAutofillAgentTest, CredentialsOnClick) {
   render_thread_->sink().ClearMessages();
   static_cast<PageClickListener*>(autofill_agent_)
       ->FormControlElementClicked(username_element_, false);
-  ExpectAllCredentials();
+  CheckSuggestions(std::string(), false);
 
   // Now simulate a user typing in an unrecognized username and then
   // clicking on the username element. This should also produce a message with
@@ -1493,7 +1376,7 @@ TEST_F(PasswordAutofillAgentTest, CredentialsOnClick) {
   render_thread_->sink().ClearMessages();
   static_cast<PageClickListener*>(autofill_agent_)
       ->FormControlElementClicked(username_element_, true);
-  ExpectAllCredentials();
+  CheckSuggestions("baz", true);
 
   // Now simulate a user typing in the first letter of the username and then
   // clicking on the username element. While the typing of the first letter will
@@ -1503,7 +1386,7 @@ TEST_F(PasswordAutofillAgentTest, CredentialsOnClick) {
   render_thread_->sink().ClearMessages();
   static_cast<PageClickListener*>(autofill_agent_)
       ->FormControlElementClicked(username_element_, true);
-  ExpectAllCredentials();
+  CheckSuggestions(kAliceUsername, true);
 }
 
 #endif  // !defined(OS_ANDROID)

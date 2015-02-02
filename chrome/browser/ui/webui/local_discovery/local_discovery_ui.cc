@@ -29,7 +29,6 @@ content::WebUIDataSource* CreateLocalDiscoveryHTMLSource() {
   source->AddResourcePath("device.png", IDR_LOCAL_DISCOVERY_DEVICE_PNG);
   source->AddResourcePath("printer.png", IDR_LOCAL_DISCOVERY_PRINTER_PNG);
 
-  source->SetUseJsonJSFormatV2();
   source->AddLocalizedString("serviceRegister",
                              IDS_LOCAL_DISCOVERY_SERVICE_REGISTER);
   source->AddLocalizedString("manageDevice", IDS_LOCAL_DISCOVERY_MANAGE_DEVICE);
@@ -98,7 +97,7 @@ content::WebUIDataSource* CreateLocalDiscoveryHTMLSource() {
   source->AddLocalizedString("backButton", IDS_SETTINGS_TITLE);
 
   // Cloud print connector-related strings.
-#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
   source->AddLocalizedString("cloudPrintConnectorEnablingButton",
                              IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLING_BUTTON);
   source->AddLocalizedString("cloudPrintConnectorDisabledButton",

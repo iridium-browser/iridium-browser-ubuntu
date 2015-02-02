@@ -17,6 +17,8 @@
 #include "shared_utils.h"
 #include "shader_utils.h"
 
+#include "testfixturetypes.h"
+
 #define EXPECT_GL_ERROR(err) EXPECT_EQ((err), glGetError())
 #define EXPECT_GL_NO_ERROR() EXPECT_GL_ERROR(GL_NO_ERROR)
 
@@ -34,18 +36,28 @@
     EXPECT_EQ((a), pixel[3]); \
 }
 
+#define EXPECT_PIXEL_NEAR(x, y, r, g, b, a, abs_error) \
+{ \
+    GLubyte pixel[4]; \
+    glReadPixels((x), (y), 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel); \
+    EXPECT_GL_NO_ERROR(); \
+    EXPECT_NEAR((r), pixel[0], abs_error); \
+    EXPECT_NEAR((g), pixel[1], abs_error); \
+    EXPECT_NEAR((b), pixel[2], abs_error); \
+    EXPECT_NEAR((a), pixel[3], abs_error); \
+}
+
 class EGLWindow;
 class OSWindow;
 
 class ANGLETest : public testing::Test
 {
   protected:
-    ANGLETest();
+    ANGLETest(EGLint requestedRenderer, EGLint glesMajorVersion);
 
   public:
-    static bool InitTestWindow();
-    static bool DestroyTestWindow();
-    static bool ResizeWindow(int width, int height);
+    bool resizeWindow(int width, int height);
+    void setWindowVisible(bool isVisible);
 
   protected:
     virtual void SetUp();
@@ -57,7 +69,6 @@ class ANGLETest : public testing::Test
     static GLuint compileShader(GLenum type, const std::string &source);
     static bool extensionEnabled(const std::string &extName);
 
-    void setClientVersion(int clientVersion);
     void setWindowWidth(int width);
     void setWindowHeight(int height);
     void setConfigRedBits(int bits);
@@ -74,19 +85,13 @@ class ANGLETest : public testing::Test
     bool isMultisampleEnabled() const;
 
   private:
+    bool initTestWindow();
+    bool destroyTestWindow();
     bool createEGLContext();
     bool destroyEGLContext();
 
     EGLWindow *mEGLWindow;
-
-    static OSWindow *mOSWindow;
-};
-
-class ANGLETestEnvironment : public testing::Environment
-{
-  public:
-    virtual void SetUp();
-    virtual void TearDown();
+    OSWindow *mOSWindow;
 };
 
 #endif  // ANGLE_TESTS_ANGLE_TEST_H_

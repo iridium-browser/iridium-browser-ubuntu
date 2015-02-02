@@ -152,12 +152,10 @@ class ExtensionFunctionDispatcher::UIThreadResponseCallbackWrapper
         weak_ptr_factory_(this) {
   }
 
-  virtual ~UIThreadResponseCallbackWrapper() {
-  }
+  ~UIThreadResponseCallbackWrapper() override {}
 
   // content::WebContentsObserver overrides.
-  virtual void RenderViewDeleted(
-      RenderViewHost* render_view_host) OVERRIDE {
+  void RenderViewDeleted(RenderViewHost* render_view_host) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (render_view_host != render_view_host_)
       return;
@@ -231,8 +229,6 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
     const ExtensionHostMsg_Request_Params& params) {
   const Extension* extension =
       extension_info_map->extensions().GetByID(params.extension_id);
-  if (!extension)
-    return;
 
   ExtensionFunction::ResponseCallback callback(
       base::Bind(&IOThreadResponseCallback, ipc_sender, routing_id,
@@ -257,11 +253,20 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
   }
   function_io->set_ipc_sender(ipc_sender, routing_id);
   function_io->set_extension_info_map(extension_info_map);
-  function->set_include_incognito(
-      extension_info_map->IsIncognitoEnabled(extension->id()));
+  if (extension) {
+    function->set_include_incognito(
+        extension_info_map->IsIncognitoEnabled(extension->id()));
+  }
 
   if (!CheckPermissions(function.get(), params, callback))
     return;
+
+  if (!extension) {
+    // Skip all of the UMA, quota, event page, activity logging stuff if there
+    // isn't an extension, e.g. if the function call was from WebUI.
+    function->Run()->Execute();
+    return;
+  }
 
   QuotaService* quota = extension_info_map->GetQuotaService();
   std::string violation_error = quota->Assess(extension->id(),
@@ -405,14 +410,13 @@ void ExtensionFunctionDispatcher::DispatchWithCallbackInternal(
   // now, largely for simplicity's sake. This is OK because currently, only
   // the webRequest API uses IOThreadExtensionFunction, and that API is not
   // compatible with lazy background pages.
-  extension_system->process_manager()->IncrementLazyKeepaliveCount(extension);
+  ProcessManager::Get(browser_context_)->IncrementLazyKeepaliveCount(extension);
 }
 
 void ExtensionFunctionDispatcher::OnExtensionFunctionCompleted(
     const Extension* extension) {
   if (extension) {
-    ExtensionSystem::Get(browser_context_)
-        ->process_manager()
+    ProcessManager::Get(browser_context_)
         ->DecrementLazyKeepaliveCount(extension);
   }
 }

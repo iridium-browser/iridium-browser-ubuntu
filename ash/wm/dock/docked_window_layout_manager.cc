@@ -87,12 +87,12 @@ class DockedBackgroundWidget : public views::Widget,
   }
 
   // views::Widget:
-  virtual void OnNativeWidgetVisibilityChanged(bool visible) OVERRIDE {
+  void OnNativeWidgetVisibilityChanged(bool visible) override {
     views::Widget::OnNativeWidgetVisibilityChanged(visible);
     UpdateBackground();
   }
 
-  virtual void OnNativeWidgetPaint(gfx::Canvas* canvas) OVERRIDE {
+  void OnNativeWidgetPaint(gfx::Canvas* canvas) override {
     const gfx::ImageSkia& shelf_background(
         alignment_ == DOCKED_ALIGNMENT_LEFT ?
             shelf_background_left_ : shelf_background_right_);
@@ -127,7 +127,7 @@ class DockedBackgroundWidget : public views::Widget,
   }
 
   // BackgroundAnimatorDelegate:
-  virtual void UpdateBackground(int alpha) OVERRIDE {
+  void UpdateBackground(int alpha) override {
     alpha_ = alpha;
     SchedulePaintInRect(gfx::Rect(GetWindowBoundsInScreen().size()));
   }
@@ -372,7 +372,7 @@ class DockedWindowLayoutManager::ShelfWindowObserver : public WindowObserver {
         ->AddObserver(this);
   }
 
-  virtual ~ShelfWindowObserver() {
+  ~ShelfWindowObserver() override {
     if (docked_layout_manager_->shelf() &&
         docked_layout_manager_->shelf()->shelf_widget())
       docked_layout_manager_->shelf()->shelf_widget()->GetNativeView()
@@ -380,9 +380,9 @@ class DockedWindowLayoutManager::ShelfWindowObserver : public WindowObserver {
   }
 
   // aura::WindowObserver:
-  virtual void OnWindowBoundsChanged(aura::Window* window,
-                                     const gfx::Rect& old_bounds,
-                                     const gfx::Rect& new_bounds) OVERRIDE {
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override {
     shelf_bounds_in_screen_ = ScreenUtil::ConvertRectToScreen(
         window->parent(), new_bounds);
     docked_layout_manager_->OnShelfBoundsChanged();
@@ -416,6 +416,8 @@ DockedWindowLayoutManager::DockedWindowLayoutManager(
                      WORKSPACE_WINDOW_STATE_FULL_SCREEN),
       docked_width_(0),
       alignment_(DOCKED_ALIGNMENT_NONE),
+      preferred_alignment_(DOCKED_ALIGNMENT_NONE),
+      event_source_(DOCKED_ACTION_SOURCE_UNKNOWN),
       last_active_window_(NULL),
       last_action_time_(base::Time::Now()),
       background_widget_(new DockedBackgroundWidget(dock_container_)) {
@@ -576,16 +578,21 @@ DockedAlignment DockedWindowLayoutManager::GetAlignmentOfWindow(
 }
 
 DockedAlignment DockedWindowLayoutManager::CalculateAlignment() const {
-  // Find a child that is not being dragged and is not a popup.
+  return CalculateAlignmentExcept(dragged_window_);
+}
+
+DockedAlignment DockedWindowLayoutManager::CalculateAlignmentExcept(
+    const aura::Window* window) const {
+  // Find a child that is not the window being queried and is not a popup.
   // If such exists the current alignment is returned - even if some of the
   // children are hidden or minimized (so they can be restored without losing
   // the docked state).
   for (size_t i = 0; i < dock_container_->children().size(); ++i) {
-    aura::Window* window(dock_container_->children()[i]);
-    if (window != dragged_window_ && !IsPopupOrTransient(window))
+    aura::Window* child(dock_container_->children()[i]);
+    if (window != child && !IsPopupOrTransient(child))
       return alignment_;
   }
-  // No docked windows remain other than possibly the window being dragged.
+  // No docked windows remain other than possibly the window being queried.
   // Return |NONE| to indicate that windows may get docked on either side.
   return DOCKED_ALIGNMENT_NONE;
 }
@@ -620,23 +627,45 @@ bool DockedWindowLayoutManager::CanDockWindow(
   if (GetWindowHeightCloseTo(window, work_area.height()) > work_area.height())
     return false;
   // Cannot dock on the other size from an existing dock.
-  const DockedAlignment alignment = CalculateAlignment();
+  const DockedAlignment alignment = CalculateAlignmentExcept(window);
   if (desired_alignment != DOCKED_ALIGNMENT_NONE &&
       alignment != DOCKED_ALIGNMENT_NONE &&
       alignment != desired_alignment) {
     return false;
   }
   // Do not allow docking on the same side as shelf.
-  ShelfAlignment shelf_alignment = SHELF_ALIGNMENT_BOTTOM;
-  if (shelf_)
-    shelf_alignment = shelf_->alignment();
-  if ((desired_alignment == DOCKED_ALIGNMENT_LEFT &&
+  return IsDockedAlignmentValid(desired_alignment);
+}
+
+bool DockedWindowLayoutManager::IsDockedAlignmentValid(
+    DockedAlignment alignment) const {
+  ShelfAlignment shelf_alignment = shelf_ ? shelf_->alignment() :
+      SHELF_ALIGNMENT_BOTTOM;
+  if ((alignment == DOCKED_ALIGNMENT_LEFT &&
        shelf_alignment == SHELF_ALIGNMENT_LEFT) ||
-      (desired_alignment == DOCKED_ALIGNMENT_RIGHT &&
+      (alignment == DOCKED_ALIGNMENT_RIGHT &&
        shelf_alignment == SHELF_ALIGNMENT_RIGHT)) {
     return false;
   }
   return true;
+}
+
+void DockedWindowLayoutManager::MaybeSetDesiredDockedAlignment(
+    DockedAlignment alignment) {
+  // If the requested alignment is |NONE| or there are no
+  // docked windows return early as we can't change whether there is a
+  // dock or not. If the requested alignment is the same as the current
+  // alignment return early as an optimization.
+  if (alignment == DOCKED_ALIGNMENT_NONE ||
+      alignment_ == DOCKED_ALIGNMENT_NONE ||
+      alignment_ == alignment ||
+      !IsDockedAlignmentValid(alignment)) {
+    return;
+  }
+  alignment_ = alignment;
+
+  Relayout();
+  UpdateDockBounds(DockedWindowLayoutManagerObserver::CHILD_CHANGED);
 }
 
 void DockedWindowLayoutManager::OnShelfBoundsChanged() {
@@ -665,13 +694,20 @@ void DockedWindowLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
   // A window can be added without proper bounds when window is moved to another
   // display via API or due to display configuration change, so the alignment
   // is set based on which edge is closer in the new display.
-  if (alignment_ == DOCKED_ALIGNMENT_NONE)
-    alignment_ = GetEdgeNearestWindow(child);
+  if (alignment_ == DOCKED_ALIGNMENT_NONE) {
+    alignment_ = preferred_alignment_ != DOCKED_ALIGNMENT_NONE ?
+        preferred_alignment_ : GetEdgeNearestWindow(child);
+  }
   MaybeMinimizeChildrenExcept(child);
   child->AddObserver(this);
   wm::GetWindowState(child)->AddObserver(this);
   Relayout();
   UpdateDockBounds(DockedWindowLayoutManagerObserver::CHILD_CHANGED);
+
+  // Only keyboard-initiated actions are recorded here. Dragging cases
+  // are handled in FinishDragging.
+  if (event_source_ != DOCKED_ACTION_SOURCE_UNKNOWN)
+    RecordUmaAction(DOCKED_ACTION_DOCK, event_source_);
 }
 
 void DockedWindowLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
@@ -700,8 +736,10 @@ void DockedWindowLayoutManager::OnChildWindowVisibilityChanged(
     bool visible) {
   if (IsPopupOrTransient(child))
     return;
-  if (visible)
-    wm::GetWindowState(child)->Restore();
+
+  wm::WindowState* window_state = wm::GetWindowState(child);
+  if (visible && window_state->IsMinimized())
+    window_state->Restore();
   Relayout();
   UpdateDockBounds(DockedWindowLayoutManagerObserver::CHILD_CHANGED);
 }
@@ -815,16 +853,20 @@ void DockedWindowLayoutManager::OnPreWindowStateTypeChange(
   // until OnFullscreenStateChange is called when exiting fullscreen.
   if (in_fullscreen_)
     return;
-  if (window_state->IsMinimized()) {
-    MinimizeDockedWindow(window_state);
-  } else if (window_state->IsMaximizedOrFullscreen() ||
-             window_state->IsSnapped()) {
+  if (!window_state->IsDocked()) {
     if (window != dragged_window_) {
       UndockWindow(window);
-      RecordUmaAction(DOCKED_ACTION_MAXIMIZE, DOCKED_ACTION_SOURCE_UNKNOWN);
+      if (window_state->IsMaximizedOrFullscreen())
+        RecordUmaAction(DOCKED_ACTION_MAXIMIZE, event_source_);
+      else
+        RecordUmaAction(DOCKED_ACTION_UNDOCK, event_source_);
     }
-  } else if (old_type == wm::WINDOW_STATE_TYPE_MINIMIZED) {
+  } else if (window_state->IsMinimized()) {
+    MinimizeDockedWindow(window_state);
+  } else if (old_type == wm::WINDOW_STATE_TYPE_DOCKED_MINIMIZED) {
     RestoreDockedWindow(window_state);
+  } else if (old_type == wm::WINDOW_STATE_TYPE_MINIMIZED) {
+    NOTREACHED() << "Minimized window in docked layout manager";
   }
 }
 
@@ -863,7 +905,7 @@ void DockedWindowLayoutManager::OnWindowDestroying(aura::Window* window) {
   }
   if (window == last_active_window_)
     last_active_window_ = NULL;
-  RecordUmaAction(DOCKED_ACTION_CLOSE, DOCKED_ACTION_SOURCE_UNKNOWN);
+  RecordUmaAction(DOCKED_ACTION_CLOSE, event_source_);
 }
 
 
@@ -930,7 +972,7 @@ void DockedWindowLayoutManager::MinimizeDockedWindow(
   window_state->window()->Hide();
   if (window_state->IsActive())
     window_state->Deactivate();
-  RecordUmaAction(DOCKED_ACTION_MINIMIZE, DOCKED_ACTION_SOURCE_UNKNOWN);
+  RecordUmaAction(DOCKED_ACTION_MINIMIZE, event_source_);
 }
 
 void DockedWindowLayoutManager::RestoreDockedWindow(
@@ -946,8 +988,8 @@ void DockedWindowLayoutManager::RestoreDockedWindow(
 
   // Evict the window if it can no longer be docked because of its height.
   if (!CanDockWindow(window, DOCKED_ALIGNMENT_NONE)) {
-    UndockWindow(window);
-    RecordUmaAction(DOCKED_ACTION_EVICT, DOCKED_ACTION_SOURCE_UNKNOWN);
+    window_state->Restore();
+    RecordUmaAction(DOCKED_ACTION_EVICT, event_source_);
     return;
   }
   gfx::Rect bounds(window->bounds());
@@ -955,7 +997,7 @@ void DockedWindowLayoutManager::RestoreDockedWindow(
   window->SetBounds(bounds);
   window->Show();
   MaybeMinimizeChildrenExcept(window);
-  RecordUmaAction(DOCKED_ACTION_RESTORE, DOCKED_ACTION_SOURCE_UNKNOWN);
+  RecordUmaAction(DOCKED_ACTION_RESTORE, event_source_);
 }
 
 void DockedWindowLayoutManager::RecordUmaAction(DockedAction action,

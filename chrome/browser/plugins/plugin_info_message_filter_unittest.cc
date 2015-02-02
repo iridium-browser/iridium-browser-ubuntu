@@ -10,11 +10,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/plugin_service_filter.h"
 #include "content/public/browser/render_process_host.h"
@@ -34,17 +34,17 @@ void PluginsLoaded(const base::Closure& callback,
 class FakePluginServiceFilter : public content::PluginServiceFilter {
  public:
   FakePluginServiceFilter() {}
-  virtual ~FakePluginServiceFilter() {}
+  ~FakePluginServiceFilter() override {}
 
-  virtual bool IsPluginAvailable(int render_process_id,
-                                 int render_view_id,
-                                 const void* context,
-                                 const GURL& url,
-                                 const GURL& policy_url,
-                                 content::WebPluginInfo* plugin) OVERRIDE;
+  bool IsPluginAvailable(int render_process_id,
+                         int render_view_id,
+                         const void* context,
+                         const GURL& url,
+                         const GURL& policy_url,
+                         content::WebPluginInfo* plugin) override;
 
-  virtual bool CanLoadPlugin(int render_process_id,
-                             const base::FilePath& path) OVERRIDE;
+  bool CanLoadPlugin(int render_process_id,
+                     const base::FilePath& path) override;
 
   void set_plugin_enabled(const base::FilePath& plugin_path, bool enabled) {
     plugin_state_[plugin_path] = enabled;
@@ -85,7 +85,7 @@ class PluginInfoMessageFilterTest : public ::testing::Test {
       context_(0, &profile_) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     content::WebPluginInfo foo_plugin(base::ASCIIToUTF16("Foo Plug-in"),
                                       foo_plugin_path_,
                                       base::ASCIIToUTF16("1"),

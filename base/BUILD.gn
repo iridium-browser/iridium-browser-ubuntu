@@ -39,6 +39,8 @@ component("base") {
     "android/fifo_utils.h",
     "android/important_file_writer_android.cc",
     "android/important_file_writer_android.h",
+    "android/locale_utils.cc",
+    "android/locale_utils.h",
     "android/scoped_java_ref.cc",
     "android/scoped_java_ref.h",
     "android/jni_android.cc",
@@ -55,6 +57,7 @@ component("base") {
     "android/jni_weak_ref.h",
     "android/library_loader/library_loader_hooks.cc",
     "android/library_loader/library_loader_hooks.h",
+    "android/library_loader/library_load_from_apk_status_codes.h",
     "android/memory_pressure_listener_android.cc",
     "android/memory_pressure_listener_android.h",
     "android/java_handler_thread.cc",
@@ -78,7 +81,7 @@ component("base") {
     "atomicops.h",
     "atomicops_internals_gcc.h",
     "atomicops_internals_mac.h",
-    "atomicops_internals_tsan.h",
+    "atomicops_internals_portable.h",
     "atomicops_internals_x86_gcc.cc",
     "atomicops_internals_x86_gcc.h",
     "atomicops_internals_x86_msvc.h",
@@ -119,6 +122,7 @@ component("base") {
     "command_line.cc",
     "command_line.h",
     "compiler_specific.h",
+    "containers/adapters.h",
     "containers/hash_tables.h",
     "containers/linked_list.h",
     "containers/mru_cache.h",
@@ -324,11 +328,15 @@ component("base") {
     "memory/discardable_memory_emulated.h",
     "memory/discardable_memory_linux.cc",
     "memory/discardable_memory_mac.cc",
-    "memory/discardable_memory_malloc.cc",
-    "memory/discardable_memory_malloc.h",
     "memory/discardable_memory_manager.cc",
     "memory/discardable_memory_manager.h",
+    "memory/discardable_memory_shmem.cc",
+    "memory/discardable_memory_shmem.h",
+    "memory/discardable_memory_shmem_allocator.cc",
+    "memory/discardable_memory_shmem_allocator.h",
     "memory/discardable_memory_win.cc",
+    "memory/discardable_shared_memory.cc",
+    "memory/discardable_shared_memory.h",
     "memory/linked_ptr.h",
     "memory/manual_constructor.h",
     "memory/memory_pressure_listener.cc",
@@ -444,6 +452,7 @@ component("base") {
     "power_monitor/power_monitor_device_source.h",
     "power_monitor/power_monitor_device_source_android.cc",
     "power_monitor/power_monitor_device_source_android.h",
+    "power_monitor/power_monitor_device_source_chromeos.cc",
     "power_monitor/power_monitor_device_source_ios.mm",
     "power_monitor/power_monitor_device_source_mac.mm",
     "power_monitor/power_monitor_device_source_posix.cc",
@@ -499,10 +508,12 @@ component("base") {
     "process/process_metrics_win.cc",
     "process/process_posix.cc",
     "process/process_win.cc",
-    "profiler/scoped_profile.cc",
-    "profiler/scoped_profile.h",
     "profiler/alternate_timer.cc",
     "profiler/alternate_timer.h",
+    "profiler/scoped_profile.cc",
+    "profiler/scoped_profile.h",
+    "profiler/scoped_tracker.cc",
+    "profiler/scoped_tracker.h",
     "profiler/tracked_time.cc",
     "profiler/tracked_time.h",
     "rand_util.cc",
@@ -801,6 +812,12 @@ component("base") {
     ]
   }
 
+  if (is_chromeos) {
+    sources -= [
+      "power_monitor/power_monitor_device_source_posix.cc",
+    ]
+  }
+
   if (is_nacl) {
     # These things would otherwise be built on a Posix build but aren't
     # supported on NaCl.
@@ -841,14 +858,18 @@ component("base") {
     ]
 
     # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    #cflags = [ "/wd4267" ]
+    cflags = [ "/wd4267" ]
 
     libs = [
+      "cfgmgr32.lib",
       "netapi32.lib",
       "powrprof.lib",
+      "setupapi.lib",
     ]
     ldflags = [
+      "/DELAYLOAD:cfgmgr32.dll",
       "/DELAYLOAD:powrprof.dll",
+      "/DELAYLOAD:setupapi.dll",
     ]
   } else if (!is_nacl) {
     # Non-Windows.
@@ -857,6 +878,10 @@ component("base") {
 
   # Mac.
   if (is_mac) {
+    sources += [
+       "memory/discardable_memory_mach.cc",
+       "memory/discardable_memory_mach.h",
+    ]
     sources -= [
       "base_paths_posix.cc",
       "native_library_posix.cc",
@@ -991,6 +1016,11 @@ component("i18n") {
     configs -= [ "//build/config/compiler:optimize" ]
     configs += [ "//build/config/compiler:optimize_max" ]
   }
+
+  if (is_win) {
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    cflags = [ "/wd4267" ]
+  }
 }
 
 source_set("prefs") {
@@ -1103,6 +1133,7 @@ test("base_unittests") {
     "callback_unittest.nc",
     "cancelable_callback_unittest.cc",
     "command_line_unittest.cc",
+    "containers/adapters_unittest.cc",
     "containers/hash_tables_unittest.cc",
     "containers/linked_list_unittest.cc",
     "containers/mru_cache_unittest.cc",
@@ -1168,6 +1199,7 @@ test("base_unittests") {
     "memory/aligned_memory_unittest.cc",
     "memory/discardable_memory_manager_unittest.cc",
     "memory/discardable_memory_unittest.cc",
+    "memory/discardable_shared_memory_unittest.cc",
     "memory/linked_ptr_unittest.cc",
     "memory/ref_counted_memory_unittest.cc",
     "memory/ref_counted_unittest.cc",
@@ -1216,6 +1248,7 @@ test("base_unittests") {
     "process/memory_unittest_mac.mm",
     "process/process_metrics_unittest.cc",
     "process/process_metrics_unittest_ios.cc",
+    "process/process_unittest.cc",
     "process/process_util_unittest.cc",
     "process/process_util_unittest_ios.cc",
     "profiler/tracked_time_unittest.cc",
@@ -1326,6 +1359,7 @@ test("base_unittests") {
       "process/memory_unittest.cc",
       "process/memory_unittest_mac.h",
       "process/memory_unittest_mac.mm",
+      "process/process_unittest.cc",
       "process/process_util_unittest.cc",
     ]
 
@@ -1384,6 +1418,7 @@ if (is_android) {
       "android/java/src/org/chromium/base/ImportantFileWriterAndroid.java",
       "android/java/src/org/chromium/base/JNIUtils.java",
       "android/java/src/org/chromium/base/library_loader/LibraryLoader.java",
+      "android/java/src/org/chromium/base/LocaleUtils.java",
       "android/java/src/org/chromium/base/MemoryPressureListener.java",
       "android/java/src/org/chromium/base/JavaHandlerThread.java",
       "android/java/src/org/chromium/base/PathService.java",
@@ -1400,8 +1435,7 @@ if (is_android) {
   # GYP: //base.gyp:base_java
   android_library("base_java") {
     srcjar_deps = [
-      ":base_java_application_state",
-      ":base_java_memory_pressure_level_list",
+      ":base_android_java_enums_srcjar",
       ":base_native_libraries_gen",
     ]
 
@@ -1437,27 +1471,19 @@ if (is_android) {
   }
 
   # GYP: //base.gyp:base_java_application_state
-  java_cpp_template("base_java_application_state") {
+  # GYP: //base.gyp:base_java_library_load_from_apk_status_codes
+  # GYP: //base.gyp:base_java_memory_pressure_level
+  java_cpp_enum("base_android_java_enums_srcjar") {
     sources = [
-      "android/java/src/org/chromium/base/ApplicationState.template",
+      "android/application_status_listener.h",
+      "android/library_loader/library_load_from_apk_status_codes.h",
+      "memory/memory_pressure_listener.h",
     ]
-    inputs = [
-      "android/application_state_list.h"
+    outputs = [
+      "org/chromium/base/ApplicationState.java",
+      "org/chromium/base/library_loader/LibraryLoadFromApkStatusCodes.java",
+      "org/chromium/base/MemoryPressureLevel.java",
     ]
-
-    package_name = "org/chromium/base"
-  }
-
-  # GYP: //base.gyp:base_java_memory_pressure_level_list
-  java_cpp_template("base_java_memory_pressure_level_list") {
-    sources = [
-      "android/java/src/org/chromium/base/MemoryPressureLevelList.template",
-    ]
-    inputs = [
-      "memory/memory_pressure_level_list.h"
-    ]
-
-    package_name = "org/chromium/base"
   }
 
   # GYP: //base/base.gyp:base_native_libraries_gen

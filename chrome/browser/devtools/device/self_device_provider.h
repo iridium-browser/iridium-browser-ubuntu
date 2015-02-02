@@ -12,19 +12,24 @@ class SelfAsDeviceProvider : public AndroidDeviceManager::DeviceProvider {
  public:
   explicit SelfAsDeviceProvider(int port);
 
-  virtual void QueryDevices(const SerialsCallback& callback) OVERRIDE;
+  void QueryDevices(const SerialsCallback& callback) override;
 
-  virtual void QueryDeviceInfo(const std::string& serial,
-                               const DeviceInfoCallback& callback) OVERRIDE;
+  void QueryDeviceInfo(const std::string& serial,
+                       const DeviceInfoCallback& callback) override;
 
-  virtual void OpenSocket(const std::string& serial,
-                          const std::string& socket_name,
-                          const SocketCallback& callback) OVERRIDE;
+  void OpenSocket(const std::string& serial,
+                  const std::string& socket_name,
+                  const SocketCallback& callback) override;
+
+  void ReleaseDevice(const std::string& serial) override;
+
+  void set_release_callback_for_test(const base::Closure& callback);
 
  private:
-  virtual ~SelfAsDeviceProvider(){}
+  ~SelfAsDeviceProvider() override;
 
   int port_;
+  base::Closure release_callback_;
 };
 
 #endif  // CHROME_BROWSER_DEVTOOLS_DEVICE_SELF_DEVICE_PROVIDER_H_

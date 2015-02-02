@@ -56,6 +56,7 @@ const char kImeOptionsPage[] = "options_page";
 const char kImport[] = "import";
 const char kIncognito[] = "incognito";
 const char kIncludeGlobs[] = "include_globs";
+const char kIndicator[] = "indicator";
 const char kInputComponents[] = "input_components";
 const char kInputView[] = "input_view";
 const char kIsolation[] = "app.isolation";
@@ -109,7 +110,6 @@ const char kPageActionIcons[] = "icons";
 const char kPageActionId[] = "id";
 const char kPageActionPopup[] = "popup";
 const char kPageActionPopupPath[] = "path";
-const char kPageActions[] = "page_actions";
 const char kPermissions[] = "permissions";
 const char kPlatformAppBackground[] = "app.background";
 const char kPlatformAppBackgroundPage[] = "app.background.page";
@@ -121,7 +121,6 @@ const char kPluginsPath[] = "path";
 const char kPluginsPublic[] = "public";
 const char kPublicKey[] = "key";
 const char kRemoveButton[] = "remove_button";
-const char kResources[] = "resources";
 const char kRequirements[] = "requirements";
 const char kRunAt[] = "run_at";
 const char kSandboxedPages[] = "sandbox.pages";
@@ -143,7 +142,7 @@ const char kSpellcheckDictionaryPath[] = "dictionary_path";
 const char kStorageManagedSchema[] = "storage.managed_schema";
 const char kSubPackagePath[] = "sub_package_path";
 const char kSuggestedKey[] = "suggested_key";
-const char kSynthesizeBrowserAction[] = "_synthesize_browser_action";
+const char kSynthesizeExtensionAction[] = "_synthesize_extension_action";
 const char kSystemIndicator[] = "system_indicator";
 const char kTheme[] = "theme";
 const char kThemeColors[] = "colors";
@@ -337,10 +336,6 @@ const char kInvalidExport[] =
     "Invalid value for 'export'.";
 const char kInvalidExportPermissions[] =
     "Permissions are not allowed for extensions that export resources.";
-const char kInvalidExportResources[] =
-    "Invalid value for 'export.resources'.";
-const char kInvalidExportResourcesString[] =
-    "Invalid value for 'export.resources[*]'.";
 const char kInvalidExportWhitelist[] =
     "Invalid value for 'export.whitelist'.";
 const char kInvalidExportWhitelistString[] =
@@ -544,12 +539,6 @@ const char kInvalidPageActionPopup[] =
     "Invalid type for page action popup.";
 const char kInvalidPageActionPopupPath[] =
     "Invalid value for page action popup path [*].";
-const char kInvalidPageActionsList[] =
-    "Invalid value for 'page_actions'.";
-const char kInvalidPageActionsListSize[] =
-    "Invalid value for 'page_actions'. There can be at most one page action.";
-const char kInvalidPageActionTypeValue[] =
-    "Invalid value for 'page_actions[*].type', expected 'tab' or 'permanent'.";
 const char kInvalidPermissionWithDetail[] =
     "Invalid value for 'permissions[*]': *.";
 const char kInvalidPermission[] =

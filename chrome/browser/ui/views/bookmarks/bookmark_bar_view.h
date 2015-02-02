@@ -29,6 +29,7 @@
 #include "ui/views/drag_controller.h"
 
 class BookmarkBarViewObserver;
+class BookmarkBarViewTestHelper;
 class BookmarkContextMenu;
 class BookmarkModel;
 class Browser;
@@ -84,7 +85,7 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // |browser_view| can be NULL during tests.
   BookmarkBarView(Browser* browser, BrowserView* browser_view);
-  virtual ~BookmarkBarView();
+  ~BookmarkBarView() override;
 
   static void DisableAnimationsForTesting(bool disabled);
 
@@ -165,111 +166,103 @@ class BookmarkBarView : public DetachableToolbarView,
                                               Profile* profile);
 
   // DetachableToolbarView methods:
-  virtual bool IsDetached() const OVERRIDE;
-  virtual double GetAnimationValue() const OVERRIDE;
-  virtual int GetToolbarOverlap() const OVERRIDE;
+  bool IsDetached() const override;
+  double GetAnimationValue() const override;
+  int GetToolbarOverlap() const override;
 
   // View methods:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual bool CanProcessEventsWithinSubtree() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
-  virtual void PaintChildren(gfx::Canvas* canvas,
-                             const views::CullSet& cull_set) OVERRIDE;
-  virtual bool GetDropFormats(
+  gfx::Size GetPreferredSize() const override;
+  gfx::Size GetMinimumSize() const override;
+  bool CanProcessEventsWithinSubtree() const override;
+  void Layout() override;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
+  void PaintChildren(gfx::Canvas* canvas,
+                     const views::CullSet& cull_set) override;
+  bool GetDropFormats(
       int* formats,
-      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
-  virtual bool AreDropTypesRequired() OVERRIDE;
-  virtual bool CanDrop(const ui::OSExchangeData& data) OVERRIDE;
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void OnThemeChanged() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual void SetVisible(bool visible) OVERRIDE;
+      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) override;
+  bool AreDropTypesRequired() override;
+  bool CanDrop(const ui::OSExchangeData& data) override;
+  void OnDragEntered(const ui::DropTargetEvent& event) override;
+  int OnDragUpdated(const ui::DropTargetEvent& event) override;
+  void OnDragExited() override;
+  int OnPerformDrop(const ui::DropTargetEvent& event) override;
+  void OnThemeChanged() override;
+  const char* GetClassName() const override;
+  void SetVisible(bool visible) override;
 
   // AccessiblePaneView:
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
+  void GetAccessibleState(ui::AXViewState* state) override;
 
   // gfx::AnimationDelegate:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
+  void AnimationProgressed(const gfx::Animation* animation) override;
+  void AnimationEnded(const gfx::Animation* animation) override;
 
   // BookmarkMenuControllerObserver:
-  virtual void BookmarkMenuControllerDeleted(
-      BookmarkMenuController* controller) OVERRIDE;
+  void BookmarkMenuControllerDeleted(
+      BookmarkMenuController* controller) override;
 
   // BookmarkBarInstructionsDelegate:
-  virtual void ShowImportDialog() OVERRIDE;
+  void ShowImportDialog() override;
 
   // BookmarkBubbleViewObserver:
-  virtual void OnBookmarkBubbleShown(const GURL& url) OVERRIDE;
-  virtual void OnBookmarkBubbleHidden() OVERRIDE;
+  void OnBookmarkBubbleShown(const GURL& url) override;
+  void OnBookmarkBubbleHidden() override;
 
   // BookmarkModelObserver:
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
-  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
-  virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 const BookmarkNode* old_parent,
-                                 int old_index,
-                                 const BookmarkNode* new_parent,
-                                 int new_index) OVERRIDE;
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index) OVERRIDE;
-  virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   const BookmarkNode* parent,
-                                   int old_index,
-                                   const BookmarkNode* node,
-                                   const std::set<GURL>& removed_urls) OVERRIDE;
-  virtual void BookmarkAllUserNodesRemoved(
-      BookmarkModel* model,
-      const std::set<GURL>& removed_urls) OVERRIDE;
-  virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
-                                          const BookmarkNode* node) OVERRIDE;
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
+  void BookmarkModelBeingDeleted(BookmarkModel* model) override;
+  void BookmarkNodeMoved(BookmarkModel* model,
+                         const BookmarkNode* old_parent,
+                         int old_index,
+                         const BookmarkNode* new_parent,
+                         int new_index) override;
+  void BookmarkNodeAdded(BookmarkModel* model,
+                         const BookmarkNode* parent,
+                         int index) override;
+  void BookmarkNodeRemoved(BookmarkModel* model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override;
+  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+                                   const std::set<GURL>& removed_urls) override;
+  void BookmarkNodeChanged(BookmarkModel* model,
+                           const BookmarkNode* node) override;
+  void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                     const BookmarkNode* node) override;
+  void BookmarkNodeFaviconChanged(BookmarkModel* model,
+                                  const BookmarkNode* node) override;
 
   // views::DragController:
-  virtual void WriteDragDataForView(views::View* sender,
-                                    const gfx::Point& press_pt,
-                                    ui::OSExchangeData* data) OVERRIDE;
-  virtual int GetDragOperationsForView(views::View* sender,
-                                       const gfx::Point& p) OVERRIDE;
-  virtual bool CanStartDragForView(views::View* sender,
-                                   const gfx::Point& press_pt,
-                                   const gfx::Point& p) OVERRIDE;
+  void WriteDragDataForView(views::View* sender,
+                            const gfx::Point& press_pt,
+                            ui::OSExchangeData* data) override;
+  int GetDragOperationsForView(views::View* sender,
+                               const gfx::Point& p) override;
+  bool CanStartDragForView(views::View* sender,
+                           const gfx::Point& press_pt,
+                           const gfx::Point& p) override;
 
   // views::MenuButtonListener:
-  virtual void OnMenuButtonClicked(views::View* view,
-                                   const gfx::Point& point) OVERRIDE;
+  void OnMenuButtonClicked(views::View* view, const gfx::Point& point) override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::ContextMenuController:
-  virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& point,
-                                      ui::MenuSourceType source_type) OVERRIDE;
+  void ShowContextMenuForView(views::View* source,
+                              const gfx::Point& point,
+                              ui::MenuSourceType source_type) override;
 
  private:
   class ButtonSeparatorView;
   struct DropInfo;
   struct DropLocation;
 
+  friend class BookmarkBarViewTestHelper;
   friend class BookmarkBarViewEventTestBase;
-  FRIEND_TEST_ALL_PREFIXES(BookmarkBarViewTest, SwitchProfile);
-  FRIEND_TEST_ALL_PREFIXES(BookmarkBarViewTest,
-                           ManagedShowAppsShortcutInBookmarksBar);
-  FRIEND_TEST_ALL_PREFIXES(BookmarkBarViewInstantExtendedTest,
-                           AppsShortcutVisibility);
 
   // Used to identify what the user is dropping onto.
   enum DropButtonType {
@@ -289,9 +282,11 @@ class BookmarkBarView : public DetachableToolbarView,
   // It's easy to get the mapping wrong. For this reason all these methods are
   // private.
 
-  // Returns the number of buttons corresponding to starred urls/folders. This
-  // is equivalent to the number of children the bookmark bar node from the
-  // bookmark bar model has.
+  // Returns the number of bookmark bar url/folder buttons that have been
+  // created. This does not necessarily represent the number of bookmark bar
+  // nodes, nor the number of visible bookmark bar buttons. Buttons are created
+  // lazily to fill available space, and may be hidden for ordering or sizing
+  // changes.
   int GetBookmarkButtonCount() const;
 
   // Returns the button at the specified index.
@@ -324,13 +319,15 @@ class BookmarkBarView : public DetachableToolbarView,
   // and icon.
   void ConfigureButton(const BookmarkNode* node, views::LabelButton* button);
 
-  // Implementation for BookmarkNodeAddedImpl.
-  void BookmarkNodeAddedImpl(BookmarkModel* model,
+  // Implementation for BookmarkNodeAddedImpl. Returns true if LayoutAndPaint()
+  // is required.
+  bool BookmarkNodeAddedImpl(BookmarkModel* model,
                              const BookmarkNode* parent,
                              int index);
 
-  // Implementation for BookmarkNodeRemoved.
-  void BookmarkNodeRemovedImpl(BookmarkModel* model,
+  // Implementation for BookmarkNodeRemoved. Returns true if LayoutAndPaint() is
+  // required.
+  bool BookmarkNodeRemovedImpl(BookmarkModel* model,
                                const BookmarkNode* parent,
                                int index);
 
@@ -374,16 +371,21 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // Updates the visibility of |other_bookmarked_button_| and
   // |managed_bookmarks_button_|. Also shows or hides the separator if required.
-  void UpdateButtonsVisibility();
+  // Returns true if something changed and a LayoutAndPaint() is needed.
+  bool UpdateOtherAndManagedButtonsVisibility();
 
   // Updates the visibility of |bookmarks_separator_view_|.
   void UpdateBookmarksSeparatorVisibility();
 
-  // This method computes the bounds for the bookmark bar items.
-  void LayoutItems();
-
   // Updates the visibility of the apps shortcut based on the pref value.
   void OnAppsPageShortcutVisibilityPrefChanged();
+
+  void OnShowManagedBookmarksPrefChanged();
+
+  void LayoutAndPaint() {
+    Layout();
+    SchedulePaint();
+  }
 
   // Needed to react to kShowAppsShortcutInBookmarkBar changes.
   PrefChangeRegistrar profile_pref_registrar_;

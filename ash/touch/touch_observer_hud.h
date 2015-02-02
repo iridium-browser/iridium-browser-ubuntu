@@ -43,7 +43,7 @@ class ASH_EXPORT TouchObserverHUD : public ui::EventHandler,
  protected:
   explicit TouchObserverHUD(aura::Window* initial_root);
 
-  virtual ~TouchObserverHUD();
+  ~TouchObserverHUD() override;
 
   virtual void SetHudForRootWindowController(
       RootWindowController* controller) = 0;
@@ -53,27 +53,27 @@ class ASH_EXPORT TouchObserverHUD : public ui::EventHandler,
   views::Widget* widget() { return widget_; }
 
   // Overriden from ui::EventHandler.
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  void OnTouchEvent(ui::TouchEvent* event) override;
 
   // Overridden from views::WidgetObserver.
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
   // Overridden from gfx::DisplayObserver.
-  virtual void OnDisplayAdded(const gfx::Display& new_display) OVERRIDE;
-  virtual void OnDisplayRemoved(const gfx::Display& old_display) OVERRIDE;
-  virtual void OnDisplayMetricsChanged(const gfx::Display& display,
-                                       uint32_t metrics) OVERRIDE;
+  void OnDisplayAdded(const gfx::Display& new_display) override;
+  void OnDisplayRemoved(const gfx::Display& old_display) override;
+  void OnDisplayMetricsChanged(const gfx::Display& display,
+                               uint32_t metrics) override;
 
 #if defined(OS_CHROMEOS)
   // Overriden from ui::DisplayConfigurator::Observer.
   virtual void OnDisplayModeChanged(
-      const ui::DisplayConfigurator::DisplayStateList& outputs) OVERRIDE;
+      const ui::DisplayConfigurator::DisplayStateList& outputs) override;
 #endif  // defined(OS_CHROMEOS)
 
   // Overriden form DisplayController::Observer.
-  virtual void OnDisplaysInitialized() OVERRIDE;
-  virtual void OnDisplayConfigurationChanging() OVERRIDE;
-  virtual void OnDisplayConfigurationChanged() OVERRIDE;
+  void OnDisplaysInitialized() override;
+  void OnDisplayConfigurationChanging() override;
+  void OnDisplayConfigurationChanged() override;
 
  private:
   friend class TouchHudTestBase;

@@ -7,64 +7,23 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
-#include "chrome/browser/android/resource_mapper.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/website_settings/website_settings.h"
-#include "chrome/grit/generated_resources.h"
+#include "chrome/browser/ui/website_settings/website_settings_ui.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/cert_store.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/ssl_status.h"
+#include "grit/generated_resources.h"
 #include "jni/WebsiteSettingsPopup_jni.h"
-#include "net/cert/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using base::android::CheckException;
-using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
-using base::android::GetClass;
-using base::android::ScopedJavaLocalRef;
-using content::CertStore;
-using content::WebContents;
-
-static jobjectArray GetCertificateChain(JNIEnv* env,
-                                        jobject obj,
-                                        jobject java_web_contents) {
-  content::WebContents* web_contents =
-      content::WebContents::FromJavaWebContents(java_web_contents);
-  if (!web_contents)
-    return NULL;
-
-  int cert_id =
-      web_contents->GetController().GetVisibleEntry()->GetSSL().cert_id;
-  scoped_refptr<net::X509Certificate> cert;
-  bool ok = CertStore::GetInstance()->RetrieveCert(cert_id, &cert);
-  CHECK(ok);
-
-  std::vector<std::string> cert_chain;
-  net::X509Certificate::OSCertHandles cert_handles =
-      cert->GetIntermediateCertificates();
-  // Make sure the peer's own cert is the first in the chain, if it's not
-  // already there.
-  if (cert_handles.empty() || cert_handles[0] != cert->os_cert_handle())
-    cert_handles.insert(cert_handles.begin(), cert->os_cert_handle());
-
-  cert_chain.reserve(cert_handles.size());
-  for (net::X509Certificate::OSCertHandles::const_iterator it =
-           cert_handles.begin();
-       it != cert_handles.end();
-       ++it) {
-    std::string cert_bytes;
-    net::X509Certificate::GetDEREncoded(*it, &cert_bytes);
-    cert_chain.push_back(cert_bytes);
-  }
-
-  // OK to release, JNI binding.
-  return base::android::ToJavaArrayOfByteArray(env, cert_chain).Release();
-}
+using base::android::ConvertUTF8ToJavaString;
 
 // static
 static jlong Init(JNIEnv* env,
@@ -81,12 +40,14 @@ static jlong Init(JNIEnv* env,
 WebsiteSettingsPopupAndroid::WebsiteSettingsPopupAndroid(
     JNIEnv* env,
     jobject java_website_settings_pop,
-    WebContents* web_contents) {
+    content::WebContents* web_contents) {
   // Important to use GetVisibleEntry to match what's showing in the omnibox.
   content::NavigationEntry* nav_entry =
       web_contents->GetController().GetVisibleEntry();
   if (nav_entry == NULL)
     return;
+
+  url_ = nav_entry->GetURL();
 
   popup_jobject_.Reset(env, java_website_settings_pop);
 
@@ -106,67 +67,26 @@ void WebsiteSettingsPopupAndroid::Destroy(JNIEnv* env, jobject obj) {
   delete this;
 }
 
-void WebsiteSettingsPopupAndroid::ResetCertDecisions(
-    JNIEnv* env,
-    jobject obj,
-    jobject java_web_contents) {
-  presenter_->OnRevokeSSLErrorBypassButtonPressed();
+void WebsiteSettingsPopupAndroid::OnPermissionSettingChanged(JNIEnv* env,
+                                                             jobject obj,
+                                                             jint type,
+                                                             jint setting) {
+  ContentSettingsType content_setting_type =
+      static_cast<ContentSettingsType>(type);
+  ContentSetting content_setting = static_cast<ContentSetting>(setting);
+  presenter_->OnSitePermissionChanged(content_setting_type, content_setting);
 }
 
 void WebsiteSettingsPopupAndroid::SetIdentityInfo(
     const IdentityInfo& identity_info) {
   JNIEnv* env = base::android::AttachCurrentThread();
 
-  {
-    int icon_id = ResourceMapper::MapFromChromiumId(
-        WebsiteSettingsUI::GetIdentityIconID(identity_info.identity_status));
+  Java_WebsiteSettingsPopup_updatePageDetails(
+      env,
+      popup_jobject_.obj(),
+      identity_info.connection_status ==
+          WebsiteSettings::SITE_CONNECTION_STATUS_INTERNAL_PAGE);
 
-    // The headline and the certificate dialog link of the site's identity
-    // section is only displayed if the site's identity was verified. If the
-    // site's identity was verified, then the headline contains the organization
-    // name from the provided certificate. If the organization name is not
-    // available than the hostname of the site is used instead.
-    std::string headline;
-    if (identity_info.cert_id) {
-      headline = identity_info.site_identity;
-    }
-
-    ScopedJavaLocalRef<jstring> description = ConvertUTF8ToJavaString(
-        env, identity_info.identity_status_description);
-    base::string16 certificate_label =
-        l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON);
-    Java_WebsiteSettingsPopup_addCertificateSection(
-        env,
-        popup_jobject_.obj(),
-        icon_id,
-        ConvertUTF8ToJavaString(env, headline).obj(),
-        description.obj(),
-        ConvertUTF16ToJavaString(env, certificate_label).obj());
-
-    if (identity_info.show_ssl_decision_revoke_button) {
-      base::string16 reset_button_label = l10n_util::GetStringUTF16(
-          IDS_PAGEINFO_RESET_INVALID_CERTIFICATE_DECISIONS_BUTTON);
-      Java_WebsiteSettingsPopup_addResetCertDecisionsButton(
-          env,
-          popup_jobject_.obj(),
-          ConvertUTF16ToJavaString(env, reset_button_label).obj());
-    }
-  }
-
-  {
-    int icon_id = ResourceMapper::MapFromChromiumId(
-        WebsiteSettingsUI::GetConnectionIconID(
-            identity_info.connection_status));
-
-    ScopedJavaLocalRef<jstring> description = ConvertUTF8ToJavaString(
-        env, identity_info.connection_status_description);
-    Java_WebsiteSettingsPopup_addDescriptionSection(
-        env, popup_jobject_.obj(), icon_id, NULL, description.obj());
-  }
-
-  Java_WebsiteSettingsPopup_addMoreInfoLink(env, popup_jobject_.obj(),
-      ConvertUTF8ToJavaString(
-          env, l10n_util::GetStringUTF8(IDS_PAGE_INFO_HELP_CENTER_LINK)).obj());
   Java_WebsiteSettingsPopup_showDialog(env, popup_jobject_.obj());
 }
 
@@ -177,7 +97,43 @@ void WebsiteSettingsPopupAndroid::SetCookieInfo(
 
 void WebsiteSettingsPopupAndroid::SetPermissionInfo(
     const PermissionInfoList& permission_info_list) {
-  NOTIMPLEMENTED();
+  JNIEnv* env = base::android::AttachCurrentThread();
+
+  // On Android, we only want to display a subset of the available options in a
+  // particular order, but only if their value is different from the default.
+  std::vector<ContentSettingsType> permissions_to_display;
+  permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_GEOLOCATION);
+  permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_MEDIASTREAM);
+  permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_PUSH_MESSAGING);
+  permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_IMAGES);
+  permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_JAVASCRIPT);
+  permissions_to_display.push_back(CONTENT_SETTINGS_TYPE_POPUPS);
+
+  std::map<ContentSettingsType, ContentSetting>
+      user_specified_settings_to_display;
+
+  for (const auto& permission : permission_info_list) {
+    if (std::find(permissions_to_display.begin(),
+                  permissions_to_display.end(),
+                  permission.type) != permissions_to_display.end() &&
+        permission.setting != CONTENT_SETTING_DEFAULT) {
+      user_specified_settings_to_display[permission.type] = permission.setting;
+    }
+  }
+
+  for (const auto& permission : permissions_to_display) {
+    if (ContainsKey(user_specified_settings_to_display, permission)) {
+      base::string16 setting_title =
+          WebsiteSettingsUI::PermissionTypeToUIString(permission);
+
+      Java_WebsiteSettingsPopup_addPermissionSection(
+          env,
+          popup_jobject_.obj(),
+          ConvertUTF16ToJavaString(env, setting_title).obj(),
+          static_cast<jint>(permission),
+          static_cast<jint>(user_specified_settings_to_display[permission]));
+    }
+  }
 }
 
 void WebsiteSettingsPopupAndroid::SetSelectedTab(

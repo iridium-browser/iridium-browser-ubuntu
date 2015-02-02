@@ -32,22 +32,17 @@
 #define ScriptDebugServer_h
 
 #include "bindings/core/v8/ScopedPersistent.h"
-#include "core/InspectorBackendDispatcher.h"
 #include "core/inspector/ScriptBreakpoint.h"
 #include "core/inspector/ScriptCallStack.h"
 #include "core/inspector/ScriptDebugListener.h"
 #include "wtf/HashMap.h"
-#include "wtf/Noncopyable.h"
 #include "wtf/PassOwnPtr.h"
-#include "wtf/text/StringHash.h"
-#include "wtf/text/WTFString.h"
 #include <v8-debug.h>
 #include <v8.h>
 
 namespace blink {
 
 class ScriptState;
-class ScriptController;
 class ScriptDebugListener;
 class ScriptSourceCode;
 class ScriptValue;
@@ -91,7 +86,7 @@ public:
         virtual ~Task() { }
         virtual void run() = 0;
     };
-    static void interruptAndRun(PassOwnPtr<Task>, v8::Isolate*);
+    static void interruptAndRun(v8::Isolate*, PassOwnPtr<Task>);
     void runPendingTasks();
 
     bool isPaused();
@@ -124,7 +119,7 @@ protected:
     virtual void quitMessageLoopOnPause() = 0;
 
     static void breakProgramCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-    void handleProgramBreak(ScriptState* pausedScriptState, v8::Handle<v8::Object> executionState, v8::Handle<v8::Value> exception, v8::Handle<v8::Array> hitBreakpoints);
+    void handleProgramBreak(ScriptState* pausedScriptState, v8::Handle<v8::Object> executionState, v8::Handle<v8::Value> exception, v8::Handle<v8::Array> hitBreakpoints, bool isPromiseRejection = false);
 
     static void v8DebugEventCallback(const v8::Debug::EventDetails& eventDetails);
     void handleV8DebugEvent(const v8::Debug::EventDetails& eventDetails);

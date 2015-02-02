@@ -17,7 +17,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/layer.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/transform.h"
@@ -161,8 +161,7 @@ class LongPressAffordanceHandler::LongPressAffordanceView
     widget_->GetNativeView()->layer()->SetOpacity(kAffordanceOpacityStartValue);
   }
 
-  virtual ~LongPressAffordanceView() {
-  }
+  ~LongPressAffordanceView() override {}
 
   void UpdateWithGrowAnimation(gfx::Animation* animation) {
     // Update the portion of the circle filled so far and re-draw.
@@ -187,12 +186,12 @@ class LongPressAffordanceHandler::LongPressAffordanceView
 
  private:
   // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE {
+  gfx::Size GetPreferredSize() const override {
     return gfx::Size(2 * (kAffordanceOuterRadius + kAffordanceGlowWidth),
         2 * (kAffordanceOuterRadius + kAffordanceGlowWidth));
   }
 
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaint(gfx::Canvas* canvas) override {
     gfx::Point center(GetPreferredSize().width() / 2,
                       GetPreferredSize().height() / 2);
     canvas->Save();
@@ -254,10 +253,10 @@ void LongPressAffordanceHandler::ProcessEvent(aura::Window* target,
       tap_down_location_ = event->root_location();
       SetTapDownTarget(target);
       current_animation_type_ = GROW_ANIMATION;
-      int64 timer_start_time_ms =
-          ui::GestureConfiguration::semi_long_press_time_in_seconds() * 1000;
       timer_.Start(FROM_HERE,
-                   base::TimeDelta::FromMilliseconds(timer_start_time_ms),
+                   base::TimeDelta::FromMilliseconds(
+                       ui::GestureConfiguration::GetInstance()
+                           ->semi_long_press_time_in_ms()),
                    this,
                    &LongPressAffordanceHandler::StartAnimation);
       break;
@@ -287,8 +286,9 @@ void LongPressAffordanceHandler::StartAnimation() {
       }
       view_.reset(new LongPressAffordanceView(tap_down_location_, root_window));
       SetDuration(
-          ui::GestureConfiguration::long_press_time_in_seconds() * 1000 -
-          ui::GestureConfiguration::semi_long_press_time_in_seconds() * 1000 -
+          ui::GestureConfiguration::GetInstance()->long_press_time_in_ms() -
+          ui::GestureConfiguration::GetInstance()
+              ->semi_long_press_time_in_ms() -
           kAffordanceDelayBeforeShrinkMs);
       Start();
       break;

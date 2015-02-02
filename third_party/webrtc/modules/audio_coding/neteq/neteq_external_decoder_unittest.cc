@@ -47,7 +47,7 @@ class NetEqExternalDecoderTest : public ::testing::Test {
         frame_size_ms_(10),
         frame_size_samples_(frame_size_ms_ * samples_per_ms_),
         output_size_samples_(frame_size_ms_ * samples_per_ms_),
-        external_decoder_(new MockExternalPcm16B(kDecoderPCM16Bswb32kHz)),
+        external_decoder_(new MockExternalPcm16B),
         rtp_generator_(new test::RtpGenerator(samples_per_ms_)),
         payload_size_bytes_(0),
         last_send_time_(0),
@@ -241,7 +241,7 @@ class LargeTimestampJumpTest : public NetEqExternalDecoderTest {
     frame_size_samples_ = frame_size_ms_ * samples_per_ms_;
     output_size_samples_ = frame_size_ms_ * samples_per_ms_;
     EXPECT_CALL(*external_decoder_, Die()).Times(1);
-    external_decoder_.reset(new MockExternalPcm16B(kDecoderPCM16B));
+    external_decoder_.reset(new MockExternalPcm16B);
   }
 
   void SetUp() OVERRIDE {
@@ -308,6 +308,8 @@ class LargeTimestampJumpTest : public NetEqExternalDecoderTest {
       case kExpandPhase: {
         if (output_type == kOutputPLCtoCNG) {
           test_state_ = kFadedExpandPhase;
+        } else if (output_type == kOutputNormal) {
+          test_state_ = kRecovered;
         }
         break;
       }
@@ -337,9 +339,14 @@ class LargeTimestampJumpTest : public NetEqExternalDecoderTest {
   }
 
   int NumExpectedDecodeCalls(int num_loops) const OVERRIDE {
-    // Some packets won't be decoded because of the buffer being flushed after
-    // the timestamp jump.
-    return num_loops - (config_.max_packets_in_buffer + 1);
+    // Some packets at the end of the stream won't be decoded. When the jump in
+    // timestamp happens, NetEq will do Expand during one GetAudio call. In the
+    // next call it will decode the packet after the jump, but the net result is
+    // that the delay increased by 1 packet. In another call, a Pre-emptive
+    // Expand operation is performed, leading to delay increase by 1 packet. In
+    // total, the test will end with a 2-packet delay, which results in the 2
+    // last packets not being decoded.
+    return num_loops - 2;
   }
 
   TestStates test_state_;

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Watches for changes in the tracked directory, including local metadata
  * changes.
@@ -47,11 +45,30 @@ FileWatcher.prototype.dispose = function() {
  * @private
  */
 FileWatcher.prototype.onDirectoryChanged_ = function(event) {
-  if (this.watchedDirectoryEntry_ &&
-      event.entry.toURL() === this.watchedDirectoryEntry_.toURL()) {
+  var fireWatcherDirectoryChanged = function(changedFiles) {
     var e = new Event('watcher-directory-changed');
-    e.changedFiles = event.changedFiles;
+
+    if (changedFiles)
+      e.changedFiles = changedFiles;
+
     this.dispatchEvent(e);
+  }.bind(this);
+
+  if (this.watchedDirectoryEntry_) {
+    var eventURL = event.entry.toURL();
+    var watchedDirURL = this.watchedDirectoryEntry_.toURL();
+
+    if (eventURL === watchedDirURL) {
+      fireWatcherDirectoryChanged(event.changedFiles);
+    } else if (watchedDirURL.match(new RegExp('^' + eventURL))) {
+      // When watched directory is deleted by the change in parent directory,
+      // notify it as watcher directory changed.
+      this.watchedDirectoryEntry_.getDirectory(
+          this.watchedDirectoryEntry_.fullPath,
+          {create: false},
+          null,
+          function() { fireWatcherDirectoryChanged(null); });
+    }
   }
 };
 
@@ -124,7 +141,7 @@ FileWatcher.prototype.dispatchMetadataEvent_ = function(
 FileWatcher.prototype.changeWatchedDirectory = function(entry, callback) {
   if (!util.isFakeEntry(entry)) {
     this.changeWatchedEntry_(
-        entry,
+        /** @type {!DirectoryEntry} */ (entry),
         callback,
         function() {
           console.error(

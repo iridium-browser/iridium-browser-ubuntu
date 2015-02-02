@@ -6,14 +6,13 @@ include_rules = [
   "+athena/resource_manager/public",
   "+athena/strings/grit/athena_strings.h",
   "+athena/wm/public",
+  "+components/app_modal_dialogs",
   "+components/favicon_base",
   "+components/metrics/proto",
   "+components/omnibox",
   "+components/renderer_context_menu",
   "+components/web_modal",
   "+content/public",
-  "+extensions/browser/app_window/app_window.h",
-  "+net/url_request",
   "+ui/aura",
   "+ui/base",
   "+ui/compositor",
@@ -28,6 +27,12 @@ include_rules = [
 
 specific_include_rules = {
   "app_activity_unittest.cc": [
-    "+extensions/common",
+    "+extensions",
+  ],
+  "content_proxy_browsertest.cc": [
+    "+athena/test",
+  ],
+  "app_activity_browsertest.cc": [
+    "+athena/test",
   ],
 }

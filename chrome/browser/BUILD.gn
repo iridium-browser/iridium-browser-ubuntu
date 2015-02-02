@@ -13,6 +13,9 @@ if (is_android) {
 } else {
   import("//tools/grit/grit_rule.gni")
 }
+if (is_desktop_linux) {
+  import("//build/config/linux/pkg_config.gni")
+}
 
 about_credits_file = "$target_gen_dir/about_credits.html"
 additional_modules_list_file =
@@ -24,8 +27,17 @@ gypi_values = exec_script(
     "scope",
     [ "../chrome_browser.gypi" ])
 
+if (is_desktop_linux) {
+  pkg_config("gnome_keyring") {
+    packages = [ "gnome-keyring-1" ]
+  }
+}
+
 static_library("browser") {
-  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+  configs += [
+    "//build/config/compiler:wexit_time_destructors",
+    "//third_party/WebKit/public:debug_devtools",
+  ]
   defines = []
   sources = []
   libs = []
@@ -61,8 +73,9 @@ static_library("browser") {
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
     "//components/crx_file",
-    "//components/data_reduction_proxy/browser",
+    "//components/data_reduction_proxy/core/browser",
     "//components/domain_reliability",
+    "//components/enhanced_bookmarks",
     "//components/favicon_base",
     "//components/favicon/core",
     "//components/feedback",
@@ -76,7 +89,6 @@ static_library("browser") {
     "//components/metrics:net",
     "//components/metrics:profiler",
     "//components/metrics/proto:proto",
-    "//components/native_app_window",
     "//components/navigation_metrics",
     "//components/network_time",
     "//components/omaha_query_params",
@@ -101,6 +113,8 @@ static_library("browser") {
     "//components/translate/core/common",
     "//components/url_fixer",
     "//components/user_prefs",
+    "//components/variations",
+    "//components/variations/net",
     "//components/webdata/common",
     "//content/public/browser",
     "//content/public/common",
@@ -121,7 +135,7 @@ static_library("browser") {
     "//third_party/zlib:minizip",
     "//third_party/zlib:zip",
     "//ui/base",
-    "//ui/events",
+    "//ui/events:events_base",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/message_center",
@@ -153,13 +167,14 @@ static_library("browser") {
       "//cc",
       "//chrome/browser/devtools",
       "//chrome/installer/util",
+      "//components/app_modal_dialogs",
       "//components/autofill/content/browser",
       "//components/dom_distiller/content",
       "//components/keyed_service/content",
       "//components/navigation_interception",
       "//components/password_manager/content/browser",
       "//components/precache/content",
-      "//components/sessions",
+      "//components/sessions:sessions_content",
       "//components/storage_monitor",
       "//components/translate/content/browser",
       "//components/url_matcher",
@@ -170,10 +185,11 @@ static_library("browser") {
       "//content/app/resources",
       "//media",
       "//media/cast:net",
+      "//mojo/common",
+      "//mojo/edk/system",
       "//mojo/environment:chromium",
       "//mojo/public/cpp/bindings",
-      "//mojo/public/js/bindings",
-      "//mojo/system",
+      "//mojo/public/js",
       "//net:extras",
       "//net:net_with_v8",
       "//storage/browser",
@@ -233,8 +249,9 @@ static_library("browser") {
       #"browser_app_shim"  TODO(GYP)
     ]
   }
-  if (!toolkit_views) {
-    deps -= [ "//components/native_app_window" ]
+  if (is_mac || is_ios) {
+    sources += rebase_path(gypi_values.chrome_browser_mac_ios_sources,
+                           ".", "//chrome")
   }
   if (cld2_data_source == "component") {
     sources += [
@@ -248,6 +265,7 @@ static_library("browser") {
       "//chrome/browser/sync_file_system/drive_backend:sync_file_system_drive_proto",
       "//chrome/common/extensions/api",
       "//chrome/common/extensions/api:api_registration",
+      "//extensions/components/javascript_dialog_extensions_client",
     ]
     sources += rebase_path(gypi_values.chrome_browser_extensions_sources,
                            ".", "//chrome")
@@ -255,9 +273,10 @@ static_library("browser") {
   if (enable_background) {
     sources += rebase_path(gypi_values.chrome_browser_background_sources,
                            ".", "//chrome")
-    if (!use_aura || is_win) {
+    if (!use_aura || is_win || is_chromeos) {
       sources -= [ "background/background_mode_manager_aura.cc" ]
     }
+    defines += [ "ENABLE_BACKGROUND=1" ]
   }
   if (enable_task_manager) {
     sources += rebase_path(gypi_values.chrome_browser_task_manager_sources,
@@ -273,10 +292,7 @@ static_library("browser") {
                            ".", "//chrome")
     #deps += [ "//components/nacl:nacl_browser" ]  TODO(GYP)
   }
-  # ["debug_devtools==1", {  TODO(GYP)
-  #   "defines": [
-  #     "DEBUG_DEVTOOLS=1",
-  # }],
+
   if (enable_configuration_policy) {
     sources += rebase_path(
         gypi_values.chrome_browser_policy_shared_with_ios_sources,
@@ -299,7 +315,10 @@ static_library("browser") {
       sources += rebase_path(gypi_values.chrome_browser_policy_desktop_sources,
                              ".", "//chrome")
     }
-    if (!is_android && !is_ios) {  # Non-mobile
+    if (is_android || is_ios) {
+      sources += rebase_path(gypi_values.chrome_browser_policy_mobile_sources,
+                             ".", "//chrome")
+    } else {
       deps += [
         "//chrome/browser/policy:path_parser",
       ]
@@ -353,12 +372,19 @@ static_library("browser") {
     sources += rebase_path(gypi_values.chrome_browser_chromeos_sources,
                            ".", "//chrome")
     deps += [
-      #"browser_chromeos",  TODO(GYP)
+      "//chrome/browser/chromeos",
     ]
   } else {
     # Non-ChromeOS.
     sources += rebase_path(gypi_values.chrome_browser_non_chromeos_sources,
                            ".", "//chrome")
+  }
+
+  if (is_chromeos || is_ios) {
+    sources -= [
+      "metrics/signin_status_metrics_provider.cc",
+      "metrics/signin_status_metrics_provider.h",
+    ]
   }
 
   if (use_cups) {
@@ -367,7 +393,7 @@ static_library("browser") {
   if (is_desktop_linux) {
     sources += rebase_path(gypi_values.chrome_browser_gnome_keyring_sources,
                            ".", "//chrome")
-    configs += [ "//build/config/linux:gnome_keyring" ]
+    configs += [ ":gnome_keyring" ]
   }
   if (use_aura) {
     sources += rebase_path(gypi_values.chrome_browser_aura_sources,
@@ -407,6 +433,9 @@ static_library("browser") {
   if (use_nss_certs) {
     sources += rebase_path(gypi_values.chrome_browser_nss_sources,
                            ".", "//chrome")
+    if (is_chromeos) {
+      sources -= [ "net/nss_context_linux.cc" ]
+    }
   }
   if (enable_notifications) {
     sources += rebase_path(gypi_values.chrome_browser_notifications_sources,
@@ -422,7 +451,7 @@ static_library("browser") {
                            ".", "//chrome")
   }
 
-  if (printing_mode != 0) {
+  if (enable_basic_printing || enable_print_preview) {
     # Some form of printing support.
     sources += rebase_path(gypi_values.chrome_browser_basic_printing_sources,
                            ".", "//chrome")
@@ -433,11 +462,11 @@ static_library("browser") {
       sources += rebase_path(gypi_values.chrome_browser_printing_emf_sources,
                              ".", "//chrome")
     }
-    if (printing_mode == 1) {
+    if (enable_print_preview) {
       # Full printing on top of the above.
       sources += rebase_path(gypi_values.chrome_browser_full_printing_sources,
                              ".", "//chrome")
-    } else if (printing_mode == 2) {
+    } else {
       # Partial-only printing support.
       sources += rebase_path(
           gypi_values.chrome_browser_basic_only_printing_sources,
@@ -450,6 +479,11 @@ static_library("browser") {
   }
   if (enable_session_service) {
     sources += rebase_path(gypi_values.chrome_browser_session_service_sources,
+                           ".", "//chrome")
+  }
+
+  if (!is_android && !is_ios && !is_chromeos) {
+    sources += rebase_path(gypi_values.chrome_browser_desktop_sources,
                            ".", "//chrome")
   }
 
@@ -473,7 +507,11 @@ static_library("browser") {
     deps += [
       ":jni_headers",
       "//components/cdm/browser",
-      #"../components/components.gyp:web_contents_delegate_android",  TODO(GYP)
+      "//components/enhanced_bookmarks",
+      "//components/history/core/android",
+      "//components/resources:components_resources",
+      "//components/web_contents_delegate_android",
+      "//third_party/android_opengl/etc1",
     ]
     deps -= [
       "//third_party/libaddressinput",
@@ -687,10 +725,13 @@ action("about_credits") {
 }
 
 # GYP version: chrome/chrome_resource.gyp:chrome_internal_resources_gen
-# TODO(GYP) write internal action
-if (false) {  #if (is_chrome_branded) {
+if (is_chrome_branded) {
   action("chrome_internal_resources_gen") {
-    # TODO(GYP)
+    script = "internal/transform_additional_modules_list.py"
+    sources = [ "internal/resources/additional_modules_list.input" ]
+    outputs = [ additional_modules_list_file ]
+    args = rebase_path(sources, root_build_dir) +
+           rebase_path(outputs, root_build_dir)
   }
 } else {
   group("chrome_internal_resources_gen") {
@@ -730,8 +771,6 @@ source_set("test_support") {
     "download/download_test_file_activity_observer.h",
     "download/test_download_shelf.cc",
     "download/test_download_shelf.h",
-    "extensions/extension_action_test_util.cc",
-    "extensions/extension_action_test_util.h",
     "invalidation/fake_invalidation_service.cc",
     "invalidation/fake_invalidation_service.h",
     "media/fake_desktop_media_list.cc",
@@ -770,8 +809,6 @@ source_set("test_support") {
     "signin/fake_signin_manager.h",
     "ssl/ssl_client_auth_requestor_mock.cc",
     "ssl/ssl_client_auth_requestor_mock.h",
-    "sync/glue/local_device_info_provider_mock.cc",
-    "sync/glue/local_device_info_provider_mock.h",
     "sync/profile_sync_components_factory_mock.cc",
     "sync/profile_sync_components_factory_mock.h",
     "sync/profile_sync_service_mock.cc",
@@ -808,6 +845,10 @@ source_set("test_support") {
   }
 
   if (enable_extensions) {
+    sources += [
+      "extensions/extension_action_test_util.cc",
+      "extensions/extension_action_test_util.h",
+    ]
     deps += [
       "//extensions:test_support",
     ]
@@ -861,7 +902,7 @@ source_set("test_support") {
       "chromeos/system/fake_input_device_settings.h",
     ]
     configs += [ "//build/config/linux:dbus" ]
-    #deps += [ "//chromeos:test_support" ]  TODO(GYP)
+    deps += [ "//chromeos:test_support" ]
   }
 
   if (enable_configuration_policy) {

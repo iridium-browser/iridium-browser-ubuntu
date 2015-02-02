@@ -24,15 +24,14 @@ class MockUbertokenConsumer : public UbertokenConsumer {
         last_error_(GoogleServiceAuthError::AuthErrorNone()),
         nb_error_(0) {
   }
-  virtual ~MockUbertokenConsumer() {}
+  ~MockUbertokenConsumer() override {}
 
-  virtual void OnUbertokenSuccess(const std::string& token) OVERRIDE {
+  void OnUbertokenSuccess(const std::string& token) override {
     last_token_ = token;
     ++ nb_correct_token_;
   }
 
-  virtual void OnUbertokenFailure(const GoogleServiceAuthError& error)
-      OVERRIDE {
+  void OnUbertokenFailure(const GoogleServiceAuthError& error) override {
     last_error_ = error;
     ++nb_error_;
   }
@@ -47,15 +46,16 @@ class MockUbertokenConsumer : public UbertokenConsumer {
 
 class UbertokenFetcherTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     request_context_getter_ = new net::TestURLRequestContextGetter(
         base::MessageLoopProxy::current());
     fetcher_.reset(new UbertokenFetcher(&token_service_,
                                         &consumer_,
+                                        GaiaConstants::kChromeSource,
                                         request_context_getter_.get()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     fetcher_.reset();
   }
 

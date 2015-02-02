@@ -49,6 +49,9 @@ struct GaiaContext {
 
   // Whether consumer management enrollment is in progress.
   bool is_enrolling_consumer_management;
+
+  // True if embedded_signin is enabled.
+  bool embedded_signin_enabled;
 };
 
 // A class that handles WebUI hooks in Gaia screen.
@@ -75,6 +78,12 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // not loading right now.
   void ReloadGaia(bool force_reload);
 
+  // Reload gaia with embedded signin frame.
+  void SwitchToEmbeddedSignin();
+
+  // Cancel embedded signin for the next load.
+  void CancelEmbeddedSignin();
+
   FrameState frame_state() const { return frame_state_; }
   net::Error frame_error() const { return frame_error_; }
 
@@ -83,18 +92,20 @@ class GaiaScreenHandler : public BaseScreenHandler {
   friend class SigninScreenHandler;
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
+  virtual void Initialize() override;
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
   // WebUI message handlers.
   void HandleFrameLoadingCompleted(int status);
-  void HandleCompleteAuthentication(const std::string& email,
+  void HandleCompleteAuthentication(const std::string& gaia_id,
+                                    const std::string& email,
                                     const std::string& password,
                                     const std::string& auth_code);
-  void HandleCompleteLogin(const std::string& typed_email,
+  void HandleCompleteLogin(const std::string& gaia_id,
+                           const std::string& typed_email,
                            const std::string& password,
                            bool using_saml);
 
@@ -105,13 +116,15 @@ class GaiaScreenHandler : public BaseScreenHandler {
   void HandleGaiaUIReady();
 
   // This is called when ConsumerManagementService::SetOwner() returns.
-  void OnSetOwnerDone(const std::string& typed_email,
+  void OnSetOwnerDone(const std::string& gaia_id,
+                      const std::string& typed_email,
                       const std::string& password,
                       bool using_saml,
                       bool success);
 
   // Really handles the complete login message.
-  void DoCompleteLogin(const std::string& typed_email,
+  void DoCompleteLogin(const std::string& gaia_id,
+                       const std::string& typed_email,
                        const std::string& password,
                        bool using_saml);
 
@@ -213,6 +226,9 @@ class GaiaScreenHandler : public BaseScreenHandler {
   std::string test_user_;
   std::string test_pass_;
   bool test_expects_complete_login_;
+
+  // True if user pressed shortcut to enable embedded signin.
+  bool embedded_signin_enabled_by_shortcut_;
 
   // Non-owning ptr to SigninScreenHandler instance. Should not be used
   // in dtor.

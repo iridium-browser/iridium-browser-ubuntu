@@ -64,7 +64,7 @@ struct FrameLoadRequest;
 
 bool isBackForwardLoadType(FrameLoadType);
 
-class FrameLoader FINAL {
+class FrameLoader final {
     WTF_MAKE_NONCOPYABLE(FrameLoader);
     DISALLOW_ALLOCATION();
 public:
@@ -75,15 +75,15 @@ public:
 
     void init();
 
-    LocalFrame* frame() const { return m_frame; }
-
     MixedContentChecker* mixedContentChecker() const { return &m_mixedContentChecker; }
     ProgressTracker& progress() const { return *m_progressTracker; }
 
     // These functions start a load. All eventually call into loadWithNavigationAction() or loadInSameDocument().
     void load(const FrameLoadRequest&); // The entry point for non-reload, non-history loads.
-    void reload(ReloadPolicy = NormalReload, const KURL& overrideURL = KURL(), const AtomicString& overrideEncoding = nullAtom, ClientRedirectPolicy = NotClientRedirect);
-    void loadHistoryItem(HistoryItem*, HistoryLoadType = HistoryDifferentDocumentLoad, ResourceRequestCachePolicy = UseProtocolCachePolicy); // The entry point for all back/forward loads
+    void reload(ReloadPolicy, const KURL& overrideURL = KURL(), ClientRedirectPolicy = NotClientRedirect);
+    void loadHistoryItem(HistoryItem*, FrameLoadType = FrameLoadTypeBackForward,
+        HistoryLoadType = HistoryDifferentDocumentLoad,
+        ResourceRequestCachePolicy = UseProtocolCachePolicy); // The entry point for all back/forward loads
 
     static void reportLocalLoadFailed(LocalFrame*, const String& url);
 
@@ -152,7 +152,7 @@ public:
     Frame* opener();
     void setOpener(LocalFrame*);
 
-    void detachFromParent();
+    void detach();
 
     void loadDone();
     void finishedParsing();
@@ -193,7 +193,7 @@ private:
     void didAccessInitialDocumentTimerFired(Timer<FrameLoader>*);
 
     bool prepareRequestForThisFrame(FrameLoadRequest&);
-    void setReferrerForFrameRequest(ResourceRequest&, ShouldSendReferrer, Document*);
+    static void setReferrerForFrameRequest(ResourceRequest&, ShouldSendReferrer, Document*);
     FrameLoadType determineFrameLoadType(const FrameLoadRequest&);
     bool isScriptTriggeredFormSubmissionInChildFrame(const FrameLoadRequest&) const;
 
@@ -206,11 +206,10 @@ private:
 
     // Calls continueLoadAfterNavigationPolicy
     void loadWithNavigationAction(const NavigationAction&, FrameLoadType, PassRefPtrWillBeRawPtr<FormState>,
-        const SubstituteData&, ContentSecurityPolicyCheck shouldCheckMainWorldContentSecurityPolicy, ClientRedirectPolicy = NotClientRedirect, const AtomicString& overrideEncoding = nullAtom);
+        const SubstituteData&, ContentSecurityPolicyCheck shouldCheckMainWorldContentSecurityPolicy, ClientRedirectPolicy = NotClientRedirect);
 
     bool validateTransitionNavigationMode();
     bool dispatchNavigationTransitionData();
-    void detachClient();
 
     void setHistoryItemStateForCommit(HistoryCommitType, bool isPushOrReplaceState = false, PassRefPtr<SerializedScriptValue> = nullptr);
 
@@ -240,9 +239,12 @@ private:
     RefPtr<DocumentLoader> m_policyDocumentLoader;
     OwnPtrWillBeMember<FetchContext> m_fetchContext;
 
-    RefPtr<HistoryItem> m_currentItem;
-    RefPtr<HistoryItem> m_provisionalItem;
+    RefPtrWillBeMember<HistoryItem> m_currentItem;
+    RefPtrWillBeMember<HistoryItem> m_provisionalItem;
+
     struct DeferredHistoryLoad {
+        DISALLOW_ALLOCATION();
+    public:
         DeferredHistoryLoad(HistoryItem* item, HistoryLoadType type, ResourceRequestCachePolicy cachePolicy)
             : m_item(item)
             , m_type(type)
@@ -254,10 +256,16 @@ private:
 
         bool isValid() { return m_item; }
 
-        RefPtr<HistoryItem> m_item;
+        void trace(Visitor* visitor)
+        {
+            visitor->trace(m_item);
+        }
+
+        RefPtrWillBeMember<HistoryItem> m_item;
         HistoryLoadType m_type;
         ResourceRequestCachePolicy m_cachePolicy;
     };
+
     DeferredHistoryLoad m_deferredHistoryLoad;
 
     bool m_inStopAllLoaders;

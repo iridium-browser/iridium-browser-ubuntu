@@ -94,10 +94,14 @@ int RunGen(const std::vector<std::string>& args) {
   if (!setup->Run())
     return 1;
 
+  Err err;
   // Write the root ninja files.
   if (!NinjaWriter::RunAndWriteFiles(&setup->build_settings(),
-                                     setup->builder()))
+                                     setup->builder(),
+                                     &err)) {
+    err.PrintToStdout();
     return 1;
+  }
 
   base::TimeDelta elapsed_time = timer.Elapsed();
 
@@ -110,7 +114,7 @@ int RunGen(const std::vector<std::string>& args) {
         base::IntToString(
             setup->scheduler().input_file_manager()->GetInputFileCount()) +
         " files in " +
-        base::IntToString(elapsed_time.InMilliseconds()) + "ms\n";
+        base::Int64ToString(elapsed_time.InMilliseconds()) + "ms\n";
     OutputString(stats);
   }
 

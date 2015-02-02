@@ -49,21 +49,18 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
                            UpdateAfter24Hours);
 
-  virtual ~ServiceWorkerWriteToCacheJob();
+  ~ServiceWorkerWriteToCacheJob() override;
 
   // net::URLRequestJob overrides
-  virtual void Start() OVERRIDE;
-  virtual void Kill() OVERRIDE;
-  virtual net::LoadState GetLoadState() const OVERRIDE;
-  virtual bool GetCharset(std::string* charset) OVERRIDE;
-  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE;
-  virtual int GetResponseCode() const OVERRIDE;
-  virtual void SetExtraRequestHeaders(
-      const net::HttpRequestHeaders& headers) OVERRIDE;
-  virtual bool ReadRawData(net::IOBuffer* buf,
-                           int buf_size,
-                           int *bytes_read) OVERRIDE;
+  void Start() override;
+  void Kill() override;
+  net::LoadState GetLoadState() const override;
+  bool GetCharset(std::string* charset) override;
+  bool GetMimeType(std::string* mime_type) const override;
+  void GetResponseInfo(net::HttpResponseInfo* info) override;
+  int GetResponseCode() const override;
+  void SetExtraRequestHeaders(const net::HttpRequestHeaders& headers) override;
+  bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read) override;
 
   const net::HttpResponseInfo* http_info() const;
 
@@ -81,27 +78,20 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
   void OnWriteDataComplete(int result);
 
   // net::URLRequest::Delegate overrides that observe the net request.
-  virtual void OnReceivedRedirect(
+  void OnReceivedRedirect(net::URLRequest* request,
+                          const net::RedirectInfo& redirect_info,
+                          bool* defer_redirect) override;
+  void OnAuthRequired(net::URLRequest* request,
+                      net::AuthChallengeInfo* auth_info) override;
+  void OnCertificateRequested(
       net::URLRequest* request,
-      const net::RedirectInfo& redirect_info,
-      bool* defer_redirect) OVERRIDE;
-  virtual void OnAuthRequired(
-      net::URLRequest* request,
-      net::AuthChallengeInfo* auth_info) OVERRIDE;
-  virtual void OnCertificateRequested(
-      net::URLRequest* request,
-      net::SSLCertRequestInfo* cert_request_info) OVERRIDE;
-  virtual void OnSSLCertificateError(
-      net::URLRequest* request,
-      const net::SSLInfo& ssl_info,
-      bool fatal) OVERRIDE;
-  virtual void OnBeforeNetworkStart(
-      net::URLRequest* request,
-      bool* defer) OVERRIDE;
-  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
-  virtual void OnReadCompleted(
-      net::URLRequest* request,
-      int bytes_read) OVERRIDE;
+      net::SSLCertRequestInfo* cert_request_info) override;
+  void OnSSLCertificateError(net::URLRequest* request,
+                             const net::SSLInfo& ssl_info,
+                             bool fatal) override;
+  void OnBeforeNetworkStart(net::URLRequest* request, bool* defer) override;
+  void OnResponseStarted(net::URLRequest* request) override;
+  void OnReadCompleted(net::URLRequest* request, int bytes_read) override;
 
   void AsyncNotifyDoneHelper(const net::URLRequestStatus& status);
 

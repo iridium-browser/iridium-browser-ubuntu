@@ -13,8 +13,8 @@ using content::InterstitialPage;
 using content::WebContents;
 using content::WebContentsTester;
 
-static const char* kURL1 = "http://www.google.com/";
-static const char* kURL2 = "http://www.gmail.com/";
+static const char kURL1[] = "http://www.google.com/";
+static const char kURL2[] = "http://www.gmail.com/";
 
 namespace chromeos {
 
@@ -32,7 +32,7 @@ class TestOfflineLoadPage :  public chromeos::OfflineLoadPage {
   }
 
   // chromeos::OfflineLoadPage override.
-  virtual void NotifyBlockingPageComplete(bool proceed) OVERRIDE;
+  virtual void NotifyBlockingPageComplete(bool proceed) override;
 
  private:
   OfflineLoadPageTest* test_page_;

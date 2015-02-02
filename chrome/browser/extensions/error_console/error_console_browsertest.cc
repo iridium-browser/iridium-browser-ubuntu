@@ -35,7 +35,7 @@ namespace {
 
 const char kTestingPage[] = "/extensions/test_file.html";
 const char kAnonymousFunction[] = "(anonymous function)";
-const char* kBackgroundPageName =
+const char* const kBackgroundPageName =
     extensions::kGeneratedBackgroundPageFilename;
 const int kNoFlags = 0;
 
@@ -127,7 +127,7 @@ void CheckManifestError(const ExtensionError* error,
 class ErrorConsoleBrowserTest : public ExtensionBrowserTest {
  public:
   ErrorConsoleBrowserTest() : error_console_(NULL) { }
-  virtual ~ErrorConsoleBrowserTest() { }
+  ~ErrorConsoleBrowserTest() override {}
 
  protected:
   // A helper class in order to wait for the proper number of errors to be
@@ -154,7 +154,7 @@ class ErrorConsoleBrowserTest : public ExtensionBrowserTest {
     }
 
     // ErrorConsole::Observer implementation.
-    virtual void OnErrorAdded(const ExtensionError* error) OVERRIDE {
+    void OnErrorAdded(const ExtensionError* error) override {
       ++errors_observed_;
       if (errors_observed_ >= errors_expected_) {
         if (waiting_)
@@ -162,9 +162,7 @@ class ErrorConsoleBrowserTest : public ExtensionBrowserTest {
       }
     }
 
-    virtual void OnErrorConsoleDestroyed() OVERRIDE {
-      error_console_ = NULL;
-    }
+    void OnErrorConsoleDestroyed() override { error_console_ = NULL; }
 
     // Spin until the appropriate number of errors have been observed.
     void WaitForErrors() {
@@ -199,7 +197,7 @@ class ErrorConsoleBrowserTest : public ExtensionBrowserTest {
     ACTION_NONE
   };
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     ExtensionBrowserTest::SetUpInProcessBrowserTestFixture();
 
     // We need to enable the ErrorConsole FeatureSwitch in order to collect
@@ -209,7 +207,7 @@ class ErrorConsoleBrowserTest : public ExtensionBrowserTest {
         FeatureSwitch::OVERRIDE_ENABLED);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionBrowserTest::SetUpOnMainThread();
 
     // Errors are only kept if we have Developer Mode enabled.
@@ -276,6 +274,7 @@ class ErrorConsoleBrowserTest : public ExtensionBrowserTest {
   }
 
   ErrorConsole* error_console() { return error_console_; }
+
  private:
   // The URL used in testing for simple page navigations.
   GURL test_url_;
@@ -393,7 +392,7 @@ IN_PROC_BROWSER_TEST_F(ErrorConsoleBrowserTest,
                   script_url,
                   "logHelloWorld",  // function name
                   6u,  // line number
-                  11u /* column number */ );
+                  11u /* column number */);
 
   CheckStackFrame(stack_trace1[1],
                   script_url,

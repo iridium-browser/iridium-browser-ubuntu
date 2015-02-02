@@ -159,7 +159,6 @@ public:
     typedef GrGLTextureDomainEffect GLProcessor;
 
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
 
     const GrTextureDomain& textureDomain() const { return fTextureDomain; }
 
@@ -174,7 +173,9 @@ private:
                           GrTextureParams::FilterMode,
                           GrCoordSet);
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
 

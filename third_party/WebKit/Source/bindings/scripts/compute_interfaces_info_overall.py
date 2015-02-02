@@ -68,6 +68,11 @@ Current keys are:
     'include_path': path for use in C++ #include directives
     'dependencies_full_paths': paths to dependencies (for merging into main)
     'dependencies_include_paths': paths for use in C++ #include directives
+    'dependencies_other_component_full_paths':
+        paths to dependencies (cannot merge because of other component)
+    'dependencies_other_component_include_paths':
+        paths for use in C++ #include directives because of dependencies in
+        other component
 
 Note that all of these are stable information, unlikely to change without
 moving or deleting files (hence requiring a full rebuild anyway) or significant
@@ -268,18 +273,46 @@ def compute_interfaces_info_overall(info_individuals):
         for implemented_interface_info in implemented_interfaces_info:
             if (implemented_interface_info['is_legacy_treat_as_partial_interface'] and
                 implemented_interface_info['include_path']):
-                implemented_interfaces_include_paths.append(implemented_interface_info['include_path'])
+                implemented_interfaces_include_paths.append(
+                    implemented_interface_info['include_path'])
+
+        dependencies_full_paths = implemented_interfaces_full_paths
+        dependencies_include_paths = implemented_interfaces_include_paths
+        dependencies_other_component_full_paths = []
+        dependencies_other_component_include_paths = []
+
+        component = idl_filename_to_component(interface_info['full_path'])
+        for full_path in partial_interfaces_full_paths:
+            partial_interface_component = idl_filename_to_component(full_path)
+            if component == partial_interface_component:
+                dependencies_full_paths.append(full_path)
+            else:
+                dependencies_other_component_full_paths.append(full_path)
+
+        for include_path in partial_interfaces_include_paths:
+            partial_interface_component = idl_filename_to_component(include_path)
+            if component == partial_interface_component:
+                dependencies_include_paths.append(include_path)
+            else:
+                dependencies_other_component_include_paths.append(include_path)
+
+        if interface_info['has_union_types']:
+            dependencies_include_paths.append(
+                'bindings/%s/v8/UnionTypes%s.h' % (component, component.capitalize()))
 
         interface_info.update({
-            'dependencies_full_paths': (partial_interfaces_full_paths +
-                                        implemented_interfaces_full_paths),
-            'dependencies_include_paths': (partial_interfaces_include_paths +
-                                           implemented_interfaces_include_paths),
+            'dependencies_full_paths': dependencies_full_paths,
+            'dependencies_include_paths': dependencies_include_paths,
+            'dependencies_other_component_full_paths':
+                dependencies_other_component_full_paths,
+            'dependencies_other_component_include_paths':
+                dependencies_other_component_include_paths,
         })
 
     # Clean up temporary private information
     for interface_info in interfaces_info.itervalues():
         del interface_info['extended_attributes']
+        del interface_info['has_union_types']
         del interface_info['is_legacy_treat_as_partial_interface']
         del interface_info['parent']
 

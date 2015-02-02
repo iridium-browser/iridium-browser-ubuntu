@@ -11,7 +11,7 @@ vars = {
     'gyp_rev':
          '1927',
     'tools_rev':
-         '13077',
+         '13800',
     'native_client_trunk':
          'http://src.chromium.org/native_client/trunk',
     'lcov_rev':
@@ -28,6 +28,8 @@ vars = {
          'https://chromium.googlesource.com/chromium/blink.git',
     'buildtools_revision':
          '59b93247766e1cdac6e482637ad493df38f7aeb7',
+    'validator_snapshots_rev':
+         '14018',
     'chrome_rev':
          '275800',
     'git_url':
@@ -42,7 +44,7 @@ deps = {
     'testing/gtest':
         Var('git_url') + '/external/googletest.git@74de57c951aedebc5dfe26a27604353432392b98',
     'third_party':
-        Var('git_url') + '/native_client/src/third_party.git@293473a038f9e4e8239dc12856a31c2a12a5806b',
+        Var('git_url') + '/native_client/src/third_party.git@7e4c04567bd393069233676fc648333885e18da9',
     'third_party/lcov':
         Var('git_url') + '/chromium/src/third_party/lcov.git@b37daf5968200da8ff520ce65c4e5bce4047dd15',
     'third_party/lss':
@@ -56,7 +58,7 @@ deps = {
     'tools/valgrind':
         Var('git_url') + '/chromium/src/tools/valgrind.git@4989a1b19c3a33c828e385d3a07e83e202e1e651',
     'validator_snapshots':
-        Var('git_url') + '/native_client/src/validator_snapshots.git@4c1ea6b6ebe020993b0a091fd4e38a6487704b60',
+        Var('git_url') + '/native_client/src/validator_snapshots.git@9eeb3dcf847c7c55cc8b47081b791d08e6f5c51b',
 }
 
 deps_os = {

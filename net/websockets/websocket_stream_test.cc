@@ -99,7 +99,7 @@ class DeterministicKeyWebSocketHandshakeStreamCreateHelper
       : WebSocketHandshakeStreamCreateHelper(connect_delegate,
                                              requested_subprotocols) {}
 
-  virtual void OnStreamCreated(WebSocketBasicHandshakeStream* stream) OVERRIDE {
+  void OnStreamCreated(WebSocketBasicHandshakeStream* stream) override {
     stream->SetWebSocketKeyForTesting("dGhlIHNhbXBsZSBub25jZQ==");
   }
 };
@@ -201,32 +201,32 @@ class WebSocketStreamCreateTest : public ::testing::Test {
     explicit TestConnectDelegate(WebSocketStreamCreateTest* owner)
         : owner_(owner) {}
 
-    virtual void OnSuccess(scoped_ptr<WebSocketStream> stream) OVERRIDE {
+    void OnSuccess(scoped_ptr<WebSocketStream> stream) override {
       stream.swap(owner_->stream_);
     }
 
-    virtual void OnFailure(const std::string& message) OVERRIDE {
+    void OnFailure(const std::string& message) override {
       owner_->has_failed_ = true;
       owner_->failure_message_ = message;
     }
 
-    virtual void OnStartOpeningHandshake(
-        scoped_ptr<WebSocketHandshakeRequestInfo> request) OVERRIDE {
+    void OnStartOpeningHandshake(
+        scoped_ptr<WebSocketHandshakeRequestInfo> request) override {
       // Can be called multiple times (in the case of HTTP auth). Last call
       // wins.
       owner_->request_info_ = request.Pass();
     }
-    virtual void OnFinishOpeningHandshake(
-        scoped_ptr<WebSocketHandshakeResponseInfo> response) OVERRIDE {
+    void OnFinishOpeningHandshake(
+        scoped_ptr<WebSocketHandshakeResponseInfo> response) override {
       if (owner_->response_info_)
         ADD_FAILURE();
       owner_->response_info_ = response.Pass();
     }
-    virtual void OnSSLCertificateError(
+    void OnSSLCertificateError(
         scoped_ptr<WebSocketEventInterface::SSLErrorCallbacks>
             ssl_error_callbacks,
         const SSLInfo& ssl_info,
-        bool fatal) OVERRIDE {
+        bool fatal) override {
       owner_->ssl_error_callbacks_ = ssl_error_callbacks.Pass();
       owner_->ssl_info_ = ssl_info;
       owner_->ssl_fatal_ = fatal;
@@ -408,7 +408,7 @@ class WebSocketStreamCreateUMATest : public ::testing::Test {
   };
 
   class StreamCreation : public WebSocketStreamCreateTest {
-    virtual void TestBody() OVERRIDE {}
+    void TestBody() override {}
   };
 
   scoped_ptr<base::HistogramSamples> GetSamples(const std::string& name) {
@@ -1121,9 +1121,11 @@ TEST_F(WebSocketStreamCreateTest, HandshakeTimeout) {
   socket_data->set_connect_data(MockConnect(SYNCHRONOUS, ERR_IO_PENDING));
   scoped_ptr<MockWeakTimer> timer(new MockWeakTimer(false, false));
   base::WeakPtr<MockWeakTimer> weak_timer = timer->AsWeakPtr();
-  CreateAndConnectRawExpectations("ws://localhost/", NoSubProtocols(),
-                                  "http://localhost", socket_data.Pass(),
-                                  timer.PassAs<base::Timer>());
+  CreateAndConnectRawExpectations("ws://localhost/",
+                                  NoSubProtocols(),
+                                  "http://localhost",
+                                  socket_data.Pass(),
+                                  timer.Pass());
   EXPECT_FALSE(has_failed());
   ASSERT_TRUE(weak_timer.get());
   EXPECT_TRUE(weak_timer->IsRunning());
@@ -1142,9 +1144,13 @@ TEST_F(WebSocketStreamCreateTest, HandshakeTimerOnSuccess) {
   scoped_ptr<MockWeakTimer> timer(new MockWeakTimer(false, false));
   base::WeakPtr<MockWeakTimer> weak_timer = timer->AsWeakPtr();
 
-  CreateAndConnectStandard(
-      "ws://localhost/", "/", NoSubProtocols(), "http://localhost", "", "",
-      timer.PassAs<base::Timer>());
+  CreateAndConnectStandard("ws://localhost/",
+                           "/",
+                           NoSubProtocols(),
+                           "http://localhost",
+                           "",
+                           "",
+                           timer.Pass());
   ASSERT_TRUE(weak_timer);
   EXPECT_TRUE(weak_timer->IsRunning());
 
@@ -1162,9 +1168,11 @@ TEST_F(WebSocketStreamCreateTest, HandshakeTimerOnFailure) {
       MockConnect(SYNCHRONOUS, ERR_CONNECTION_REFUSED));
   scoped_ptr<MockWeakTimer> timer(new MockWeakTimer(false, false));
   base::WeakPtr<MockWeakTimer> weak_timer = timer->AsWeakPtr();
-  CreateAndConnectRawExpectations("ws://localhost/", NoSubProtocols(),
-                                  "http://localhost", socket_data.Pass(),
-                                  timer.PassAs<base::Timer>());
+  CreateAndConnectRawExpectations("ws://localhost/",
+                                  NoSubProtocols(),
+                                  "http://localhost",
+                                  socket_data.Pass(),
+                                  timer.Pass());
   ASSERT_TRUE(weak_timer.get());
   EXPECT_TRUE(weak_timer->IsRunning());
 

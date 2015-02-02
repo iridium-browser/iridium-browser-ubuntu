@@ -213,16 +213,16 @@ void HTMLElementEquivalent::addToStyle(Element*, EditingStyle* style) const
     style->setProperty(m_propertyID, m_primitiveValue->cssText());
 }
 
-class HTMLTextDecorationEquivalent FINAL : public HTMLElementEquivalent {
+class HTMLTextDecorationEquivalent final : public HTMLElementEquivalent {
 public:
     static PassOwnPtrWillBeRawPtr<HTMLElementEquivalent> create(CSSValueID primitiveValue, const HTMLQualifiedName& tagName)
     {
         return adoptPtrWillBeNoop(new HTMLTextDecorationEquivalent(primitiveValue, tagName));
     }
-    virtual bool propertyExistsInStyle(const StylePropertySet*) const OVERRIDE;
-    virtual bool valueIsPresentInStyle(HTMLElement*, StylePropertySet*) const OVERRIDE;
+    virtual bool propertyExistsInStyle(const StylePropertySet*) const override;
+    virtual bool valueIsPresentInStyle(HTMLElement*, StylePropertySet*) const override;
 
-    virtual void trace(Visitor* visitor) OVERRIDE { HTMLElementEquivalent::trace(visitor); }
+    virtual void trace(Visitor* visitor) override { HTMLElementEquivalent::trace(visitor); }
 
 private:
     HTMLTextDecorationEquivalent(CSSValueID primitiveValue, const HTMLQualifiedName& tagName);
@@ -259,14 +259,14 @@ public:
         return adoptPtrWillBeNoop(new HTMLAttributeEquivalent(propertyID, attrName));
     }
 
-    virtual bool matches(const Element* element) const OVERRIDE { return HTMLElementEquivalent::matches(element) && element->hasAttribute(m_attrName); }
-    virtual bool hasAttribute() const OVERRIDE { return true; }
-    virtual bool valueIsPresentInStyle(HTMLElement*, StylePropertySet*) const OVERRIDE;
-    virtual void addToStyle(Element*, EditingStyle*) const OVERRIDE;
+    virtual bool matches(const Element* element) const override { return HTMLElementEquivalent::matches(element) && element->hasAttribute(m_attrName); }
+    virtual bool hasAttribute() const override { return true; }
+    virtual bool valueIsPresentInStyle(HTMLElement*, StylePropertySet*) const override;
+    virtual void addToStyle(Element*, EditingStyle*) const override;
     virtual PassRefPtrWillBeRawPtr<CSSValue> attributeValueAsCSSValue(Element*) const;
     inline const QualifiedName& attributeName() const { return m_attrName; }
 
-    virtual void trace(Visitor* visitor) OVERRIDE { HTMLElementEquivalent::trace(visitor); }
+    virtual void trace(Visitor* visitor) override { HTMLElementEquivalent::trace(visitor); }
 
 protected:
     HTMLAttributeEquivalent(CSSPropertyID, const HTMLQualifiedName& tagName, const QualifiedName& attrName);
@@ -313,15 +313,15 @@ PassRefPtrWillBeRawPtr<CSSValue> HTMLAttributeEquivalent::attributeValueAsCSSVal
     return dummyStyle->getPropertyCSSValue(m_propertyID);
 }
 
-class HTMLFontSizeEquivalent FINAL : public HTMLAttributeEquivalent {
+class HTMLFontSizeEquivalent final : public HTMLAttributeEquivalent {
 public:
     static PassOwnPtrWillBeRawPtr<HTMLFontSizeEquivalent> create()
     {
         return adoptPtrWillBeNoop(new HTMLFontSizeEquivalent());
     }
-    virtual PassRefPtrWillBeRawPtr<CSSValue> attributeValueAsCSSValue(Element*) const OVERRIDE;
+    virtual PassRefPtrWillBeRawPtr<CSSValue> attributeValueAsCSSValue(Element*) const override;
 
-    virtual void trace(Visitor* visitor) OVERRIDE { HTMLAttributeEquivalent::trace(visitor); }
+    virtual void trace(Visitor* visitor) override { HTMLAttributeEquivalent::trace(visitor); }
 
 private:
     HTMLFontSizeEquivalent();
@@ -712,21 +712,21 @@ TriState EditingStyle::triStateOfStyle(const VisibleSelection& selection) const
 
     TriState state = FalseTriState;
     bool nodeIsStart = true;
-    for (Node* node = selection.start().deprecatedNode(); node; node = NodeTraversal::next(*node)) {
-        if (node->renderer() && node->hasEditableStyle()) {
-            RefPtrWillBeRawPtr<CSSComputedStyleDeclaration> nodeStyle = CSSComputedStyleDeclaration::create(node);
+    for (Node& node : NodeTraversal::startsAt(selection.start().deprecatedNode())) {
+        if (node.renderer() && node.hasEditableStyle()) {
+            RefPtrWillBeRawPtr<CSSComputedStyleDeclaration> nodeStyle = CSSComputedStyleDeclaration::create(&node);
             if (nodeStyle) {
-                TriState nodeState = triStateOfStyle(nodeStyle.get(), node->isTextNode() ? EditingStyle::DoNotIgnoreTextOnlyProperties : EditingStyle::IgnoreTextOnlyProperties);
+                TriState nodeState = triStateOfStyle(nodeStyle.get(), node.isTextNode() ? EditingStyle::DoNotIgnoreTextOnlyProperties : EditingStyle::IgnoreTextOnlyProperties);
                 if (nodeIsStart) {
                     state = nodeState;
                     nodeIsStart = false;
-                } else if (state != nodeState && node->isTextNode()) {
+                } else if (state != nodeState && node.isTextNode()) {
                     state = MixedTriState;
                     break;
                 }
             }
         }
-        if (node == selection.end().deprecatedNode())
+        if (&node == selection.end().deprecatedNode())
             break;
     }
 
@@ -786,9 +786,9 @@ bool EditingStyle::conflictsWithInlineStyleOfElement(HTMLElement* element, Editi
     return conflictingProperties && !conflictingProperties->isEmpty();
 }
 
-static const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent> >& htmlElementEquivalents()
+static const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent>>& htmlElementEquivalents()
 {
-    DEFINE_STATIC_LOCAL(WillBePersistentHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent> >, HTMLElementEquivalents, ());
+    DEFINE_STATIC_LOCAL(WillBePersistentHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent>>, HTMLElementEquivalents, ());
     if (!HTMLElementEquivalents.size()) {
         HTMLElementEquivalents.append(HTMLElementEquivalent::create(CSSPropertyFontWeight, CSSValueBold, HTMLNames::bTag));
         HTMLElementEquivalents.append(HTMLElementEquivalent::create(CSSPropertyFontWeight, CSSValueBold, HTMLNames::strongTag));
@@ -811,7 +811,7 @@ bool EditingStyle::conflictsWithImplicitStyleOfElement(HTMLElement* element, Edi
     if (!m_mutableStyle)
         return false;
 
-    const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent> >& HTMLElementEquivalents = htmlElementEquivalents();
+    const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent>>& HTMLElementEquivalents = htmlElementEquivalents();
     for (size_t i = 0; i < HTMLElementEquivalents.size(); ++i) {
         const HTMLElementEquivalent* equivalent = HTMLElementEquivalents[i].get();
         if (equivalent->matches(element) && equivalent->propertyExistsInStyle(m_mutableStyle.get())
@@ -824,9 +824,9 @@ bool EditingStyle::conflictsWithImplicitStyleOfElement(HTMLElement* element, Edi
     return false;
 }
 
-static const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent> >& htmlAttributeEquivalents()
+static const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent>>& htmlAttributeEquivalents()
 {
-    DEFINE_STATIC_LOCAL(WillBePersistentHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent> >, HTMLAttributeEquivalents, ());
+    DEFINE_STATIC_LOCAL(WillBePersistentHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent>>, HTMLAttributeEquivalents, ());
     if (!HTMLAttributeEquivalents.size()) {
         // elementIsStyledSpanOrHTMLEquivalent depends on the fact each HTMLAttriuteEquivalent matches exactly one attribute
         // of exactly one element except dirAttr.
@@ -847,10 +847,10 @@ bool EditingStyle::conflictsWithImplicitStyleOfAttributes(HTMLElement* element) 
     if (!m_mutableStyle)
         return false;
 
-    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent> >& HTMLAttributeEquivalents = htmlAttributeEquivalents();
-    for (size_t i = 0; i < HTMLAttributeEquivalents.size(); ++i) {
-        if (HTMLAttributeEquivalents[i]->matches(element) && HTMLAttributeEquivalents[i]->propertyExistsInStyle(m_mutableStyle.get())
-            && !HTMLAttributeEquivalents[i]->valueIsPresentInStyle(element, m_mutableStyle.get()))
+    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent>>& HTMLAttributeEquivalents = htmlAttributeEquivalents();
+    for (const auto& equivalent : HTMLAttributeEquivalents) {
+        if (equivalent->matches(element) && equivalent->propertyExistsInStyle(m_mutableStyle.get())
+            && !equivalent->valueIsPresentInStyle(element, m_mutableStyle.get()))
             return true;
     }
 
@@ -866,10 +866,10 @@ bool EditingStyle::extractConflictingImplicitStyleOfAttributes(HTMLElement* elem
     if (!m_mutableStyle)
         return false;
 
-    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent> >& HTMLAttributeEquivalents = htmlAttributeEquivalents();
+    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent>>& HTMLAttributeEquivalents = htmlAttributeEquivalents();
     bool removed = false;
-    for (size_t i = 0; i < HTMLAttributeEquivalents.size(); ++i) {
-        const HTMLAttributeEquivalent* equivalent = HTMLAttributeEquivalents[i].get();
+    for (const auto& attribute : HTMLAttributeEquivalents) {
+        const HTMLAttributeEquivalent* equivalent = attribute.get();
 
         // unicode-bidi and direction are pushed down separately so don't push down with other styles.
         if (shouldPreserveWritingDirection == PreserveWritingDirection && equivalent->attributeName() == HTMLNames::dirAttr)
@@ -900,7 +900,7 @@ bool EditingStyle::elementIsStyledSpanOrHTMLEquivalent(const HTMLElement* elemen
     if (isHTMLSpanElement(*element))
         elementIsSpanOrElementEquivalent = true;
     else {
-        const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent> >& HTMLElementEquivalents = htmlElementEquivalents();
+        const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent>>& HTMLElementEquivalents = htmlElementEquivalents();
         size_t i;
         for (i = 0; i < HTMLElementEquivalents.size(); ++i) {
             if (HTMLElementEquivalents[i]->matches(element)) {
@@ -915,9 +915,9 @@ bool EditingStyle::elementIsStyledSpanOrHTMLEquivalent(const HTMLElement* elemen
         return elementIsSpanOrElementEquivalent; // span, b, etc... without any attributes
 
     unsigned matchedAttributes = 0;
-    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent> >& HTMLAttributeEquivalents = htmlAttributeEquivalents();
-    for (size_t i = 0; i < HTMLAttributeEquivalents.size(); ++i) {
-        if (HTMLAttributeEquivalents[i]->matches(element) && HTMLAttributeEquivalents[i]->attributeName() != HTMLNames::dirAttr)
+    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent>>& HTMLAttributeEquivalents = htmlAttributeEquivalents();
+    for (const auto& equivalent : HTMLAttributeEquivalents) {
+        if (equivalent->matches(element) && equivalent->attributeName() != HTMLNames::dirAttr)
             matchedAttributes++;
     }
 
@@ -1045,18 +1045,18 @@ void EditingStyle::mergeInlineAndImplicitStyleOfElement(Element* element, CSSPro
     styleFromRules->m_mutableStyle = extractEditingProperties(styleFromRules->m_mutableStyle.get(), propertiesToInclude);
     mergeStyle(styleFromRules->m_mutableStyle.get(), mode);
 
-    const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent> >& elementEquivalents = htmlElementEquivalents();
-    for (size_t i = 0; i < elementEquivalents.size(); ++i) {
-        if (elementMatchesAndPropertyIsNotInInlineStyleDecl(elementEquivalents[i].get(), element, mode, m_mutableStyle.get()))
-            elementEquivalents[i]->addToStyle(element, this);
+    const WillBeHeapVector<OwnPtrWillBeMember<HTMLElementEquivalent>>& elementEquivalents = htmlElementEquivalents();
+    for (const auto& equivalent : elementEquivalents) {
+        if (elementMatchesAndPropertyIsNotInInlineStyleDecl(equivalent.get(), element, mode, m_mutableStyle.get()))
+            equivalent->addToStyle(element, this);
     }
 
-    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent> >& attributeEquivalents = htmlAttributeEquivalents();
-    for (size_t i = 0; i < attributeEquivalents.size(); ++i) {
-        if (attributeEquivalents[i]->attributeName() == HTMLNames::dirAttr)
+    const WillBeHeapVector<OwnPtrWillBeMember<HTMLAttributeEquivalent>>& attributeEquivalents = htmlAttributeEquivalents();
+    for (const auto& attribute : attributeEquivalents) {
+        if (attribute->attributeName() == HTMLNames::dirAttr)
             continue; // We don't want to include directionality
-        if (elementMatchesAndPropertyIsNotInInlineStyleDecl(attributeEquivalents[i].get(), element, mode, m_mutableStyle.get()))
-            attributeEquivalents[i]->addToStyle(element, this);
+        if (elementMatchesAndPropertyIsNotInInlineStyleDecl(attribute.get(), element, mode, m_mutableStyle.get()))
+            attribute->addToStyle(element, this);
     }
 }
 

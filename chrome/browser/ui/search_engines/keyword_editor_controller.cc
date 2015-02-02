@@ -8,7 +8,6 @@
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/search_engines/template_url_table_model.h"
-#include "chrome/common/pref_names.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -61,9 +60,9 @@ void KeywordEditorController::ModifyTemplateURL(TemplateURL* template_url,
 }
 
 bool KeywordEditorController::CanEdit(const TemplateURL* url) const {
-  return (url->GetType() != TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION) &&
-      (!url_model_->is_default_search_managed() ||
-       (url != url_model_->GetDefaultSearchProvider()));
+  return (url->GetType() == TemplateURL::NORMAL) &&
+      (url != url_model_->GetDefaultSearchProvider() ||
+       !url_model_->is_default_search_managed());
 }
 
 bool KeywordEditorController::CanMakeDefault(const TemplateURL* url) const {
@@ -71,7 +70,8 @@ bool KeywordEditorController::CanMakeDefault(const TemplateURL* url) const {
 }
 
 bool KeywordEditorController::CanRemove(const TemplateURL* url) const {
-  return url != url_model_->GetDefaultSearchProvider();
+  return (url->GetType() == TemplateURL::NORMAL) &&
+      (url != url_model_->GetDefaultSearchProvider());
 }
 
 void KeywordEditorController::RemoveTemplateURL(int index) {

@@ -24,15 +24,15 @@ class ExtensionStorageMonitorFactory
   friend struct DefaultSingletonTraits<ExtensionStorageMonitorFactory>;
 
   ExtensionStorageMonitorFactory();
-  virtual ~ExtensionStorageMonitorFactory();
+  ~ExtensionStorageMonitorFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  bool ServiceIsNULLWhileTesting() const override;
 };
 
 }  // namespace extensions

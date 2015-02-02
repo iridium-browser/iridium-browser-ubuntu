@@ -14,7 +14,7 @@ namespace test {
 class TestSystemTrayDelegate : public DefaultSystemTrayDelegate {
  public:
   TestSystemTrayDelegate();
-  virtual ~TestSystemTrayDelegate();
+  ~TestSystemTrayDelegate() override;
 
   // Changes the login status when initially the delegate is created. This will
   // be called before AshTestBase::SetUp() to test the case when chrome is
@@ -42,15 +42,13 @@ class TestSystemTrayDelegate : public DefaultSystemTrayDelegate {
   void ClearSessionLengthLimit();
 
   // Overridden from SystemTrayDelegate:
-  virtual user::LoginStatus GetUserLoginStatus() const OVERRIDE;
-  virtual bool IsUserSupervised() const OVERRIDE;
-  virtual bool ShouldShowDisplayNotification() OVERRIDE;
-  virtual bool GetSessionStartTime(
-      base::TimeTicks* session_start_time) OVERRIDE;
-  virtual bool GetSessionLengthLimit(
-      base::TimeDelta* session_length_limit) OVERRIDE;
-  virtual void ShutDown() OVERRIDE;
-  virtual void SignOut() OVERRIDE;
+  user::LoginStatus GetUserLoginStatus() const override;
+  bool IsUserSupervised() const override;
+  bool ShouldShowDisplayNotification() override;
+  bool GetSessionStartTime(base::TimeTicks* session_start_time) override;
+  bool GetSessionLengthLimit(base::TimeDelta* session_length_limit) override;
+  void ShutDown() override;
+  void SignOut() override;
 
  private:
   bool should_show_display_notification_;

@@ -13,7 +13,7 @@
 #include "ipc/message_filter.h"
 
 namespace content {
-class GpuMemoryBufferImpl;
+class BrowserGpuMemoryBufferManager;
 class GpuMemoryBufferFactoryHostImpl;
 
 class CONTENT_EXPORT BrowserGpuChannelHostFactory
@@ -24,20 +24,14 @@ class CONTENT_EXPORT BrowserGpuChannelHostFactory
   static BrowserGpuChannelHostFactory* instance() { return instance_; }
 
   // GpuChannelHostFactory implementation.
-  virtual bool IsMainThread() OVERRIDE;
-  virtual base::MessageLoop* GetMainLoop() OVERRIDE;
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOLoopProxy() OVERRIDE;
-  virtual scoped_ptr<base::SharedMemory> AllocateSharedMemory(
-      size_t size) OVERRIDE;
-  virtual CreateCommandBufferResult CreateViewCommandBuffer(
+  bool IsMainThread() override;
+  base::MessageLoop* GetMainLoop() override;
+  scoped_refptr<base::MessageLoopProxy> GetIOLoopProxy() override;
+  scoped_ptr<base::SharedMemory> AllocateSharedMemory(size_t size) override;
+  CreateCommandBufferResult CreateViewCommandBuffer(
       int32 surface_id,
       const GPUCreateCommandBufferConfig& init_params,
-      int32 route_id) OVERRIDE;
-  virtual scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
-      size_t width,
-      size_t height,
-      unsigned internalformat,
-      unsigned usage) OVERRIDE;
+      int32 route_id) override;
 
   // Specify a task runner and callback to be used for a set of messages. The
   // callback will be set up on the current GpuProcessHost, identified by
@@ -60,11 +54,10 @@ class CONTENT_EXPORT BrowserGpuChannelHostFactory
 
  private:
   struct CreateRequest;
-  struct AllocateGpuMemoryBufferRequest;
   class EstablishRequest;
 
   BrowserGpuChannelHostFactory();
-  virtual ~BrowserGpuChannelHostFactory();
+  ~BrowserGpuChannelHostFactory() override;
 
   void GpuChannelEstablished();
   void CreateViewCommandBufferOnIO(
@@ -75,15 +68,12 @@ class CONTENT_EXPORT BrowserGpuChannelHostFactory
                                        CreateCommandBufferResult result);
   static void AddFilterOnIO(int gpu_host_id,
                             scoped_refptr<IPC::MessageFilter> filter);
-  static void AllocateGpuMemoryBufferOnIO(
-      AllocateGpuMemoryBufferRequest* request);
-  static void OnGpuMemoryBufferCreated(AllocateGpuMemoryBufferRequest* request,
-                                       scoped_ptr<GpuMemoryBufferImpl> buffer);
 
   const int gpu_client_id_;
   scoped_ptr<base::WaitableEvent> shutdown_event_;
   scoped_refptr<GpuChannelHost> gpu_channel_;
   scoped_ptr<GpuMemoryBufferFactoryHostImpl> gpu_memory_buffer_factory_host_;
+  scoped_ptr<BrowserGpuMemoryBufferManager> gpu_memory_buffer_manager_;
   int gpu_host_id_;
   scoped_refptr<EstablishRequest> pending_request_;
   std::vector<base::Closure> established_callbacks_;

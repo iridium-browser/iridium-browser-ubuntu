@@ -331,6 +331,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
       self.ContentTypeHandler,
       self.NoContentHandler,
       self.ServerRedirectHandler,
+      self.CrossSiteRedirectHandler,
       self.ClientRedirectHandler,
       self.GetSSLSessionCacheHandler,
       self.SSLManySmallRecords,
@@ -357,6 +358,7 @@ class TestPageHandler(testserver_base.BasePageHandler):
       'gif': 'image/gif',
       'jpeg' : 'image/jpeg',
       'jpg' : 'image/jpeg',
+      'js' : 'application/javascript',
       'json': 'application/json',
       'pdf' : 'application/pdf',
       'txt' : 'text/plain',
@@ -1418,6 +1420,35 @@ class TestPageHandler(testserver_base.BasePageHandler):
 
     return True
 
+  def CrossSiteRedirectHandler(self):
+    """Sends a server redirect to the given site. The syntax is
+    '/cross-site/hostname/...' to redirect to //hostname/...
+    It is used to navigate between different Sites, causing
+    cross-site/cross-process navigations in the browser."""
+
+    test_name = "/cross-site"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+
+    params = urllib.unquote(self.path[(len(test_name) + 1):])
+    slash = params.find('/')
+    if slash < 0:
+      self.sendRedirectHelp(test_name)
+      return True
+
+    host = params[:slash]
+    path = params[(slash+1):]
+    dest = "//%s:%s/%s" % (host, str(self.server.server_port), path)
+
+    self.send_response(301)  # moved permanently
+    self.send_header('Location', dest)
+    self.send_header('Content-Type', 'text/html')
+    self.end_headers()
+    self.wfile.write('<html><head>')
+    self.wfile.write('</head><body>Redirecting to %s</body></html>' % dest)
+
+    return True
+
   def ClientRedirectHandler(self):
     """Sends a client redirect to the given URL. The syntax is
     '/client-redirect?http://foo.bar/asdf' to redirect to
@@ -1505,9 +1536,8 @@ class TestPageHandler(testserver_base.BasePageHandler):
     self.send_header('Content-Type', 'text/plain')
     self.end_headers()
 
-    for cipher_suite in self.server.tlsConnection.clientHello.cipher_suites:
-      self.wfile.write(str(cipher_suite))
-      self.wfile.write('\n')
+    cipher_suites = self.server.tlsConnection.clientHello.cipher_suites
+    self.wfile.write('\n'.join(str(c) for c in cipher_suites))
     return True
 
   def CloseSocketHandler(self):

@@ -31,26 +31,25 @@ class KeyboardContentsDelegate : public content::WebContentsDelegate,
  public:
   KeyboardContentsDelegate(keyboard::KeyboardControllerProxy* proxy)
       : proxy_(proxy) {}
-  virtual ~KeyboardContentsDelegate() {}
+  ~KeyboardContentsDelegate() override {}
 
  private:
   // Overridden from content::WebContentsDelegate:
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE {
+      const content::OpenURLParams& params) override {
     source->GetController().LoadURL(
         params.url, params.referrer, params.transition, params.extra_headers);
     Observe(source);
     return source;
   }
 
-  virtual bool IsPopupOrPanel(
-      const content::WebContents* source) const OVERRIDE {
+  bool IsPopupOrPanel(const content::WebContents* source) const override {
     return true;
   }
 
-  virtual void MoveContents(content::WebContents* source,
-                            const gfx::Rect& pos) OVERRIDE {
+  void MoveContents(content::WebContents* source,
+                    const gfx::Rect& pos) override {
     aura::Window* keyboard = proxy_->GetKeyboardWindow();
     // keyboard window must have been added to keyboard container window at this
     // point. Otherwise, wrong keyboard bounds is used and may cause problem as
@@ -60,20 +59,23 @@ class KeyboardContentsDelegate : public content::WebContentsDelegate,
     int new_height = pos.height();
     bounds.set_y(bounds.y() + bounds.height() - new_height);
     bounds.set_height(new_height);
-    keyboard->SetBounds(bounds);
+    // Keyboard bounds should only be reset when it actually changes. Otherwise
+    // it interrupts the initial animation of showing the keyboard. Described in
+    // crbug.com/356753.
+    if (bounds != keyboard->bounds())
+      keyboard->SetBounds(bounds);
   }
 
   // Overridden from content::WebContentsDelegate:
-  virtual void RequestMediaAccessPermission(content::WebContents* web_contents,
+  void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) OVERRIDE {
+      const content::MediaResponseCallback& callback) override {
     proxy_->RequestAudioInput(web_contents, request, callback);
   }
 
   // Overridden from content::WebContentsObserver:
-  virtual void WebContentsDestroyed() OVERRIDE {
-    delete this;
-  }
+  void WebContentsDestroyed() override { delete this; }
 
   keyboard::KeyboardControllerProxy* proxy_;
 

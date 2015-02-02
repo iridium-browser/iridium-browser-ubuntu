@@ -153,19 +153,19 @@ static void high_inter_predictor(const uint8_t *src, int src_stride,
                                  int w, int h, int ref,
                                  const InterpKernel *kernel,
                                  int xs, int ys, int bd) {
-  sf->high_predict[subpel_x != 0][subpel_y != 0][ref](
+  sf->highbd_predict[subpel_x != 0][subpel_y != 0][ref](
       src, src_stride, dst, dst_stride,
       kernel[subpel_x], xs, kernel[subpel_y], ys, w, h, bd);
 }
 
-void vp9_high_build_inter_predictor(const uint8_t *src, int src_stride,
-                                    uint8_t *dst, int dst_stride,
-                                    const MV *src_mv,
-                                    const struct scale_factors *sf,
-                                    int w, int h, int ref,
-                                    const InterpKernel *kernel,
-                                    enum mv_precision precision,
-                                    int x, int y, int bd) {
+void vp9_highbd_build_inter_predictor(const uint8_t *src, int src_stride,
+                                      uint8_t *dst, int dst_stride,
+                                      const MV *src_mv,
+                                      const struct scale_factors *sf,
+                                      int w, int h, int ref,
+                                      const InterpKernel *kernel,
+                                      enum mv_precision precision,
+                                      int x, int y, int bd) {
   const int is_q4 = precision == MV_PRECISION_Q4;
   const MV mv_q4 = { is_q4 ? src_mv->row : src_mv->row * 2,
                      is_q4 ? src_mv->col : src_mv->col * 2 };
@@ -288,8 +288,9 @@ static void build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
     uint8_t *pre;
     MV32 scaled_mv;
     int xs, ys, subpel_x, subpel_y;
+    const int is_scaled = vp9_is_scaled(sf);
 
-    if (vp9_is_scaled(sf)) {
+    if (is_scaled) {
       pre = pre_buf->buf + scaled_buffer_offset(x, y, pre_buf->stride, sf);
       scaled_mv = vp9_scale_mv(&mv_q4, mi_x + x, mi_y + y, sf);
       xs = sf->x_step_q4;
@@ -385,12 +386,6 @@ static void dec_build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
                ? average_split_mvs(pd, mi, ref, block)
                : mi->mbmi.mv[ref].as_mv;
 
-
-    // TODO(jkoleszar): This clamping is done in the incorrect place for the
-    // scaling case. It needs to be done on the scaled MV, not the pre-scaling
-    // MV. Note however that it performs the subsampling aware scaling so
-    // that the result is always q4.
-    // mv_precision precision is MV_PRECISION_Q4.
     const MV mv_q4 = clamp_mv_to_umv_border_sb(xd, &mv, bw, bh,
                                                pd->subsampling_x,
                                                pd->subsampling_y);
@@ -400,6 +395,7 @@ static void dec_build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
         subpel_x, subpel_y;
     uint8_t *ref_frame, *buf_ptr;
     const YV12_BUFFER_CONFIG *ref_buf = xd->block_refs[ref]->buf;
+    const int is_scaled = vp9_is_scaled(sf);
 
     // Get reference frame pointer, width and height.
     if (plane == 0) {
@@ -412,7 +408,7 @@ static void dec_build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
       ref_frame = plane == 1 ? ref_buf->u_buffer : ref_buf->v_buffer;
     }
 
-    if (vp9_is_scaled(sf)) {
+    if (is_scaled) {
       // Co-ordinate of containing block to pixel precision.
       int x_start = (-xd->mb_to_left_edge >> (3 + pd->subsampling_x));
       int y_start = (-xd->mb_to_top_edge >> (3 + pd->subsampling_y));
@@ -451,7 +447,8 @@ static void dec_build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
     subpel_x = scaled_mv.col & SUBPEL_MASK;
     subpel_y = scaled_mv.row & SUBPEL_MASK;
 
-    // Calculate the top left corner of the best matching block in the reference frame.
+    // Calculate the top left corner of the best matching block in the
+    // reference frame.
     x0 += scaled_mv.col >> SUBPEL_BITS;
     y0 += scaled_mv.row >> SUBPEL_BITS;
     x0_16 += scaled_mv.col;
@@ -463,20 +460,20 @@ static void dec_build_inter_predictors(MACROBLOCKD *xd, int plane, int block,
 
     // Do border extension if there is motion or the
     // width/height is not a multiple of 8 pixels.
-    if (scaled_mv.col || scaled_mv.row ||
+    if (is_scaled || scaled_mv.col || scaled_mv.row ||
         (frame_width & 0x7) || (frame_height & 0x7)) {
       // Get reference block bottom right coordinate.
       int x1 = ((x0_16 + (w - 1) * xs) >> SUBPEL_BITS) + 1;
       int y1 = ((y0_16 + (h - 1) * ys) >> SUBPEL_BITS) + 1;
       int x_pad = 0, y_pad = 0;
 
-      if (subpel_x || (sf->x_step_q4 & SUBPEL_MASK)) {
+      if (subpel_x || (sf->x_step_q4 != SUBPEL_SHIFTS)) {
         x0 -= VP9_INTERP_EXTEND - 1;
         x1 += VP9_INTERP_EXTEND;
         x_pad = 1;
       }
 
-      if (subpel_y || (sf->y_step_q4 & SUBPEL_MASK)) {
+      if (subpel_y || (sf->y_step_q4 != SUBPEL_SHIFTS)) {
         y0 -= VP9_INTERP_EXTEND - 1;
         y1 += VP9_INTERP_EXTEND;
         y_pad = 1;

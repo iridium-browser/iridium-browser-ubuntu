@@ -21,21 +21,20 @@
 class StatusIconMac : public StatusIcon {
  public:
   StatusIconMac();
-  virtual ~StatusIconMac();
+  ~StatusIconMac() override;
 
   // Overridden from StatusIcon.
-  virtual void SetImage(const gfx::ImageSkia& image) OVERRIDE;
-  virtual void SetToolTip(const base::string16& tool_tip) OVERRIDE;
-  virtual void DisplayBalloon(const gfx::ImageSkia& icon,
-                              const base::string16& title,
-                              const base::string16& contents) OVERRIDE;
+  void SetImage(const gfx::ImageSkia& image) override;
+  void SetToolTip(const base::string16& tool_tip) override;
+  void DisplayBalloon(const gfx::ImageSkia& icon,
+                      const base::string16& title,
+                      const base::string16& contents) override;
 
   bool HasStatusIconMenu();
 
  protected:
   // Overridden from StatusIcon.
-  virtual void UpdatePlatformContextMenu(
-      StatusIconMenuModel* model) OVERRIDE;
+  void UpdatePlatformContextMenu(StatusIconMenuModel* model) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(StatusIconMacTest, CreateMenu);

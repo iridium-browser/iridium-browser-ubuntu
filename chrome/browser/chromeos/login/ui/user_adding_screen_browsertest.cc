@@ -25,9 +25,9 @@ using namespace testing;
 
 namespace {
 
-const char* kTestUsers[] = {"test-user1@gmail.com",
-                            "test-user2@gmail.com",
-                            "test-user3@gmail.com"};
+const char* const kTestUsers[] = {"test-user1@gmail.com",
+                                  "test-user2@gmail.com",
+                                  "test-user3@gmail.com"};
 
 }  // anonymous namespace
 
@@ -41,14 +41,14 @@ class UserAddingScreenTest : public LoginManagerTest,
                            user_adding_finished_(0) {
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() override {
     LoginManagerTest::SetUpInProcessBrowserTestFixture();
     UserAddingScreen::Get()->AddObserver(this);
   }
 
-  virtual void OnUserAddingFinished() OVERRIDE { ++user_adding_finished_; }
+  virtual void OnUserAddingFinished() override { ++user_adding_finished_; }
 
-  virtual void OnUserAddingStarted() OVERRIDE { ++user_adding_started_; }
+  virtual void OnUserAddingStarted() override { ++user_adding_started_; }
 
   void SetUserCanLock(user_manager::User* user, bool can_lock) {
     user->set_can_lock(can_lock);

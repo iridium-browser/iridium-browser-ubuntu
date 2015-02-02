@@ -1,4 +1,3 @@
-ben@chromium.org
 msw@chromium.org
 pkasting@chromium.org
 sky@chromium.org
@@ -11,6 +10,5 @@ per-file tab_helpers.*=avi@chromium.org
 
 # Instant/Search files.
 per-file browser_instant_controller*=kmadhusu@chromium.org
-per-file browser_instant_controller*=brettw@chromium.org
 per-file browser_instant_controller*=jered@chromium.org
 per-file browser_instant_controller*=samarth@chromium.org

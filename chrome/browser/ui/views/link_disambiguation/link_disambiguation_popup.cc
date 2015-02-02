@@ -19,7 +19,8 @@
 class LinkDisambiguationPopup::ZoomBubbleView
     : public views::BubbleDelegateView {
  public:
-  ZoomBubbleView(const gfx::Rect& target_rect,
+  ZoomBubbleView(views::Widget* top_level_widget,
+                 const gfx::Rect& target_rect,
                  const gfx::ImageSkia* zoomed_skia_image,
                  const aura::Window* content,
                  LinkDisambiguationPopup* popup,
@@ -30,12 +31,12 @@ class LinkDisambiguationPopup::ZoomBubbleView
 
  private:
   // views::View overrides
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
 
   // WidgetObserver overrides
-  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+  void OnWidgetClosing(views::Widget* widget) override;
 
   const float scale_;
   const aura::Window* content_;
@@ -48,13 +49,16 @@ class LinkDisambiguationPopup::ZoomBubbleView
 };
 
 LinkDisambiguationPopup::ZoomBubbleView::ZoomBubbleView(
+    views::Widget* top_level_widget,
     const gfx::Rect& target_rect,
     const gfx::ImageSkia* zoomed_skia_image,
     const aura::Window* content,
     LinkDisambiguationPopup* popup,
     const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
     const base::Callback<void(ui::MouseEvent*)>& mouse_cb)
-    : BubbleDelegateView(NULL, views::BubbleBorder::FLOAT),
+    : BubbleDelegateView(
+          top_level_widget ? top_level_widget->GetContentsView() : nullptr,
+          views::BubbleBorder::FLOAT),
       scale_(static_cast<float>(zoomed_skia_image->width()) /
           static_cast<float>(target_rect.width())),
       content_(content),
@@ -149,6 +153,7 @@ LinkDisambiguationPopup::~LinkDisambiguationPopup() {
 }
 
 void LinkDisambiguationPopup::Show(
+    views::Widget* top_level_widget,
     const SkBitmap& zoomed_bitmap,
     const gfx::Rect& target_rect,
     const gfx::NativeView content,
@@ -157,6 +162,7 @@ void LinkDisambiguationPopup::Show(
   content_ = content;
 
   view_ = new ZoomBubbleView(
+      top_level_widget,
       target_rect,
       gfx::Image::CreateFrom1xBitmap(zoomed_bitmap).ToImageSkia(),
       content_,

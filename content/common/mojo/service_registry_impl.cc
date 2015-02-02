@@ -26,7 +26,7 @@ ServiceRegistryImpl::~ServiceRegistryImpl() {
 
 void ServiceRegistryImpl::BindRemoteServiceProvider(
     mojo::ScopedMessagePipeHandle handle) {
-  DCHECK(!bound_);
+  CHECK(!bound_);
   bound_ = true;
   mojo::WeakBindToPipe(this, handle.Pass());
   while (!pending_connects_.empty()) {
@@ -44,9 +44,7 @@ void ServiceRegistryImpl::OnConnectionError() {
 void ServiceRegistryImpl::AddService(
     const std::string& service_name,
     const base::Callback<void(mojo::ScopedMessagePipeHandle)> service_factory) {
-  bool inserted = service_factories_.insert(
-      std::make_pair(service_name, service_factory)).second;
-  DCHECK(inserted);
+  service_factories_[service_name] = service_factory;
 }
 
 void ServiceRegistryImpl::RemoveService(const std::string& service_name) {

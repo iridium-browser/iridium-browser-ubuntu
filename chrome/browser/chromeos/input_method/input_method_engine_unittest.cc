@@ -15,6 +15,8 @@
 #include "chromeos/ime/mock_component_extension_ime_manager_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/mock_ime_input_context_handler.h"
+#include "ui/base/ime/text_input_flags.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace chromeos {
 
@@ -30,7 +32,8 @@ enum CallsBitmap {
   ACTIVATE = 1U,
   DEACTIVATED = 2U,
   ONFOCUS = 4U,
-  ONBLUR = 8U
+  ONBLUR = 8U,
+  ONCOMPOSITIONBOUNDSCHANGED = 16U
 };
 
 void InitInputMethod() {
@@ -65,38 +68,41 @@ class TestObserver : public InputMethodEngineInterface::Observer {
   TestObserver() : calls_bitmap_(NONE) {}
   virtual ~TestObserver() {}
 
-  virtual void OnActivate(const std::string& engine_id) OVERRIDE {
+  virtual void OnActivate(const std::string& engine_id) override {
     calls_bitmap_ |= ACTIVATE;
   }
-  virtual void OnDeactivated(const std::string& engine_id) OVERRIDE {
+  virtual void OnDeactivated(const std::string& engine_id) override {
     calls_bitmap_ |= DEACTIVATED;
   }
   virtual void OnFocus(
-      const InputMethodEngineInterface::InputContext& context) OVERRIDE {
+      const InputMethodEngineInterface::InputContext& context) override {
     calls_bitmap_ |= ONFOCUS;
   }
-  virtual void OnBlur(int context_id) OVERRIDE {
+  virtual void OnBlur(int context_id) override {
     calls_bitmap_ |= ONBLUR;
   }
   virtual void OnKeyEvent(
       const std::string& engine_id,
       const InputMethodEngineInterface::KeyboardEvent& event,
-      input_method::KeyEventHandle* key_data) OVERRIDE {}
+      input_method::KeyEventHandle* key_data) override {}
   virtual void OnInputContextUpdate(
-      const InputMethodEngineInterface::InputContext& context) OVERRIDE {}
+      const InputMethodEngineInterface::InputContext& context) override {}
   virtual void OnCandidateClicked(
       const std::string& engine_id,
       int candidate_id,
-      InputMethodEngineInterface::MouseButtonEvent button) OVERRIDE {}
+      InputMethodEngineInterface::MouseButtonEvent button) override {}
   virtual void OnMenuItemActivated(
       const std::string& engine_id,
-      const std::string& menu_id) OVERRIDE {}
+      const std::string& menu_id) override {}
   virtual void OnSurroundingTextChanged(
       const std::string& engine_id,
       const std::string& text,
       int cursor_pos,
-      int anchor_pos) OVERRIDE {}
-  virtual void OnReset(const std::string& engine_id) OVERRIDE {}
+      int anchor_pos) override {}
+  virtual void OnCompositionBoundsChanged(const gfx::Rect& bounds) override {
+    calls_bitmap_ |= ONCOMPOSITIONBOUNDSCHANGED;
+  }
+  virtual void OnReset(const std::string& engine_id) override {}
 
   unsigned char GetCallsBitmapAndReset() {
     unsigned char ret = calls_bitmap_;
@@ -138,7 +144,7 @@ class InputMethodEngineTest :  public testing::Test {
 
   void FocusIn(ui::TextInputType input_type) {
     IMEEngineHandlerInterface::InputContext input_context(
-        input_type, ui::TEXT_INPUT_MODE_DEFAULT);
+        input_type, ui::TEXT_INPUT_MODE_DEFAULT, ui::TEXT_INPUT_FLAG_NONE);
     engine_->FocusIn(input_context);
     IMEBridge::Get()->SetCurrentTextInputType(input_type);
   }
@@ -247,6 +253,14 @@ TEST_F(InputMethodEngineTest, TestHistograms) {
   histograms.ExpectBucketCount("InputMethod.CommitLength", 5, 1);
   histograms.ExpectBucketCount("InputMethod.CommitLength", 2, 1);
   histograms.ExpectBucketCount("InputMethod.CommitLength", 7, 1);
+}
+
+TEST_F(InputMethodEngineTest, TestCompositionBoundsChanged) {
+  CreateEngine(true);
+  // Enable/disable with focus.
+  engine_->SetCompositionBounds(gfx::Rect());
+  EXPECT_EQ(ONCOMPOSITIONBOUNDSCHANGED,
+            observer_->GetCallsBitmapAndReset());
 }
 
 }  // namespace input_method

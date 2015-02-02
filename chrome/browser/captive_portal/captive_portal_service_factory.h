@@ -31,13 +31,13 @@ class CaptivePortalServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<CaptivePortalServiceFactory>;
 
   CaptivePortalServiceFactory();
-  virtual ~CaptivePortalServiceFactory();
+  ~CaptivePortalServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(CaptivePortalServiceFactory);
 };

@@ -46,7 +46,7 @@ blink::WebGestureEvent CreateFlingCancelEvent(double time_stamp) {
 RenderWidgetHostViewGuest::RenderWidgetHostViewGuest(
     RenderWidgetHost* widget_host,
     BrowserPluginGuest* guest,
-    RenderWidgetHostViewBase* platform_view)
+    base::WeakPtr<RenderWidgetHostViewBase> platform_view)
     : RenderWidgetHostViewChildFrame(widget_host),
       // |guest| is NULL during test.
       guest_(guest ? guest->AsWeakPtr() : base::WeakPtr<BrowserPluginGuest>()),
@@ -177,7 +177,8 @@ void RenderWidgetHostViewGuest::Destroy() {
   // The RenderWidgetHost's destruction led here, so don't call it.
   DestroyGuestView();
 
-  platform_view_->Destroy();
+  if (platform_view_)  // The platform view might have been destroyed already.
+    platform_view_->Destroy();
 }
 
 gfx::Size RenderWidgetHostViewGuest::GetPhysicalBackingSize() const {
@@ -190,19 +191,8 @@ base::string16 RenderWidgetHostViewGuest::GetSelectedText() const {
 
 void RenderWidgetHostViewGuest::SetTooltipText(
     const base::string16& tooltip_text) {
-  platform_view_->SetTooltipText(tooltip_text);
-}
-
-void RenderWidgetHostViewGuest::AcceleratedSurfaceBuffersSwapped(
-    const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
-    int gpu_host_id) {
-  NOTREACHED();
-}
-
-void RenderWidgetHostViewGuest::AcceleratedSurfacePostSubBuffer(
-    const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
-    int gpu_host_id) {
-  NOTREACHED();
+  if (guest_)
+    guest_->SetTooltipText(tooltip_text);
 }
 
 void RenderWidgetHostViewGuest::OnSwapCompositorFrame(
@@ -294,7 +284,8 @@ void RenderWidgetHostViewGuest::SetIsLoading(bool is_loading) {
 void RenderWidgetHostViewGuest::TextInputTypeChanged(
     ui::TextInputType type,
     ui::TextInputMode input_mode,
-    bool can_compose_inline) {
+    bool can_compose_inline,
+    int flags) {
   if (!guest_)
     return;
 
@@ -302,7 +293,7 @@ void RenderWidgetHostViewGuest::TextInputTypeChanged(
   if (!rwhv)
     return;
   // Forward the information to embedding RWHV.
-  rwhv->TextInputTypeChanged(type, input_mode, can_compose_inline);
+  rwhv->TextInputTypeChanged(type, input_mode, can_compose_inline, flags);
 }
 
 void RenderWidgetHostViewGuest::ImeCancelComposition() {
@@ -359,23 +350,15 @@ void RenderWidgetHostViewGuest::SelectionBoundsChanged(
   rwhv->SelectionBoundsChanged(guest_params);
 }
 
-void RenderWidgetHostViewGuest::CopyFromCompositingSurface(
-    const gfx::Rect& src_subrect,
-    const gfx::Size& dst_size,
-    CopyFromCompositingSurfaceCallback& callback,
-    const SkColorType color_type) {
-  CHECK(guest_);
-  guest_->CopyFromCompositingSurface(src_subrect, dst_size, callback);
-}
-
-void RenderWidgetHostViewGuest::SetBackgroundOpaque(bool opaque) {
+void RenderWidgetHostViewGuest::SetBackgroundColor(SkColor color) {
   // Content embedders can toggle opaque backgrounds through this API.
   // We plumb the value here so that BrowserPlugin updates its compositing
   // state in response to this change. We also want to preserve this flag
   // after recovering from a crash so we let BrowserPluginGuest store it.
   if (!guest_)
     return;
-  RenderWidgetHostViewBase::SetBackgroundOpaque(opaque);
+  RenderWidgetHostViewBase::SetBackgroundColor(color);
+  bool opaque = GetBackgroundOpaque();
   host_->SetBackgroundOpaque(opaque);
   guest_->SetContentsOpaque(opaque);
 }
@@ -399,10 +382,6 @@ void RenderWidgetHostViewGuest::GetScreenInfo(blink::WebScreenInfo* results) {
 #if defined(OS_MACOSX)
 void RenderWidgetHostViewGuest::SetActive(bool active) {
   platform_view_->SetActive(active);
-}
-
-void RenderWidgetHostViewGuest::SetTakesFocusOnlyOnMouseDown(bool flag) {
-  platform_view_->SetTakesFocusOnlyOnMouseDown(flag);
 }
 
 void RenderWidgetHostViewGuest::SetWindowVisibility(bool visible) {
@@ -430,7 +409,7 @@ void RenderWidgetHostViewGuest::ShowDefinitionForSelection() {
       // Vertical offset from guest's top to embedder's bottom edge.
       embedder_bounds.bottom() - guest_bounds.y());
 
-  RenderWidgetHostViewMacDictionaryHelper helper(platform_view_);
+  RenderWidgetHostViewMacDictionaryHelper helper(platform_view_.get());
   helper.SetTargetView(rwhv);
   helper.set_offset(guest_offset);
   helper.ShowDefinitionForSelection();

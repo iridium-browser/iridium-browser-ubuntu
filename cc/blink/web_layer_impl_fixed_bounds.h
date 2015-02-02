@@ -6,7 +6,7 @@
 #define CC_BLINK_WEB_LAYER_IMPL_FIXED_BOUNDS_H_
 
 #include "cc/blink/web_layer_impl.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/transform.h"
 
 namespace cc_blink {
@@ -19,17 +19,18 @@ namespace cc_blink {
 class WebLayerImplFixedBounds : public WebLayerImpl {
  public:
   CC_BLINK_EXPORT WebLayerImplFixedBounds();
-  CC_BLINK_EXPORT explicit WebLayerImplFixedBounds(scoped_refptr<cc::Layer>);
+  CC_BLINK_EXPORT explicit WebLayerImplFixedBounds(
+      scoped_refptr<cc::Layer> layer);
   virtual ~WebLayerImplFixedBounds();
 
   // WebLayerImpl overrides.
-  virtual void invalidateRect(const blink::WebFloatRect& rect);
+  virtual void invalidateRect(const blink::WebRect& rect) override;
   virtual void setTransformOrigin(
-      const blink::WebFloatPoint3D& transform_origin);
-  virtual void setBounds(const blink::WebSize& bounds);
-  virtual blink::WebSize bounds() const;
-  virtual void setTransform(const SkMatrix44& transform);
-  virtual SkMatrix44 transform() const;
+      const blink::WebFloatPoint3D& transform_origin) override;
+  virtual void setBounds(const blink::WebSize& bounds) override;
+  virtual blink::WebSize bounds() const override;
+  virtual void setTransform(const SkMatrix44& transform) override;
+  virtual SkMatrix44 transform() const override;
 
   CC_BLINK_EXPORT void SetFixedBounds(gfx::Size bounds);
 

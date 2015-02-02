@@ -28,6 +28,8 @@
 #include "media/base/media_log.h"
 #include "media/base/video_decoder_config.h"
 #include "media/ffmpeg/ffmpeg_common.h"
+#include "media/filters/ffmpeg_aac_bitstream_converter.h"
+#include "media/filters/ffmpeg_bitstream_converter.h"
 #include "media/filters/ffmpeg_glue.h"
 #include "media/filters/ffmpeg_h264_to_annex_b_bitstream_converter.h"
 #include "media/filters/webvtt_util.h"
@@ -95,7 +97,6 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
       last_packet_timestamp_(kNoTimestamp()),
       last_packet_duration_(kNoTimestamp()),
       video_rotation_(VIDEO_ROTATION_0),
-      bitstream_converter_enabled_(false),
       fixup_negative_ogg_timestamps_(false) {
   DCHECK(demuxer_);
 
@@ -148,13 +149,6 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
   // Calculate the duration.
   duration_ = ConvertStreamTimestamp(stream->time_base, stream->duration);
 
-#if defined(USE_PROPRIETARY_CODECS)
-  if (stream_->codec->codec_id == AV_CODEC_ID_H264) {
-    bitstream_converter_.reset(
-        new FFmpegH264ToAnnexBBitstreamConverter(stream_->codec));
-  }
-#endif
-
   if (is_encrypted) {
     AVDictionaryEntry* key = av_dict_get(stream->metadata, "enc_key_id", NULL,
                                          0);
@@ -170,7 +164,7 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
       return;
 
     encryption_key_id_.assign(enc_key_id);
-    demuxer_->FireNeedKey(kWebMEncryptInitDataType, enc_key_id);
+    demuxer_->FireNeedKey(kWebMInitDataType, enc_key_id);
   }
 }
 
@@ -184,7 +178,7 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
 
 #if defined(USE_PROPRIETARY_CODECS)
   // Convert the packet if there is a bitstream filter.
-  if (packet->data && bitstream_converter_enabled_ &&
+  if (packet->data && bitstream_converter_ &&
       !bitstream_converter_->ConvertPacket(packet.get())) {
     LOG(ERROR) << "Format conversion failed.";
   }
@@ -382,6 +376,12 @@ void FFmpegDemuxerStream::SetEndOfStream() {
 void FFmpegDemuxerStream::FlushBuffers() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(read_cb_.is_null()) << "There should be no pending read";
+
+  // H264 and AAC require that we resend the header after flush.
+  // Reset bitstream for converter to do so.
+  // This is related to chromium issue 140371 (http://crbug.com/140371).
+  ResetBitstreamConverter();
+
   buffer_queue_.Clear();
   end_of_stream_ = false;
   last_packet_timestamp_ = kNoTimestamp();
@@ -427,11 +427,29 @@ void FFmpegDemuxerStream::EnableBitstreamConverter() {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
 #if defined(USE_PROPRIETARY_CODECS)
-  CHECK(bitstream_converter_.get());
-  bitstream_converter_enabled_ = true;
+  InitBitstreamConverter();
 #else
   NOTREACHED() << "Proprietary codecs not enabled.";
 #endif
+}
+
+void FFmpegDemuxerStream::ResetBitstreamConverter() {
+#if defined(USE_PROPRIETARY_CODECS)
+  if (bitstream_converter_)
+    InitBitstreamConverter();
+#endif  // defined(USE_PROPRIETARY_CODECS)
+}
+
+void FFmpegDemuxerStream::InitBitstreamConverter() {
+#if defined(USE_PROPRIETARY_CODECS)
+  if (stream_->codec->codec_id == AV_CODEC_ID_H264) {
+    bitstream_converter_.reset(
+        new FFmpegH264ToAnnexBBitstreamConverter(stream_->codec));
+  } else if (stream_->codec->codec_id == AV_CODEC_ID_AAC) {
+    bitstream_converter_.reset(
+        new FFmpegAACBitstreamConverter(stream_->codec));
+  }
+#endif  // defined(USE_PROPRIETARY_CODECS)
 }
 
 bool FFmpegDemuxerStream::SupportsConfigChanges() { return false; }

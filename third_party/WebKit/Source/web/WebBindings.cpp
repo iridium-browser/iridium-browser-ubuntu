@@ -33,13 +33,13 @@
 
 #include "bindings/core/v8/NPV8Object.h"
 #include "bindings/core/v8/ScriptController.h"
+#include "bindings/core/v8/V8ArrayBuffer.h"
+#include "bindings/core/v8/V8ArrayBufferView.h"
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "bindings/core/v8/V8Element.h"
 #include "bindings/core/v8/V8NPObject.h"
 #include "bindings/core/v8/V8NPUtils.h"
 #include "bindings/core/v8/V8Range.h"
-#include "bindings/core/v8/custom/V8ArrayBufferCustom.h"
-#include "bindings/core/v8/custom/V8ArrayBufferViewCustom.h"
 #include "bindings/core/v8/npruntime_impl.h"
 #include "bindings/core/v8/npruntime_priv.h"
 #include "core/dom/Range.h"
@@ -49,7 +49,6 @@
 #include "public/web/WebArrayBufferView.h"
 #include "public/web/WebElement.h"
 #include "public/web/WebRange.h"
-#include "wtf/ArrayBufferView.h"
 
 namespace blink {
 
@@ -286,11 +285,11 @@ static bool getArrayBufferImpl(NPObject* object, WebArrayBuffer* arrayBuffer, v8
     v8::Handle<v8::Object> v8Object = v8::Local<v8::Object>::New(isolate, v8NPObject->v8Object);
     if (v8Object.IsEmpty())
         return false;
-    ArrayBuffer* native = V8ArrayBuffer::hasInstance(v8Object, isolate) ? V8ArrayBuffer::toImpl(v8Object) : 0;
-    if (!native)
+    DOMArrayBuffer* impl = V8ArrayBuffer::hasInstance(v8Object, isolate) ? V8ArrayBuffer::toImpl(v8Object) : 0;
+    if (!impl)
         return false;
 
-    *arrayBuffer = WebArrayBuffer(native);
+    *arrayBuffer = WebArrayBuffer(impl->buffer());
     return true;
 }
 
@@ -307,11 +306,11 @@ static bool getArrayBufferViewImpl(NPObject* object, WebArrayBufferView* arrayBu
     v8::Handle<v8::Object> v8Object = v8::Local<v8::Object>::New(isolate, v8NPObject->v8Object);
     if (v8Object.IsEmpty())
         return false;
-    ArrayBufferView* native = V8ArrayBufferView::hasInstance(v8Object, isolate) ? V8ArrayBufferView::toImpl(v8Object) : 0;
-    if (!native)
+    DOMArrayBufferView* impl = V8ArrayBufferView::hasInstance(v8Object, isolate) ? V8ArrayBufferView::toImpl(v8Object) : 0;
+    if (!impl)
         return false;
 
-    *arrayBufferView = WebArrayBufferView(native);
+    *arrayBufferView = WebArrayBufferView(impl->view());
     return true;
 }
 
@@ -323,7 +322,7 @@ static NPObject* makeIntArrayImpl(const WebVector<int>& data, v8::Isolate* isola
         result->Set(i, v8::Number::New(isolate, data[i]));
 
     LocalDOMWindow* window = currentDOMWindow(isolate);
-    return npCreateV8ScriptObject(0, result, window, isolate);
+    return npCreateV8ScriptObject(isolate, 0, result, window);
 }
 
 static NPObject* makeStringArrayImpl(const WebVector<WebString>& data, v8::Isolate* isolate)
@@ -334,7 +333,7 @@ static NPObject* makeStringArrayImpl(const WebVector<WebString>& data, v8::Isola
         result->Set(i, v8String(isolate, data[i]));
 
     LocalDOMWindow* window = currentDOMWindow(isolate);
-    return npCreateV8ScriptObject(0, result, window, isolate);
+    return npCreateV8ScriptObject(isolate, 0, result, window);
 }
 
 bool WebBindings::getRange(NPObject* range, WebRange* webRange)
@@ -384,7 +383,7 @@ void WebBindings::popExceptionHandler()
 
 void WebBindings::toNPVariant(v8::Local<v8::Value> object, NPObject* root, NPVariant* result)
 {
-    convertV8ObjectToNPVariant(object, root, result, v8::Isolate::GetCurrent());
+    convertV8ObjectToNPVariant(v8::Isolate::GetCurrent(), object, root, result);
 }
 
 v8::Handle<v8::Value> WebBindings::toV8Value(const NPVariant* variant)
@@ -395,11 +394,11 @@ v8::Handle<v8::Value> WebBindings::toV8Value(const NPVariant* variant)
         V8NPObject* v8Object = npObjectToV8NPObject(object);
         if (!v8Object)
             return v8::Undefined(isolate);
-        return convertNPVariantToV8Object(variant, v8Object->rootObject->frame()->script().windowScriptNPObject(), isolate);
+        return convertNPVariantToV8Object(isolate, variant, v8Object->rootObject->frame()->script().windowScriptNPObject());
     }
     // Safe to pass 0 since we have checked the script object class to make sure the
     // argument is a primitive v8 type.
-    return convertNPVariantToV8Object(variant, 0, isolate);
+    return convertNPVariantToV8Object(isolate, variant, 0);
 }
 
 } // namespace blink

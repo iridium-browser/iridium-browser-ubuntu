@@ -218,6 +218,32 @@ TEST(GraphicsContextTest, trackOpaqueClipTest)
     context.restore();
 }
 
+TEST(GraphicsContextTest, trackDisplayListRecording)
+{
+    SkBitmap bitmap;
+    bitmap.allocN32Pixels(100, 100);
+    SkCanvas canvas(bitmap);
+
+    GraphicsContext context(&canvas);
+    context.setRegionTrackingMode(GraphicsContext::RegionTrackingOpaque);
+
+    Color opaque(1.0f, 0.0f, 0.0f, 1.0f);
+
+    context.fillRect(FloatRect(0, 0, 50, 50), opaque, CompositeSourceOver);
+    EXPECT_EQ_RECT(IntRect(0, 0, 50, 50), context.opaqueRegion().asRect());
+    FloatRect bounds(0, 0, 100, 100);
+    context.beginRecording(bounds);
+    context.fillRect(FloatRect(0, 0, 100, 100), opaque, CompositeSourceOver);
+    RefPtr<DisplayList> displayList = context.endRecording();
+
+    // Make sure the opaque region was unaffected by the rect drawn during DisplayList recording.
+    EXPECT_EQ_RECT(IntRect(0, 0, 50, 50), context.opaqueRegion().asRect());
+
+    // Make sure the opaque region *is* affected (reset) by drawing the DisplayList itself.
+    context.drawDisplayList(displayList.get());
+    EXPECT_EQ_RECT(IntRect(), context.opaqueRegion().asRect());
+}
+
 TEST(GraphicsContextTest, trackImageMask)
 {
     SkBitmap bitmap;
@@ -733,6 +759,12 @@ TEST(GraphicsContextTest, trackOpaqueTextTest)
     EXPECT_PIXELS_MATCH(bitmap, context.opaqueRegion().asRect());
 }
 
+static inline void writePixels(GraphicsContext* context, const SkBitmap& bm, int x, int y)
+{
+    SkAutoLockPixels locker(bm);
+    context->writePixels(bm.info(), bm.getPixels(), bm.rowBytes(), x, y);
+}
+
 TEST(GraphicsContextTest, trackOpaqueWritePixelsTest)
 {
     SkBitmap bitmap;
@@ -760,7 +792,7 @@ TEST(GraphicsContextTest, trackOpaqueWritePixelsTest)
     SkPaint paint;
     paint.setXfermodeMode(SkXfermode::kSrc_Mode);
 
-    context.writePixels(opaqueBitmap, 50, 50);
+    writePixels(&context, opaqueBitmap, 50, 50);
     EXPECT_EQ_RECT(IntRect(50, 50, 10, 10), context.opaqueRegion().asRect());
     EXPECT_PIXELS_MATCH(bitmap, context.opaqueRegion().asRect());
 
@@ -768,19 +800,19 @@ TEST(GraphicsContextTest, trackOpaqueWritePixelsTest)
     EXPECT_EQ_RECT(IntRect(10, 10, 90, 90), context.opaqueRegion().asRect());
     EXPECT_PIXELS_MATCH(bitmap, context.opaqueRegion().asRect());
 
-    context.writePixels(alphaBitmap, 10, 0);
+    writePixels(&context, alphaBitmap, 10, 0);
     EXPECT_EQ_RECT(IntRect(10, 10, 90, 90), context.opaqueRegion().asRect());
     EXPECT_PIXELS_MATCH(bitmap, context.opaqueRegion().asRect());
 
-    context.writePixels(alphaBitmap, 10, 1);
+    writePixels(&context, alphaBitmap, 10, 1);
     EXPECT_EQ_RECT(IntRect(10, 11, 90, 89), context.opaqueRegion().asRect());
     EXPECT_PIXELS_MATCH(bitmap, context.opaqueRegion().asRect());
 
-    context.writePixels(alphaBitmap, 0, 10);
+    writePixels(&context, alphaBitmap, 0, 10);
     EXPECT_EQ_RECT(IntRect(10, 11, 90, 89), context.opaqueRegion().asRect());
     EXPECT_PIXELS_MATCH(bitmap, context.opaqueRegion().asRect());
 
-    context.writePixels(alphaBitmap, 1, 10);
+    writePixels(&context, alphaBitmap, 1, 10);
     EXPECT_EQ_RECT(IntRect(11, 11, 89, 89), context.opaqueRegion().asRect());
     EXPECT_PIXELS_MATCH(bitmap, context.opaqueRegion().asRect());
 }
@@ -1181,7 +1213,7 @@ TEST(GraphicsContextTest, RecordingCanvas)
 
     // endRecording finally makes the picture accessible
     RefPtr<DisplayList> dl = context.endRecording();
-    SkPicture* pic = dl->picture();
+    SkPicture* pic = dl->picture().get();
     EXPECT_TRUE(pic);
     EXPECT_EQ(1, pic->getRefCnt());
 

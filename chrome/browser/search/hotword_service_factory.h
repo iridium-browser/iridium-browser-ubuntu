@@ -27,6 +27,9 @@ class HotwordServiceFactory : public MediaCaptureDevicesDispatcher::Observer,
   // Returns true if hotwording is allowed for |context|.
   static bool IsHotwordAllowed(content::BrowserContext* context);
 
+  // Returns whether specialized hotword hardware exists.
+  static bool IsHotwordHardwareAvailable();
+
   // Returns the current error message for the service for |context|.
   // A value of 0 indicates no error.
   static int GetCurrentError(content::BrowserContext* context);
@@ -35,9 +38,14 @@ class HotwordServiceFactory : public MediaCaptureDevicesDispatcher::Observer,
   // is browser (not profile) specific, it resides in the factory.
   static bool IsMicrophoneAvailable();
 
+  // Returns whether the state of the audio devices has been updated.
+  // Essentially it indicates the validity of the return value from
+  // IsMicrophoneAvailable().
+  static bool IsAudioDeviceStateUpdated();
+
   // Overridden from MediaCaptureDevicesDispatcher::Observer
-  virtual void OnUpdateAudioDevices(
-      const content::MediaStreamDevices& devices) OVERRIDE;
+  void OnUpdateAudioDevices(
+      const content::MediaStreamDevices& devices) override;
 
   // This will kick off the monitor that calls OnUpdateAudioDevices when the
   // number of audio devices changes (or is initialized). It needs to be a
@@ -51,13 +59,13 @@ class HotwordServiceFactory : public MediaCaptureDevicesDispatcher::Observer,
   friend struct DefaultSingletonTraits<HotwordServiceFactory>;
 
   HotwordServiceFactory();
-  virtual ~HotwordServiceFactory();
+  ~HotwordServiceFactory() override;
 
   // Overrides from BrowserContextKeyedServiceFactory:
-  virtual void RegisterProfilePrefs(
-      user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry) override;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   // Must be called from the UI thread since the instance of
   // MediaCaptureDevicesDispatcher can only be accessed on the UI thread.
@@ -66,6 +74,13 @@ class HotwordServiceFactory : public MediaCaptureDevicesDispatcher::Observer,
   bool microphone_available() { return microphone_available_; }
 
   bool microphone_available_;
+
+  // Indicates if the check for audio devices has been run such that it can be
+  // included in the error checking. Audio checking is not done immediately
+  // upon start up because of the negative impact on performance.
+  bool audio_device_state_updated_;
+
+  bool audio_device_state_updated() { return audio_device_state_updated_; }
 
   DISALLOW_COPY_AND_ASSIGN(HotwordServiceFactory);
 };

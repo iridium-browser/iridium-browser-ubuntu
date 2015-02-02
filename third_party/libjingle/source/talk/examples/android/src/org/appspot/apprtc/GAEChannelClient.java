@@ -45,27 +45,24 @@ import android.webkit.WebViewClient;
  * "androidMessageHandler".
  */
 public class GAEChannelClient {
-  private static final String TAG = "GAEChannelClient";
+  private static final String TAG = "GAERTCClient";
   private WebView webView;
   private final ProxyingMessageHandler proxyingMessageHandler;
 
   /**
    * Callback interface for messages delivered on the Google AppEngine channel.
-   *
-   * Methods are guaranteed to be invoked on the UI thread of |activity| passed
-   * to GAEChannelClient's constructor.
    */
-  public interface MessageHandler {
+  public interface GAEMessageHandler {
     public void onOpen();
-    public void onMessage(String data);
+    public void onMessage(final String data);
     public void onClose();
-    public void onError(int code, String description);
+    public void onError(final int code, final String description);
   }
 
   /** Asynchronously open an AppEngine channel. */
   @SuppressLint("SetJavaScriptEnabled")
   public GAEChannelClient(
-      Activity activity, String token, MessageHandler handler) {
+      Activity activity, String token, GAEMessageHandler handler) {
     webView = new WebView(activity);
     webView.getSettings().setJavaScriptEnabled(true);
     webView.setWebChromeClient(new WebChromeClient() {  // Purely for debugging.
@@ -83,8 +80,7 @@ public class GAEChannelClient {
               ", desc: " + description);
         }
       });
-    proxyingMessageHandler =
-        new ProxyingMessageHandler(activity, handler, token);
+    proxyingMessageHandler = new ProxyingMessageHandler(handler, token);
     webView.addJavascriptInterface(
         proxyingMessageHandler, "androidMessageHandler");
     webView.loadUrl("file:///android_asset/channel.html");
@@ -102,72 +98,52 @@ public class GAEChannelClient {
   }
 
   // Helper class for proxying callbacks from the Java<->JS interaction
-  // (private, background) thread to the Activity's UI thread.
+  // (private, background) thread.
   private static class ProxyingMessageHandler {
-    private final Activity activity;
-    private final MessageHandler handler;
-    private final boolean[] disconnected = { false };
+    private final GAEMessageHandler handler;
+    private boolean disconnected = false;
     private final String token;
 
-    public
-     ProxyingMessageHandler(Activity activity, MessageHandler handler,
-                            String token) {
-      this.activity = activity;
+    public ProxyingMessageHandler(GAEMessageHandler handler, String token) {
       this.handler = handler;
       this.token = token;
     }
 
     public void disconnect() {
-      disconnected[0] = true;
+      disconnected = true;
     }
 
-    private boolean disconnected() {
-      return disconnected[0];
-    }
-
-    @JavascriptInterface public String getToken() {
+    @JavascriptInterface
+    public String getToken() {
       return token;
     }
 
-    @JavascriptInterface public void onOpen() {
-      activity.runOnUiThread(new Runnable() {
-          public void run() {
-            if (!disconnected()) {
-              handler.onOpen();
-            }
-          }
-        });
+    @JavascriptInterface
+    public void onOpen() {
+      if (!disconnected) {
+        handler.onOpen();
+      }
     }
 
-    @JavascriptInterface public void onMessage(final String data) {
-      activity.runOnUiThread(new Runnable() {
-          public void run() {
-            if (!disconnected()) {
-              handler.onMessage(data);
-            }
-          }
-        });
+    @JavascriptInterface
+    public void onMessage(final String data) {
+      if (!disconnected) {
+        handler.onMessage(data);
+      }
     }
 
-    @JavascriptInterface public void onClose() {
-      activity.runOnUiThread(new Runnable() {
-          public void run() {
-            if (!disconnected()) {
-              handler.onClose();
-            }
-          }
-        });
+    @JavascriptInterface
+    public void onClose() {
+      if (!disconnected) {
+        handler.onClose();
+      }
     }
 
-    @JavascriptInterface public void onError(
-        final int code, final String description) {
-      activity.runOnUiThread(new Runnable() {
-          public void run() {
-            if (!disconnected()) {
-              handler.onError(code, description);
-            }
-          }
-        });
+    @JavascriptInterface
+    public void onError(final int code, final String description) {
+      if (!disconnected) {
+        handler.onError(code, description);
+      }
     }
   }
 }

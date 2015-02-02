@@ -175,22 +175,22 @@ class GetURLForURLIDTask : public history::HistoryDBTask {
         start_time_(base::Time::Now()) {
   }
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     DoURLLookup(db, &request_->source_url_);
     for (int i = 0; i < static_cast<int>(request_->candidate_urls_.size()); i++)
       DoURLLookup(db, &request_->candidate_urls_[i]);
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
+  void DoneRunOnMainThread() override {
     callback_.Run();
     TIMING_HISTOGRAM("Prerender.LocalPredictorURLLookupTime",
                      base::Time::Now() - start_time_);
   }
 
  private:
-  virtual ~GetURLForURLIDTask() {}
+  ~GetURLForURLIDTask() override {}
 
   void DoURLLookup(history::HistoryDatabase* db,
                    PrerenderLocalPredictor::LocalPredictorURLInfo* request) {
@@ -216,18 +216,18 @@ class GetVisitHistoryTask : public history::HistoryDBTask {
         visit_history_(new vector<history::BriefVisitInfo>) {
   }
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     db->GetBriefVisitInfoOfMostRecentVisits(max_visits_, visit_history_.get());
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
+  void DoneRunOnMainThread() override {
     local_predictor_->OnGetInitialVisitHistory(visit_history_.Pass());
   }
 
  private:
-  virtual ~GetVisitHistoryTask() {}
+  ~GetVisitHistoryTask() override {}
 
   PrerenderLocalPredictor* local_predictor_;
   int max_visits_;
@@ -528,7 +528,7 @@ class PrerenderLocalPredictor::PrefetchList {
 PrerenderLocalPredictor::PrerenderLocalPredictor(
     PrerenderManager* prerender_manager)
     : prerender_manager_(prerender_manager),
-      is_visit_database_observer_(false),
+      is_history_service_observer_(false),
       weak_factory_(this),
       prefetch_list_(new PrefetchList()) {
   RecordEvent(EVENT_CONSTRUCTED);
@@ -583,15 +583,16 @@ PrerenderLocalPredictor::~PrerenderLocalPredictor() {
 
 void PrerenderLocalPredictor::Shutdown() {
   timer_.Stop();
-  if (is_visit_database_observer_) {
+  if (is_history_service_observer_) {
     HistoryService* history = GetHistoryIfExists();
     CHECK(history);
-    history->RemoveVisitDatabaseObserver(this);
-    is_visit_database_observer_ = false;
+    history->RemoveObserver(this);
+    is_history_service_observer_ = false;
   }
 }
 
-void PrerenderLocalPredictor::OnAddVisit(const history::BriefVisitInfo& info) {
+void PrerenderLocalPredictor::OnAddVisit(HistoryService* history_service,
+                                         const history::BriefVisitInfo& info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RecordEvent(EVENT_ADD_VISIT);
   if (!visit_history_.get())
@@ -1138,13 +1139,13 @@ void PrerenderLocalPredictor::Init() {
   }
   HistoryService* history = GetHistoryIfExists();
   if (history) {
-    CHECK(!is_visit_database_observer_);
+    CHECK(!is_history_service_observer_);
     history->ScheduleDBTask(
         scoped_ptr<history::HistoryDBTask>(
             new GetVisitHistoryTask(this, kMaxVisitHistory)),
         &history_db_tracker_);
-    history->AddVisitDatabaseObserver(this);
-    is_visit_database_observer_ = true;
+    history->AddObserver(this);
+    is_history_service_observer_ = true;
   } else {
     RecordEvent(EVENT_INIT_FAILED_NO_HISTORY);
   }

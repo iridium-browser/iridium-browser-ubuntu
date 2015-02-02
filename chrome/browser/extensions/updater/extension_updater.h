@@ -20,11 +20,11 @@
 #include "base/scoped_observer.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/extensions/updater/extension_downloader.h"
-#include "chrome/browser/extensions/updater/extension_downloader_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/updater/extension_downloader.h"
+#include "extensions/browser/updater/extension_downloader_delegate.h"
 #include "extensions/browser/updater/manifest_fetch_data.h"
 #include "url/gurl.h"
 
@@ -91,7 +91,7 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
                    ExtensionCache* cache,
                    const ExtensionDownloader::Factory& downloader_factory);
 
-  virtual ~ExtensionUpdater();
+  ~ExtensionUpdater() override;
 
   // Starts the updater running.  Should be called at most once.
   void Start();
@@ -124,6 +124,9 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
   void set_default_check_params(const CheckParams& params) {
     default_params_ = params;
   }
+
+  // Overrides the extension cache with |extension_cache| for testing.
+  void SetExtensionCacheForTesting(ExtensionCache* extension_cache);
 
  private:
   friend class ExtensionUpdaterTest;
@@ -188,28 +191,25 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
   void DoCheckSoon();
 
   // Implementation of ExtensionDownloaderDelegate.
-  virtual void OnExtensionDownloadFailed(
-      const std::string& id,
-      Error error,
-      const PingResult& ping,
-      const std::set<int>& request_ids) OVERRIDE;
-  virtual void OnExtensionDownloadFinished(
-      const std::string& id,
-      const base::FilePath& path,
-      bool file_ownership_passed,
-      const GURL& download_url,
-      const std::string& version,
-      const PingResult& ping,
-      const std::set<int>& request_id) OVERRIDE;
-  virtual bool GetPingDataForExtension(
-      const std::string& id,
-      ManifestFetchData::PingData* ping_data) OVERRIDE;
-  virtual std::string GetUpdateUrlData(const std::string& id) OVERRIDE;
-  virtual bool IsExtensionPending(const std::string& id) OVERRIDE;
-  virtual bool GetExtensionExistingVersion(const std::string& id,
-                                           std::string* version) OVERRIDE;
-  virtual bool ShouldForceUpdate(const std::string& extension_id,
-                                 std::string* source) OVERRIDE;
+  void OnExtensionDownloadFailed(const std::string& id,
+                                 Error error,
+                                 const PingResult& ping,
+                                 const std::set<int>& request_ids) override;
+  void OnExtensionDownloadFinished(const std::string& id,
+                                   const base::FilePath& path,
+                                   bool file_ownership_passed,
+                                   const GURL& download_url,
+                                   const std::string& version,
+                                   const PingResult& ping,
+                                   const std::set<int>& request_id) override;
+  bool GetPingDataForExtension(const std::string& id,
+                               ManifestFetchData::PingData* ping_data) override;
+  std::string GetUpdateUrlData(const std::string& id) override;
+  bool IsExtensionPending(const std::string& id) override;
+  bool GetExtensionExistingVersion(const std::string& id,
+                                   std::string* version) override;
+  bool ShouldForceUpdate(const std::string& extension_id,
+                         std::string* source) override;
 
   void UpdatePingData(const std::string& id, const PingResult& ping_result);
 
@@ -217,17 +217,16 @@ class ExtensionUpdater : public ExtensionDownloaderDelegate,
   void MaybeInstallCRXFile();
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Implementation of ExtensionRegistryObserver.
-  virtual void OnExtensionWillBeInstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      bool is_update,
-      bool from_ephemeral,
-      const std::string& old_name) OVERRIDE;
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override;
 
   // Send a notification that update checks are starting.
   void NotifyStarted();

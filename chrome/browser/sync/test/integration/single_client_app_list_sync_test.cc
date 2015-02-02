@@ -30,15 +30,15 @@ class SingleClientAppListSyncTest : public SyncTest {
  public:
   SingleClientAppListSyncTest() : SyncTest(SINGLE_CLIENT) {}
 
-  virtual ~SingleClientAppListSyncTest() {}
+  ~SingleClientAppListSyncTest() override {}
 
   // SyncTest
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     SyncTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(app_list::switches::kEnableSyncAppList);
   }
 
-  virtual bool SetupClients() OVERRIDE {
+  bool SetupClients() override {
     if (!SyncTest::SetupClients())
       return false;
 

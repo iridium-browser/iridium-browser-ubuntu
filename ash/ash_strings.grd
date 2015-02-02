@@ -242,7 +242,7 @@ Press Ctrl+Alt+Z to disable.
         Lock
       </message>
       <message name="IDS_ASH_STATUS_TRAY_SIGN_IN_ANOTHER_ACCOUNT" desc="The string for the button which lets the user add another account to the current session.">
-        Sign in another account...
+        Sign in another user...
       </message>
       <message name="IDS_ASH_STATUS_TRAY_CAPTION_CANNOT_ADD_USER" desc="The caption for the error message when the user has reached the limit of multi profile users.">
         Can't sign in to another account.
@@ -284,6 +284,10 @@ Press Ctrl+Alt+Z to disable.
 
       <message name="IDS_ASH_STATUS_TRAY_UPDATE" desc="The label used in the tray popup to notify that the user should restart to get system updates.">
         Restart to update
+      </message>
+
+      <message name="IDS_ASH_STATUS_TRAY_RESTART_AND_POWERWASH_TO_UPDATE" desc="The label used in the tray popup to notify that the user should restart and powerwash the device to get system updates.">
+        Restart and powerwash to update
       </message>
 
       <message name="IDS_ASH_STATUS_TRAY_VOLUME" desc="The accessible text for the volume slider.">
@@ -391,6 +395,9 @@ Press Ctrl+Alt+Z to disable.
       </message>
       <message name="IDS_ASH_ALT_KEY" desc="Name of [Alt] key name. Shouldn't be translated in many languages actually. This name should be lower case.">
         alt
+      </message>
+      <message name="IDS_ASH_SEARCH_KEY" desc="Name of [Search] key name. This name should be lower case.">
+        search
       </message>
       <message name="IDS_ASH_ALTGR_KEY" desc="Name of [AltGr] key name. Shouldn't be translated in many languages actually. This name should be lower case.">
         altgr

@@ -94,7 +94,6 @@
 #define IDC_ENCODING_AUTO_DETECT        35500
 #define IDC_ENCODING_UTF8               35501
 #define IDC_ENCODING_UTF16LE            35502
-#define IDC_ENCODING_ISO88591           35503
 #define IDC_ENCODING_WINDOWS1252        35504
 #define IDC_ENCODING_GBK                35505
 #define IDC_ENCODING_GB18030            35506
@@ -254,6 +253,7 @@
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
+#define IDC_TOUCH_HUD_PROJECTION_TOGGLE 46400     // ChromeOS only
 
 // The range of command ids reserved for context menus added by web content.
 #define IDC_CONTENT_CONTEXT_CUSTOM_FIRST 47000

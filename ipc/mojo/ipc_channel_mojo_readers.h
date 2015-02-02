@@ -12,12 +12,6 @@
 #include "ipc/mojo/ipc_message_pipe_reader.h"
 #include "mojo/public/cpp/system/core.h"
 
-namespace mojo {
-namespace embedder {
-struct ChannelInfo;
-}
-}
-
 namespace IPC {
 
 class ChannelMojo;
@@ -33,9 +27,9 @@ class MessageReader : public MessagePipeReader {
   bool Send(scoped_ptr<Message> message);
 
   // MessagePipeReader implementation
-  virtual void OnMessageReceived() OVERRIDE;
-  virtual void OnPipeClosed() OVERRIDE;
-  virtual void OnPipeError(MojoResult error) OVERRIDE;
+  void OnMessageReceived() override;
+  void OnPipeClosed() override;
+  void OnPipeError(MojoResult error) override;
 
  private:
   ChannelMojo* owner_;
@@ -52,8 +46,8 @@ class ControlReader : public MessagePipeReader {
   virtual bool Connect();
 
   // MessagePipeReader implementation
-  virtual void OnPipeClosed() OVERRIDE;
-  virtual void OnPipeError(MojoResult error) OVERRIDE;
+  void OnPipeClosed() override;
+  void OnPipeError(MojoResult error) override;
 
  protected:
   ChannelMojo* owner_;
@@ -65,13 +59,13 @@ class ControlReader : public MessagePipeReader {
 class ServerControlReader : public ControlReader {
  public:
   ServerControlReader(mojo::ScopedMessagePipeHandle pipe, ChannelMojo* owner);
-  virtual ~ServerControlReader();
+  ~ServerControlReader() override;
 
   // ControlReader override
-  virtual bool Connect() OVERRIDE;
+  bool Connect() override;
 
   // MessagePipeReader implementation
-  virtual void OnMessageReceived() OVERRIDE;
+  void OnMessageReceived() override;
 
  private:
   MojoResult SendHelloRequest();
@@ -88,7 +82,7 @@ class ClientControlReader : public ControlReader {
   ClientControlReader(mojo::ScopedMessagePipeHandle pipe, ChannelMojo* owner);
 
   // MessagePipeReader implementation
-  virtual void OnMessageReceived() OVERRIDE;
+  void OnMessageReceived() override;
 
  private:
   MojoResult RespondHelloRequest(MojoHandle message_channel);

@@ -22,6 +22,7 @@
 #include "build/build_config.h"
 #include "content/common/sandbox_linux/sandbox_bpf_base_policy_linux.h"
 #include "content/common/sandbox_linux/sandbox_seccomp_bpf_linux.h"
+#include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/seccomp-bpf-helpers/syscall_sets.h"
 #include "sandbox/linux/services/linux_syscalls.h"
 
@@ -96,12 +97,12 @@ void AddArmGpuWhitelist(std::vector<std::string>* read_whitelist,
 
 class CrosArmGpuBrokerProcessPolicy : public CrosArmGpuProcessPolicy {
  public:
-  static sandbox::bpf_dsl::SandboxBPFDSLPolicy* Create() {
+  static sandbox::bpf_dsl::Policy* Create() {
     return new CrosArmGpuBrokerProcessPolicy();
   }
-  virtual ~CrosArmGpuBrokerProcessPolicy() {}
+  ~CrosArmGpuBrokerProcessPolicy() override {}
 
-  virtual ResultExpr EvaluateSyscall(int system_call_number) const OVERRIDE;
+  ResultExpr EvaluateSyscall(int system_call_number) const override;
 
  private:
   CrosArmGpuBrokerProcessPolicy() : CrosArmGpuProcessPolicy(false) {}
@@ -152,9 +153,6 @@ ResultExpr CrosArmGpuProcessPolicy::EvaluateSyscall(int sysno) const {
     }
 #endif  // defined(__arm__)
     default:
-      if (SyscallSets::IsAdvancedScheduler(sysno))
-        return Allow();
-
       // Default to the generic GPU policy.
       return GpuProcessPolicy::EvaluateSyscall(sysno);
   }

@@ -69,14 +69,14 @@ class NetworkLocationProvider
                           net::URLRequestContextGetter* context,
                           const GURL& url,
                           const base::string16& access_token);
-  virtual ~NetworkLocationProvider();
+  ~NetworkLocationProvider() override;
 
   // LocationProvider implementation
-  virtual bool StartProvider(bool high_accuracy) OVERRIDE;
-  virtual void StopProvider() OVERRIDE;
-  virtual void GetPosition(Geoposition *position) OVERRIDE;
-  virtual void RequestRefresh() OVERRIDE;
-  virtual void OnPermissionGranted() OVERRIDE;
+  bool StartProvider(bool high_accuracy) override;
+  void StopProvider() override;
+  void GetPosition(Geoposition* position) override;
+  void RequestRefresh() override;
+  void OnPermissionGranted() override;
 
  private:
   // Satisfies a position request from cache or network.

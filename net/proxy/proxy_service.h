@@ -97,7 +97,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                ProxyResolver* resolver,
                NetLog* net_log);
 
-  virtual ~ProxyService();
+  ~ProxyService() override;
 
   // Used internally to handle PAC queries.
   // TODO(eroman): consider naming this simply "Request".
@@ -129,6 +129,14 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                    PacRequest** pac_request,
                    NetworkDelegate* network_delegate,
                    const BoundNetLog& net_log);
+
+  // Returns true if the proxy information could be determined without spawning
+  // an asynchronous task.  Otherwise, |result| is unmodified.
+  bool TryResolveProxySynchronously(const GURL& raw_url,
+                                    int load_flags,
+                                    ProxyInfo* result,
+                                    NetworkDelegate* network_delegate,
+                                    const BoundNetLog& net_log);
 
   // This method is called after a failure to connect or resolve a host name.
   // It gives the proxy service an opportunity to reconsider the proxy to use.
@@ -202,7 +210,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   }
 
   // Returns the current configuration being used by ProxyConfigService.
-  const ProxyConfig& config() {
+  const ProxyConfig& config() const {
     return config_;
   }
 
@@ -321,6 +329,17 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                                  NetworkDelegate* network_delegate,
                                  ProxyInfo* result);
 
+  // Identical to ResolveProxy, except that |callback| is permitted to be null.
+  // if |callback.is_null()|, this function becomes a thin wrapper around
+  // |TryToCompleteSynchronously|.
+  int ResolveProxyHelper(const GURL& url,
+                         int load_flags,
+                         ProxyInfo* results,
+                         const net::CompletionCallback& callback,
+                         PacRequest** pac_request,
+                         NetworkDelegate* network_delegate,
+                         const BoundNetLog& net_log);
+
   // Cancels all of the requests sent to the ProxyResolver. These will be
   // restarted when calling SetReady().
   void SuspendAllPendingRequests();
@@ -356,16 +375,16 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
 
   // NetworkChangeNotifier::IPAddressObserver
   // When this is called, we re-fetch PAC scripts and re-run WPAD.
-  virtual void OnIPAddressChanged() OVERRIDE;
+  void OnIPAddressChanged() override;
 
   // NetworkChangeNotifier::DNSObserver
   // We respond as above.
-  virtual void OnDNSChanged() OVERRIDE;
+  void OnDNSChanged() override;
 
   // ProxyConfigService::Observer
-  virtual void OnProxyConfigChanged(
+  void OnProxyConfigChanged(
       const ProxyConfig& config,
-      ProxyConfigService::ConfigAvailability availability) OVERRIDE;
+      ProxyConfigService::ConfigAvailability availability) override;
 
   scoped_ptr<ProxyConfigService> config_service_;
   scoped_ptr<ProxyResolver> resolver_;

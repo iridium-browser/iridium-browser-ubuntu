@@ -594,7 +594,8 @@ blah /* hey! */
   }}
 
 @-webkit-keyframe blah {
-  100% { height: -500px 0; }
+  from { height: rotate(-10turn); }
+  100% { height: 500px; }
 }
 
 #rule {
@@ -738,6 +739,19 @@ b:before,
 """(replace with rgb(170, 187, 204), rgb(221, 238, 255))
     color: #bad; (replace with rgb(187, 170, 221))
     color: #bada55; (replace with rgb(186, 218, 85))""")
+
+  def testWebkitBeforeOrAfter(self):
+    self.VerifyContentsProducesOutput("""
+.test {
+  -webkit-margin-before: 10px;
+  -webkit-margin-start: 20px;
+  -webkit-padding-after: 3px;
+  -webkit-padding-end: 5px;
+}
+""", """
+- Use *-top/bottom instead of -webkit-*-before/after.
+    -webkit-margin-before: 10px; (replace with margin-top)
+    -webkit-padding-after: 3px; (replace with padding-bottom)""")
 
   def testCssZeroLengthTerms(self):
     self.VerifyContentsProducesOutput("""

@@ -42,7 +42,7 @@ using extensions::Extension;
 
 class AppBackgroundPageApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kDisablePopupBlocking);
     command_line->AppendSwitch(extensions::switches::kAllowHTTPBackgroundPage);
@@ -126,10 +126,9 @@ class AppBackgroundPageNaClTest : public AppBackgroundPageApiTest {
  public:
   AppBackgroundPageNaClTest()
       : extension_(NULL) {}
-  virtual ~AppBackgroundPageNaClTest() {
-  }
+  ~AppBackgroundPageNaClTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     AppBackgroundPageApiTest::SetUpOnMainThread();
 #if !defined(DISABLE_NACL)
     nacl::NaClProcessHost::SetPpapiKeepAliveThrottleForTesting(50);
@@ -614,7 +613,7 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest,
   ExtensionTestMessageListener nacl_modules_loaded("nacl_modules_loaded", true);
   LaunchTestingApp();
   extensions::ProcessManager* manager =
-    extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+      extensions::ProcessManager::Get(browser()->profile());
   ImpulseCallbackCounter active_impulse_counter(manager, extension()->id());
   EXPECT_TRUE(nacl_modules_loaded.WaitUntilSatisfied());
 
@@ -640,7 +639,7 @@ IN_PROC_BROWSER_TEST_F(AppBackgroundPageNaClTest,
   ExtensionTestMessageListener nacl_modules_loaded("nacl_modules_loaded", true);
   LaunchTestingApp();
   extensions::ProcessManager* manager =
-    extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+      extensions::ProcessManager::Get(browser()->profile());
   ImpulseCallbackCounter idle_impulse_counter(manager, extension()->id());
   EXPECT_TRUE(nacl_modules_loaded.WaitUntilSatisfied());
 

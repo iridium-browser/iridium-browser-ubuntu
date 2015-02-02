@@ -133,7 +133,7 @@ WebInspector.MediaQueryInspector.prototype = {
             return;
 
         var locations = mediaQueryMarker._locations;
-        var uiLocations = new StringMap();
+        var uiLocations = new Map();
         for (var i = 0; i < locations.length; ++i) {
             var uiLocation = WebInspector.cssWorkspaceBinding.rawLocationToUILocation(locations[i]);
             if (!uiLocation)
@@ -142,7 +142,7 @@ WebInspector.MediaQueryInspector.prototype = {
             uiLocations.set(descriptor, uiLocation);
         }
 
-        var contextMenuItems = uiLocations.keys().sort();
+        var contextMenuItems = uiLocations.keysArray().sort();
         var contextMenu = new WebInspector.ContextMenu(event);
         var subMenuItem = contextMenu.appendSubMenuItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Reveal in source code" : "Reveal In Source Code"));
         for (var i = 0; i < contextMenuItems.length; ++i) {
@@ -321,7 +321,7 @@ WebInspector.MediaQueryInspector.prototype = {
             "media-inspector-marker-min-max-width",
             "media-inspector-marker-min-width"
         ];
-        var markerElement = document.createElementWithClass("div", "media-inspector-marker");
+        var markerElement = createElementWithClass("div", "media-inspector-marker");
         var leftPixelValue = minWidthValue ? (minWidthValue - this._offset) / zoomFactor : 0;
         markerElement.style.left = leftPixelValue + "px";
         markerElement.classList.add(styleClassPerSection[model.section()]);

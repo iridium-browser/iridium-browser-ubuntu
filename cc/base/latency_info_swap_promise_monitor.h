@@ -22,11 +22,11 @@ class CC_EXPORT LatencyInfoSwapPromiseMonitor : public SwapPromiseMonitor {
   LatencyInfoSwapPromiseMonitor(ui::LatencyInfo* latency,
                                 LayerTreeHost* layer_tree_host,
                                 LayerTreeHostImpl* layer_tree_host_impl);
-  virtual ~LatencyInfoSwapPromiseMonitor();
+  ~LatencyInfoSwapPromiseMonitor() override;
 
-  virtual void OnSetNeedsCommitOnMain() OVERRIDE;
-  virtual void OnSetNeedsRedrawOnImpl() OVERRIDE;
-  virtual void OnForwardScrollUpdateToMainThreadOnImpl() OVERRIDE;
+  void OnSetNeedsCommitOnMain() override;
+  void OnSetNeedsRedrawOnImpl() override;
+  void OnForwardScrollUpdateToMainThreadOnImpl() override;
 
  private:
   ui::LatencyInfo* latency_;

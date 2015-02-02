@@ -37,6 +37,7 @@
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8AbstractEventListener.h"
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8DOMException.h"
 #include "bindings/core/v8/V8DOMTokenList.h"
 #include "bindings/core/v8/V8EventTarget.h"
 #include "bindings/core/v8/V8HTMLAllCollection.h"
@@ -45,15 +46,6 @@
 #include "bindings/core/v8/V8NodeList.h"
 #include "bindings/core/v8/V8ScriptRunner.h"
 #include "bindings/core/v8/V8Storage.h"
-#include "bindings/core/v8/custom/V8Float32ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Float64ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Int16ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Int32ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Int8ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Uint16ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Uint32ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Uint8ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Uint8ClampedArrayCustom.h"
 #include "core/events/EventTarget.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/inspector/InjectedScript.h"
@@ -88,7 +80,7 @@ void V8InjectedScriptHost::inspectedObjectMethodCustom(const v8::FunctionCallbac
         return;
 
     if (!info[0]->IsInt32()) {
-        V8ThrowException::throwTypeError("argument has to be an integer", info.GetIsolate());
+        V8ThrowException::throwTypeError(info.GetIsolate(), "argument has to be an integer");
         return;
     }
 
@@ -133,6 +125,8 @@ void V8InjectedScriptHost::internalConstructorNameMethodCustom(const v8::Functio
                     result = constructorName;
             }
         }
+        if (toCoreStringWithUndefinedOrNullCheck(result) == "Object" && object->IsFunction())
+            result = v8AtomicString(info.GetIsolate(), "Function");
     }
 
     v8SetReturnValue(info, result);
@@ -187,6 +181,10 @@ void V8InjectedScriptHost::subtypeMethodCustom(const v8::FunctionCallbackInfo<v8
         || V8HTMLCollection::hasInstance(value, isolate)
         || V8HTMLAllCollection::hasInstance(value, isolate)) {
         v8SetReturnValue(info, v8AtomicString(isolate, "array"));
+        return;
+    }
+    if (value->IsNativeError() || V8DOMException::hasInstance(value, isolate)) {
+        v8SetReturnValue(info, v8AtomicString(isolate, "error"));
         return;
     }
 }

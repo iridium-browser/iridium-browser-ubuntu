@@ -140,29 +140,24 @@ class FakeExtensionGCMAppHandler : public ExtensionGCMAppHandler {
         app_handler_count_drop_to_zero_(false) {
   }
 
-  virtual ~FakeExtensionGCMAppHandler() {
-  }
+  ~FakeExtensionGCMAppHandler() override {}
 
-  virtual void OnMessage(
+  void OnMessage(const std::string& app_id,
+                 const gcm::GCMClient::IncomingMessage& message) override {}
+
+  void OnMessagesDeleted(const std::string& app_id) override {}
+
+  void OnSendError(
       const std::string& app_id,
-      const gcm::GCMClient::IncomingMessage& message) OVERRIDE {
-  }
+      const gcm::GCMClient::SendErrorDetails& send_error_details) override {}
 
-  virtual void OnMessagesDeleted(const std::string& app_id) OVERRIDE {
-  }
-
-  virtual void OnSendError(
-      const std::string& app_id,
-      const gcm::GCMClient::SendErrorDetails& send_error_details) OVERRIDE {
-  }
-
-  virtual void OnUnregisterCompleted(const std::string& app_id,
-                                     gcm::GCMClient::Result result) OVERRIDE {
+  void OnUnregisterCompleted(const std::string& app_id,
+                             gcm::GCMClient::Result result) override {
     unregistration_result_ = result;
     waiter_->SignalCompleted();
   }
 
-  virtual void RemoveAppHandler(const std::string& app_id) OVERRIDE{
+  void RemoveAppHandler(const std::string& app_id) override {
     ExtensionGCMAppHandler::RemoveAppHandler(app_id);
     if (!GetGCMDriver()->app_handlers().size())
       app_handler_count_drop_to_zero_ = true;
@@ -203,11 +198,10 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
         unregistration_result_(gcm::GCMClient::UNKNOWN_ERROR) {
   }
 
-  virtual ~ExtensionGCMAppHandlerTest() {
-  }
+  ~ExtensionGCMAppHandlerTest() override {}
 
   // Overridden from test::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     // Make BrowserThread work in unittest.
@@ -258,7 +252,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     gcm_app_handler_.reset(new FakeExtensionGCMAppHandler(profile(), &waiter_));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
 #if defined(OS_CHROMEOS)
     test_user_manager_.reset();
 #endif

@@ -37,6 +37,7 @@
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/fetch/ResourceLoader.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
@@ -439,9 +440,10 @@ void DocumentLoader::cancelLoadAfterXFrameOptionsOrCSPDenied(const ResourceRespo
     return;
 }
 
-void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse& response)
+void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
     ASSERT_UNUSED(resource, m_mainResource == resource);
+    ASSERT_UNUSED(handle, !handle);
     RefPtr<DocumentLoader> protect(this);
 
     m_applicationCacheHost->didReceiveResponseForMainResource(response);
@@ -509,7 +511,7 @@ void DocumentLoader::ensureWriter(const AtomicString& mimeType, const KURL& over
     if (m_writer)
         return;
 
-    const AtomicString& encoding = overrideEncoding().isNull() ? response().textEncodingName() : overrideEncoding();
+    const AtomicString& encoding = m_frame->host()->overrideEncoding().isNull() ? response().textEncodingName() : m_frame->host()->overrideEncoding();
 
     // Prepare a DocumentInit before clearing the frame, because it may need to
     // inherit an aliased security context.
@@ -520,6 +522,10 @@ void DocumentLoader::ensureWriter(const AtomicString& mimeType, const KURL& over
 
     m_writer = createWriterFor(0, init, mimeType, encoding, false);
     m_writer->setDocumentWasLoadedAsPartOfNavigation();
+
+    if (m_substituteData.isValid() && m_substituteData.forceSynchronousLoad())
+        m_writer->forceSynchronousParse();
+
     // This should be set before receivedFirstData().
     if (!overridingURL.isEmpty())
         m_frame->document()->setBaseURLOverride(overridingURL);
@@ -536,7 +542,7 @@ void DocumentLoader::commitData(const char* bytes, size_t length)
     m_writer->addData(bytes, length);
 }
 
-void DocumentLoader::dataReceived(Resource* resource, const char* data, int length)
+void DocumentLoader::dataReceived(Resource* resource, const char* data, unsigned length)
 {
     ASSERT(data);
     ASSERT(length);
@@ -675,7 +681,7 @@ bool DocumentLoader::scheduleArchiveLoad(Resource* cachedResource, const Resourc
     }
 
     cachedResource->setLoading(true);
-    cachedResource->responseReceived(archiveResource->response());
+    cachedResource->responseReceived(archiveResource->response(), nullptr);
     SharedBuffer* data = archiveResource->data();
     if (data)
         cachedResource->appendData(data->data(), data->size());

@@ -30,7 +30,8 @@
 
 /**
  * @constructor
- * @implements {WebInspector.ExtensionServerAPI}
+ * @extends {WebInspector.Object}
+ * @suppressGlobalPropertiesCheck
  */
 WebInspector.ExtensionServer = function()
 {
@@ -44,6 +45,10 @@ WebInspector.ExtensionServer = function()
     this._lastRequestId = 0;
     this._registeredExtensions = {};
     this._status = new WebInspector.ExtensionStatus();
+    /** @type {!Array.<!WebInspector.ExtensionSidebarPane>} */
+    this._sidebarPanes = [];
+    /** @type {!Array.<!WebInspector.ExtensionAuditCategory>} */
+    this._auditCategories = [];
 
     var commands = WebInspector.extensionAPI.Commands;
 
@@ -75,12 +80,26 @@ WebInspector.ExtensionServer = function()
     this._registerHandler(commands.Unsubscribe, this._onUnsubscribe.bind(this));
     this._registerHandler(commands.UpdateButton, this._onUpdateButton.bind(this));
     this._registerHandler(commands.UpdateAuditProgress, this._onUpdateAuditProgress.bind(this));
-    window.addEventListener("message", this._onWindowMessage.bind(this), false);
+    window.addEventListener("message", this._onWindowMessage.bind(this), false);  // Only for main window.
 
     this._initExtensions();
 }
 
+WebInspector.ExtensionServer.Events = {
+    SidebarPaneAdded: "SidebarPaneAdded",
+    AuditCategoryAdded: "AuditCategoryAdded"
+}
+
 WebInspector.ExtensionServer.prototype = {
+    initializeExtensions: function()
+    {
+        this._initializeCommandIssued = true;
+        if (this._pendingExtensionInfos) {
+            this._addExtensions(this._pendingExtensionInfos);
+            delete this._pendingExtensionInfos;
+        }
+    },
+
     /**
      * @return {boolean}
      */
@@ -89,21 +108,36 @@ WebInspector.ExtensionServer.prototype = {
         return !!Object.keys(this._registeredExtensions).length;
     },
 
+    /**
+     * @param {string} panelId
+     * @param {string} action
+     * @param {string=} searchString
+     */
     notifySearchAction: function(panelId, action, searchString)
     {
         this._postNotification(WebInspector.extensionAPI.Events.PanelSearch + panelId, action, searchString);
     },
 
+    /**
+     * @param {string} identifier
+     * @param {number=} frameIndex
+     */
     notifyViewShown: function(identifier, frameIndex)
     {
         this._postNotification(WebInspector.extensionAPI.Events.ViewShown + identifier, frameIndex);
     },
 
+    /**
+     * @param {string} identifier
+     */
     notifyViewHidden: function(identifier)
     {
         this._postNotification(WebInspector.extensionAPI.Events.ViewHidden + identifier);
     },
 
+    /**
+     * @param {string} identifier
+     */
     notifyButtonClicked: function(identifier)
     {
         this._postNotification(WebInspector.extensionAPI.Events.ButtonClicked + identifier);
@@ -116,15 +150,23 @@ WebInspector.ExtensionServer.prototype = {
         this._postNotification(WebInspector.extensionAPI.Events.InspectedURLChanged, url);
     },
 
-    startAuditRun: function(category, auditRun)
+
+    /**
+     * @param {string} categoryId
+     * @param {!WebInspector.ExtensionAuditCategoryResults} auditResults
+     */
+    startAuditRun: function(categoryId, auditResults)
     {
-        this._clientObjects[auditRun.id] = auditRun;
-        this._postNotification("audit-started-" + category.id, auditRun.id);
+        this._clientObjects[auditResults.id()] = auditResults;
+        this._postNotification("audit-started-" + categoryId, auditResults.id());
     },
 
-    stopAuditRun: function(auditRun)
+    /**
+     * @param {!WebInspector.ExtensionAuditCategoryResults} auditResults
+     */
+    stopAuditRun: function(auditResults)
     {
-        delete this._clientObjects[auditRun.id];
+        delete this._clientObjects[auditResults.id()];
     },
 
     /**
@@ -201,11 +243,15 @@ WebInspector.ExtensionServer.prototype = {
         NetworkAgent.setExtraHTTPHeaders(allHeaders);
     },
 
+    /**
+     * @param {*} message
+     * @suppressGlobalPropertiesCheck
+     */
     _onApplyStyleSheet: function(message)
     {
         if (!Runtime.experiments.isEnabled("applyCustomStylesheet"))
             return;
-        var styleSheet = document.createElement("style");
+        var styleSheet = createElement("style");
         styleSheet.textContent = message.styleSheet;
         document.head.appendChild(styleSheet);
     },
@@ -219,26 +265,35 @@ WebInspector.ExtensionServer.prototype = {
             return this._status.E_EXISTS(id);
 
         var page = this._expandResourcePath(port._extensionOrigin, message.page);
-        var panelDescriptor = new WebInspector.ExtensionServerPanelDescriptor(id, message.title, new WebInspector.ExtensionPanel(id, page));
-        this._clientObjects[id] = panelDescriptor.panel();
+        var panelDescriptor = new WebInspector.ExtensionServerPanelDescriptor(id, message.title, new WebInspector.ExtensionPanel(this, id, page));
+        this._clientObjects[id] = panelDescriptor;
         WebInspector.inspectorView.addPanel(panelDescriptor);
         return this._status.OK();
     },
 
     _onShowPanel: function(message)
     {
-        // Note: WebInspector.inspectorView.showPanel already sanitizes input.
-        WebInspector.inspectorView.showPanel(message.id);
+        WebInspector.inspectorView.showPanel(message.id).done();
     },
 
     _onCreateStatusBarButton: function(message, port)
     {
-        var panel = this._clientObjects[message.panel];
-        if (!panel || !(panel instanceof WebInspector.ExtensionPanel))
+        var panelDescriptor = this._clientObjects[message.panel];
+        if (!panelDescriptor || !(panelDescriptor instanceof WebInspector.ExtensionServerPanelDescriptor))
             return this._status.E_NOTFOUND(message.panel);
-        var button = new WebInspector.ExtensionButton(message.id, this._expandResourcePath(port._extensionOrigin, message.icon), message.tooltip, message.disabled);
+        var button = new WebInspector.ExtensionButton(this, message.id, this._expandResourcePath(port._extensionOrigin, message.icon), message.tooltip, message.disabled);
         this._clientObjects[message.id] = button;
-        panel.addStatusBarItem(button.element);
+
+        panelDescriptor.panel().then(appendButton).done();
+
+        /**
+         * @param {!WebInspector.Panel} panel
+         */
+        function appendButton(panel)
+        {
+            /** @type {!WebInspector.ExtensionPanel} panel*/ (panel).addStatusBarItem(button.element);
+        }
+
         return this._status.OK();
     },
 
@@ -253,17 +308,23 @@ WebInspector.ExtensionServer.prototype = {
 
     _onCreateSidebarPane: function(message)
     {
-        var panel = WebInspector.inspectorView.panel(message.panel);
-        if (!panel)
+        if (message.panel !== "elements" && message.panel !== "sources")
             return this._status.E_NOTFOUND(message.panel);
-        if (!panel.addExtensionSidebarPane)
-            return this._status.E_NOTSUPPORTED();
         var id = message.id;
-        var sidebar = new WebInspector.ExtensionSidebarPane(message.title, id);
+        var sidebar = new WebInspector.ExtensionSidebarPane(this, message.panel, message.title, id);
+        this._sidebarPanes.push(sidebar);
         this._clientObjects[id] = sidebar;
-        panel.addExtensionSidebarPane(id, sidebar);
+        this.dispatchEventToListeners(WebInspector.ExtensionServer.Events.SidebarPaneAdded, sidebar);
 
         return this._status.OK();
+    },
+
+    /**
+     * @return {!Array.<!WebInspector.ExtensionSidebarPane>}
+     */
+    sidebarPanes: function()
+    {
+        return this._sidebarPanes;
     },
 
     _onSetSidebarHeight: function(message)
@@ -455,8 +516,6 @@ WebInspector.ExtensionServer.prototype = {
 
     _onGetHAR: function()
     {
-        // Wake up the "network" module for HAR operations.
-        WebInspector.inspectorView.panel("network");
         var requests = WebInspector.networkLog.requests;
         var harLog = (new WebInspector.HARLog(requests)).build();
         for (var i = 0; i < harLog.entries.length; ++i)
@@ -510,8 +569,13 @@ WebInspector.ExtensionServer.prototype = {
          */
         function onContentAvailable(content)
         {
+            var contentEncoded = false;
+            if (contentProvider instanceof WebInspector.Resource)
+                contentEncoded = contentProvider.contentEncoded;
+            if (contentProvider instanceof WebInspector.NetworkRequest)
+                contentEncoded = contentProvider.contentEncoded;
             var response = {
-                encoding: (content === null) || contentProvider.contentType().isTextType() ? "" : "base64",
+                encoding: contentEncoded && content ? "base64" : "",
                 content: content
             };
             this._dispatchCallback(message.requestId, port, response);
@@ -580,16 +644,22 @@ WebInspector.ExtensionServer.prototype = {
     _onAddAuditCategory: function(message, port)
     {
         var category = new WebInspector.ExtensionAuditCategory(port._extensionOrigin, message.id, message.displayName, message.resultCount);
-        if (WebInspector.inspectorView.panel("audits").getCategory(category.id))
-            return this._status.E_EXISTS(category.id);
         this._clientObjects[message.id] = category;
-        // FIXME: register module manager extension instead of waking up audits module.
-        WebInspector.inspectorView.panel("audits").addCategory(category);
+        this._auditCategories.push(category);
+        this.dispatchEventToListeners(WebInspector.ExtensionServer.Events.AuditCategoryAdded, category);
+    },
+
+    /**
+     * @return {!Array.<!WebInspector.ExtensionAuditCategory>}
+     */
+    auditCategories: function()
+    {
+        return this._auditCategories;
     },
 
     _onAddAuditResult: function(message)
     {
-        var auditResult = this._clientObjects[message.resultId];
+        var auditResult = /** {!WebInspector.ExtensionAuditCategoryResults} */ (this._clientObjects[message.resultId]);
         if (!auditResult)
             return this._status.E_NOTFOUND(message.resultId);
         try {
@@ -602,7 +672,7 @@ WebInspector.ExtensionServer.prototype = {
 
     _onUpdateAuditProgress: function(message)
     {
-        var auditResult = this._clientObjects[message.resultId];
+        var auditResult = /** {!WebInspector.ExtensionAuditCategoryResults} */ (this._clientObjects[message.resultId]);
         if (!auditResult)
             return this._status.E_NOTFOUND(message.resultId);
         auditResult.updateProgress(Math.min(Math.max(0, message.progress), 1));
@@ -610,7 +680,7 @@ WebInspector.ExtensionServer.prototype = {
 
     _onStopAuditCategoryRun: function(message)
     {
-        var auditRun = this._clientObjects[message.resultId];
+        var auditRun = /** {!WebInspector.ExtensionAuditCategoryResults} */ (this._clientObjects[message.resultId]);
         if (!auditRun)
             return this._status.E_NOTFOUND(message.resultId);
         auditRun.done();
@@ -621,6 +691,10 @@ WebInspector.ExtensionServer.prototype = {
         const Esc = "U+001B";
         message.entries.forEach(handleEventEntry);
 
+        /**
+         * @param {*} entry
+         * @suppressGlobalPropertiesCheck
+         */
         function handleEventEntry(entry)
         {
             if (!entry.ctrlKey && !entry.altKey && !entry.metaKey && !/^F\d+$/.test(entry.keyIdentifier) && entry.keyIdentifier !== Esc)
@@ -685,39 +759,12 @@ WebInspector.ExtensionServer.prototype = {
 
         this._registerSubscriptionHandler(WebInspector.extensionAPI.Events.PanelObjectSelected + "elements",
             onElementsSubscriptionStarted.bind(this), onElementsSubscriptionStopped.bind(this));
-
-        this._registerAutosubscriptionHandler(WebInspector.extensionAPI.Events.PanelObjectSelected + "sources",
-            WebInspector.notifications,
-            WebInspector.SourceFrame.Events.SelectionChanged,
-            this._notifySourceFrameSelectionChanged);
         this._registerResourceContentCommittedHandler(this._notifyUISourceCodeContentCommitted);
 
         WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.InspectedURLChanged,
             this._inspectedURLChanged, this);
 
         InspectorExtensionRegistry.getExtensionsAsync();
-    },
-
-    /**
-     * @param {!WebInspector.TextRange} textRange
-     */
-    _makeSourceSelection: function(textRange)
-    {
-        var sourcesPanel = WebInspector.inspectorView.panel("sources");
-        var selection = {
-            startLine: textRange.startLine,
-            startColumn: textRange.startColumn,
-            endLine: textRange.endLine,
-            endColumn: textRange.endColumn,
-            url: sourcesPanel.sourcesView().currentUISourceCode().uri()
-        };
-
-        return selection;
-    },
-
-    _notifySourceFrameSelectionChanged: function(event)
-    {
-        this._postNotification(WebInspector.extensionAPI.Events.PanelObjectSelected + "sources", this._makeSourceSelection(event.data));
     },
 
     _notifyConsoleMessageAdded: function(event)
@@ -741,8 +788,6 @@ WebInspector.ExtensionServer.prototype = {
     _notifyRequestFinished: function(event)
     {
         var request = /** @type {!WebInspector.NetworkRequest} */ (event.data);
-        // Wake up the "network" module for HAR operations.
-        WebInspector.inspectorView.panel("network");
         this._postNotification(WebInspector.extensionAPI.Events.NetworkRequestFinished, this._requestId(request), (new WebInspector.HAREntry(request)).build());
     },
 
@@ -754,13 +799,17 @@ WebInspector.ExtensionServer.prototype = {
     /**
      * @param {!Array.<!ExtensionDescriptor>} extensionInfos
      */
-    addExtensions: function(extensionInfos)
+    _addExtensions: function(extensionInfos)
     {
-        extensionInfos.forEach(this._addExtension, this);
+        if (this._initializeCommandIssued)
+            extensionInfos.forEach(this._addExtension, this);
+        else
+            this._pendingExtensionInfos = extensionInfos;
     },
 
     /**
      * @param {!ExtensionDescriptor} extensionInfo
+     * @suppressGlobalPropertiesCheck
      */
     _addExtension: function(extensionInfo)
     {
@@ -780,10 +829,10 @@ WebInspector.ExtensionServer.prototype = {
                 InspectorFrontendHost.setInjectedScriptForOrigin(extensionOrigin, buildExtensionAPIInjectedScript(extensionInfo));
                 this._registeredExtensions[extensionOrigin] = { name: name };
             }
-            var iframe = document.createElement("iframe");
+            var iframe = createElement("iframe");
             iframe.src = startPage;
             iframe.style.display = "none";
-            document.body.appendChild(iframe);
+            document.body.appendChild(iframe);  // Only for main window.
         } catch (e) {
             console.error("Failed to initialize extension " + startPage + ":" + e);
             return false;
@@ -984,7 +1033,9 @@ WebInspector.ExtensionServer.prototype = {
             contextId = context.id;
         }
         RuntimeAgent.evaluate(expression, "extension", exposeCommandLineAPI, true, contextId, returnByValue, false, callback);
-    }
+    },
+
+    __proto__: WebInspector.Object.prototype
 }
 
 /**
@@ -1019,11 +1070,11 @@ WebInspector.ExtensionServerPanelDescriptor.prototype = {
     },
 
     /**
-     * @return {!WebInspector.Panel}
+     * @return {!Promise.<!WebInspector.Panel>}
      */
     panel: function()
     {
-        return this._panel;
+        return Promise.resolve(this._panel);
     }
 }
 
@@ -1065,3 +1116,15 @@ WebInspector.ExtensionStatus.Record;
 
 WebInspector.extensionAPI = {};
 defineCommonExtensionSymbols(WebInspector.extensionAPI);
+
+WebInspector.addExtensions = function(extensions)
+{
+    if (WebInspector.extensionServer._overridePlatformExtensionAPIForTest)
+        window.buildPlatformExtensionAPI = WebInspector.extensionServer._overridePlatformExtensionAPIForTest;
+    WebInspector.extensionServer._addExtensions(extensions);
+}
+
+WebInspector.setInspectedTabId = function(tabId)
+{
+    WebInspector._inspectedTabId = tabId;
+}

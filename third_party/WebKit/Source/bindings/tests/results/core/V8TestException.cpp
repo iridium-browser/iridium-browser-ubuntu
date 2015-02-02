@@ -20,7 +20,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestException::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestException::domTemplate, V8TestException::refObject, V8TestException::derefObject, V8TestException::createPersistentHandle, 0, 0, 0, V8TestException::installConditionallyEnabledMethods, V8TestException::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeExceptionPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestException::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestException::domTemplate, V8TestException::refObject, V8TestException::derefObject, V8TestException::trace, 0, 0, 0, V8TestException::installConditionallyEnabledMethods, V8TestException::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeExceptionPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestException.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -28,8 +28,6 @@ const WrapperTypeInfo V8TestException::wrapperTypeInfo = { gin::kEmbedderBlink, 
 const WrapperTypeInfo& TestException::s_wrapperTypeInfo = V8TestException::wrapperTypeInfo;
 
 namespace TestExceptionV8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void readonlyUnsignedShortAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
@@ -89,8 +87,10 @@ static void installV8TestExceptionTemplate(v8::Handle<v8::FunctionTemplate> func
         0, 0,
         0, 0,
         isolate);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
     static const V8DOMConfiguration::ConstantConfiguration V8TestExceptionConstants[] = {
         {"UNSIGNED_SHORT_CONSTANT", 1, 0, 0, V8DOMConfiguration::ConstantTypeUnsignedShort},
     };
@@ -124,21 +124,14 @@ TestException* V8TestException::toImplWithTypeCheck(v8::Isolate* isolate, v8::Ha
     return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestException>() : 0;
 }
 
-
-void V8TestException::refObject(ScriptWrappableBase* internalPointer)
+void V8TestException::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestException>()->ref();
+    scriptWrappableBase->toImpl<TestException>()->ref();
 }
 
-void V8TestException::derefObject(ScriptWrappableBase* internalPointer)
+void V8TestException::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestException>()->deref();
-}
-
-WrapperPersistentNode* V8TestException::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<TestException>()->deref();
 }
 
 template<>

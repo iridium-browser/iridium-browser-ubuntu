@@ -16,13 +16,13 @@ class PanelResource;
 class PanelInformation : public NotificationObservingWebContentsInformation {
  public:
   PanelInformation();
-  virtual ~PanelInformation();
+  ~PanelInformation() override;
 
   // WebContentsInformation implementation.
-  virtual bool CheckOwnership(content::WebContents* web_contents) OVERRIDE;
-  virtual void GetAll(const NewWebContentsCallback& callback) OVERRIDE;
-  virtual scoped_ptr<RendererResource> MakeResource(
-      content::WebContents* web_contents) OVERRIDE;
+  bool CheckOwnership(content::WebContents* web_contents) override;
+  void GetAll(const NewWebContentsCallback& callback) override;
+  scoped_ptr<RendererResource> MakeResource(
+      content::WebContents* web_contents) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PanelInformation);

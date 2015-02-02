@@ -149,6 +149,11 @@ class Command;
   // of transitioning into fullscreen presentation mode.
   BOOL enteringPresentationMode_;
 
+  // When the window is in the process of entering AppKit Fullscreen, this
+  // property indicates whether the window is being fullscreened on the
+  // primary screen.
+  BOOL enteringAppKitFullscreenOnPrimaryScreen_;
+
   // The size of the original (non-fullscreen) window.  This is saved just
   // before entering fullscreen mode and is only valid when |-isFullscreen|
   // returns YES.
@@ -265,7 +270,7 @@ class Command;
 
 // Called to tell the selected tab to update its loading state.
 // |force| is set if the update is due to changing tabs, as opposed to
-// the page-load finishing.  See comment in reload_button.h.
+// the page-load finishing.  See comment in reload_button_cocoa.h.
 - (void)setIsLoading:(BOOL)isLoading force:(BOOL)force;
 
 // Brings this controller's window to the front.

@@ -93,16 +93,18 @@ class BackendDelegate : public HistoryBackend::Delegate {
       : history_test_(history_test) {
   }
 
-  virtual void NotifyProfileError(sql::InitStatus init_status) OVERRIDE {}
-  virtual void SetInMemoryBackend(
-      scoped_ptr<InMemoryHistoryBackend> backend) OVERRIDE;
-  virtual void NotifyFaviconChanged(const std::set<GURL>& url) OVERRIDE {}
-  virtual void BroadcastNotifications(
-      int type,
-      scoped_ptr<HistoryDetails> details) OVERRIDE;
-  virtual void DBLoaded() OVERRIDE {}
-  virtual void NotifyVisitDBObserversOnAddVisit(
-      const BriefVisitInfo& info) OVERRIDE {}
+  void NotifyProfileError(sql::InitStatus init_status) override {}
+  void SetInMemoryBackend(scoped_ptr<InMemoryHistoryBackend> backend) override;
+  void NotifyAddVisit(const BriefVisitInfo& info) override {}
+  void NotifyFaviconChanged(const std::set<GURL>& url) override {}
+  void NotifyURLVisited(ui::PageTransition transition,
+                        const URLRow& row,
+                        const RedirectList& redirects,
+                        base::Time visit_time) override {}
+  void BroadcastNotifications(int type,
+                              scoped_ptr<HistoryDetails> details) override;
+  void DBLoaded() override {}
+
  private:
   HistoryBackendDBTest* history_test_;
 };
@@ -114,8 +116,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
   HistoryBackendDBTest() : db_(NULL) {
   }
 
-  virtual ~HistoryBackendDBTest() {
-  }
+  ~HistoryBackendDBTest() override {}
 
  protected:
   friend class BackendDelegate;
@@ -153,7 +154,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
   }
 
   // testing::Test
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryBackendDBTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
@@ -166,7 +167,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     DeleteBackend();
 
     // Make sure we don't have any event pending that could disrupt the next
@@ -983,8 +984,7 @@ class HistoryTest : public testing::Test {
         query_url_success_(false) {
   }
 
-  virtual ~HistoryTest() {
-  }
+  ~HistoryTest() override {}
 
   void OnMostVisitedURLsAvailable(const MostVisitedURLList* url_list) {
     most_visited_urls_ = *url_list;
@@ -995,7 +995,7 @@ class HistoryTest : public testing::Test {
   friend class BackendDelegate;
 
   // testing::Test
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
@@ -1006,7 +1006,7 @@ class HistoryTest : public testing::Test {
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     if (history_service_)
       CleanupHistoryService();
 
@@ -1503,12 +1503,11 @@ class HistoryDBTaskImpl : public HistoryDBTask {
   HistoryDBTaskImpl(int* invoke_count, bool* done_invoked)
       : invoke_count_(invoke_count), done_invoked_(done_invoked) {}
 
-  virtual bool RunOnDBThread(HistoryBackend* backend,
-                             HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(HistoryBackend* backend, HistoryDatabase* db) override {
     return (++*invoke_count_ == kWantInvokeCount);
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
+  void DoneRunOnMainThread() override {
     *done_invoked_ = true;
     base::MessageLoop::current()->Quit();
   }
@@ -1517,7 +1516,7 @@ class HistoryDBTaskImpl : public HistoryDBTask {
   bool* done_invoked_;
 
  private:
-  virtual ~HistoryDBTaskImpl() {}
+  ~HistoryDBTaskImpl() override {}
 
   DISALLOW_COPY_AND_ASSIGN(HistoryDBTaskImpl);
 };

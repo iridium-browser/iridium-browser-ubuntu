@@ -25,7 +25,7 @@ class BluetoothManifestPermission : public ManifestPermission {
  public:
   typedef std::set<std::string> BluetoothUuidSet;
   BluetoothManifestPermission();
-  virtual ~BluetoothManifestPermission();
+  ~BluetoothManifestPermission() override;
 
   // Tries to construct the info based on |value|, as it would have appeared in
   // the manifest. Sets |error| and returns an empty scoped_ptr on failure.
@@ -41,18 +41,15 @@ class BluetoothManifestPermission : public ManifestPermission {
   void AddPermission(const std::string& uuid);
 
   // extensions::ManifestPermission overrides.
-  virtual std::string name() const OVERRIDE;
-  virtual std::string id() const OVERRIDE;
-  virtual bool HasMessages() const OVERRIDE;
-  virtual PermissionMessages GetMessages() const OVERRIDE;
-  virtual bool FromValue(const base::Value* value) OVERRIDE;
-  virtual scoped_ptr<base::Value> ToValue() const OVERRIDE;
-  virtual ManifestPermission* Diff(const ManifestPermission* rhs)
-      const OVERRIDE;
-  virtual ManifestPermission* Union(const ManifestPermission* rhs)
-      const OVERRIDE;
-  virtual ManifestPermission* Intersect(const ManifestPermission* rhs)
-      const OVERRIDE;
+  std::string name() const override;
+  std::string id() const override;
+  bool HasMessages() const override;
+  PermissionMessages GetMessages() const override;
+  bool FromValue(const base::Value* value) override;
+  scoped_ptr<base::Value> ToValue() const override;
+  ManifestPermission* Diff(const ManifestPermission* rhs) const override;
+  ManifestPermission* Union(const ManifestPermission* rhs) const override;
+  ManifestPermission* Intersect(const ManifestPermission* rhs) const override;
 
   const BluetoothUuidSet& uuids() const {
     return uuids_;

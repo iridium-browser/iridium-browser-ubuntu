@@ -11,21 +11,18 @@
 #include "GrResourceCache2.h"
 #include "GrGpu.h"
 
-GrIORef::~GrIORef() {
-    SkASSERT(0 == fRefCnt);
-    SkASSERT(0 == fPendingReads);
-    SkASSERT(0 == fPendingWrites);
-    // Set to invalid values.
-    SkDEBUGCODE(fRefCnt = fPendingReads = fPendingWrites = -10;)
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
 static inline GrResourceCache2* get_resource_cache2(GrGpu* gpu) {
     SkASSERT(gpu);
     SkASSERT(gpu->getContext());
     SkASSERT(gpu->getContext()->getResourceCache2());
     return gpu->getContext()->getResourceCache2();
+}
+
+static inline GrResourceCache* get_resource_cache(GrGpu* gpu) {
+    SkASSERT(gpu);
+    SkASSERT(gpu->getContext());
+    SkASSERT(gpu->getContext()->getResourceCache());
+    return gpu->getContext()->getResourceCache();
 }
 
 GrGpuResource::GrGpuResource(GrGpu* gpu, bool isWrapped)
@@ -81,11 +78,29 @@ GrContext* GrGpuResource::getContext() {
     }
 }
 
+void GrGpuResource::notifyIsPurgable() const {
+    if (fCacheEntry && !this->wasDestroyed()) {
+        get_resource_cache(fGpu)->notifyPurgable(this);
+    }
+}
+
 void GrGpuResource::setScratchKey(const GrResourceKey& scratchKey) {
     SkASSERT(fScratchKey.isNullScratch());
     SkASSERT(scratchKey.isScratch());
     SkASSERT(!scratchKey.isNullScratch());
     fScratchKey = scratchKey;
+}
+
+const GrResourceKey* GrGpuResource::getContentKey() const {
+    if (fCacheEntry && !fCacheEntry->key().isScratch()) {
+        return &fCacheEntry->key();
+    }
+    return NULL;
+}
+
+bool GrGpuResource::isScratch() const {
+    // Currently scratch resources have a cache entry in GrResourceCache with a scratch key.
+    return NULL != fCacheEntry && fCacheEntry->key().isScratch();
 }
 
 uint32_t GrGpuResource::CreateUniqueID() {

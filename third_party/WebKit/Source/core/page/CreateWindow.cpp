@@ -62,23 +62,23 @@ static LocalFrame* createWindow(LocalFrame& openerFrame, LocalFrame& lookupFrame
     if (openerFrame.document()->isSandboxed(SandboxPopups)) {
         // FIXME: This message should be moved off the console once a solution to https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
         openerFrame.document()->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, ErrorMessageLevel, "Blocked opening '" + request.resourceRequest().url().elidedString() + "' in a new window because the request was made in a sandboxed frame whose 'allow-popups' permission is not set."));
-        return 0;
+        return nullptr;
     }
 
     if (openerFrame.settings() && !openerFrame.settings()->supportsMultipleWindows()) {
         created = false;
         if (!openerFrame.tree().top()->isLocalFrame())
-            return 0;
+            return nullptr;
         return toLocalFrame(openerFrame.tree().top());
     }
 
     Page* oldPage = openerFrame.page();
     if (!oldPage)
-        return 0;
+        return nullptr;
 
     Page* page = oldPage->chrome().client().createWindow(&openerFrame, request, features, policy, shouldSendReferrer);
     if (!page || !page->mainFrame()->isLocalFrame())
-        return 0;
+        return nullptr;
     FrameHost* host = &page->frameHost();
 
     ASSERT(page->mainFrame());
@@ -125,22 +125,24 @@ LocalFrame* createWindow(const String& urlString, const AtomicString& frameName,
     if (!completedURL.isEmpty() && !completedURL.isValid()) {
         // Don't expose client code to invalid URLs.
         callingWindow.printErrorMessage("Unable to open a window with invalid URL '" + completedURL.string() + "'.\n");
-        return 0;
+        return nullptr;
     }
 
-    // For whatever reason, Firefox uses the first frame to determine the outgoingReferrer. We replicate that behavior here.
-    Referrer referrer(SecurityPolicy::generateReferrerHeader(firstFrame.document()->referrerPolicy(), completedURL, firstFrame.document()->outgoingReferrer()), firstFrame.document()->referrerPolicy());
+    FrameLoadRequest frameRequest(callingWindow.document(), completedURL, frameName);
 
-    ResourceRequest request(completedURL, referrer);
-    request.addHTTPOriginIfNeeded(AtomicString(firstFrame.document()->outgoingOrigin()));
-    FrameLoadRequest frameRequest(callingWindow.document(), request, frameName);
+    // Normally, FrameLoader would take care of setting the referrer for a navigation that is
+    // triggered from javascript. However, creating a window goes through sufficient processing
+    // that it eventually enters FrameLoader as an embedder-initiated navigation. FrameLoader
+    // assumes no responsibility for generating an embedder-initiated navigation's referrer,
+    // so we need to ensure the proper referrer is set now.
+    frameRequest.resourceRequest().setHTTPReferrer(SecurityPolicy::generateReferrer(activeFrame->document()->referrerPolicy(), completedURL, activeFrame->document()->outgoingReferrer()));
 
     // We pass the opener frame for the lookupFrame in case the active frame is different from
     // the opener frame, and the name references a frame relative to the opener frame.
     bool created;
     LocalFrame* newFrame = createWindow(*activeFrame, openerFrame, frameRequest, windowFeatures, NavigationPolicyIgnore, MaybeSendReferrer, created);
     if (!newFrame)
-        return 0;
+        return nullptr;
 
     if (newFrame != &openerFrame && newFrame != openerFrame.tree().top())
         newFrame->loader().forceSandboxFlags(openerFrame.document()->sandboxFlags());
@@ -153,12 +155,10 @@ LocalFrame* createWindow(const String& urlString, const AtomicString& frameName,
     if (function)
         function(newFrame->domWindow(), functionContext);
 
-    if (created) {
-        FrameLoadRequest request(callingWindow.document(), ResourceRequest(completedURL, referrer));
-        newFrame->loader().load(request);
-    } else if (!urlString.isEmpty()) {
-        newFrame->navigationScheduler().scheduleLocationChange(callingWindow.document(), completedURL.string(), referrer, false);
-    }
+    if (created)
+        newFrame->loader().load(FrameLoadRequest(callingWindow.document(), completedURL));
+    else if (!urlString.isEmpty())
+        newFrame->navigationScheduler().scheduleLocationChange(callingWindow.document(), completedURL.string(), false);
     return newFrame;
 }
 

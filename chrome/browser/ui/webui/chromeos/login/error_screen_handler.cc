@@ -10,7 +10,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/app_session_lifetime.h"
 #include "chrome/browser/chromeos/app_mode/certificate_manager_dialog.h"
-#include "chrome/browser/chromeos/login/ui/captive_portal_window_proxy.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/extensions/component_loader.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/chromeos/login/native_window_delegate.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -30,6 +30,10 @@
 #include "extensions/browser/extension_system.h"
 #include "grit/browser_resources.h"
 #include "ui/strings/grit/ui_strings.h"
+
+#if !defined(USE_ATHENA)
+#include "chrome/browser/chromeos/login/ui/captive_portal_window_proxy.h"
+#endif
 
 namespace {
 
@@ -49,7 +53,10 @@ ErrorScreenHandler::ErrorScreenHandler(
   DCHECK(network_state_informer_.get());
 }
 
-ErrorScreenHandler::~ErrorScreenHandler() {}
+ErrorScreenHandler::~ErrorScreenHandler() {
+  if (delegate_)
+    delegate_->OnActorDestroyed();
+}
 
 void ErrorScreenHandler::SetDelegate(ErrorScreenActorDelegate* delegate) {
   delegate_ = delegate;
@@ -100,6 +107,7 @@ void ErrorScreenHandler::Hide() {
 }
 
 void ErrorScreenHandler::FixCaptivePortal() {
+#if !defined(USE_ATHENA)
   if (!captive_portal_window_proxy_.get()) {
     content::WebContents* web_contents =
         LoginDisplayHostImpl::default_host()->GetWebUILoginView()->
@@ -109,18 +117,27 @@ void ErrorScreenHandler::FixCaptivePortal() {
                                      web_contents));
   }
   captive_portal_window_proxy_->ShowIfRedirected();
+#endif
 }
 
 void ErrorScreenHandler::ShowCaptivePortal() {
+#if defined(USE_ATHENA)
+  // TODO(ygorshenin): Figure out what the captive portal should look like
+  // on athena (crbug.com/430300)
+  NOTIMPLEMENTED();
+#else
   // This call is an explicit user action
   // i.e. clicking on link so force dialog show.
   FixCaptivePortal();
   captive_portal_window_proxy_->Show();
+#endif
 }
 
 void ErrorScreenHandler::HideCaptivePortal() {
+#if !defined(USE_ATHENA)
   if (captive_portal_window_proxy_.get())
     captive_portal_window_proxy_->Close();
+#endif
 }
 
 void ErrorScreenHandler::SetUIState(ErrorScreen::UIState ui_state) {

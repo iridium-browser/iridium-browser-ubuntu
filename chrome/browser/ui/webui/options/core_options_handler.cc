@@ -61,19 +61,6 @@ bool CanSetExtensionControlledPrefValue(
 #endif
 }
 
-// Hack to re-use IDS_ABOUT, which is a menu item for the About page.
-// Since it's a menu item, it may include a "&" to indicate a hotkey.
-base::string16 GetAboutString() {
-  if (!switches::AboutInSettingsEnabled())
-    return base::string16();
-
-  base::string16 str = l10n_util::GetStringUTF16(IDS_ABOUT);
-  size_t start_pos = str.find(base::ASCIIToUTF16("&"));
-  if (start_pos != base::string16::npos)
-    str.erase(start_pos, 1);
-  return str;
-}
-
 }  // namespace
 
 CoreOptionsHandler::CoreOptionsHandler()
@@ -162,7 +149,8 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
   // About
   localized_strings->SetBoolean("showAbout",
                                 switches::AboutInSettingsEnabled());
-  localized_strings->SetString("aboutButton", GetAboutString());
+  localized_strings->SetString("aboutButton",
+                               l10n_util::GetStringUTF16(IDS_ABOUT_BUTTON));
 
   // Common
   localized_strings->SetString("ok",

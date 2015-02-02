@@ -5,6 +5,8 @@
 #ifndef EXTENSIONS_SHELL_BROWSER_SHELL_DESKTOP_CONTROLLER_H_
 #define EXTENSIONS_SHELL_BROWSER_SHELL_DESKTOP_CONTROLLER_H_
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -62,33 +64,34 @@ class ShellDesktopController : public DesktopController,
                                public aura::WindowTreeHostObserver {
  public:
   ShellDesktopController();
-  virtual ~ShellDesktopController();
+  ~ShellDesktopController() override;
 
   // DesktopController:
-  virtual aura::WindowTreeHost* GetHost() OVERRIDE;
-  virtual AppWindow* CreateAppWindow(content::BrowserContext* context,
-                                     const Extension* extension) OVERRIDE;
-  virtual void AddAppWindow(aura::Window* window) OVERRIDE;
-  virtual void CloseAppWindows() OVERRIDE;
+  aura::WindowTreeHost* GetHost() override;
+  AppWindow* CreateAppWindow(content::BrowserContext* context,
+                             const Extension* extension) override;
+  void AddAppWindow(aura::Window* window) override;
+  void RemoveAppWindow(AppWindow* window) override;
+  void CloseAppWindows() override;
 
   // aura::client::WindowTreeClient overrides:
-  virtual aura::Window* GetDefaultParent(aura::Window* context,
-                                         aura::Window* window,
-                                         const gfx::Rect& bounds) OVERRIDE;
+  aura::Window* GetDefaultParent(aura::Window* context,
+                                 aura::Window* window,
+                                 const gfx::Rect& bounds) override;
 
 #if defined(OS_CHROMEOS)
   // chromeos::PowerManagerClient::Observer overrides:
   virtual void PowerButtonEventReceived(bool down,
                                         const base::TimeTicks& timestamp)
-      OVERRIDE;
+      override;
 
   // ui::DisplayConfigurator::Observer overrides.
   virtual void OnDisplayModeChanged(const std::vector<
-      ui::DisplayConfigurator::DisplayState>& displays) OVERRIDE;
+      ui::DisplayConfigurator::DisplayState>& displays) override;
 #endif
 
   // aura::WindowTreeHostObserver overrides:
-  virtual void OnHostCloseRequested(const aura::WindowTreeHost* host) OVERRIDE;
+  void OnHostCloseRequested(const aura::WindowTreeHost* host) override;
 
  protected:
   // Creates and sets the aura clients and window manager stuff. Subclass may
@@ -131,8 +134,8 @@ class ShellDesktopController : public DesktopController,
 
   scoped_ptr<AppWindowClient> app_window_client_;
 
-  // The desktop supports a single app window.
-  AppWindow* app_window_;  // NativeAppWindow::Close() deletes this.
+  // NativeAppWindow::Close() deletes the AppWindow.
+  std::vector<AppWindow*> app_windows_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellDesktopController);
 };

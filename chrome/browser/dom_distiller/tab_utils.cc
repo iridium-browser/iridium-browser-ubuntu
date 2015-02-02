@@ -38,20 +38,18 @@ class SelfDeletingRequestDelegate : public ViewRequestDelegate,
                                     public content::WebContentsObserver {
  public:
   explicit SelfDeletingRequestDelegate(content::WebContents* web_contents);
-  virtual ~SelfDeletingRequestDelegate();
+  ~SelfDeletingRequestDelegate() override;
 
   // ViewRequestDelegate implementation.
-  virtual void OnArticleReady(
-      const DistilledArticleProto* article_proto) OVERRIDE;
-  virtual void OnArticleUpdated(
-      ArticleDistillationUpdate article_update) OVERRIDE;
+  void OnArticleReady(const DistilledArticleProto* article_proto) override;
+  void OnArticleUpdated(ArticleDistillationUpdate article_update) override;
 
   // content::WebContentsObserver implementation.
-  virtual void DidNavigateMainFrame(
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-  virtual void WebContentsDestroyed() OVERRIDE;
+      const content::FrameNavigateParams& params) override;
+  void RenderProcessGone(base::TerminationStatus status) override;
+  void WebContentsDestroyed() override;
 
   // Takes ownership of the ViewerHandle to keep distillation alive until |this|
   // is deleted.
@@ -122,8 +120,7 @@ void StartDistillation(content::WebContents* web_contents) {
           web_contents->GetBrowserContext());
   scoped_ptr<DistillerPage> distiller_page =
       dom_distiller_service->CreateDefaultDistillerPageWithHandle(
-                                 source_page_handle.PassAs<SourcePageHandle>())
-          .Pass();
+                                 source_page_handle.Pass()).Pass();
 
   const GURL& last_committed_url = web_contents->GetLastCommittedURL();
   scoped_ptr<ViewerHandle> viewer_handle = dom_distiller_service->ViewUrl(

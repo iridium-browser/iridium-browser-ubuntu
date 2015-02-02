@@ -33,13 +33,6 @@ namespace blink {
 class RenderSelectionInfoBase : public NoBaseWillBeGarbageCollected<RenderSelectionInfoBase> {
     WTF_MAKE_NONCOPYABLE(RenderSelectionInfoBase); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
-    RenderSelectionInfoBase()
-        : m_object(nullptr)
-        , m_paintInvalidationContainer(nullptr)
-        , m_state(RenderObject::SelectionNone)
-    {
-    }
-
     RenderSelectionInfoBase(RenderObject* o)
         : m_object(o)
         , m_paintInvalidationContainer(o->isRooted() ? o->containerForPaintInvalidation() : nullptr)
@@ -53,9 +46,7 @@ public:
         visitor->trace(m_paintInvalidationContainer);
     }
 
-    RenderObject* object() const { return m_object; }
-    const RenderLayerModelObject* paintInvalidationContainer() const { return m_paintInvalidationContainer; }
-    RenderObject::SelectionState state() const { return m_state; }
+    RenderObject* object() const { return m_object.get(); }
 
 protected:
     RawPtrWillBeMember<RenderObject> m_object;
@@ -64,7 +55,7 @@ protected:
 };
 
 // This struct is used when the selection changes to cache the old and new state of the selection for each RenderObject.
-class RenderSelectionInfo FINAL : public RenderSelectionInfoBase {
+class RenderSelectionInfo final : public RenderSelectionInfoBase {
 public:
     RenderSelectionInfo(RenderObject* o)
         : RenderSelectionInfoBase(o)
@@ -79,45 +70,17 @@ public:
         }
     }
 
-    void invalidatePaint()
+    LayoutRect absoluteSelectionRect() const
     {
-        m_object->invalidatePaintUsingContainer(m_paintInvalidationContainer, enclosingIntRect(m_rect), InvalidationSelection);
-    }
+        if (!m_paintInvalidationContainer)
+            return LayoutRect();
 
-    LayoutRect rect() const { return m_rect; }
+        FloatQuad absQuad = m_paintInvalidationContainer->localToAbsoluteQuad(FloatRect(m_rect));
+        return absQuad.enclosingBoundingBox();
+    }
 
 private:
     LayoutRect m_rect; // relative to paint invalidation container
-};
-
-// This struct is used when the selection changes to cache the old and new state of the selection for each RenderBlock.
-class RenderBlockSelectionInfo FINAL : public RenderSelectionInfoBase {
-public:
-    RenderBlockSelectionInfo(RenderBlock* b)
-        : RenderSelectionInfoBase(b)
-    {
-        if (m_paintInvalidationContainer && b->canUpdateSelectionOnRootLineBoxes())
-            m_rects = block()->selectionGapRectsForPaintInvalidation(m_paintInvalidationContainer);
-        else
-            m_rects = GapRects();
-    }
-
-    void invalidatePaint()
-    {
-        LayoutRect paintInvalidationRect = m_rects;
-        // FIXME: this is leaking the squashing abstraction. However, removing the groupedMapping() condiitional causes
-        // RenderBox::mapRectToPaintInvalidationBacking to get called, which makes rect adjustments even if you pass the same
-        // paintInvalidationContainer as the render object. Find out why it does that and fix.
-        if (m_paintInvalidationContainer && m_paintInvalidationContainer->layer()->groupedMapping())
-            RenderLayer::mapRectToPaintBackingCoordinates(m_paintInvalidationContainer, paintInvalidationRect);
-        m_object->invalidatePaintUsingContainer(m_paintInvalidationContainer, enclosingIntRect(paintInvalidationRect), InvalidationSelection);
-    }
-
-    RenderBlock* block() const { return toRenderBlock(m_object); }
-    GapRects rects() const { return m_rects; }
-
-private:
-    GapRects m_rects; // relative to paint invalidation container
 };
 
 } // namespace blink

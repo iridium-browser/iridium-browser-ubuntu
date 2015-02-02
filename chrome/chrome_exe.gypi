@@ -468,7 +468,8 @@
               'dependencies': [
                 '../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',
                 '../components/nacl.gyp:nacl_helper',
-                ],
+                '../components/nacl_nonsfi.gyp:nacl_helper_nonsfi',
+              ],
             }],
           ],
           'dependencies': [
@@ -673,10 +674,11 @@
           'type': 'none',
           'dependencies': [
             'chrome',
+            # Runtime dependencies
+            '../third_party/mesa/mesa.gyp:osmesa',
           ],
           'includes': [
             '../build/isolate.gypi',
-            'chrome.isolate',
           ],
           'sources': [
             'chrome.isolate',

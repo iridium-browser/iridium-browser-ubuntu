@@ -7,14 +7,14 @@
 #include "chrome/browser/extensions/api/page_capture/page_capture_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 
 using extensions::PageCaptureSaveAsMHTMLFunction;
 
 class ExtensionPageCaptureApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
   }
@@ -31,8 +31,7 @@ class PageCaptureSaveAsMHTMLDelegate
     PageCaptureSaveAsMHTMLFunction::SetTestDelegate(NULL);
   }
 
-  virtual void OnTemporaryFileCreated(
-      const base::FilePath& temp_file) OVERRIDE {
+  void OnTemporaryFileCreated(const base::FilePath& temp_file) override {
     temp_file_ = temp_file;
   }
 

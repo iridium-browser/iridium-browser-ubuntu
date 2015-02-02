@@ -17,7 +17,6 @@
 #include "chrome/test/chromedriver/net/sync_websocket.h"
 #include "chrome/test/chromedriver/net/websocket.h"
 #include "net/base/completion_callback.h"
-#include "net/socket_stream/socket_stream.h"
 
 namespace base {
 class WaitableEvent;
@@ -32,16 +31,15 @@ class GURL;
 class SyncWebSocketImpl : public SyncWebSocket {
  public:
   explicit SyncWebSocketImpl(net::URLRequestContextGetter* context_getter);
-  virtual ~SyncWebSocketImpl();
+  ~SyncWebSocketImpl() override;
 
   // Overridden from SyncWebSocket:
-  virtual bool IsConnected() OVERRIDE;
-  virtual bool Connect(const GURL& url) OVERRIDE;
-  virtual bool Send(const std::string& message) OVERRIDE;
-  virtual StatusCode ReceiveNextMessage(
-      std::string* message,
-      const base::TimeDelta& timeout) OVERRIDE;
-  virtual bool HasNextMessage() OVERRIDE;
+  bool IsConnected() override;
+  bool Connect(const GURL& url) override;
+  bool Send(const std::string& message) override;
+  StatusCode ReceiveNextMessage(std::string* message,
+                                const base::TimeDelta& timeout) override;
+  bool HasNextMessage() override;
 
  private:
   struct CoreTraits;
@@ -59,15 +57,15 @@ class SyncWebSocketImpl : public SyncWebSocket {
     bool HasNextMessage();
 
     // Overriden from WebSocketListener:
-    virtual void OnMessageReceived(const std::string& message) OVERRIDE;
-    virtual void OnClose() OVERRIDE;
+    void OnMessageReceived(const std::string& message) override;
+    void OnClose() override;
 
    private:
     friend class base::RefCountedThreadSafe<Core, CoreTraits>;
     friend class base::DeleteHelper<Core>;
     friend struct CoreTraits;
 
-    virtual ~Core();
+    ~Core() override;
 
     void ConnectOnIO(const GURL& url,
                      bool* success,

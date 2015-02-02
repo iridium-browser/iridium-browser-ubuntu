@@ -15,6 +15,9 @@ Performs the following steps:
   collection until there are no tests left.
 """
 
+# TODO(jbudorick) Deprecate and remove this class after any relevant parts have
+# been ported to the new environment / test instance model.
+
 import logging
 import threading
 
@@ -272,7 +275,6 @@ def _RunAllTests(runners, test_collection_factory, num_retries, timeout=None,
           #                 for the above are switched or wrapped.
           android_commands.errors.DeviceUnresponsiveError) as e:
     logging.error(e)
-    exit_code = constants.WARNING_EXIT_CODE
 
   if not all((len(tc) == 0 for tc in test_collections)):
     logging.error('Only ran %d tests (all devices are likely offline).' %

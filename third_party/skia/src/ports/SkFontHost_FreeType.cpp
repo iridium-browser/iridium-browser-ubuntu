@@ -1495,8 +1495,14 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* metrics
     metrics->fBottom = ymin * scale;
     metrics->fLeading = leading * scale;
     metrics->fAvgCharWidth = avgCharWidth * scale;
+#ifdef SK_USE_SCALED_FONTMETRICS
+    // new correct behavior. need chrome to define this, and then we can remove the else code
+    metrics->fXMin = xmin * scale;
+    metrics->fXMax = xmax * scale;
+#else
     metrics->fXMin = xmin;
     metrics->fXMax = xmax;
+#endif
     metrics->fXHeight = x_height;
     metrics->fCapHeight = cap_height;
     metrics->fUnderlineThickness = underlineThickness * scale;
@@ -1669,60 +1675,142 @@ size_t SkTypeface_FreeType::onGetTableData(SkFontTableTag tag, size_t offset,
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
 
-/*static*/ bool SkTypeface_FreeType::ScanFont(
-    SkStream* stream, int ttcIndex, SkString* name, SkTypeface::Style* style, bool* isFixedPitch)
+
+SkTypeface_FreeType::Scanner::Scanner() {
+    if (FT_Init_FreeType(&fLibrary)) {
+        fLibrary = NULL;
+    }
+}
+SkTypeface_FreeType::Scanner::~Scanner() {
+    FT_Done_FreeType(fLibrary);
+}
+
+FT_Face SkTypeface_FreeType::Scanner::openFace(SkStream* stream, int ttcIndex,
+                                               FT_Stream ftStream) const
 {
-    FT_Library  library;
-    if (FT_Init_FreeType(&library)) {
-        return false;
+    if (fLibrary == NULL) {
+        return NULL;
     }
 
-    FT_Open_Args    args;
+    FT_Open_Args args;
     memset(&args, 0, sizeof(args));
 
     const void* memoryBase = stream->getMemoryBase();
-    FT_StreamRec    streamRec;
 
     if (memoryBase) {
         args.flags = FT_OPEN_MEMORY;
         args.memory_base = (const FT_Byte*)memoryBase;
         args.memory_size = stream->getLength();
     } else {
-        memset(&streamRec, 0, sizeof(streamRec));
-        streamRec.size = stream->getLength();
-        streamRec.descriptor.pointer = stream;
-        streamRec.read  = sk_stream_read;
-        streamRec.close = sk_stream_close;
+        memset(ftStream, 0, sizeof(*ftStream));
+        ftStream->size = stream->getLength();
+        ftStream->descriptor.pointer = stream;
+        ftStream->read  = sk_stream_read;
+        ftStream->close = sk_stream_close;
 
         args.flags = FT_OPEN_STREAM;
-        args.stream = &streamRec;
+        args.stream = ftStream;
     }
 
     FT_Face face;
-    if (FT_Open_Face(library, &args, ttcIndex, &face)) {
-        FT_Done_FreeType(library);
+    if (FT_Open_Face(fLibrary, &args, ttcIndex, &face)) {
+        return NULL;
+    }
+    return face;
+}
+
+bool SkTypeface_FreeType::Scanner::recognizedFont(SkStream* stream, int* numFaces) const {
+    SkAutoMutexAcquire libraryLock(fLibraryMutex);
+
+    FT_StreamRec streamRec;
+    FT_Face face = this->openFace(stream, -1, &streamRec);
+    if (NULL == face) {
         return false;
     }
 
-    int tempStyle = SkTypeface::kNormal;
+    *numFaces = face->num_faces;
+
+    FT_Done_Face(face);
+    return true;
+}
+
+#include "SkTSearch.h"
+bool SkTypeface_FreeType::Scanner::scanFont(
+    SkStream* stream, int ttcIndex, SkString* name, SkFontStyle* style, bool* isFixedPitch) const
+{
+    SkAutoMutexAcquire libraryLock(fLibraryMutex);
+
+    FT_StreamRec streamRec;
+    FT_Face face = this->openFace(stream, ttcIndex, &streamRec);
+    if (NULL == face) {
+        return false;
+    }
+
+    int weight = SkFontStyle::kNormal_Weight;
+    int width = SkFontStyle::kNormal_Width;
+    SkFontStyle::Slant slant = SkFontStyle::kUpright_Slant;
     if (face->style_flags & FT_STYLE_FLAG_BOLD) {
-        tempStyle |= SkTypeface::kBold;
+        weight = SkFontStyle::kBold_Weight;
     }
     if (face->style_flags & FT_STYLE_FLAG_ITALIC) {
-        tempStyle |= SkTypeface::kItalic;
+        slant = SkFontStyle::kItalic_Slant;
+    }
+
+    PS_FontInfoRec psFontInfo;
+    TT_OS2* os2 = static_cast<TT_OS2*>(FT_Get_Sfnt_Table(face, ft_sfnt_os2));
+    if (os2 && os2->version != 0xffff) {
+        weight = os2->usWeightClass;
+        width = os2->usWidthClass;
+    } else if (0 == FT_Get_PS_Font_Info(face, &psFontInfo) && psFontInfo.weight) {
+        static const struct {
+            char const * const name;
+            int const weight;
+        } commonWeights [] = {
+            // There are probably more common names, but these are known to exist.
+            { "black", SkFontStyle::kBlack_Weight },
+            { "bold", SkFontStyle::kBold_Weight },
+            { "book", (SkFontStyle::kNormal_Weight + SkFontStyle::kLight_Weight)/2 },
+            { "demi", SkFontStyle::kSemiBold_Weight },
+            { "demibold", SkFontStyle::kSemiBold_Weight },
+            { "extra", SkFontStyle::kExtraBold_Weight },
+            { "extrabold", SkFontStyle::kExtraBold_Weight },
+            { "extralight", SkFontStyle::kExtraLight_Weight },
+            { "hairline", SkFontStyle::kThin_Weight },
+            { "heavy", SkFontStyle::kBlack_Weight },
+            { "light", SkFontStyle::kLight_Weight },
+            { "medium", SkFontStyle::kMedium_Weight },
+            { "normal", SkFontStyle::kNormal_Weight },
+            { "plain", SkFontStyle::kNormal_Weight },
+            { "regular", SkFontStyle::kNormal_Weight },
+            { "roman", SkFontStyle::kNormal_Weight },
+            { "semibold", SkFontStyle::kSemiBold_Weight },
+            { "standard", SkFontStyle::kNormal_Weight },
+            { "thin", SkFontStyle::kThin_Weight },
+            { "ultra", SkFontStyle::kExtraBold_Weight },
+            { "ultrablack", 1000 },
+            { "ultrabold", SkFontStyle::kExtraBold_Weight },
+            { "ultraheavy", 1000 },
+            { "ultralight", SkFontStyle::kExtraLight_Weight },
+        };
+        int const index = SkStrLCSearch(&commonWeights[0].name, SK_ARRAY_COUNT(commonWeights),
+                                        psFontInfo.weight, sizeof(commonWeights[0]));
+        if (index >= 0) {
+            weight = commonWeights[index].weight;
+        } else {
+            SkDEBUGF(("Do not know weight for: %s (%s) \n", face->family_name, psFontInfo.weight));
+        }
     }
 
     if (name) {
         name->set(face->family_name);
     }
     if (style) {
-        *style = (SkTypeface::Style) tempStyle;
+        *style = SkFontStyle(weight, width, slant);
     }
     if (isFixedPitch) {
         *isFixedPitch = FT_IS_FIXED_WIDTH(face);
     }
 
     FT_Done_Face(face);
-    FT_Done_FreeType(library);
     return true;
 }

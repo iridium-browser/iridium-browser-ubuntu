@@ -35,8 +35,8 @@ class RecordResultCallback : public StrikeRegisterClient::ResultCallback {
   }
 
  protected:
-  virtual void RunImpl(bool nonce_is_valid_and_unique,
-                       InsertStatus nonce_error) OVERRIDE {
+  void RunImpl(bool nonce_is_valid_and_unique,
+               InsertStatus nonce_error) override {
     *called_ = true;
     *saved_value_ = nonce_is_valid_and_unique;
     *saved_nonce_error_ = nonce_error;
@@ -60,7 +60,7 @@ class LocalStrikeRegisterClientTest : public ::testing::Test {
   LocalStrikeRegisterClientTest() {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     strike_register_.reset(new LocalStrikeRegisterClient(
         kMaxEntries, kCurrentTimeExternalSecs, kWindowSecs, kOrbit,
         net::StrikeRegister::NO_STARTUP_PERIOD_NEEDED));

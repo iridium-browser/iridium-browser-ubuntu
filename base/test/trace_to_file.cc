@@ -5,6 +5,7 @@
 #include "base/test/trace_to_file.h"
 
 #include "base/base_switches.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event_impl.h"
 #include "base/files/file_util.h"
@@ -67,8 +68,8 @@ void TraceToFile::AppendFileFooter() {
 }
 
 void TraceToFile::TraceOutputCallback(const std::string& data) {
-  int ret = AppendToFile(path_, data.c_str(), static_cast<int>(data.size()));
-  DCHECK_NE(-1, ret);
+  bool ret = AppendToFile(path_, data.c_str(), static_cast<int>(data.size()));
+  DCHECK(ret);
 }
 
 static void OnTraceDataCollected(

@@ -66,7 +66,7 @@ EGLContext EGLWindow::getContext() const
     return mContext;
 }
 
-bool EGLWindow::initializeGL(const OSWindow *osWindow)
+bool EGLWindow::initializeGL(OSWindow *osWindow)
 {
     PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT = reinterpret_cast<PFNEGLGETPLATFORMDISPLAYEXTPROC>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
     if (!eglGetPlatformDisplayEXT)

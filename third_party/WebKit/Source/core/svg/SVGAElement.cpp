@@ -91,7 +91,7 @@ void SVGAElement::svgAttributeChanged(const QualifiedName& attrName)
         setIsLink(!hrefString().isNull());
 
         if (wasLink != isLink())
-            setNeedsStyleRecalc(SubtreeStyleChange);
+            setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::LinkColorChange));
 
         return;
     }
@@ -110,7 +110,10 @@ RenderObject* SVGAElement::createRenderer(RenderStyle*)
 void SVGAElement::defaultEventHandler(Event* event)
 {
     if (isLink()) {
-        if (focused() && isEnterKeyKeydownEvent(event)) {
+        ASSERT(event->target());
+        Node* target = event->target()->toNode();
+        ASSERT(target);
+        if ((focused() || target->focused()) && isEnterKeyKeypressEvent(event)) {
             event->setDefaultHandled();
             dispatchSimulatedClick(event);
             return;

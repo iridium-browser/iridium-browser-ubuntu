@@ -4,8 +4,10 @@
 
 #include "chromeos/ime/component_extension_ime_manager.h"
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/extension_ime_util.h"
 
 namespace chromeos {
@@ -35,12 +37,14 @@ const char* kLoginLayoutWhitelist[] = {
   "gb(extd)",
   "hr",
   "hu",
+  "ie",
   "is",
   "it",
   "jp",
   "latam",
   "lt",
   "lv(apostrophe)",
+  "mt",
   "no",
   "pl",
   "pt",
@@ -160,6 +164,8 @@ bool ComponentExtensionIMEManager::IsWhitelistedExtension(
 
 input_method::InputMethodDescriptors
     ComponentExtensionIMEManager::GetAllIMEAsInputMethodDescriptor() {
+  bool enable_new_korean_ime = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableNewKoreanIme);
   input_method::InputMethodDescriptors result;
   for (std::map<std::string, ComponentExtensionIME>::const_iterator it =
           component_extension_imes_.begin();
@@ -167,6 +173,9 @@ input_method::InputMethodDescriptors
     const ComponentExtensionIME& ext = it->second;
     for (size_t j = 0; j < ext.engines.size(); ++j) {
       const ComponentExtensionEngine& ime = ext.engines[j];
+      // Filter out new Korean IME if the experimental flag is OFF.
+      if (!enable_new_korean_ime && ime.engine_id == "ko-t-i0-und")
+        continue;
       const std::string input_method_id =
           extension_ime_util::GetComponentInputMethodID(
               ext.id, ime.engine_id);
@@ -175,7 +184,7 @@ input_method::InputMethodDescriptors
           input_method::InputMethodDescriptor(
               input_method_id,
               ime.display_name,
-              std::string(), // TODO(uekawa): Set short name.
+              ime.indicator,
               layouts,
               ime.language_codes,
               // Enables extension based xkb keyboards on login screen.

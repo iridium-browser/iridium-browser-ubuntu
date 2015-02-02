@@ -24,15 +24,15 @@ struct TestData {
 
 class LevelDBWrapperTest : public testing::Test {
  public:
-  virtual ~LevelDBWrapperTest() {}
+  ~LevelDBWrapperTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(database_dir_.CreateUniqueTempDir());
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
     InitializeLevelDB();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     db_.reset();
     in_memory_env_.reset();
   }
@@ -70,7 +70,7 @@ class LevelDBWrapperTest : public testing::Test {
 
  private:
   void InitializeLevelDB() {
-    leveldb::DB* db = NULL;
+    leveldb::DB* db = nullptr;
     leveldb::Options options;
     options.create_if_missing = true;
     options.max_open_files = 0;  // Use minimum.

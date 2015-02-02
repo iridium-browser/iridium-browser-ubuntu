@@ -69,7 +69,6 @@ Du logger på med en administrert konto, og gir administratoren kontroll over Ch
 <translation id="7267430310003164111">Forespørsel om nedlasting av en app fra Google Play-butikken. Appnavn: <ph name="APP_NAME"/>. Appens gjennomsnittlige vurdering: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Installerer …</translation>
 <translation id="3992315671621218278">Lagre linken</translation>
-<translation id="8034522405403831421">Denne siden er på <ph name="SOURCE_LANGUAGE"/>. Vil du oversette den til <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Nettstedsinnstillinger</translation>
 <translation id="4195643157523330669">Åpne i ny fane</translation>
 <translation id="651048280540227067">Lukk menyen</translation>
@@ -95,6 +94,7 @@ Du logger på med en administrert konto, og gir administratoren kontroll over Ch
 <translation id="7947953824732555851">Godta og logg på</translation>
 <translation id="6333140779060797560">Del via <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Lukk</translation>
+<translation id="5138299137310274655">Denne siden er på <ph name="SOURCE_LANGUAGE"/>. Vil du oversette den til <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Endre språk</translation>
 <translation id="5032574515228824816">Ledetekst</translation>
 <translation id="7961015016161918242">Aldri</translation>

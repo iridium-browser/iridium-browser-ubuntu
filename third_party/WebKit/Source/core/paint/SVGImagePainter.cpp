@@ -14,6 +14,8 @@
 #include "core/rendering/svg/SVGRenderSupport.h"
 #include "core/rendering/svg/SVGRenderingContext.h"
 #include "core/svg/SVGImageElement.h"
+#include "platform/graphics/DisplayList.h"
+#include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 
 namespace blink {
@@ -27,8 +29,8 @@ void SVGImagePainter::paint(PaintInfo& paintInfo)
         || !m_renderSVGImage.imageResource()->hasImage())
         return;
 
-    FloatRect boundingBox = m_renderSVGImage.paintInvalidationRectInLocalCoordinates();
-    if (!SVGRenderSupport::paintInfoIntersectsPaintInvalidationRect(boundingBox, m_renderSVGImage.localToParentTransform(), paintInfo))
+    FloatRect invalBox = m_renderSVGImage.paintInvalidationRectInLocalCoordinates();
+    if (!SVGRenderSupport::paintInfoIntersectsPaintInvalidationRect(invalBox, m_renderSVGImage.localToParentTransform(), paintInfo))
         return;
 
     PaintInfo childPaintInfo(paintInfo);
@@ -36,35 +38,44 @@ void SVGImagePainter::paint(PaintInfo& paintInfo)
 
     childPaintInfo.applyTransform(m_renderSVGImage.localToParentTransform(), &stateSaver);
 
-    if (!m_renderSVGImage.objectBoundingBox().isEmpty()) {
+    FloatRect boundingBox = m_renderSVGImage.objectBoundingBox();
+    if (!boundingBox.isEmpty()) {
         // SVGRenderingContext may taint the state - make sure we're always saving.
         stateSaver.saveIfNeeded();
 
         SVGRenderingContext renderingContext(&m_renderSVGImage, childPaintInfo);
         if (renderingContext.isRenderingPrepared()) {
-            if (m_renderSVGImage.style()->svgStyle().bufferedRendering() == BR_STATIC && renderingContext.bufferForeground(m_renderSVGImage.bufferedForeground()))
-                return;
+            if (m_renderSVGImage.style()->svgStyle().bufferedRendering() != BR_STATIC) {
+                paintForeground(childPaintInfo);
+            } else {
+                RefPtr<DisplayList>& bufferedForeground = m_renderSVGImage.bufferedForeground();
+                if (!bufferedForeground) {
+                    childPaintInfo.context->beginRecording(boundingBox);
+                    paintForeground(childPaintInfo);
+                    bufferedForeground = childPaintInfo.context->endRecording();
+                }
 
-            paintForeground(m_renderSVGImage, childPaintInfo);
+                childPaintInfo.context->drawDisplayList(bufferedForeground.get());
+            }
         }
     }
 
     if (m_renderSVGImage.style()->outlineWidth())
-        ObjectPainter(m_renderSVGImage).paintOutline(childPaintInfo, IntRect(boundingBox));
+        ObjectPainter(m_renderSVGImage).paintOutline(childPaintInfo, IntRect(invalBox));
 }
 
-void SVGImagePainter::paintForeground(RenderSVGImage& renderer, PaintInfo& paintInfo)
+void SVGImagePainter::paintForeground(PaintInfo& paintInfo)
 {
-    RefPtr<Image> image = renderer.imageResource()->image();
-    FloatRect destRect = renderer.objectBoundingBox();
+    RefPtr<Image> image = m_renderSVGImage.imageResource()->image();
+    FloatRect destRect = m_renderSVGImage.objectBoundingBox();
     FloatRect srcRect(0, 0, image->width(), image->height());
 
-    SVGImageElement* imageElement = toSVGImageElement(renderer.element());
+    SVGImageElement* imageElement = toSVGImageElement(m_renderSVGImage.element());
     imageElement->preserveAspectRatio()->currentValue()->transformRect(destRect, srcRect);
 
     InterpolationQuality interpolationQuality = InterpolationDefault;
-    if (renderer.style()->svgStyle().bufferedRendering() != BR_STATIC)
-        interpolationQuality = ImageQualityController::imageQualityController()->chooseInterpolationQuality(paintInfo.context, &renderer, image.get(), image.get(), LayoutSize(destRect.size()));
+    if (m_renderSVGImage.style()->svgStyle().bufferedRendering() != BR_STATIC)
+        interpolationQuality = ImageQualityController::imageQualityController()->chooseInterpolationQuality(paintInfo.context, &m_renderSVGImage, image.get(), image.get(), LayoutSize(destRect.size()));
 
     InterpolationQuality previousInterpolationQuality = paintInfo.context->imageInterpolationQuality();
     paintInfo.context->setImageInterpolationQuality(interpolationQuality);

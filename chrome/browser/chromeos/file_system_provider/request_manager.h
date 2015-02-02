@@ -39,6 +39,8 @@ enum RequestType {
   TRUNCATE,
   WRITE_FILE,
   ABORT,
+  ADD_WATCHER,
+  REMOVE_WATCHER,
   TESTING
 };
 

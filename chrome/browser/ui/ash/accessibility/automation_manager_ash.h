@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-
 #include "chrome/browser/extensions/api/automation_internal/automation_action_adapter.h"
 #include "chrome/browser/ui/ash/accessibility/ax_tree_source_ash.h"
 #include "ui/accessibility/ax_tree_serializer.h"
@@ -41,10 +40,10 @@ class AutomationManagerAsh : public extensions::AutomationActionAdapter {
                    ui::AXEvent event_type);
 
   // AutomationActionAdapter implementation.
-  virtual void DoDefault(int32 id) OVERRIDE;
-  virtual void Focus(int32 id) OVERRIDE;
-  virtual void MakeVisible(int32 id) OVERRIDE;
-  virtual void SetSelection(int32 id, int32 start, int32 end) OVERRIDE;
+  void DoDefault(int32 id) override;
+  void Focus(int32 id) override;
+  void MakeVisible(int32 id) override;
+  void SetSelection(int32 id, int32 start, int32 end) override;
 
  protected:
   virtual ~AutomationManagerAsh();

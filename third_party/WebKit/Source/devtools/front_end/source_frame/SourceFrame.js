@@ -37,7 +37,6 @@
 WebInspector.SourceFrame = function(contentProvider)
 {
     WebInspector.VBox.call(this);
-    this.element.classList.add("script-view");
 
     this._url = contentProvider.contentURL();
     this._contentProvider = contentProvider;
@@ -83,11 +82,25 @@ WebInspector.SourceFrame.createSearchRegex = function(query, modifiers)
         // Silent catch.
     }
 
-    // Otherwise just do case-insensitive search.
+    // Otherwise just do a plain text search.
     if (!regex)
-        regex = createPlainTextSearchRegex(query, "i" + modifiers);
+        regex = createPlainTextSearchRegex(query, modifiers);
 
     return regex;
+}
+
+/**
+ * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
+ * @param {boolean=} global
+ * @return {!RegExp}
+ */
+WebInspector.SourceFrame._createSearchRegexForConfig = function(searchConfig, global)
+{
+    var modifiers = searchConfig.caseSensitive ? "" : "i";
+    if (global)
+        modifiers += "g";
+    var query = searchConfig.isRegex ? "/" + searchConfig.query + "/" : searchConfig.query;
+    return WebInspector.SourceFrame.createSearchRegex(query, modifiers);
 }
 
 WebInspector.SourceFrame.Events = {
@@ -187,14 +200,6 @@ WebInspector.SourceFrame.prototype = {
     get loaded()
     {
         return this._loaded;
-    },
-
-    /**
-     * @return {boolean}
-     */
-    hasContent: function()
-    {
-        return true;
     },
 
     get textEditor()
@@ -406,45 +411,48 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
-     * @param {string} query
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
      * @param {boolean} shouldJump
      * @param {boolean} jumpBackwards
-     * @param {function(!WebInspector.View, number)} callback
+     * @param {function(!WebInspector.View, number)} searchFinishedCallback
+     */
+    _doFindSearchMatches: function(searchConfig, shouldJump, jumpBackwards, searchFinishedCallback)
+    {
+        this._currentSearchResultIndex = -1;
+        this._searchResults = [];
+
+        var regex = WebInspector.SourceFrame._createSearchRegexForConfig(searchConfig);
+        this._searchRegex = regex;
+        this._searchResults = this._collectRegexMatches(regex);
+        searchFinishedCallback(this, this._searchResults.length);
+        if (!this._searchResults.length)
+            this._textEditor.cancelSearchResultsHighlight();
+        else if (shouldJump && jumpBackwards)
+            this.jumpToPreviousSearchResult();
+        else if (shouldJump)
+            this.jumpToNextSearchResult();
+        else
+            this._textEditor.highlightSearchResults(regex, null);
+    },
+
+    /**
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
+     * @param {boolean} shouldJump
+     * @param {boolean} jumpBackwards
+     * @param {function(!WebInspector.View, number)} searchFinishedCallback
      * @param {function(number)} currentMatchChangedCallback
      * @param {function()} searchResultsChangedCallback
      */
-    performSearch: function(query, shouldJump, jumpBackwards, callback, currentMatchChangedCallback, searchResultsChangedCallback)
+    performSearch: function(searchConfig, shouldJump, jumpBackwards, searchFinishedCallback, currentMatchChangedCallback, searchResultsChangedCallback)
     {
-        /**
-         * @param {string} query
-         * @this {WebInspector.SourceFrame}
-         */
-        function doFindSearchMatches(query)
-        {
-            this._currentSearchResultIndex = -1;
-            this._searchResults = [];
-
-            var regex = WebInspector.SourceFrame.createSearchRegex(query);
-            this._searchRegex = regex;
-            this._searchResults = this._collectRegexMatches(regex);
-            if (!this._searchResults.length)
-                this._textEditor.cancelSearchResultsHighlight();
-            else if (shouldJump && jumpBackwards)
-                this.jumpToPreviousSearchResult();
-            else if (shouldJump)
-                this.jumpToNextSearchResult();
-            else
-                this._textEditor.highlightSearchResults(regex, null);
-            callback(this, this._searchResults.length);
-        }
-
         this._resetSearch();
         this._currentSearchMatchChangedCallback = currentMatchChangedCallback;
         this._searchResultsChangedCallback = searchResultsChangedCallback;
+        var searchFunction = this._doFindSearchMatches.bind(this, searchConfig, shouldJump, jumpBackwards, searchFinishedCallback);
         if (this.loaded)
-            doFindSearchMatches.call(this, query);
+            searchFunction.call(this);
         else
-            this._delayedFindSearchMatches = doFindSearchMatches.bind(this, query);
+            this._delayedFindSearchMatches = searchFunction;
 
         this._ensureContentLoaded();
     },
@@ -482,7 +490,7 @@ WebInspector.SourceFrame.prototype = {
             return;
         this._textEditor.cancelSearchResultsHighlight();
         if (range)
-            this._textEditor.setSelection(range);
+            this.setSelection(range);
     },
 
     /**
@@ -524,22 +532,6 @@ WebInspector.SourceFrame.prototype = {
         this.jumpToSearchResult(currentIndex - 1);
     },
 
-    /**
-     * @return {boolean}
-     */
-    showingFirstSearchResult: function()
-    {
-        return this._searchResults.length &&  this._currentSearchResultIndex === 0;
-    },
-
-    /**
-     * @return {boolean}
-     */
-    showingLastSearchResult: function()
-    {
-        return this._searchResults.length && this._currentSearchResultIndex === (this._searchResults.length - 1);
-    },
-
     get currentSearchResultIndex()
     {
         return this._currentSearchResultIndex;
@@ -556,29 +548,40 @@ WebInspector.SourceFrame.prototype = {
     },
 
     /**
-     * @param {string} text
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
+     * @param {string} replacement
      */
-    replaceSelectionWith: function(text)
+    replaceSelectionWith: function(searchConfig, replacement)
     {
         var range = this._searchResults[this._currentSearchResultIndex];
         if (!range)
             return;
         this._textEditor.highlightSearchResults(this._searchRegex, null);
+
+        var oldText = this._textEditor.copyRange(range);
+        var regex = WebInspector.SourceFrame._createSearchRegexForConfig(searchConfig);
+        var text;
+        if (regex.__fromRegExpQuery)
+            text = oldText.replace(regex, replacement);
+        else
+            text = oldText.replace(regex, function() { return replacement; });
+
         var newRange = this._textEditor.editRange(range, text);
         this._textEditor.setSelection(newRange.collapseToEnd());
     },
 
     /**
-     * @param {string} query
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
      * @param {string} replacement
      */
-    replaceAllWith: function(query, replacement)
+    replaceAllWith: function(searchConfig, replacement)
     {
         this._resetCurrentSearchResultIndex();
 
         var text = this._textEditor.text();
         var range = this._textEditor.range();
-        var regex = WebInspector.SourceFrame.createSearchRegex(query, "g");
+
+        var regex = WebInspector.SourceFrame._createSearchRegexForConfig(searchConfig, true);
         if (regex.__fromRegExpQuery)
             text = text.replace(regex, replacement);
         else
@@ -613,10 +616,11 @@ WebInspector.SourceFrame.prototype = {
             do {
                 var match = regexObject.exec(line);
                 if (match) {
+                    var matchEndIndex = match.index + Math.max(match[0].length, 1);
                     if (match[0].length)
-                        ranges.push(new WebInspector.TextRange(i, offset + match.index, i, offset + match.index + match[0].length));
-                    offset += match.index + 1;
-                    line = line.substring(match.index + 1);
+                        ranges.push(new WebInspector.TextRange(i, offset + match.index, i, offset + matchEndIndex));
+                    offset += matchEndIndex;
+                    line = line.substring(matchEndIndex);
                 }
             } while (match && line);
         }
@@ -769,7 +773,7 @@ WebInspector.SourceFrame.RowMessage = function(consoleMessage)
 {
     this._consoleMessage = consoleMessage;
     this._repeatCount = 1;
-    this.element = document.createElementWithClass("div", "text-editor-row-message");
+    this.element = createElementWithClass("div", "text-editor-row-message");
     this._icon = this.element.createChild("span", "text-editor-row-message-icon");
     this._icon.classList.add(WebInspector.SourceFrame._iconClassPerLevel[consoleMessage.level]);
     this._repeatCountElement = this.element.createChild("span", "bubble-repeat-count hidden error");
@@ -826,14 +830,14 @@ WebInspector.SourceFrame.RowMessageBucket = function(sourceFrame, textEditor, li
     this._sourceFrame = sourceFrame;
     this._textEditor = textEditor;
     this._lineHandle = textEditor.textEditorPositionHandle(lineNumber, 0);
-    this._decoration = document.createElementWithClass("div", "text-editor-line-decoration");
+    this._decoration = createElementWithClass("div", "text-editor-line-decoration");
     this._decoration._messageBucket = this;
     this._wave = this._decoration.createChild("div", "text-editor-line-decoration-wave");
     this._icon = this._wave.createChild("div", "text-editor-line-decoration-icon");
 
     this._textEditor.addDecoration(lineNumber, this._decoration);
 
-    this._messagesDescriptionElement = document.createElementWithClass("div", "text-editor-messages-description-container");
+    this._messagesDescriptionElement = createElementWithClass("div", "text-editor-messages-description-container");
     /** @type {!Array.<!WebInspector.SourceFrame.RowMessage>} */
     this._messages = [];
 
@@ -1000,17 +1004,6 @@ WebInspector.TextEditorDelegateForSourceFrame.prototype = {
     populateTextAreaContextMenu: function(contextMenu, lineNumber)
     {
         this._sourceFrame.populateTextAreaContextMenu(contextMenu, lineNumber);
-    },
-
-    /**
-     * @param {string} hrefValue
-     * @param {boolean} isExternal
-     * @return {!Element}
-     */
-    createLink: function(hrefValue, isExternal)
-    {
-        var targetLocation = WebInspector.ParsedURL.completeURL(this._sourceFrame._url, hrefValue);
-        return WebInspector.linkifyURLAsNode(targetLocation || hrefValue, hrefValue, undefined, isExternal);
     },
 
     /**

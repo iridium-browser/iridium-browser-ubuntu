@@ -41,13 +41,13 @@ enum GrCoordSet {
  */
 class GrCoordTransform : SkNoncopyable {
 public:
-    GrCoordTransform() { SkDEBUGCODE(fInEffect = false); }
+    GrCoordTransform() { SkDEBUGCODE(fInProcessor = false); }
 
     /**
      * Create a transformation that maps [0, 1] to a texture's boundaries.
      */
     GrCoordTransform(GrCoordSet sourceCoords, const GrTexture* texture) {
-        SkDEBUGCODE(fInEffect = false);
+        SkDEBUGCODE(fInProcessor = false);
         this->reset(sourceCoords, texture);
     }
 
@@ -57,25 +57,25 @@ public:
      * coord convention.
      */
     GrCoordTransform(GrCoordSet sourceCoords, const SkMatrix& m, const GrTexture* texture = NULL) {
-        SkDEBUGCODE(fInEffect = false);
+        SkDEBUGCODE(fInProcessor = false);
         this->reset(sourceCoords, m, texture);
     }
 
     void reset(GrCoordSet sourceCoords, const GrTexture* texture) {
-        SkASSERT(!fInEffect);
+        SkASSERT(!fInProcessor);
         SkASSERT(texture);
         this->reset(sourceCoords, MakeDivByTextureWHMatrix(texture), texture);
     }
 
     void reset(GrCoordSet sourceCoords, const SkMatrix& m, const GrTexture* texture = NULL) {
-        SkASSERT(!fInEffect);
+        SkASSERT(!fInProcessor);
         fSourceCoords = sourceCoords;
         fMatrix = m;
         fReverseY = texture && kBottomLeft_GrSurfaceOrigin == texture->origin();
     }
 
     GrCoordTransform& operator= (const GrCoordTransform& other) {
-        SkASSERT(!fInEffect);
+        SkASSERT(!fInProcessor);
         fSourceCoords = other.fSourceCoords;
         fMatrix = other.fMatrix;
         fReverseY = other.fReverseY;
@@ -87,15 +87,17 @@ public:
      * effect, since effects are immutable.
      */
     SkMatrix* accessMatrix() {
-        SkASSERT(!fInEffect);
+        SkASSERT(!fInProcessor);
         return &fMatrix;
     }
 
-    bool operator== (const GrCoordTransform& other) const {
-        return fSourceCoords == other.fSourceCoords &&
-               fMatrix.cheapEqualTo(other.fMatrix) &&
-               fReverseY == other.fReverseY;
+    bool operator== (const GrCoordTransform& that) const {
+        return fSourceCoords == that.fSourceCoords &&
+               fMatrix.cheapEqualTo(that.fMatrix) &&
+               fReverseY == that.fReverseY;
     }
+
+    bool operator!= (const GrCoordTransform& that) const { return !(*this == that); }
 
     GrCoordSet sourceCoords() const { return fSourceCoords; }
     const SkMatrix& getMatrix() const { return fMatrix; }
@@ -119,9 +121,9 @@ private:
 
 #ifdef SK_DEBUG
 public:
-    void setInEffect() const { fInEffect = true; }
+    void setInProcessor() const { fInProcessor = true; }
 private:
-    mutable bool fInEffect;
+    mutable bool fInProcessor;
 #endif
 };
 

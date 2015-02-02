@@ -73,6 +73,7 @@ class EVENTS_EXPORT Event {
   void set_latency(const LatencyInfo& latency) { latency_ = latency; }
 
   int source_device_id() const { return source_device_id_; }
+  void set_source_device_id(int id) { source_device_id_ = id; }
 
   // By default, events are "cancelable", this means any default processing that
   // the containing abstraction layer may perform can be prevented by calling
@@ -256,12 +257,12 @@ class EVENTS_EXPORT Event {
 class EVENTS_EXPORT CancelModeEvent : public Event {
  public:
   CancelModeEvent();
-  virtual ~CancelModeEvent();
+  ~CancelModeEvent() override;
 };
 
 class EVENTS_EXPORT LocatedEvent : public Event {
  public:
-  virtual ~LocatedEvent();
+  ~LocatedEvent() override;
 
   float x() const { return location_.x(); }
   float y() const { return location_.y(); }
@@ -469,8 +470,8 @@ class EVENTS_EXPORT MouseWheelEvent : public MouseEvent {
   const gfx::Vector2d& offset() const { return offset_; }
 
   // Overridden from LocatedEvent.
-  virtual void UpdateForRootTransform(
-      const gfx::Transform& inverted_root_transform) OVERRIDE;
+  void UpdateForRootTransform(
+      const gfx::Transform& inverted_root_transform) override;
 
  private:
   gfx::Vector2d offset_;
@@ -508,7 +509,7 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
              float angle,
              float force);
 
-  virtual ~TouchEvent();
+  ~TouchEvent() override;
 
   int touch_id() const { return touch_id_; }
   float radius_x() const { return radius_x_; }
@@ -521,8 +522,8 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   void set_radius_y(const float r) { radius_y_ = r; }
 
   // Overridden from LocatedEvent.
-  virtual void UpdateForRootTransform(
-      const gfx::Transform& inverted_root_transform) OVERRIDE;
+  void UpdateForRootTransform(
+      const gfx::Transform& inverted_root_transform) override;
 
  protected:
   void set_radius(float radius_x, float radius_y) {
@@ -615,7 +616,7 @@ class EVENTS_EXPORT KeyEvent : public Event {
 
   KeyEvent& operator=(const KeyEvent& rhs);
 
-  virtual ~KeyEvent();
+  ~KeyEvent() override;
 
   // TODO(erg): While we transition to mojo, we have to hack around a mismatch
   // in our event types. Our ui::Events don't really have all the data we need
@@ -802,7 +803,7 @@ class EVENTS_EXPORT GestureEvent : public LocatedEvent {
         details_(model.details_) {
   }
 
-  virtual ~GestureEvent();
+  ~GestureEvent() override;
 
   const GestureEventDetails& details() const { return details_; }
 

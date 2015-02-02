@@ -2,11 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * PreviewPanel UI class.
- * @param {HTMLElement} element DOM Element of preview panel.
+ * @param {Element} element DOM Element of preview panel.
  * @param {PreviewPanel.VisibilityType} visibilityType Initial value of the
  *     visibility type.
  * @param {MetadataCache} metadataCache Metadata cache.
@@ -27,7 +25,7 @@ var PreviewPanel = function(element,
 
   /**
    * Visibility type of the preview panel.
-   * @type {PreviewPanel.VisiblityType}
+   * @type {PreviewPanel.VisibilityType}
    * @private
    */
   this.visibilityType_ = visibilityType;
@@ -41,7 +39,7 @@ var PreviewPanel = function(element,
 
   /**
    * Dom element of the preview panel.
-   * @type {HTMLElement}
+   * @type {Element}
    * @private
    */
   this.element_ = element;
@@ -55,7 +53,7 @@ var PreviewPanel = function(element,
       volumeManager);
 
   /**
-   * @type {HTMLElement}
+   * @type {Element}
    * @private
    */
   this.summaryElement_ = element.querySelector('.preview-summary');
@@ -68,7 +66,7 @@ var PreviewPanel = function(element,
       this.summaryElement_.querySelector('.calculating-size'));
 
   /**
-   * @type {HTMLElement}
+   * @type {Element}
    * @private
    */
   this.previewText_ = element.querySelector('.preview-text');
@@ -78,7 +76,8 @@ var PreviewPanel = function(element,
    * @type {FileSelection}
    * @private
    */
-  this.selection_ = {entries: [], computeBytes: function() {}};
+  this.selection_ = /** @type {FileSelection} */
+      ({entries: [], computeBytes: function() {}});
 
   /**
    * Sequence value that is incremented by every selection update and is used to
@@ -102,31 +101,38 @@ var PreviewPanel = function(element,
  * @enum {string}
  * @const
  */
-PreviewPanel.Event = Object.freeze({
+PreviewPanel.Event = {
   // Event to be triggered at the end of visibility change.
   VISIBILITY_CHANGE: 'visibilityChange'
-});
+};
+Object.freeze(PreviewPanel.Event);
 
 /**
  * Visibility type of the preview panel.
+ * @enum {string}
+ * @const
  */
-PreviewPanel.VisibilityType = Object.freeze({
+PreviewPanel.VisibilityType = {
   // Preview panel always shows.
   ALWAYS_VISIBLE: 'alwaysVisible',
   // Preview panel shows when the selection property are set.
   AUTO: 'auto',
   // Preview panel does not show.
   ALWAYS_HIDDEN: 'alwaysHidden'
-});
+};
+Object.freeze(PreviewPanel.VisibilityType);
 
 /**
+ * @enum {string}
+ * @const
  * @private
  */
-PreviewPanel.Visibility_ = Object.freeze({
+PreviewPanel.Visibility_ = {
   VISIBLE: 'visible',
   HIDING: 'hiding',
   HIDDEN: 'hidden'
-});
+};
+Object.freeze(PreviewPanel.Visibility_);
 
 PreviewPanel.prototype = {
   __proto__: cr.EventTarget.prototype,
@@ -312,13 +318,13 @@ PreviewPanel.prototype.onTransitionEnd_ = function(event) {
  *
  * This label shows dots and varying the number of dots every
  * CalculatingSizeLabel.PERIOD milliseconds.
- * @param {HTMLElement} element DOM element of the label.
+ * @param {Element} element DOM element of the label.
  * @constructor
  */
 PreviewPanel.CalculatingSizeLabel = function(element) {
   this.element_ = element;
   this.count_ = 0;
-  this.intervalID_ = null;
+  this.intervalID_ = 0;
   Object.seal(this);
 };
 
@@ -337,7 +343,7 @@ PreviewPanel.CalculatingSizeLabel.prototype = {
   set hidden(hidden) {
     this.element_.hidden = hidden;
     if (!hidden) {
-      if (this.intervalID_ != null)
+      if (this.intervalID_ !== 0)
         return;
       this.count_ = 2;
       this.intervalID_ =
@@ -345,10 +351,10 @@ PreviewPanel.CalculatingSizeLabel.prototype = {
                       PreviewPanel.CalculatingSizeLabel.PERIOD);
       this.onStep_();
     } else {
-      if (this.intervalID_ == null)
+      if (this.intervalID_ === 0)
         return;
       clearInterval(this.intervalID_);
-      this.intervalID_ = null;
+      this.intervalID_ = 0;
     }
   }
 };
@@ -369,7 +375,7 @@ PreviewPanel.CalculatingSizeLabel.prototype.onStep_ = function() {
 /**
  * Thumbnails on the preview panel.
  *
- * @param {HTMLElement} element DOM Element of thumbnail container.
+ * @param {Element} element DOM Element of thumbnail container.
  * @param {MetadataCache} metadataCache MetadataCache.
  * @param {VolumeManagerWrapper} volumeManager Volume manager instance.
  * @constructor
@@ -403,7 +409,7 @@ PreviewPanel.Thumbnails.ZOOMED_THUMBNAIL_SIZE = 200;
 PreviewPanel.Thumbnails.prototype = {
   /**
    * Sets entries to be displayed in the view.
-   * @param {Array.<Entry>} value Entries.
+   * @param {FileSelection} value Entries.
    */
   set selection(value) {
     this.sequence_++;
@@ -440,14 +446,14 @@ PreviewPanel.Thumbnails.prototype.loadThumbnails_ = function(selection) {
 
     // Load the image.
     if (entries[i]) {
-      FileGrid.decorateThumbnailBox(box,
-                                    entries[i],
-                                    this.metadataCache_,
-                                    this.volumeManager_,
-                                    ThumbnailLoader.FillMode.FILL,
-                                    FileGrid.ThumbnailQuality.LOW,
-                                    i == 0 && length == 1 &&
-                                        this.setZoomedImage_.bind(this));
+      FileGrid.decorateThumbnailBox(
+          box,
+          entries[i],
+          this.metadataCache_,
+          this.volumeManager_,
+          ThumbnailLoader.FillMode.FILL,
+          FileGrid.ThumbnailQuality.LOW,
+          i == 0 && length == 1 ? this.setZoomedImage_.bind(this) : undefined);
     }
 
     // Register the click handler.
@@ -463,11 +469,12 @@ PreviewPanel.Thumbnails.prototype.loadThumbnails_ = function(selection) {
  * Create the zoomed version of image and set it to the DOM element to show the
  * zoomed image.
  *
- * @param {Image} image Image to be source of the zoomed image.
- * @param {transform} transform Transformation to be applied to the image.
+ * @param {HTMLImageElement} image Image to be source of the zoomed image.
+ * @param {Object=} opt_transform Transformation to be applied to the image.
  * @private
  */
-PreviewPanel.Thumbnails.prototype.setZoomedImage_ = function(image, transform) {
+PreviewPanel.Thumbnails.prototype.setZoomedImage_ = function(image,
+                                                             opt_transform) {
   if (!image)
     return;
   var width = image.width || 0;
@@ -505,13 +512,14 @@ PreviewPanel.Thumbnails.prototype.setZoomedImage_ = function(image, transform) {
 
   var boxWidth = Math.max(PreviewPanel.Thumbnails.THUMBNAIL_SIZE, imageWidth);
   var boxHeight = Math.max(PreviewPanel.Thumbnails.THUMBNAIL_SIZE, imageHeight);
-  if (transform && transform.rotate90 % 2 == 1) {
+  if (opt_transform && opt_transform.rotate90 % 2 == 1) {
     var t = boxWidth;
     boxWidth = boxHeight;
     boxHeight = t;
   }
 
-  util.applyTransform(zoomedImage, transform);
+  if (opt_transform)
+    util.applyTransform(zoomedImage, opt_transform);
 
   var zoomedBox = this.element_.ownerDocument.createElement('div');
   zoomedBox.className = 'popup';

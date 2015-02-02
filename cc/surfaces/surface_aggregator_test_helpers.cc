@@ -69,7 +69,8 @@ void AddTestRenderPassQuad(TestRenderPass* pass, RenderPassId render_pass_id) {
                output_rect,
                render_pass_id,
                0,
-               gfx::RectF(),
+               gfx::Vector2dF(),
+               gfx::Size(),
                FilterOperations(),
                gfx::Vector2dF(),
                FilterOperations());
@@ -134,13 +135,10 @@ void TestQuadMatchesExpectations(Quad expected_quad, const DrawQuad* quad) {
 
 void TestPassMatchesExpectations(Pass expected_pass, const RenderPass* pass) {
   ASSERT_EQ(expected_pass.quad_count, pass->quad_list.size());
-  size_t i = 0;
-  for (QuadList::ConstIterator iter = pass->quad_list.begin();
-       iter != pass->quad_list.end();
+  for (auto iter = pass->quad_list.cbegin(); iter != pass->quad_list.cend();
        ++iter) {
-    SCOPED_TRACE(base::StringPrintf("Quad number %" PRIuS, i));
-    TestQuadMatchesExpectations(expected_pass.quads[i], &*iter);
-    ++i;
+    SCOPED_TRACE(base::StringPrintf("Quad number %" PRIuS, iter.index()));
+    TestQuadMatchesExpectations(expected_pass.quads[iter.index()], *iter);
   }
 }
 

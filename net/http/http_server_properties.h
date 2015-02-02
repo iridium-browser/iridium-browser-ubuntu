@@ -15,17 +15,9 @@
 #include "net/base/net_export.h"
 #include "net/socket/next_proto.h"
 #include "net/spdy/spdy_framer.h"  // TODO(willchan): Reconsider this.
+#include "net/spdy/spdy_protocol.h"
 
 namespace net {
-
-enum AlternateProtocolExperiment {
-  // 200 alternate_protocol servers are loaded (persisted 200 MRU servers).
-  ALTERNATE_PROTOCOL_NOT_PART_OF_EXPERIMENT = 0,
-  // 200 alternate_protocol servers are loaded (persisted 1000 MRU servers).
-  ALTERNATE_PROTOCOL_TRUNCATED_200_SERVERS,
-  // 1000 alternate_protocol servers are loaded (persisted 1000 MRU servers).
-  ALTERNATE_PROTOCOL_TRUNCATED_1000_SERVERS,
-};
 
 enum AlternateProtocolUsage {
   // Alternate Protocol was used without racing a normal connection.
@@ -44,10 +36,8 @@ enum AlternateProtocolUsage {
   ALTERNATE_PROTOCOL_USAGE_MAX,
 };
 
-// Log a histogram to reflect |usage| and |alternate_protocol_experiment|.
-NET_EXPORT void HistogramAlternateProtocolUsage(
-    AlternateProtocolUsage usage,
-    AlternateProtocolExperiment alternate_protocol_experiment);
+// Log a histogram to reflect |usage|.
+NET_EXPORT void HistogramAlternateProtocolUsage(AlternateProtocolUsage usage);
 
 enum BrokenAlternateProtocolLocation {
   BROKEN_ALTERNATE_PROTOCOL_LOCATION_HTTP_STREAM_FACTORY_IMPL_JOB = 0,
@@ -71,7 +61,6 @@ enum AlternateProtocol {
   NPN_SPDY_MAXIMUM_VERSION = NPN_SPDY_4,
   QUIC,
   ALTERNATE_PROTOCOL_MAXIMUM_VALID_VERSION = QUIC,
-  ALTERNATE_PROTOCOL_BROKEN,  // The alternate protocol is known to be broken.
   UNINITIALIZED_ALTERNATE_PROTOCOL,
 };
 
@@ -98,7 +87,17 @@ struct NET_EXPORT AlternateProtocolInfo {
                         double probability)
       : port(port),
         protocol(protocol),
-        probability(probability) {}
+        probability(probability),
+        is_broken(false) {}
+
+  AlternateProtocolInfo(uint16 port,
+                        AlternateProtocol protocol,
+                        double probability,
+                        bool is_broken)
+      : port(port),
+        protocol(protocol),
+        probability(probability),
+        is_broken(is_broken) {}
 
   bool Equals(const AlternateProtocolInfo& other) const {
     return port == other.port &&
@@ -111,6 +110,7 @@ struct NET_EXPORT AlternateProtocolInfo {
   uint16 port;
   AlternateProtocol protocol;
   double probability;
+  bool is_broken;
 };
 
 struct NET_EXPORT SupportsQuic {
@@ -193,9 +193,6 @@ class NET_EXPORT HttpServerProperties {
   // Returns all Alternate-Protocol mappings.
   virtual const AlternateProtocolMap& alternate_protocol_map() const = 0;
 
-  virtual void SetAlternateProtocolExperiment(
-      AlternateProtocolExperiment experiment) = 0;
-
   // Sets the threshold to be used when evaluating Alternate-Protocol
   // advertisments. Only advertisements with a with a probability
   // greater than |threshold| will be honored. |threshold| must be
@@ -203,9 +200,6 @@ class NET_EXPORT HttpServerProperties {
   // all advertisements will be honored.
   virtual void SetAlternateProtocolProbabilityThreshold(
       double threshold) = 0;
-
-  virtual AlternateProtocolExperiment GetAlternateProtocolExperiment()
-      const = 0;
 
   // Gets a reference to the SettingsMap stored for a host.
   // If no settings are stored, returns an empty SettingsMap.

@@ -185,35 +185,35 @@ class NfcDebugMessageHandler : public content::WebUIMessageHandler,
   virtual ~NfcDebugMessageHandler();
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
   // NfcAdapter::Observer overrides.
   virtual void AdapterPresentChanged(
       NfcAdapter* adapter,
-      bool present) OVERRIDE;
+      bool present) override;
   virtual void AdapterPoweredChanged(
       NfcAdapter* adapter,
-      bool powered) OVERRIDE;
+      bool powered) override;
   virtual void AdapterPollingChanged(
       NfcAdapter* adapter,
-      bool polling) OVERRIDE;
-  virtual void TagFound(NfcAdapter* adapter, NfcTag* tag) OVERRIDE;
-  virtual void TagLost(NfcAdapter*adapter, NfcTag* tag) OVERRIDE;
-  virtual void PeerFound(NfcAdapter* adaper, NfcPeer* peer) OVERRIDE;
-  virtual void PeerLost(NfcAdapter* adapter, NfcPeer* peer) OVERRIDE;
+      bool polling) override;
+  virtual void TagFound(NfcAdapter* adapter, NfcTag* tag) override;
+  virtual void TagLost(NfcAdapter*adapter, NfcTag* tag) override;
+  virtual void PeerFound(NfcAdapter* adaper, NfcPeer* peer) override;
+  virtual void PeerLost(NfcAdapter* adapter, NfcPeer* peer) override;
 
   // NfcNdefTagTechnology::Observer override.
   virtual void RecordReceived(
       NfcTag* tag,
-      const NfcNdefRecord* record) OVERRIDE;
+      const NfcNdefRecord* record) override;
 
   // NfcPeer::Observer override.
   virtual void RecordReceived(
       NfcPeer* peer,
-      const NfcNdefRecord* record) OVERRIDE;
+      const NfcNdefRecord* record) override;
 
   // NfcTag::Observer override.
-  virtual void TagReady(NfcTag* tag) OVERRIDE;
+  virtual void TagReady(NfcTag* tag) override;
 
  private:
   // Called by the UI when the page loads. This method requests information
@@ -676,8 +676,7 @@ NfcDebugUI::NfcDebugUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(new NfcDebugMessageHandler());
 
   content::WebUIDataSource* html_source =
-    content::WebUIDataSource::Create(chrome::kChromeUINfcDebugHost);
-  html_source->SetUseJsonJSFormatV2();
+      content::WebUIDataSource::Create(chrome::kChromeUINfcDebugHost);
 
   html_source->AddLocalizedString("titleText", IDS_NFC_DEBUG_TITLE);
   html_source->AddLocalizedString("notSupportedText",

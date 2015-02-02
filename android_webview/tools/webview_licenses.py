@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,7 +22,6 @@ import multiprocessing
 import optparse
 import os
 import re
-import subprocess
 import sys
 import textwrap
 
@@ -37,14 +36,26 @@ third_party = \
   imp.load_source('PRESUBMIT', \
                   os.path.join(REPOSITORY_ROOT, 'third_party', 'PRESUBMIT.py'))
 
+sys.path.append(os.path.join(REPOSITORY_ROOT, 'third_party'))
+import jinja2
 sys.path.append(os.path.join(REPOSITORY_ROOT, 'tools'))
 import licenses
 
+import copyright_scanner
 import known_issues
 
 class InputApi(object):
   def __init__(self):
+    self.os_path = os.path
+    self.os_walk = os.walk
     self.re = re
+    self.ReadFile = _ReadFile
+    self.change = InputApiChange()
+
+class InputApiChange(object):
+  def __init__(self):
+    self.RepositoryRoot = lambda: REPOSITORY_ROOT
+
 
 def GetIncompatibleDirectories():
   """Gets a list of third-party directories which use licenses incompatible
@@ -60,7 +71,8 @@ def GetIncompatibleDirectories():
       continue
     try:
       metadata = licenses.ParseDir(directory, REPOSITORY_ROOT,
-                                   require_license_file=False)
+                                   require_license_file=False,
+                                   optional_keys=['License Android Compatible'])
     except licenses.LicenseError as e:
       print 'Got LicenseError while scanning ' + directory
       raise
@@ -97,41 +109,12 @@ class ScanResult(object):
   Ok, Warnings, Errors = range(3)
 
 # Needs to be a top-level function for multiprocessing
-def _FindCopyrights(files_to_scan):
-  args = [os.path.join('android_webview', 'tools', 'find_copyrights.pl')]
-  p = subprocess.Popen(
-    args=args, cwd=REPOSITORY_ROOT,
-    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-  lines = p.communicate(files_to_scan)[0].splitlines()
+def _FindCopyrightViolations(files_to_scan_as_string):
+  return copyright_scanner.FindCopyrightViolations(
+    InputApi(), REPOSITORY_ROOT, files_to_scan_as_string)
 
-  offending_files = []
-  allowed_copyrights = '^(?:\*No copyright\*' \
-      '|20[0-9][0-9](?:-20[0-9][0-9])? The Chromium Authors\. ' \
-      'All rights reserved.*)$'
-  allowed_copyrights_re = re.compile(allowed_copyrights)
-  for l in lines:
-    entries = l.split('\t')
-    if entries[1] == "GENERATED FILE":
-      continue
-    copyrights = entries[1].split(' / ')
-    for c in copyrights:
-      if c and not allowed_copyrights_re.match(c):
-        offending_files.append(os.path.normpath(entries[0]))
-        break
-  return offending_files
-
-def _ShardString(s, delimiter, shard_len):
-  result = []
-  index = 0
-  last_pos = 0
-  for m in re.finditer(delimiter, s):
-    index += 1
-    if index % shard_len == 0:
-      result.append(s[last_pos:m.end()])
-      last_pos = m.end()
-  if not index % shard_len == 0:
-    result.append(s[last_pos:])
-  return result
+def _ShardList(l, shard_len):
+  return [l[i:i + shard_len] for i in range(0, len(l), shard_len)]
 
 def _CheckLicenseHeaders(excluded_dirs_list, whitelisted_files):
   """Checks that all files which are not in a listed third-party directory,
@@ -145,78 +128,34 @@ def _CheckLicenseHeaders(excluded_dirs_list, whitelisted_files):
     ScanResult.Warnings if there are stale entries;
     ScanResult.Errors if new non-whitelisted entries found.
   """
-
-  excluded_dirs_list = [d for d in excluded_dirs_list if not 'third_party' in d]
-  # Using a common pattern for third-partyies makes the ignore regexp shorter
-  excluded_dirs_list.append('third_party')
-  # VCS dirs
-  excluded_dirs_list.append('.git')
-  excluded_dirs_list.append('.svn')
-  # Build output
-  excluded_dirs_list.append('out/Debug')
-  excluded_dirs_list.append('out/Release')
-  # 'Copyright' appears in license agreements
-  excluded_dirs_list.append('chrome/app/resources')
-  # Quickoffice js files from internal src used on buildbots. crbug.com/350472.
-  excluded_dirs_list.append('chrome/browser/resources/chromeos/quickoffice')
-  # This is a test output directory
-  excluded_dirs_list.append('chrome/tools/test/reference_build')
-  # blink style copy right headers.
-  excluded_dirs_list.append('content/shell/renderer/test_runner')
-  # blink style copy right headers.
-  excluded_dirs_list.append('content/shell/tools/plugin')
-  # This is tests directory, doesn't exist in the snapshot
-  excluded_dirs_list.append('content/test/data')
-  # This is a tests directory that doesn't exist in the shipped product.
-  excluded_dirs_list.append('gin/test')
-  # This is a test output directory
-  excluded_dirs_list.append('data/dom_perf')
-  # This is a tests directory that doesn't exist in the shipped product.
-  excluded_dirs_list.append('tools/perf/page_sets')
-  excluded_dirs_list.append('tools/perf/page_sets/tough_animation_cases')
-  # Histogram tools, doesn't exist in the snapshot
-  excluded_dirs_list.append('tools/histograms')
-  # Swarming tools, doesn't exist in the snapshot
-  excluded_dirs_list.append('tools/swarming_client')
-  # Arm sysroot tools, doesn't exist in the snapshot
-  excluded_dirs_list.append('arm-sysroot')
-  # Data is not part of open source chromium, but are included on some bots.
-  excluded_dirs_list.append('data')
-  # This is not part of open source chromium, but are included on some bots.
-  excluded_dirs_list.append('skia/tools/clusterfuzz-data')
-
-  args = [os.path.join('android_webview', 'tools', 'find_files.pl'),
-          '.'
-          ] + excluded_dirs_list
-  p = subprocess.Popen(args=args, cwd=REPOSITORY_ROOT, stdout=subprocess.PIPE)
-  files_to_scan = p.communicate()[0]
-
-  sharded_files_to_scan = _ShardString(files_to_scan, '\n', 2000)
+  input_api = InputApi()
+  files_to_scan = copyright_scanner.FindFiles(
+    input_api, REPOSITORY_ROOT, ['.'], excluded_dirs_list)
+  sharded_files_to_scan = _ShardList(files_to_scan, 2000)
   pool = multiprocessing.Pool()
   offending_files_chunks = pool.map_async(
-      _FindCopyrights, sharded_files_to_scan).get(999999)
+      _FindCopyrightViolations, sharded_files_to_scan).get(999999)
   pool.close()
   pool.join()
   # Flatten out the result
   offending_files = \
     [item for sublist in offending_files_chunks for item in sublist]
 
-  unknown = set(offending_files) - set(whitelisted_files)
+  (unknown, missing, stale) = copyright_scanner.AnalyzeScanResults(
+    input_api, whitelisted_files, offending_files)
+
   if unknown:
     print 'The following files contain a third-party license but are not in ' \
           'a listed third-party directory and are not whitelisted. You must ' \
           'add the following files to the whitelist.\n%s' % \
           '\n'.join(sorted(unknown))
-
-  stale = set(whitelisted_files) - set(offending_files)
+  if missing:
+    print 'The following files are whitelisted, but do not exist.\n%s' % \
+        '\n'.join(sorted(missing))
   if stale:
     print 'The following files are whitelisted unnecessarily. You must ' \
           'remove the following files from the whitelist.\n%s' % \
           '\n'.join(sorted(stale))
-  missing = [f for f in whitelisted_files if not os.path.exists(f)]
-  if missing:
-    print 'The following files are whitelisted, but do not exist.\n%s' % \
-        '\n'.join(sorted(missing))
 
   if unknown:
     return ScanResult.Errors
@@ -226,7 +165,19 @@ def _CheckLicenseHeaders(excluded_dirs_list, whitelisted_files):
     return ScanResult.Ok
 
 
-def _ReadFile(path):
+def _ReadFile(full_path, mode='rU'):
+  """Reads a file from disk. This emulates presubmit InputApi.ReadFile func.
+  Args:
+    full_path: The path of the file to read.
+  Returns:
+    The contents of the file as a string.
+  """
+
+  with open(full_path, mode) as f:
+    return f.read()
+
+
+def _ReadLocalFile(path, mode='rb'):
   """Reads a file from disk.
   Args:
     path: The path of the file to read, relative to the root of the repository.
@@ -234,7 +185,7 @@ def _ReadFile(path):
     The contents of the file as a string.
   """
 
-  return open(os.path.join(REPOSITORY_ROOT, path), 'rb').read()
+  return _ReadFile(os.path.join(REPOSITORY_ROOT, path), mode)
 
 
 def _FindThirdPartyDirs():
@@ -294,16 +245,35 @@ def _Scan():
         all_licenses_valid = False
 
   # Second, check for non-standard license text.
-  files_data = _ReadFile(os.path.join('android_webview', 'tools',
-                                      'third_party_files_whitelist.txt'))
-  whitelisted_files = []
-  for line in files_data.splitlines():
-    match = re.match(r'([^#\s]+)', line)
-    if match:
-      whitelisted_files.append(match.group(1))
+  whitelisted_files = copyright_scanner.LoadWhitelistedFilesList(InputApi())
   licenses_check = _CheckLicenseHeaders(third_party_dirs, whitelisted_files)
 
   return licenses_check if all_licenses_valid else ScanResult.Errors
+
+
+class TemplateEntryGenerator(object):
+  def __init__(self):
+    self.toc_index = 0
+
+  def _ReadFileGuessEncoding(self, name):
+    contents = ''
+    with open(name, 'rb') as input_file:
+      contents = input_file.read()
+    try:
+      return contents.decode('utf8')
+    except UnicodeDecodeError:
+      pass
+    # If it's not UTF-8, it must be CP-1252. Fail otherwise.
+    return contents.decode('cp1252')
+
+  def MetadataToTemplateEntry(self, metadata):
+    self.toc_index += 1
+    return {
+      'name': metadata['Name'],
+      'url': metadata['URL'],
+      'license': self._ReadFileGuessEncoding(metadata['License File']),
+      'toc_href': 'entry' + str(self.toc_index),
+    }
 
 
 def GenerateNoticeFile():
@@ -313,21 +283,29 @@ def GenerateNoticeFile():
     The contents of the NOTICE file.
   """
 
+  generator = TemplateEntryGenerator()
+  # Start from Chromium's LICENSE file
+  entries = [generator.MetadataToTemplateEntry({
+    'Name': 'The Chromium Project',
+    'URL': 'http://www.chromium.org',
+    'License File': os.path.join(REPOSITORY_ROOT, 'LICENSE') })
+  ]
+
   third_party_dirs = _FindThirdPartyDirs()
-
-  # Don't forget Chromium's LICENSE file
-  content = [_ReadFile('LICENSE')]
-
   # We provide attribution for all third-party directories.
-  # TODO(steveblock): Limit this to only code used by the WebView binary.
+  # TODO(mnaganov): Limit this to only code used by the WebView binary.
   for directory in sorted(third_party_dirs):
     metadata = licenses.ParseDir(directory, REPOSITORY_ROOT,
                                  require_license_file=False)
     license_file = metadata['License File']
     if license_file and license_file != licenses.NOT_SHIPPED:
-      content.append(_ReadFile(license_file))
+      entries.append(generator.MetadataToTemplateEntry(metadata))
 
-  return '\n'.join(content)
+  env = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(os.path.dirname(__file__)),
+    extensions=['jinja2.ext.autoescape'])
+  template = env.get_template('licenses_notice.tmpl')
+  return template.render({ 'entries': entries }).encode('utf8')
 
 
 def _ProcessIncompatibleResult(incompatible_directories):
@@ -347,14 +325,16 @@ def main():
   parser = optparse.OptionParser(formatter=FormatterWithNewLines(),
                                  usage='%prog [options]')
   parser.description = (__doc__ +
-                       '\nCommands:\n' \
-                       '  scan Check licenses.\n' \
-                       '  notice Generate Android NOTICE file on stdout.\n' \
-                       '  incompatible_directories Scan for incompatibly'
-                       ' licensed directories.\n'
-                       '  all_incompatible_directories Scan for incompatibly'
-                       ' licensed directories (even those in'
-                       ' known_issues.py).\n')
+                        '\nCommands:\n'
+                        '  scan Check licenses.\n'
+                        '  notice Generate Android NOTICE file on stdout.\n'
+                        '  incompatible_directories Scan for incompatibly'
+                        ' licensed directories.\n'
+                        '  all_incompatible_directories Scan for incompatibly'
+                        ' licensed directories (even those in'
+                        ' known_issues.py).\n'
+                        '  display_copyrights Display autorship on the files'
+                        ' using names provided via stdin.\n')
   (_, args) = parser.parse_args()
   if len(args) != 1:
     parser.print_help()
@@ -372,6 +352,12 @@ def main():
     return _ProcessIncompatibleResult(GetUnknownIncompatibleDirectories())
   elif args[0] == 'all_incompatible_directories':
     return _ProcessIncompatibleResult(GetIncompatibleDirectories())
+  elif args[0] == 'display_copyrights':
+    files = sys.stdin.read().splitlines()
+    for f, c in \
+        zip(files, copyright_scanner.FindCopyrights(InputApi(), '.', files)):
+      print f, '\t', ' / '.join(sorted(c))
+    return ScanResult.Ok
   parser.print_help()
   return ScanResult.Errors
 

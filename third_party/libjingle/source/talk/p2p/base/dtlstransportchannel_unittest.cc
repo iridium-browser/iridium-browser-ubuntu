@@ -28,8 +28,8 @@
 
 #include <set>
 
-#include "talk/p2p/base/dtlstransport.h"
-#include "talk/p2p/base/fakesession.h"
+#include "webrtc/p2p/base/dtlstransport.h"
+#include "webrtc/p2p/base/fakesession.h"
 #include "webrtc/base/common.h"
 #include "webrtc/base/dscp.h"
 #include "webrtc/base/gunit.h"
@@ -377,14 +377,6 @@ class DtlsTestClient : public sigslot::has_slots<> {
 
 class DtlsTransportChannelTest : public testing::Test {
  public:
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
-  }
-
   DtlsTransportChannelTest() :
       client1_("P1", rtc::Thread::Current(),
                rtc::Thread::Current()),

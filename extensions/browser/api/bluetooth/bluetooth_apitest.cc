@@ -45,13 +45,13 @@ class BluetoothApiTest : public ExtensionApiTest {
  public:
   BluetoothApiTest() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
     empty_extension_ = extensions::test_util::CreateEmptyExtension();
     SetUpMockAdapter();
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     EXPECT_CALL(*mock_adapter_, RemoveObserver(testing::_));
   }
 

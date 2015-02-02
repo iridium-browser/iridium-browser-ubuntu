@@ -24,7 +24,7 @@ class FileProxyTest : public testing::Test {
         bytes_written_(-1),
         weak_factory_(this) {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(dir_.CreateUniqueTempDir());
     ASSERT_TRUE(file_thread_.Start());
   }
@@ -267,7 +267,7 @@ TEST_F(FileProxyTest, WriteAndFlush) {
   CreateProxy(File::FLAG_CREATE | File::FLAG_WRITE, &proxy);
 
   const char data[] = "foo!";
-  int data_bytes = ARRAYSIZE_UNSAFE(data);
+  int data_bytes = arraysize(data);
   proxy.Write(0, data, data_bytes,
               Bind(&FileProxyTest::DidWrite, weak_factory_.GetWeakPtr()));
   MessageLoop::current()->Run();

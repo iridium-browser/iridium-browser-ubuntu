@@ -15,7 +15,7 @@
 #include "SkRecord.h"
 
 // Fill a BBH to be used by SkRecordDraw to accelerate playback.
-void SkRecordFillBounds(const SkRecord&, SkBBoxHierarchy*);
+void SkRecordFillBounds(const SkRect& cullRect, const SkRecord&, SkBBoxHierarchy*);
 
 // Draw an SkRecord into an SkCanvas.  A convenience wrapper around SkRecords::Draw.
 void SkRecordDraw(const SkRecord&, SkCanvas*, const SkBBoxHierarchy*, SkDrawPictureCallback*);
@@ -37,6 +37,9 @@ public:
         : fInitialCTM(initialCTM ? *initialCTM : canvas->getTotalMatrix())
         , fCanvas(canvas) {}
 
+    // This operator calls methods on the |canvas|. The various draw() wrapper
+    // methods around SkCanvas are defined by the DRAW() macro in
+    // SkRecordDraw.cpp.
     template <typename T> void operator()(const T& r) {
         this->draw(r);
     }

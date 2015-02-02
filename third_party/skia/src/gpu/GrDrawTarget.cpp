@@ -13,6 +13,7 @@
 #include "GrDrawTargetCaps.h"
 #include "GrPath.h"
 #include "GrRenderTarget.h"
+#include "GrSurfacePriv.h"
 #include "GrTemplates.h"
 #include "GrTexture.h"
 #include "GrVertexBuffer.h"
@@ -92,7 +93,6 @@ GrDrawTarget::GrDrawTarget(GrContext* context)
     , fContext(context)
     , fGpuTraceMarkerCount(0) {
     SkASSERT(context);
-
     fDrawState = &fDefaultDrawState;
     // We assume that fDrawState always owns a ref to the object it points at.
     fDefaultDrawState.ref();
@@ -232,9 +232,6 @@ void GrDrawTarget::releasePreviousVertexSource() {
     switch (geoSrc.fVertexSrc) {
         case kNone_GeometrySrcType:
             break;
-        case kArray_GeometrySrcType:
-            this->releaseVertexArray();
-            break;
         case kReserved_GeometrySrcType:
             this->releaseReservedVertexSpace();
             break;
@@ -255,9 +252,6 @@ void GrDrawTarget::releasePreviousIndexSource() {
     switch (geoSrc.fIndexSrc) {
         case kNone_GeometrySrcType:   // these two don't require
             break;
-        case kArray_GeometrySrcType:
-            this->releaseIndexArray();
-            break;
         case kReserved_GeometrySrcType:
             this->releaseReservedIndexSpace();
             break;
@@ -271,25 +265,6 @@ void GrDrawTarget::releasePreviousIndexSource() {
             SkFAIL("Unknown Index Source Type.");
             break;
     }
-}
-
-void GrDrawTarget::setVertexSourceToArray(const void* vertexArray,
-                                          int vertexCount) {
-    this->releasePreviousVertexSource();
-    GeometrySrcState& geoSrc = fGeoSrcStateStack.back();
-    geoSrc.fVertexSrc = kArray_GeometrySrcType;
-    geoSrc.fVertexSize = this->drawState()->getVertexStride();
-    geoSrc.fVertexCount = vertexCount;
-    this->onSetVertexSourceToArray(vertexArray, vertexCount);
-}
-
-void GrDrawTarget::setIndexSourceToArray(const void* indexArray,
-                                         int indexCount) {
-    this->releasePreviousIndexSource();
-    GeometrySrcState& geoSrc = fGeoSrcStateStack.back();
-    geoSrc.fIndexSrc = kArray_GeometrySrcType;
-    geoSrc.fIndexCount = indexCount;
-    this->onSetIndexSourceToArray(indexArray, indexCount);
 }
 
 void GrDrawTarget::setVertexSourceToBuffer(const GrVertexBuffer* buffer) {
@@ -358,7 +333,6 @@ bool GrDrawTarget::checkDraw(GrPrimitiveType type, int startVertex,
         case kNone_GeometrySrcType:
             SkFAIL("Attempting to draw without vertex src.");
         case kReserved_GeometrySrcType: // fallthrough
-        case kArray_GeometrySrcType:
             maxValidVertex = geoSrc.fVertexCount;
             break;
         case kBuffer_GeometrySrcType:
@@ -375,7 +349,6 @@ bool GrDrawTarget::checkDraw(GrPrimitiveType type, int startVertex,
             case kNone_GeometrySrcType:
                 SkFAIL("Attempting to draw indexed geom without index src.");
             case kReserved_GeometrySrcType: // fallthrough
-            case kArray_GeometrySrcType:
                 maxValidIndex = geoSrc.fIndexCount;
                 break;
             case kBuffer_GeometrySrcType:
@@ -390,7 +363,7 @@ bool GrDrawTarget::checkDraw(GrPrimitiveType type, int startVertex,
     SkASSERT(drawState.getRenderTarget());
 
     if (drawState.hasGeometryProcessor()) {
-        const GrGeometryProcessor* gp = drawState.getGeometryProcessor()->getGeometryProcessor();
+        const GrGeometryProcessor* gp = drawState.getGeometryProcessor();
         int numTextures = gp->numTextures();
         for (int t = 0; t < numTextures; ++t) {
             GrTexture* texture = gp->texture(t);
@@ -437,32 +410,33 @@ bool GrDrawTarget::setupDstReadIfNecessary(GrDeviceCoordTexture* dstCopy, const 
         drawBounds->roundOut(&drawIBounds);
         if (!copyRect.intersect(drawIBounds)) {
 #ifdef SK_DEBUG
-            GrPrintf("Missed an early reject. Bailing on draw from setupDstReadIfNecessary.\n");
+            SkDebugf("Missed an early reject. Bailing on draw from setupDstReadIfNecessary.\n");
 #endif
             return false;
         }
     } else {
 #ifdef SK_DEBUG
-        //GrPrintf("No dev bounds when dst copy is made.\n");
+        //SkDebugf("No dev bounds when dst copy is made.\n");
 #endif
     }
 
     // MSAA consideration: When there is support for reading MSAA samples in the shader we could
     // have per-sample dst values by making the copy multisampled.
-    GrTextureDesc desc;
+    GrSurfaceDesc desc;
     this->initCopySurfaceDstDesc(rt, &desc);
     desc.fWidth = copyRect.width();
     desc.fHeight = copyRect.height();
 
-    GrAutoScratchTexture ast(fContext, desc, GrContext::kApprox_ScratchTexMatch);
+    SkAutoTUnref<GrTexture> copy(
+        fContext->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch));
 
-    if (NULL == ast.texture()) {
-        GrPrintf("Failed to create temporary copy of destination texture.\n");
+    if (!copy) {
+        SkDebugf("Failed to create temporary copy of destination texture.\n");
         return false;
     }
     SkIPoint dstPoint = {0, 0};
-    if (this->copySurface(ast.texture(), rt, copyRect, dstPoint)) {
-        dstCopy->setTexture(ast.texture());
+    if (this->copySurface(copy, rt, copyRect, dstPoint)) {
+        dstCopy->setTexture(copy);
         dstCopy->setOffset(copyRect.fLeft, copyRect.fTop);
         return true;
     } else {
@@ -526,28 +500,20 @@ void GrDrawTarget::drawNonIndexed(GrPrimitiveType type,
     }
 }
 
-void GrDrawTarget::stencilPath(const GrPath* path, SkPath::FillType fill) {
+void GrDrawTarget::stencilPath(const GrPath* path, GrPathRendering::FillType fill) {
     // TODO: extract portions of checkDraw that are relevant to path stenciling.
     SkASSERT(path);
     SkASSERT(this->caps()->pathRenderingSupport());
-    SkASSERT(!SkPath::IsInverseFillType(fill));
     this->onStencilPath(path, fill);
 }
 
-void GrDrawTarget::drawPath(const GrPath* path, SkPath::FillType fill) {
+void GrDrawTarget::drawPath(const GrPath* path, GrPathRendering::FillType fill) {
     // TODO: extract portions of checkDraw that are relevant to path rendering.
     SkASSERT(path);
     SkASSERT(this->caps()->pathRenderingSupport());
-    const GrDrawState* drawState = &getDrawState();
 
-    SkRect devBounds;
-    if (SkPath::IsInverseFillType(fill)) {
-        devBounds = SkRect::MakeWH(SkIntToScalar(drawState->getRenderTarget()->width()),
-                                   SkIntToScalar(drawState->getRenderTarget()->height()));
-    } else {
-        devBounds = path->getBounds();
-    }
-    SkMatrix viewM = drawState->getViewMatrix();
+    SkRect devBounds = path->getBounds();
+    SkMatrix viewM = this->drawState()->getViewMatrix();
     viewM.mapRect(&devBounds);
 
     GrDeviceCoordTexture dstCopy;
@@ -561,7 +527,7 @@ void GrDrawTarget::drawPath(const GrPath* path, SkPath::FillType fill) {
 void GrDrawTarget::drawPaths(const GrPathRange* pathRange,
                              const uint32_t indices[], int count,
                              const float transforms[], PathTransformType transformsType,
-                             SkPath::FillType fill) {
+                             GrPathRendering::FillType fill) {
     SkASSERT(this->caps()->pathRenderingSupport());
     SkASSERT(pathRange);
     SkASSERT(indices);
@@ -578,6 +544,31 @@ void GrDrawTarget::drawPaths(const GrPathRange* pathRange,
 
     this->onDrawPaths(pathRange, indices, count, transforms, transformsType, fill,
                       dstCopy.texture() ? &dstCopy : NULL);
+}
+
+void GrDrawTarget::clear(const SkIRect* rect, GrColor color, bool canIgnoreRect,
+                         GrRenderTarget* renderTarget) {
+    if (fCaps->useDrawInsteadOfClear()) {
+        // This works around a driver bug with clear by drawing a rect instead.
+        // The driver will ignore a clear if it is the only thing rendered to a
+        // target before the target is read.
+        SkIRect rtRect = SkIRect::MakeWH(renderTarget->width(), renderTarget->height());
+        if (NULL == rect || canIgnoreRect || rect->contains(rtRect)) {
+            rect = &rtRect;
+            // We first issue a discard() since that may help tilers.
+            this->discard(renderTarget);
+        }
+        AutoStateRestore asr(this, kReset_ASRInit, &SkMatrix::I());
+
+        this->drawState()->setColor(color);
+        this->drawState()->disableState(GrDrawState::kClip_StateBit);
+        this->drawState()->disableState(GrDrawState::kHWAntialias_StateBit);
+        this->drawState()->setRenderTarget(renderTarget);
+
+        this->drawSimpleRect(*rect);
+    } else {       
+        this->onClear(rect, color, canIgnoreRect, renderTarget);
+    }
 }
 
 typedef GrTraceMarkerSet::Iter TMIter;
@@ -698,7 +689,7 @@ void GrDrawTarget::onDrawRect(const SkRect& rect,
 
     AutoReleaseGeometry geo(this, 4, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return;
     }
 
@@ -923,13 +914,30 @@ bool GrDrawTarget::copySurface(GrSurface* dst,
                                    dstPoint,
                                    &clippedSrcRect,
                                    &clippedDstPoint)) {
-        SkASSERT(this->canCopySurface(dst, src, srcRect, dstPoint));
+        SkASSERT(GrDrawTarget::canCopySurface(dst, src, srcRect, dstPoint));
         return true;
     }
 
-    bool result = this->onCopySurface(dst, src, clippedSrcRect, clippedDstPoint);
-    SkASSERT(result == this->canCopySurface(dst, src, clippedSrcRect, clippedDstPoint));
-    return result;
+    if (!GrDrawTarget::canCopySurface(dst, src, clippedSrcRect, clippedDstPoint)) {
+        return false;
+    }
+
+    GrRenderTarget* rt = dst->asRenderTarget();
+    GrTexture* tex = src->asTexture();
+
+    GrDrawTarget::AutoStateRestore asr(this, kReset_ASRInit);
+    this->drawState()->setRenderTarget(rt);
+    SkMatrix matrix;
+    matrix.setTranslate(SkIntToScalar(clippedSrcRect.fLeft - clippedDstPoint.fX),
+                        SkIntToScalar(clippedSrcRect.fTop - clippedDstPoint.fY));
+    matrix.postIDiv(tex->width(), tex->height());
+    this->drawState()->addColorTextureProcessor(tex, matrix);
+    SkIRect dstRect = SkIRect::MakeXYWH(clippedDstPoint.fX,
+                                        clippedDstPoint.fY,
+                                        clippedSrcRect.width(),
+                                        clippedSrcRect.height());
+    this->drawSimpleRect(dstRect);
+    return true;
 }
 
 bool GrDrawTarget::canCopySurface(GrSurface* dst,
@@ -950,53 +958,21 @@ bool GrDrawTarget::canCopySurface(GrSurface* dst,
                                    &clippedDstPoint)) {
         return true;
     }
-    return this->onCanCopySurface(dst, src, clippedSrcRect, clippedDstPoint);
-}
 
-bool GrDrawTarget::onCanCopySurface(GrSurface* dst,
-                                    GrSurface* src,
-                                    const SkIRect& srcRect,
-                                    const SkIPoint& dstPoint) {
     // Check that the read/write rects are contained within the src/dst bounds.
-    SkASSERT(!srcRect.isEmpty());
-    SkASSERT(SkIRect::MakeWH(src->width(), src->height()).contains(srcRect));
-    SkASSERT(dstPoint.fX >= 0 && dstPoint.fY >= 0);
-    SkASSERT(dstPoint.fX + srcRect.width() <= dst->width() &&
-             dstPoint.fY + srcRect.height() <= dst->height());
+    SkASSERT(!clippedSrcRect.isEmpty());
+    SkASSERT(SkIRect::MakeWH(src->width(), src->height()).contains(clippedSrcRect));
+    SkASSERT(clippedDstPoint.fX >= 0 && clippedDstPoint.fY >= 0);
+    SkASSERT(clippedDstPoint.fX + clippedSrcRect.width() <= dst->width() &&
+             clippedDstPoint.fY + clippedSrcRect.height() <= dst->height());
 
-    return !dst->isSameAs(src) && dst->asRenderTarget() && src->asTexture();
+    return !dst->surfacePriv().isSameAs(src) && dst->asRenderTarget() && src->asTexture();
 }
 
-bool GrDrawTarget::onCopySurface(GrSurface* dst,
-                                 GrSurface* src,
-                                 const SkIRect& srcRect,
-                                 const SkIPoint& dstPoint) {
-    if (!GrDrawTarget::onCanCopySurface(dst, src, srcRect, dstPoint)) {
-        return false;
-    }
-
-    GrRenderTarget* rt = dst->asRenderTarget();
-    GrTexture* tex = src->asTexture();
-
-    GrDrawTarget::AutoStateRestore asr(this, kReset_ASRInit);
-    this->drawState()->setRenderTarget(rt);
-    SkMatrix matrix;
-    matrix.setTranslate(SkIntToScalar(srcRect.fLeft - dstPoint.fX),
-                        SkIntToScalar(srcRect.fTop - dstPoint.fY));
-    matrix.postIDiv(tex->width(), tex->height());
-    this->drawState()->addColorTextureProcessor(tex, matrix);
-    SkIRect dstRect = SkIRect::MakeXYWH(dstPoint.fX,
-                                        dstPoint.fY,
-                                        srcRect.width(),
-                                        srcRect.height());
-    this->drawSimpleRect(dstRect);
-    return true;
-}
-
-void GrDrawTarget::initCopySurfaceDstDesc(const GrSurface* src, GrTextureDesc* desc) {
+void GrDrawTarget::initCopySurfaceDstDesc(const GrSurface* src, GrSurfaceDesc* desc) {
     // Make the dst of the copy be a render target because the default copySurface draws to the dst.
     desc->fOrigin = kDefault_GrSurfaceOrigin;
-    desc->fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+    desc->fFlags = kRenderTarget_GrSurfaceFlag | kNoStencil_GrSurfaceFlag;
     desc->fConfig = src->config();
 }
 
@@ -1017,6 +993,8 @@ void GrDrawTargetCaps::reset() {
     fReuseScratchTextures = true;
     fGpuTracingSupport = false;
     fCompressedTexSubImageSupport = false;
+
+    fUseDrawInsteadOfClear = false;
 
     fMapBufferFlags = kNone_MapFlags;
 
@@ -1043,6 +1021,8 @@ GrDrawTargetCaps& GrDrawTargetCaps::operator=(const GrDrawTargetCaps& other) {
     fReuseScratchTextures = other.fReuseScratchTextures;
     fGpuTracingSupport = other.fGpuTracingSupport;
     fCompressedTexSubImageSupport = other.fCompressedTexSubImageSupport;
+
+    fUseDrawInsteadOfClear = other.fUseDrawInsteadOfClear;
 
     fMapBufferFlags = other.fMapBufferFlags;
 
@@ -1079,25 +1059,29 @@ static SkString map_flags_to_string(uint32_t flags) {
 SkString GrDrawTargetCaps::dump() const {
     SkString r;
     static const char* gNY[] = {"NO", "YES"};
-    r.appendf("MIP Map Support              : %s\n", gNY[fMipMapSupport]);
-    r.appendf("NPOT Texture Tile Support    : %s\n", gNY[fNPOTTextureTileSupport]);
-    r.appendf("Two Sided Stencil Support    : %s\n", gNY[fTwoSidedStencilSupport]);
-    r.appendf("Stencil Wrap Ops  Support    : %s\n", gNY[fStencilWrapOpsSupport]);
-    r.appendf("HW AA Lines Support          : %s\n", gNY[fHWAALineSupport]);
-    r.appendf("Shader Derivative Support    : %s\n", gNY[fShaderDerivativeSupport]);
-    r.appendf("Geometry Shader Support      : %s\n", gNY[fGeometryShaderSupport]);
-    r.appendf("Dual Source Blending Support : %s\n", gNY[fDualSourceBlendingSupport]);
-    r.appendf("Path Rendering Support       : %s\n", gNY[fPathRenderingSupport]);
-    r.appendf("Dst Read In Shader Support   : %s\n", gNY[fDstReadInShaderSupport]);
-    r.appendf("Discard Render Target Support: %s\n", gNY[fDiscardRenderTargetSupport]);
-    r.appendf("Reuse Scratch Textures       : %s\n", gNY[fReuseScratchTextures]);
-    r.appendf("Gpu Tracing Support          : %s\n", gNY[fGpuTracingSupport]);
-    r.appendf("Compressed Update Support    : %s\n", gNY[fCompressedTexSubImageSupport]);
-    r.appendf("Max Texture Size             : %d\n", fMaxTextureSize);
-    r.appendf("Max Render Target Size       : %d\n", fMaxRenderTargetSize);
-    r.appendf("Max Sample Count             : %d\n", fMaxSampleCount);
+    r.appendf("MIP Map Support                    : %s\n", gNY[fMipMapSupport]);
+    r.appendf("NPOT Texture Tile Support          : %s\n", gNY[fNPOTTextureTileSupport]);
+    r.appendf("Two Sided Stencil Support          : %s\n", gNY[fTwoSidedStencilSupport]);
+    r.appendf("Stencil Wrap Ops  Support          : %s\n", gNY[fStencilWrapOpsSupport]);
+    r.appendf("HW AA Lines Support                : %s\n", gNY[fHWAALineSupport]);
+    r.appendf("Shader Derivative Support          : %s\n", gNY[fShaderDerivativeSupport]);
+    r.appendf("Geometry Shader Support            : %s\n", gNY[fGeometryShaderSupport]);
+    r.appendf("Dual Source Blending Support       : %s\n", gNY[fDualSourceBlendingSupport]);
+    r.appendf("Path Rendering Support             : %s\n", gNY[fPathRenderingSupport]);
+    r.appendf("Dst Read In Shader Support         : %s\n", gNY[fDstReadInShaderSupport]);
+    r.appendf("Discard Render Target Support      : %s\n", gNY[fDiscardRenderTargetSupport]);
+    r.appendf("Reuse Scratch Textures             : %s\n", gNY[fReuseScratchTextures]);
+    r.appendf("Gpu Tracing Support                : %s\n", gNY[fGpuTracingSupport]);
+    r.appendf("Compressed Update Support          : %s\n", gNY[fCompressedTexSubImageSupport]);
 
-    r.appendf("Map Buffer Support           : %s\n", map_flags_to_string(fMapBufferFlags).c_str());
+    r.appendf("Draw Instead of Clear [workaround] : %s\n", gNY[fUseDrawInsteadOfClear]);
+
+    r.appendf("Max Texture Size                   : %d\n", fMaxTextureSize);
+    r.appendf("Max Render Target Size             : %d\n", fMaxRenderTargetSize);
+    r.appendf("Max Sample Count                   : %d\n", fMaxSampleCount);
+
+    r.appendf("Map Buffer Support                 : %s\n",
+              map_flags_to_string(fMapBufferFlags).c_str());
 
     static const char* kConfigNames[] = {
         "Unknown",  // kUnknown_GrPixelConfig

@@ -27,16 +27,15 @@ public class AwContentsClientAutoLoginTest extends AwTestBase {
         AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
         AwContents awContents = testView.getAwContents();
         final OnReceivedLoginRequestHelper loginRequestHelper =
-            mContentsClient.getOnReceivedLoginRequestHelper();
+                mContentsClient.getOnReceivedLoginRequestHelper();
 
         final String path = "/" + testName + ".html";
         final String html = testName;
         List<Pair<String, String>> headers = new ArrayList<Pair<String, String>>();
         headers.add(Pair.create("x-auto-login", xAutoLoginHeader));
 
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String pageUrl = webServer.setResponse(path, html, headers);
             final int callCount = loginRequestHelper.getCallCount();
             loadUrlAsync(awContents, pageUrl);
@@ -46,7 +45,7 @@ public class AwContentsClientAutoLoginTest extends AwTestBase {
             assertEquals(expectedAccount, loginRequestHelper.getAccount());
             assertEquals(expectedArgs, loginRequestHelper.getArgs());
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 

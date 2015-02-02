@@ -31,6 +31,7 @@
 
 namespace webrtc {
 
+class BitrateAggregator;
 class CriticalSectionWrapper;
 class RTPSenderAudio;
 class RTPSenderVideo;
@@ -65,7 +66,7 @@ class RTPSenderInterface {
       PacedSender::Priority priority) = 0;
 };
 
-class RTPSender : public RTPSenderInterface, public Bitrate::Observer {
+class RTPSender : public RTPSenderInterface {
  public:
   RTPSender(const int32_t id, const bool audio, Clock *clock,
             Transport *transport, RtpAudioFeedback *audio_feedback,
@@ -276,8 +277,6 @@ class RTPSender : public RTPSenderInterface, public Bitrate::Observer {
 
   uint32_t BitrateSent() const;
 
-  virtual void BitrateUpdated(const BitrateStatistics& stats) OVERRIDE;
-
   void SetRtpState(const RtpState& rtp_state);
   RtpState GetRtpState() const;
   void SetRtxRtpState(const RtpState& rtp_state);
@@ -336,7 +335,10 @@ class RTPSender : public RTPSenderInterface, public Bitrate::Observer {
   bool IsFecPacket(const uint8_t* buffer, const RTPHeader& header) const;
 
   Clock* clock_;
-  Bitrate bitrate_sent_;
+  int64_t clock_delta_ms_;
+
+  scoped_ptr<BitrateAggregator> bitrates_;
+  Bitrate total_bitrate_sent_;
 
   int32_t id_;
   const bool audio_configured_;
@@ -344,6 +346,7 @@ class RTPSender : public RTPSenderInterface, public Bitrate::Observer {
   RTPSenderVideo *video_;
 
   PacedSender *paced_sender_;
+  int64_t last_capture_time_ms_sent_;
   CriticalSectionWrapper *send_critsect_;
 
   Transport *transport_;
@@ -373,7 +376,6 @@ class RTPSender : public RTPSenderInterface, public Bitrate::Observer {
   StreamDataCounters rtp_stats_ GUARDED_BY(statistics_crit_);
   StreamDataCounters rtx_rtp_stats_ GUARDED_BY(statistics_crit_);
   StreamDataCountersCallback* rtp_stats_callback_ GUARDED_BY(statistics_crit_);
-  BitrateStatisticsObserver* const bitrate_callback_;
   FrameCountObserver* const frame_count_observer_;
   SendSideDelayObserver* const send_side_delay_observer_;
 

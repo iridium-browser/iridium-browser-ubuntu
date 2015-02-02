@@ -7,6 +7,7 @@
 
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -33,6 +34,7 @@ struct IndexedDBHostMsg_FactoryGetDatabaseNames_Params;
 struct IndexedDBHostMsg_FactoryOpen_Params;
 
 namespace content {
+class IndexedDBBlobInfo;
 class IndexedDBConnection;
 class IndexedDBContextImpl;
 class IndexedDBCursor;
@@ -58,12 +60,12 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
       const content::IndexedDBDatabaseMetadata& metadata);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual void OnChannelClosing() OVERRIDE;
-  virtual void OnDestruct() const OVERRIDE;
-  virtual base::TaskRunner* OverrideTaskRunnerForMessage(
-      const IPC::Message& message) OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnChannelConnected(int32 peer_pid) override;
+  void OnChannelClosing() override;
+  void OnDestruct() const override;
+  base::TaskRunner* OverrideTaskRunnerForMessage(
+      const IPC::Message& message) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   void FinishTransaction(int64 host_transaction_id, bool committed);
 
@@ -94,9 +96,7 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
   static uint32 TransactionIdToRendererTransactionId(int64 host_transaction_id);
   static uint32 TransactionIdToProcessId(int64 host_transaction_id);
 
-  void HoldBlobDataHandle(const std::string& uuid,
-                          scoped_ptr<storage::BlobDataHandle> blob_data_handle);
-  void DropBlobDataHandle(const std::string& uuid);
+  std::string HoldBlobData(const IndexedDBBlobInfo& blob_info);
 
  private:
   // Friends to enable OnDestruct() delegation.
@@ -104,7 +104,8 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
   friend class base::DeleteHelper<IndexedDBDispatcherHost>;
 
   // Used in nested classes.
-  typedef std::map<std::string, storage::BlobDataHandle*> BlobDataHandleMap;
+  typedef std::map<std::string, std::pair<storage::BlobDataHandle*, int>>
+      BlobDataHandleMap;
   typedef std::map<int64, int64> TransactionIDToDatabaseIDMap;
   typedef std::map<int64, uint64> TransactionIDToSizeMap;
   typedef std::map<int64, GURL> TransactionIDToURLMap;
@@ -234,7 +235,7 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
     DISALLOW_COPY_AND_ASSIGN(CursorDispatcherHost);
   };
 
-  virtual ~IndexedDBDispatcherHost();
+  ~IndexedDBDispatcherHost() override;
 
   // Helper templates.
   template <class ReturnType>
@@ -261,6 +262,7 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
                    std::vector<storage::BlobDataHandle*> handles);
 
   void ResetDispatcherHosts();
+  void DropBlobData(const std::string& uuid);
 
   // The getter holds the context until OnChannelConnected() can be called from
   // the IO thread, which will extract the net::URLRequestContext from it.

@@ -22,9 +22,15 @@ class AppInfoPanel : public views::View {
  public:
   AppInfoPanel(Profile* profile, const extensions::Extension* app);
 
-  virtual ~AppInfoPanel();
+  ~AppInfoPanel() override;
 
  protected:
+  // Closes the dialog.
+  void Close();
+
+  // Opens the given URL in a new browser tab.
+  void OpenLink(const GURL& url);
+
   // Create a heading label with the given text.
   views::Label* CreateHeading(const base::string16& text) const;
 
@@ -35,10 +41,8 @@ class AppInfoPanel : public views::View {
   views::View* CreateVerticalStack() const;
 
   // Create a view with a horizontally-stacked box layout, which can have child
-  // views appended to it. |child_spacing| defaults to the spacing between
-  // related horizontal controls.
+  // views appended to it.
   views::View* CreateHorizontalStack(int child_spacing) const;
-  views::View* CreateHorizontalStack() const;
 
   // Given a key and a value, displays them side-by-side as a field and its
   // value.

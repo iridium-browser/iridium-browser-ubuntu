@@ -26,6 +26,7 @@ class URLRequestContextGetter;
 
 namespace storage {
 class QuotaManagerProxy;
+class SpecialStoragePolicy;
 }
 
 namespace content {
@@ -48,7 +49,8 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   // Init and Shutdown are for use on the UI thread when the profile,
   // storagepartition is being setup and torn down.
   void Init(const base::FilePath& user_data_directory,
-            storage::QuotaManagerProxy* quota_manager_proxy);
+            storage::QuotaManagerProxy* quota_manager_proxy,
+            storage::SpecialStoragePolicy* special_storage_policy);
   void Shutdown();
 
   // Deletes all files on disk and restarts the system asynchronously. This
@@ -65,16 +67,18 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   }
 
   // ServiceWorkerContext implementation:
-  virtual void RegisterServiceWorker(
-      const GURL& pattern,
-      const GURL& script_url,
-      const ResultCallback& continuation) OVERRIDE;
-  virtual void UnregisterServiceWorker(const GURL& pattern,
-                                       const ResultCallback& continuation)
-      OVERRIDE;
-  virtual void Terminate() OVERRIDE;
-  virtual void GetAllOriginsInfo(const GetUsageInfoCallback& callback) OVERRIDE;
-  virtual void DeleteForOrigin(const GURL& origin_url) OVERRIDE;
+  void RegisterServiceWorker(const GURL& pattern,
+                             const GURL& script_url,
+                             const ResultCallback& continuation) override;
+  void UnregisterServiceWorker(const GURL& pattern,
+                               const ResultCallback& continuation) override;
+  void GetAllOriginsInfo(const GetUsageInfoCallback& callback) override;
+  void DeleteForOrigin(const GURL& origin_url) override;
+
+  // DeleteForOrigin with completion callback.  Does not exit early, and returns
+  // false if one or more of the deletions fail.
+  virtual void DeleteForOrigin(const GURL& origin_url,
+                               const ResultCallback& done);
 
   void AddObserver(ServiceWorkerContextObserver* observer);
   void RemoveObserver(ServiceWorkerContextObserver* observer);
@@ -95,23 +99,23 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   friend class base::RefCountedThreadSafe<ServiceWorkerContextWrapper>;
   friend class EmbeddedWorkerTestHelper;
   friend class ServiceWorkerProcessManager;
-  virtual ~ServiceWorkerContextWrapper();
+  friend class MockServiceWorkerContextWrapper;
+
+  ~ServiceWorkerContextWrapper() override;
 
   void InitInternal(
       const base::FilePath& user_data_directory,
       const scoped_refptr<base::SequencedTaskRunner>& stores_task_runner,
-      const scoped_refptr<base::SequencedTaskRunner>& database_task_runner,
+      scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_manager,
       const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
-      storage::QuotaManagerProxy* quota_manager_proxy);
+      storage::QuotaManagerProxy* quota_manager_proxy,
+      storage::SpecialStoragePolicy* special_storage_policy);
   void ShutdownOnIO();
 
   void DidDeleteAndStartOver(ServiceWorkerStatusCode status);
 
   void DidGetAllRegistrationsForGetAllOrigins(
       const GetUsageInfoCallback& callback,
-      const std::vector<ServiceWorkerRegistrationInfo>& registrations);
-  void DidGetAllRegistrationsForDeleteForOrigin(
-      const GURL& origin,
       const std::vector<ServiceWorkerRegistrationInfo>& registrations);
 
   const scoped_refptr<ObserverListThreadSafe<ServiceWorkerContextObserver> >
@@ -120,7 +124,7 @@ class CONTENT_EXPORT ServiceWorkerContextWrapper
   // Cleared in Shutdown():
   scoped_ptr<ServiceWorkerContextCore> context_core_;
 
-  // Initialized in Init(); true of the user data directory is empty.
+  // Initialized in Init(); true if the user data directory is empty.
   bool is_incognito_;
 };
 

@@ -10,18 +10,19 @@
  * @extends {WebInspector.VBox}
  * @param {!WebInspector.Workspace} workspace
  * @param {!WebInspector.SourcesPanel} sourcesPanel
+ * @suppressGlobalPropertiesCheck
  */
 WebInspector.SourcesView = function(workspace, sourcesPanel)
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("sourcesView.css");
+    this.registerRequiredCSS("sources/sourcesView.css");
     this.element.id = "sources-panel-sources-view";
     this.setMinimumAndPreferredSizes(50, 25, 150, 100);
 
     this._workspace = workspace;
     this._sourcesPanel = sourcesPanel;
 
-    this._searchableView = new WebInspector.SearchableView(this);
+    this._searchableView = new WebInspector.SearchableView(this, "sourcesViewSearchConfig");
     this._searchableView.setMinimalSearchQuerySize(0);
     this._searchableView.show(this.element);
 
@@ -37,17 +38,18 @@ WebInspector.SourcesView = function(workspace, sourcesPanel)
     this._historyManager = new WebInspector.EditingLocationHistoryManager(this, this.currentSourceFrame.bind(this));
 
     this._statusBarContainerElement = this.element.createChild("div", "sources-status-bar");
+    this._statusBarEditorActionsElement = this._statusBarContainerElement.createChild("div");
 
+    self.runtime.instancesPromise(WebInspector.SourcesView.EditorAction).then(appendButtonsForExtensions.bind(this));
     /**
+     * @param {!Array.<!WebInspector.SourcesView.EditorAction>} actions
      * @this {WebInspector.SourcesView}
-     * @param {!WebInspector.SourcesView.EditorAction} EditorAction
      */
-    function appendButtonForExtension(EditorAction)
+    function appendButtonsForExtensions(actions)
     {
-        this._statusBarContainerElement.appendChild(EditorAction.button(this));
+        for (var i = 0; i < actions.length; ++i)
+            this._statusBarEditorActionsElement.appendChild(actions[i].button(this));
     }
-    var editorActions = /** @type {!Array.<!WebInspector.SourcesView.EditorAction>} */ (self.runtime.instances(WebInspector.SourcesView.EditorAction));
-    editorActions.forEach(appendButtonForExtension.bind(this));
 
     this._scriptViewStatusBarItemsContainer = this._statusBarContainerElement.createChild("div", "inline-block");
     this._scriptViewStatusBarTextContainer = this._statusBarContainerElement.createChild("div", "hbox");
@@ -69,11 +71,12 @@ WebInspector.SourcesView = function(workspace, sourcesPanel)
             return;
 
         event.returnValue = WebInspector.UIString("DevTools have unsaved changes that will be permanently lost.");
-        WebInspector.inspectorView.showPanel("sources");
+        WebInspector.inspectorView.setCurrentPanel(WebInspector.SourcesPanel.instance());
         for (var i = 0; i < unsavedSourceCodes.length; ++i)
             WebInspector.Revealer.reveal(unsavedSourceCodes[i]);
     }
-    window.addEventListener("beforeunload", handleBeforeUnload, true);
+    if (!window.opener)
+        window.addEventListener("beforeunload", handleBeforeUnload, true);
 
     this._shortcuts = {};
     this.element.addEventListener("keydown", this._handleKeyDown.bind(this), false);
@@ -82,6 +85,16 @@ WebInspector.SourcesView = function(workspace, sourcesPanel)
 WebInspector.SourcesView.Events = {
     EditorClosed: "EditorClosed",
     EditorSelected: "EditorSelected",
+}
+
+/**
+ * @param {!WebInspector.UISourceCode} uiSourceCode
+ * @return {string}
+ */
+WebInspector.SourcesView.uiSourceCodeHighlighterType = function(uiSourceCode)
+{
+    var mimeType = WebInspector.ResourceType.mimeTypesForExtensions[uiSourceCode.extension().toLowerCase()];
+    return mimeType || uiSourceCode.contentType().canonicalMimeType();
 }
 
 WebInspector.SourcesView.prototype = {
@@ -242,7 +255,7 @@ WebInspector.SourcesView.prototype = {
         this._editorContainer.addUISourceCode(uiSourceCode);
         // Replace debugger script-based uiSourceCode with a network-based one.
         var currentUISourceCode = this._currentUISourceCode;
-        if (currentUISourceCode && currentUISourceCode.project().isServiceProject() && currentUISourceCode !== uiSourceCode && currentUISourceCode.url === uiSourceCode.url) {
+        if (currentUISourceCode && currentUISourceCode.project().isServiceProject() && currentUISourceCode !== uiSourceCode && currentUISourceCode.url === uiSourceCode.url && uiSourceCode.url) {
             this._showFile(uiSourceCode);
             this._editorContainer.removeUISourceCode(currentUISourceCode);
         }
@@ -351,7 +364,7 @@ WebInspector.SourcesView.prototype = {
             sourceFrame = new WebInspector.UISourceCodeFrame(uiSourceCode);
         break;
         }
-        sourceFrame.setHighlighterType(uiSourceCode.highlighterType());
+        sourceFrame.setHighlighterType(WebInspector.SourcesView.uiSourceCodeHighlighterType(uiSourceCode));
         this._sourceFramesByUISourceCode.set(uiSourceCode, sourceFrame);
         this._historyManager.trackSourceFrameCursorJumps(sourceFrame);
         return sourceFrame;
@@ -393,7 +406,7 @@ WebInspector.SourcesView.prototype = {
         if (!oldSourceFrame)
             return;
         if (this._sourceFrameMatchesUISourceCode(oldSourceFrame, uiSourceCode)) {
-            oldSourceFrame.setHighlighterType(uiSourceCode.highlighterType());
+            oldSourceFrame.setHighlighterType(WebInspector.SourcesView.uiSourceCodeHighlighterType(uiSourceCode));
         } else {
             this._editorContainer.removeUISourceCode(uiSourceCode);
             this._removeSourceFrame(uiSourceCode);
@@ -467,7 +480,7 @@ WebInspector.SourcesView.prototype = {
             this._historyManager.pushNewState();
 
         this._searchableView.setReplaceable(!!sourceFrame && sourceFrame.canEditSource());
-        this._searchableView.resetSearch();
+        this._searchableView.refreshSearch();
 
         this.dispatchEventToListeners(WebInspector.SourcesView.Events.EditorSelected, uiSourceCode);
     },
@@ -486,15 +499,15 @@ WebInspector.SourcesView.prototype = {
             this._searchView.searchCanceled();
 
         delete this._searchView;
-        delete this._searchQuery;
+        delete this._searchConfig;
     },
 
     /**
-     * @param {string} query
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
      * @param {boolean} shouldJump
      * @param {boolean=} jumpBackwards
      */
-    performSearch: function(query, shouldJump, jumpBackwards)
+    performSearch: function(searchConfig, shouldJump, jumpBackwards)
     {
         this._searchableView.updateSearchMatchesCount(0);
 
@@ -503,7 +516,7 @@ WebInspector.SourcesView.prototype = {
             return;
 
         this._searchView = sourceFrame;
-        this._searchQuery = query;
+        this._searchConfig = searchConfig;
 
         /**
          * @param {!WebInspector.View} view
@@ -532,10 +545,10 @@ WebInspector.SourcesView.prototype = {
          */
         function searchResultsChanged()
         {
-            this.performSearch(query, false, false);
+            this.performSearch(this._searchConfig, false, false);
         }
 
-        this._searchView.performSearch(query, shouldJump, !!jumpBackwards, finishedCallback.bind(this), currentMatchChanged.bind(this), searchResultsChanged.bind(this));
+        this._searchView.performSearch(this._searchConfig, shouldJump, !!jumpBackwards, finishedCallback.bind(this), currentMatchChanged.bind(this), searchResultsChanged.bind(this));
     },
 
     jumpToNextSearchResult: function()
@@ -544,7 +557,7 @@ WebInspector.SourcesView.prototype = {
             return;
 
         if (this._searchView !== this.currentSourceFrame()) {
-            this.performSearch(this._searchQuery, true);
+            this.performSearch(this._searchConfig, true);
             return;
         }
 
@@ -557,7 +570,7 @@ WebInspector.SourcesView.prototype = {
             return;
 
         if (this._searchView !== this.currentSourceFrame()) {
-            this.performSearch(this._searchQuery, true);
+            this.performSearch(this._searchConfig, true);
             if (this._searchView)
                 this._searchView.jumpToLastSearchResult();
             return;
@@ -567,30 +580,47 @@ WebInspector.SourcesView.prototype = {
     },
 
     /**
-     * @param {string} text
+     * @return {boolean}
      */
-    replaceSelectionWith: function(text)
+    supportsCaseSensitiveSearch: function()
     {
-        var sourceFrame = this.currentSourceFrame();
-        if (!sourceFrame) {
-            console.assert(sourceFrame);
-            return;
-        }
-        sourceFrame.replaceSelectionWith(text);
+        return true;
     },
 
     /**
-     * @param {string} query
-     * @param {string} text
+     * @return {boolean}
      */
-    replaceAllWith: function(query, text)
+    supportsRegexSearch: function()
+    {
+        return true;
+    },
+
+    /**
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
+     * @param {string} replacement
+     */
+    replaceSelectionWith: function(searchConfig, replacement)
     {
         var sourceFrame = this.currentSourceFrame();
         if (!sourceFrame) {
             console.assert(sourceFrame);
             return;
         }
-        sourceFrame.replaceAllWith(query, text);
+        sourceFrame.replaceSelectionWith(searchConfig, replacement);
+    },
+
+    /**
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
+     * @param {string} replacement
+     */
+    replaceAllWith: function(searchConfig, replacement)
+    {
+        var sourceFrame = this.currentSourceFrame();
+        if (!sourceFrame) {
+            console.assert(sourceFrame);
+            return;
+        }
+        sourceFrame.replaceAllWith(searchConfig, replacement);
     },
 
     /**

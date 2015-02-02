@@ -17,15 +17,18 @@
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
@@ -212,23 +215,6 @@ void RecordOfflineStatus(int load_flags, RequestOfflineStatus status) {
   }
 }
 
-// TODO(rvargas): Remove once we get the data.
-void RecordVaryHeaderHistogram(const net::HttpResponseInfo* response) {
-  enum VaryType {
-    VARY_NOT_PRESENT,
-    VARY_UA,
-    VARY_OTHER,
-    VARY_MAX
-  };
-  VaryType vary = VARY_NOT_PRESENT;
-  if (response->vary_data.is_valid()) {
-    vary = VARY_OTHER;
-    if (response->headers->HasHeaderValue("vary", "user-agent"))
-      vary = VARY_UA;
-  }
-  UMA_HISTOGRAM_ENUMERATION("HttpCache.Vary", vary, VARY_MAX);
-}
-
 void RecordNoStoreHeaderHistogram(int load_flags,
                                   const net::HttpResponseInfo* response) {
   if (load_flags & net::LOAD_MAIN_FRAME) {
@@ -236,6 +222,18 @@ void RecordNoStoreHeaderHistogram(int load_flags,
         "Net.MainFrameNoStore",
         response->headers->HasHeaderValue("cache-control", "no-store"));
   }
+}
+
+base::Value* NetLogAsyncRevalidationInfoCallback(
+    const net::NetLog::Source& source,
+    const net::HttpRequestInfo* request,
+    net::NetLog::LogLevel log_level) {
+  base::DictionaryValue* dict = new base::DictionaryValue();
+  source.AddToEventParameters(dict);
+
+  dict->SetString("url", request->url.possibly_invalid_spec());
+  dict->SetString("method", request->method);
+  return dict;
 }
 
 enum ExternallyConditionalizedType {
@@ -1193,6 +1191,7 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
     UpdateTransactionPattern(PATTERN_ENTRY_NOT_CACHED);
   }
 
+  // Invalidate any cached GET with a successful PUT or DELETE.
   if (mode_ == WRITE &&
       (request_->method == "PUT" || request_->method == "DELETE")) {
     if (NonErrorResponse(new_response->headers->response_code())) {
@@ -1204,12 +1203,13 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
     mode_ = NONE;
   }
 
-  if (request_->method == "POST" &&
+  // Invalidate any cached GET with a successful POST.
+  if (!(effective_load_flags_ & LOAD_DISABLE_CACHE) &&
+      request_->method == "POST" &&
       NonErrorResponse(new_response->headers->response_code())) {
     cache_->DoomMainEntryForUrl(request_->url);
   }
 
-  RecordVaryHeaderHistogram(new_response);
   RecordNoStoreHeaderHistogram(request_->load_flags, new_response);
 
   if (new_response_->headers->response_code() == 416 &&
@@ -1343,10 +1343,7 @@ int HttpCache::Transaction::DoCreateEntryComplete(int result) {
     return OK;
   }
 
-  if (result == OK) {
-    UMA_HISTOGRAM_BOOLEAN("HttpCache.OpenToCreateRace", false);
-  } else {
-    UMA_HISTOGRAM_BOOLEAN("HttpCache.OpenToCreateRace", true);
+  if (result != OK) {
     // We have a race here: Maybe we failed to open the entry and decided to
     // create one, but by the time we called create, another transaction already
     // created the entry. If we want to eliminate this issue, we need an atomic
@@ -2000,7 +1997,7 @@ void HttpCache::Transaction::SetRequest(const BoundNetLog& net_log,
   if (request_->extra_headers.HasHeader(HttpRequestHeaders::kRange))
     range_found = true;
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kSpecialHeaders); ++i) {
+  for (size_t i = 0; i < arraysize(kSpecialHeaders); ++i) {
     if (HeaderMatches(request_->extra_headers, kSpecialHeaders[i].search)) {
       effective_load_flags_ |= kSpecialHeaders[i].load_flag;
       break;
@@ -2110,7 +2107,16 @@ int HttpCache::Transaction::BeginCacheRead() {
 int HttpCache::Transaction::BeginCacheValidation() {
   DCHECK(mode_ == READ_WRITE);
 
-  bool skip_validation = !RequiresValidation();
+  ValidationType required_validation = RequiresValidation();
+
+  bool skip_validation = (required_validation == VALIDATION_NONE);
+
+  if (required_validation == VALIDATION_ASYNCHRONOUS &&
+      !(request_->method == "GET" && (truncated_ || partial_)) && cache_ &&
+      cache_->use_stale_while_revalidate()) {
+    TriggerAsyncValidation();
+    skip_validation = true;
+  }
 
   if (request_->method == "HEAD" &&
       (truncated_ || response_.headers->response_code() == 206)) {
@@ -2140,6 +2146,7 @@ int HttpCache::Transaction::BeginCacheValidation() {
   }
 
   if (skip_validation) {
+    // TODO(ricea): Is this pattern okay for asynchronous revalidations?
     UpdateTransactionPattern(PATTERN_ENTRY_USED);
     RecordOfflineStatus(effective_load_flags_, OFFLINE_STATUS_FRESH_CACHE);
     return SetupEntryForRead();
@@ -2295,37 +2302,42 @@ int HttpCache::Transaction::RestartNetworkRequestWithAuth(
   return rv;
 }
 
-bool HttpCache::Transaction::RequiresValidation() {
+ValidationType HttpCache::Transaction::RequiresValidation() {
   // TODO(darin): need to do more work here:
   //  - make sure we have a matching request method
   //  - watch out for cached responses that depend on authentication
 
   // In playback mode, nothing requires validation.
   if (cache_->mode() == net::HttpCache::PLAYBACK)
-    return false;
+    return VALIDATION_NONE;
 
   if (response_.vary_data.is_valid() &&
       !response_.vary_data.MatchesRequest(*request_,
                                           *response_.headers.get())) {
     vary_mismatch_ = true;
-    return true;
+    return VALIDATION_SYNCHRONOUS;
   }
 
   if (effective_load_flags_ & LOAD_PREFERRING_CACHE)
-    return false;
+    return VALIDATION_NONE;
 
-  if (effective_load_flags_ & LOAD_VALIDATE_CACHE)
-    return true;
+  if (effective_load_flags_ & (LOAD_VALIDATE_CACHE | LOAD_ASYNC_REVALIDATION))
+    return VALIDATION_SYNCHRONOUS;
 
   if (request_->method == "PUT" || request_->method == "DELETE")
-    return true;
+    return VALIDATION_SYNCHRONOUS;
 
-  if (response_.headers->RequiresValidation(
-          response_.request_time, response_.response_time, Time::Now())) {
-    return true;
+  ValidationType validation_required_by_headers =
+      response_.headers->RequiresValidation(
+          response_.request_time, response_.response_time, Time::Now());
+
+  if (validation_required_by_headers == VALIDATION_ASYNCHRONOUS) {
+    // Asynchronous revalidation is only supported for GET and HEAD methods.
+    if (request_->method != "GET" && request_->method != "HEAD")
+      return VALIDATION_SYNCHRONOUS;
   }
 
-  return false;
+  return validation_required_by_headers;
 }
 
 bool HttpCache::Transaction::ConditionalizeRequest() {
@@ -2374,12 +2386,9 @@ bool HttpCache::Transaction::ConditionalizeRequest() {
   if (!use_if_range) {
     // stale-while-revalidate is not useful when we only have a partial response
     // cached, so don't set the header in that case.
-    TimeDelta stale_while_revalidate;
-    if (response_.headers->GetStaleWhileRevalidateValue(
-            &stale_while_revalidate) &&
-        stale_while_revalidate > TimeDelta()) {
-      TimeDelta max_age =
-          response_.headers->GetFreshnessLifetime(response_.response_time);
+    HttpResponseHeaders::FreshnessLifetimes lifetimes =
+        response_.headers->GetFreshnessLifetimes(response_.response_time);
+    if (lifetimes.staleness > TimeDelta()) {
       TimeDelta current_age = response_.headers->GetCurrentAge(
           response_.request_time, response_.response_time, Time::Now());
 
@@ -2387,8 +2396,8 @@ bool HttpCache::Transaction::ConditionalizeRequest() {
           kFreshnessHeader,
           base::StringPrintf("max-age=%" PRId64
                              ",stale-while-revalidate=%" PRId64 ",age=%" PRId64,
-                             max_age.InSeconds(),
-                             stale_while_revalidate.InSeconds(),
+                             lifetimes.freshness.InSeconds(),
+                             lifetimes.staleness.InSeconds(),
                              current_age.InSeconds()));
     }
   }
@@ -2555,6 +2564,25 @@ void HttpCache::Transaction::FixHeadersForHead() {
     response_.headers->RemoveHeader("Content-Range");
     response_.headers->ReplaceStatusLine("HTTP/1.1 200 OK");
   }
+}
+
+void HttpCache::Transaction::TriggerAsyncValidation() {
+  DCHECK(!request_->upload_data_stream);
+  BoundNetLog async_revalidation_net_log(
+      BoundNetLog::Make(net_log_.net_log(), NetLog::SOURCE_ASYNC_REVALIDATION));
+  net_log_.AddEvent(
+      NetLog::TYPE_HTTP_CACHE_VALIDATE_RESOURCE_ASYNC,
+      async_revalidation_net_log.source().ToEventParametersCallback());
+  async_revalidation_net_log.BeginEvent(
+      NetLog::TYPE_ASYNC_REVALIDATION,
+      base::Bind(
+          &NetLogAsyncRevalidationInfoCallback, net_log_.source(), request_));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&HttpCache::PerformAsyncValidation,
+                 cache_,  // cache_ is a weak pointer.
+                 *request_,
+                 async_revalidation_net_log));
 }
 
 void HttpCache::Transaction::FailRangeRequest() {
@@ -2899,6 +2927,10 @@ void HttpCache::Transaction::RecordHistograms() {
 }
 
 void HttpCache::Transaction::OnIOComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("422516 Transaction::OnIOComplete"));
+
   DoLoop(result);
 }
 

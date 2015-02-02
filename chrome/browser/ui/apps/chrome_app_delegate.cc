@@ -36,12 +36,12 @@
 #endif
 
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
 
 namespace {
@@ -81,8 +81,8 @@ class OpenURLFromTabBasedOnBrowserDefault
 
   // Opens a URL when called with the result of if this is the default system
   // browser or not.
-  virtual void SetDefaultWebClientUIState(
-      ShellIntegration::DefaultWebClientUIState state) OVERRIDE {
+  void SetDefaultWebClientUIState(
+      ShellIntegration::DefaultWebClientUIState state) override {
     Profile* profile =
         Profile::FromBrowserContext(source_->GetBrowserContext());
     DCHECK(profile);
@@ -101,7 +101,7 @@ class OpenURLFromTabBasedOnBrowserDefault
     }
   }
 
-  virtual bool IsOwnedByWorker() OVERRIDE { return true; }
+  bool IsOwnedByWorker() override { return true; }
 
  private:
   scoped_ptr<content::WebContents> source_;
@@ -114,11 +114,11 @@ class ChromeAppDelegate::NewWindowContentsDelegate
     : public content::WebContentsDelegate {
  public:
   NewWindowContentsDelegate() {}
-  virtual ~NewWindowContentsDelegate() {}
+  ~NewWindowContentsDelegate() override {}
 
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
+      const content::OpenURLParams& params) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NewWindowContentsDelegate);
@@ -170,12 +170,12 @@ void ChromeAppDelegate::InitWebContents(content::WebContents* web_contents) {
   FaviconTabHelper::CreateForWebContents(web_contents);
 
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   printing::PrintViewManager::CreateForWebContents(web_contents);
   printing::PrintPreviewMessageHandler::CreateForWebContents(web_contents);
 #else
   printing::PrintViewManagerBasic::CreateForWebContents(web_contents);
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);

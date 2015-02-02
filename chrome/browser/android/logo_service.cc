@@ -9,7 +9,6 @@
 #include "chrome/browser/image_decoder.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/search_engines/template_url_service.h"
@@ -69,12 +68,12 @@ class LogoDecoderDelegate : public ImageDecoder::Delegate {
 
   // ImageDecoder::Delegate:
   virtual void OnImageDecoded(const ImageDecoder* decoder,
-                              const SkBitmap& decoded_image) OVERRIDE {
+                              const SkBitmap& decoded_image) override {
     image_decoded_callback_.Run(decoded_image);
     delete this;
   }
 
-  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE {
+  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) override {
     image_decoded_callback_.Run(SkBitmap());
     delete this;
   }
@@ -95,7 +94,7 @@ class ChromeLogoDelegate : public search_provider_logos::LogoDelegate {
   // search_provider_logos::LogoDelegate:
   virtual void DecodeUntrustedImage(
       const scoped_refptr<base::RefCountedString>& encoded_image,
-      base::Callback<void(const SkBitmap&)> image_decoded_callback) OVERRIDE {
+      base::Callback<void(const SkBitmap&)> image_decoded_callback) override {
     scoped_refptr<ImageDecoder> image_decoder = new ImageDecoder(
         NULL,
         encoded_image->data(),

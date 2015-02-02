@@ -58,7 +58,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   static const char Type[];
 
   // Request navigating the guest to the provided |src| URL.
-  void NavigateGuest(const std::string& src);
+  void NavigateGuest(const std::string& src, bool force_navigation);
 
   // Shows the context menu for the guest.
   // |items| acts as a filter. This restricts the current context's default
@@ -77,110 +77,111 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   // Sets the transparency of the guest.
   void SetAllowTransparency(bool allow);
 
+  // Loads a data URL with a specified base URL and virtual URL.
+  bool LoadDataWithBaseURL(const std::string& data_url,
+                           const std::string& base_url,
+                           const std::string& virtual_url,
+                           std::string* error);
+
   // GuestViewBase implementation.
-  virtual const char* GetAPINamespace() const OVERRIDE;
-  virtual int GetTaskPrefix() const OVERRIDE;
-  virtual void CreateWebContents(
-      const std::string& embedder_extension_id,
-      int embedder_render_process_id,
-      const GURL& embedder_site_url,
-      const base::DictionaryValue& create_params,
-      const WebContentsCreatedCallback& callback) OVERRIDE;
-  virtual void DidAttachToEmbedder() OVERRIDE;
-  virtual void DidInitialize() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
-  virtual void EmbedderDestroyed() OVERRIDE;
-  virtual void GuestDestroyed() OVERRIDE;
-  virtual void GuestReady() OVERRIDE;
-  virtual void GuestSizeChangedDueToAutoSize(
-      const gfx::Size& old_size,
-      const gfx::Size& new_size) OVERRIDE;
-  virtual bool IsAutoSizeSupported() const OVERRIDE;
-  virtual bool IsDragAndDropEnabled() const OVERRIDE;
-  virtual void WillAttachToEmbedder() OVERRIDE;
-  virtual void WillDestroy() OVERRIDE;
+  const char* GetAPINamespace() const override;
+  int GetTaskPrefix() const override;
+  void CreateWebContents(const std::string& embedder_extension_id,
+                         int embedder_render_process_id,
+                         const GURL& embedder_site_url,
+                         const base::DictionaryValue& create_params,
+                         const WebContentsCreatedCallback& callback) override;
+  void DidAttachToEmbedder() override;
+  void DidInitialize() override;
+  void DidStopLoading() override;
+  void EmbedderWillBeDestroyed() override;
+  void GuestDestroyed() override;
+  void GuestReady() override;
+  void GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
+                                     const gfx::Size& new_size) override;
+  bool IsAutoSizeSupported() const override;
+  bool IsDragAndDropEnabled() const override;
+  void WillAttachToEmbedder() override;
+  void WillDestroy() override;
 
   // WebContentsDelegate implementation.
-  virtual bool AddMessageToConsole(content::WebContents* source,
-                                   int32 level,
-                                   const base::string16& message,
-                                   int32 line_no,
-                                   const base::string16& source_id) OVERRIDE;
-  virtual void LoadProgressChanged(content::WebContents* source,
-                                   double progress) OVERRIDE;
-  virtual void CloseContents(content::WebContents* source) OVERRIDE;
-  virtual void FindReply(content::WebContents* source,
-                         int request_id,
-                         int number_of_matches,
-                         const gfx::Rect& selection_rect,
-                         int active_match_ordinal,
-                         bool final_update) OVERRIDE;
-  virtual bool HandleContextMenu(
-      const content::ContextMenuParams& params) OVERRIDE;
-  virtual void HandleKeyboardEvent(
+  bool AddMessageToConsole(content::WebContents* source,
+                           int32 level,
+                           const base::string16& message,
+                           int32 line_no,
+                           const base::string16& source_id) override;
+  void LoadProgressChanged(content::WebContents* source,
+                           double progress) override;
+  void CloseContents(content::WebContents* source) override;
+  void FindReply(content::WebContents* source,
+                 int request_id,
+                 int number_of_matches,
+                 const gfx::Rect& selection_rect,
+                 int active_match_ordinal,
+                 bool final_update) override;
+  bool HandleContextMenu(const content::ContextMenuParams& params) override;
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void RendererResponsive(content::WebContents* source) OVERRIDE;
-  virtual void RendererUnresponsive(content::WebContents* source) OVERRIDE;
-  virtual void RequestMediaAccessPermission(
+      const content::NativeWebKeyboardEvent& event) override;
+  void RendererResponsive(content::WebContents* source) override;
+  void RendererUnresponsive(content::WebContents* source) override;
+  void RequestMediaAccessPermission(
       content::WebContents* source,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) OVERRIDE;
-  virtual bool CheckMediaAccessPermission(
-      content::WebContents* source,
-      const GURL& security_origin,
-      content::MediaStreamType type) OVERRIDE;
-  virtual void CanDownload(content::RenderViewHost* render_view_host,
-                           const GURL& url,
-                           const std::string& request_method,
-                           const base::Callback<void(bool)>& callback) OVERRIDE;
-  virtual content::JavaScriptDialogManager*
-      GetJavaScriptDialogManager() OVERRIDE;
-  virtual content::ColorChooser* OpenColorChooser(
+      const content::MediaResponseCallback& callback) override;
+  bool CheckMediaAccessPermission(content::WebContents* source,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type) override;
+  void CanDownload(content::RenderViewHost* render_view_host,
+                   const GURL& url,
+                   const std::string& request_method,
+                   const base::Callback<void(bool)>& callback) override;
+  content::JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
-      const std::vector<content::ColorSuggestion>& suggestions) OVERRIDE;
-  virtual void AddNewContents(content::WebContents* source,
-                              content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
-  virtual content::WebContents* OpenURLFromTab(
+      const std::vector<content::ColorSuggestion>& suggestions) override;
+  void AddNewContents(content::WebContents* source,
+                      content::WebContents* new_contents,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_pos,
+                      bool user_gesture,
+                      bool* was_blocked) override;
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
-  virtual void WebContentsCreated(content::WebContents* source_contents,
-                                  int opener_render_frame_id,
-                                  const base::string16& frame_name,
-                                  const GURL& target_url,
-                                  content::WebContents* new_contents) OVERRIDE;
+      const content::OpenURLParams& params) override;
+  void WebContentsCreated(content::WebContents* source_contents,
+                          int opener_render_frame_id,
+                          const base::string16& frame_name,
+                          const GURL& target_url,
+                          content::WebContents* new_contents) override;
 
   // BrowserPluginGuestDelegate implementation.
-  virtual content::WebContents* CreateNewGuestWindow(
-      const content::WebContents::CreateParams& create_params) OVERRIDE;
-  virtual void RequestPointerLockPermission(
+  content::WebContents* CreateNewGuestWindow(
+      const content::WebContents::CreateParams& create_params) override;
+  void RequestPointerLockPermission(
       bool user_gesture,
       bool last_unlocked_by_target,
-      const base::Callback<void(bool)>& callback) OVERRIDE;
+      const base::Callback<void(bool)>& callback) override;
   // NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Returns the current zoom factor.
   double GetZoom();
 
   // Begin or continue a find request.
-  void Find(const base::string16& search_text,
-            const blink::WebFindOptions& options,
-            scoped_refptr<WebViewInternalFindFunction> find_function);
+  void StartFinding(const base::string16& search_text,
+                    const blink::WebFindOptions& options,
+                    scoped_refptr<WebViewInternalFindFunction> find_function);
 
   // Conclude a find request to clear highlighting.
   void StopFinding(content::StopFindAction);
 
   // If possible, navigate the guest to |relative_index| entries away from the
-  // current navigation entry.
-  void Go(int relative_index);
+  // current navigation entry. Returns true on success.
+  bool Go(int relative_index);
 
   // Reload the guest.
   void Reload();
@@ -238,7 +239,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   WebViewGuest(content::BrowserContext* browser_context,
                int guest_instance_id);
 
-  virtual ~WebViewGuest();
+  ~WebViewGuest() override;
 
   void AttachWebViewHelpers(content::WebContents* contents);
 
@@ -247,27 +248,25 @@ class WebViewGuest : public GuestView<WebViewGuest>,
                                   const std::string& user_input);
 
   // WebContentsObserver implementation.
-  virtual void DidCommitProvisionalLoadForFrame(
+  void DidCommitProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& url,
-      ui::PageTransition transition_type) OVERRIDE;
-  virtual void DidFailProvisionalLoad(
-      content::RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      int error_code,
-      const base::string16& error_description) OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
+      ui::PageTransition transition_type) override;
+  void DidFailProvisionalLoad(content::RenderFrameHost* render_frame_host,
+                              const GURL& validated_url,
+                              int error_code,
+                              const base::string16& error_description) override;
+  void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       bool is_error_page,
-      bool is_iframe_srcdoc) OVERRIDE;
-  virtual void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual bool OnMessageReceived(
-      const IPC::Message& message,
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-  virtual void UserAgentOverrideSet(const std::string& user_agent) OVERRIDE;
+      bool is_iframe_srcdoc) override;
+  void DocumentLoadedInFrame(
+      content::RenderFrameHost* render_frame_host) override;
+  bool OnMessageReceived(const IPC::Message& message,
+                         content::RenderFrameHost* render_frame_host) override;
+  void RenderProcessGone(base::TerminationStatus status) override;
+  void UserAgentOverrideSet(const std::string& user_agent) override;
 
   // Informs the embedder of a frame name change.
   void ReportFrameNameChange(const std::string& name);
@@ -294,10 +293,6 @@ class WebViewGuest : public GuestView<WebViewGuest>,
       const gfx::Rect& initial_bounds,
       bool user_gesture,
       content::WebContents* new_contents);
-
-  // Destroy unattached new windows that have been opened by this
-  // WebViewGuest.
-  void DestroyUnattachedWindows();
 
   // Requests resolution of a potentially relative URL.
   GURL ResolveURL(const std::string& src);
@@ -337,10 +332,13 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   // Stores whether the contents of the guest can be transparent.
   bool guest_opaque_;
 
+  // Stores the src URL of the WebView.
+  GURL src_;
+
   // Handles the JavaScript dialog requests.
   JavaScriptDialogHelper javascript_dialog_helper_;
 
-  // Handels permission requests.
+  // Handles permission requests.
   scoped_ptr<WebViewPermissionHelper> web_view_permission_helper_;
 
   scoped_ptr<WebViewGuestDelegate> web_view_guest_delegate_;
@@ -359,6 +357,10 @@ class WebViewGuest : public GuestView<WebViewGuest>,
 
   typedef std::map<WebViewGuest*, NewWindowInfo> PendingWindowMap;
   PendingWindowMap pending_new_windows_;
+
+  // This is used to ensure pending tasks will not fire after this object is
+  // destroyed.
+  base::WeakPtrFactory<WebViewGuest> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewGuest);
 };

@@ -75,68 +75,20 @@ int ASN1_item_verify(const ASN1_ITEM *it, X509_ALGOR *a,
 		ASN1_BIT_STRING *signature, void *asn, EVP_PKEY *pkey)
 	{
 	EVP_MD_CTX ctx;
-	unsigned char *buf_in=NULL;
-	int ret= -1,inl;
-	const EVP_PKEY_ASN1_METHOD *ameth;
-
-	int mdnid, pknid;
+	uint8_t *buf_in = NULL;
+	int ret = 0, inl;
 
 	if (!pkey)
 		{
 		OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ERR_R_PASSED_NULL_PARAMETER);
-		return 1;
+		return 0;
 		}
 
 	EVP_MD_CTX_init(&ctx);
 
-	/* Convert signature OID into digest and public key OIDs */
-	if (!OBJ_find_sigid_algs(OBJ_obj2nid(a->algorithm), &mdnid, &pknid))
+	if (!EVP_DigestVerifyInitFromAlgorithm(&ctx, a, pkey))
 		{
-		OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ASN1_R_UNKNOWN_SIGNATURE_ALGORITHM);
 		goto err;
-		}
-	if (mdnid == NID_undef)
-		{
-		if (!pkey->ameth || !pkey->ameth->item_verify)
-			{
-			OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ASN1_R_UNKNOWN_SIGNATURE_ALGORITHM);
-			goto err;
-			}
-		ret = pkey->ameth->item_verify(&ctx, it, asn, a,
-							signature, pkey);
-		/* Return value of 2 means carry on, anything else means we
-		 * exit straight away: either a fatal error of the underlying
-		 * verification routine handles all verification.
-		 */
-		if (ret != 2)
-			goto err;
-		ret = -1;
-		}
-	else
-		{
-		const EVP_MD *type;
-		type=EVP_get_digestbynid(mdnid);
-		if (type == NULL)
-			{
-			OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ASN1_R_UNKNOWN_MESSAGE_DIGEST_ALGORITHM);
-			goto err;
-			}
-
-		/* Check public key OID matches public key type */
-		ameth = EVP_PKEY_asn1_find(NULL, pknid);
-		if (ameth == NULL || ameth->pkey_id != pkey->ameth->pkey_id)
-			{
-			OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ASN1_R_WRONG_PUBLIC_KEY_TYPE);
-			goto err;
-			}
-
-		if (!EVP_DigestVerifyInit(&ctx, NULL, type, NULL, pkey))
-			{
-			OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ERR_R_EVP_LIB);
-			ret=0;
-			goto err;
-			}
-
 		}
 
 	inl = ASN1_item_i2d(asn, &buf_in, it);
@@ -149,8 +101,9 @@ int ASN1_item_verify(const ASN1_ITEM *it, X509_ALGOR *a,
 
 	if (!EVP_DigestVerifyUpdate(&ctx,buf_in,inl))
 		{
+		OPENSSL_cleanse(buf_in,(unsigned int)inl);
+		OPENSSL_free(buf_in);
 		OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ERR_R_EVP_LIB);
-		ret=0;
 		goto err;
 		}
 
@@ -161,15 +114,14 @@ int ASN1_item_verify(const ASN1_ITEM *it, X509_ALGOR *a,
 			(size_t)signature->length) <= 0)
 		{
 		OPENSSL_PUT_ERROR(X509, ASN1_item_verify, ERR_R_EVP_LIB);
-		ret=0;
 		goto err;
 		}
 	/* we don't need to zero the 'ctx' because we just checked
 	 * public information */
 	/* memset(&ctx,0,sizeof(ctx)); */
-	ret=1;
+	ret = 1;
 err:
 	EVP_MD_CTX_cleanup(&ctx);
-	return(ret);
+	return ret;
 	}
 

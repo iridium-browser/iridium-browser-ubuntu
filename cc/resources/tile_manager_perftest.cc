@@ -37,9 +37,9 @@ static const int kTimeCheckInterval = 10;
 class FakeRasterizerImpl : public Rasterizer, public RasterizerTaskClient {
  public:
   // Overridden from Rasterizer:
-  virtual void SetClient(RasterizerClient* client) OVERRIDE {}
-  virtual void Shutdown() OVERRIDE {}
-  virtual void ScheduleTasks(RasterTaskQueue* queue) OVERRIDE {
+  void SetClient(RasterizerClient* client) override {}
+  void Shutdown() override {}
+  void ScheduleTasks(RasterTaskQueue* queue) override {
     for (RasterTaskQueue::Item::Vector::const_iterator it =
              queue->items.begin();
          it != queue->items.end();
@@ -53,7 +53,7 @@ class FakeRasterizerImpl : public Rasterizer, public RasterizerTaskClient {
       completed_tasks_.push_back(task);
     }
   }
-  virtual void CheckForCompletedTasks() OVERRIDE {
+  void CheckForCompletedTasks() override {
     for (RasterTask::Vector::iterator it = completed_tasks_.begin();
          it != completed_tasks_.end();
          ++it) {
@@ -69,12 +69,11 @@ class FakeRasterizerImpl : public Rasterizer, public RasterizerTaskClient {
   }
 
   // Overridden from RasterizerTaskClient:
-  virtual scoped_ptr<RasterBuffer> AcquireBufferForRaster(
-      const Resource* resource) OVERRIDE {
-    return scoped_ptr<RasterBuffer>();
+  scoped_ptr<RasterBuffer> AcquireBufferForRaster(
+      const Resource* resource) override {
+    return nullptr;
   }
-  virtual void ReleaseBufferForRaster(
-      scoped_ptr<RasterBuffer> buffer) OVERRIDE {}
+  void ReleaseBufferForRaster(scoped_ptr<RasterBuffer> buffer) override {}
 
  private:
   RasterTask::Vector completed_tasks_;
@@ -112,25 +111,21 @@ class TileManagerPerfTest : public testing::Test {
     host_impl_.tile_manager()->SetGlobalStateForTesting(state);
   }
 
-  virtual void SetUp() OVERRIDE {
-    picture_pile_ = FakePicturePileImpl::CreateInfiniteFilledPile();
+  virtual void SetUp() override {
     InitializeRenderer();
     SetTreePriority(SAME_PRIORITY_FOR_BOTH_TREES);
   }
 
   virtual void InitializeRenderer() {
-    host_impl_.InitializeRenderer(
-        FakeOutputSurface::Create3d().PassAs<OutputSurface>());
+    host_impl_.InitializeRenderer(FakeOutputSurface::Create3d().Pass());
     tile_manager()->SetRasterizerForTesting(g_fake_rasterizer.Pointer());
   }
 
   void SetupDefaultTrees(const gfx::Size& layer_bounds) {
-    gfx::Size tile_size(100, 100);
-
     scoped_refptr<FakePicturePileImpl> pending_pile =
-        FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+        FakePicturePileImpl::CreateFilledPile(kDefaultTileSize, layer_bounds);
     scoped_refptr<FakePicturePileImpl> active_pile =
-        FakePicturePileImpl::CreateFilledPile(tile_size, layer_bounds);
+        FakePicturePileImpl::CreateFilledPile(kDefaultTileSize, layer_bounds);
 
     SetupTrees(pending_pile, active_pile);
   }
@@ -166,7 +161,7 @@ class TileManagerPerfTest : public testing::Test {
     scoped_ptr<FakePictureLayerImpl> pending_layer =
         FakePictureLayerImpl::CreateWithPile(pending_tree, id_, pile);
     pending_layer->SetDrawsContent(true);
-    pending_tree->SetRootLayer(pending_layer.PassAs<LayerImpl>());
+    pending_tree->SetRootLayer(pending_layer.Pass());
 
     pending_root_layer_ = static_cast<FakePictureLayerImpl*>(
         host_impl_.pending_tree()->LayerById(id_));
@@ -362,13 +357,15 @@ class TileManagerPerfTest : public testing::Test {
     int next_id = id_ + 1;
 
     // Create the rest of the layers as children of the root layer.
+    scoped_refptr<FakePicturePileImpl> pile =
+        FakePicturePileImpl::CreateFilledPile(kDefaultTileSize, layer_bounds);
     while (static_cast<int>(layers.size()) < layer_count) {
       scoped_ptr<FakePictureLayerImpl> layer =
-          FakePictureLayerImpl::CreateWithPile(
-              host_impl_.pending_tree(), next_id, picture_pile_);
+          FakePictureLayerImpl::CreateWithPile(host_impl_.pending_tree(),
+                                               next_id, pile);
       layer->SetBounds(layer_bounds);
       layers.push_back(layer.get());
-      pending_root_layer_->AddChild(layer.PassAs<LayerImpl>());
+      pending_root_layer_->AddChild(layer.Pass());
 
       FakePictureLayerImpl* fake_layer =
           static_cast<FakePictureLayerImpl*>(layers.back());
@@ -434,9 +431,12 @@ class TileManagerPerfTest : public testing::Test {
   FakePictureLayerImpl* pending_root_layer_;
   FakePictureLayerImpl* active_root_layer_;
   LapTimer timer_;
-  scoped_refptr<FakePicturePileImpl> picture_pile_;
   LayerTreeSettings settings_;
+
+  static const gfx::Size kDefaultTileSize;
 };
+
+const gfx::Size TileManagerPerfTest::kDefaultTileSize(100, 100);
 
 TEST_F(TileManagerPerfTest, ManageTiles) {
   RunManageTilesTest("2_100", 2, 100);

@@ -18,14 +18,12 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/opaque_browser_frame_view_layout.h"
 #include "chrome/browser/ui/views/frame/opaque_browser_frame_view_platform_specific.h"
-#include "chrome/browser/ui/views/profiles/avatar_label.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
@@ -51,6 +49,10 @@
 #include "ui/views/widget/root_view.h"
 #include "ui/views/window/frame_background.h"
 #include "ui/views/window/window_shape.h"
+
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/ui/views/profiles/supervised_user_avatar_label.h"
+#endif
 
 #if defined(OS_LINUX)
 #include "ui/views/controls/menu/menu_runner.h"
@@ -204,18 +206,33 @@ gfx::Rect OpaqueBrowserFrameView::GetWindowBoundsForClientBounds(
   return layout_->GetWindowBoundsForClientBounds(client_bounds);
 }
 
+bool OpaqueBrowserFrameView::IsWithinAvatarMenuButtons(
+    const gfx::Point& point) const {
+  if (avatar_button() &&
+     avatar_button()->GetMirroredBounds().Contains(point)) {
+    return true;
+  }
+  if (new_avatar_button() &&
+     new_avatar_button()->GetMirroredBounds().Contains(point)) {
+    return true;
+  }
+
+  return false;
+}
+
 int OpaqueBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   if (!bounds().Contains(point))
     return HTNOWHERE;
 
-  // See if the point is within the avatar menu button or within the avatar
-  // label.
-  if ((avatar_button() &&
-       avatar_button()->GetMirroredBounds().Contains(point)) ||
-      (avatar_label() && avatar_label()->GetMirroredBounds().Contains(point)) ||
-      (new_avatar_button() &&
-       new_avatar_button()->GetMirroredBounds().Contains(point)))
+  // See if the point is within the avatar menu button.
+  if (IsWithinAvatarMenuButtons(point))
     return HTCLIENT;
+#if defined(ENABLE_MANAGED_USERS)
+  // ...or within the avatar label, if it's a supervised user.
+  if ((supervised_user_avatar_label() &&
+       supervised_user_avatar_label()->GetMirroredBounds().Contains(point)))
+    return HTCLIENT;
+#endif
 
   int frame_component = frame()->client_view()->NonClientHitTest(point);
 

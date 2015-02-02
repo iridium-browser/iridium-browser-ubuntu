@@ -102,8 +102,8 @@ int main(int argc, char* argv[])
     unsigned int  tmpSumStreamLen = 0;
     unsigned int  packetCntr = 0;
     unsigned int  lostPacketCntr = 0;
-    uint16_t  payload[600];
-    uint16_t  payloadRCU[600];
+    uint8_t  payload[1200];
+    uint8_t  payloadRCU[1200];
     uint16_t  packetLossPercent = 0;
     int16_t   rcuStreamLen = 0;
 	int onlyEncode;
@@ -376,14 +376,14 @@ valid values are 8 and 16.\n", sampFreqKHz);
                                 stream_len = WebRtcIsac_Encode(
                                         ISAC_main_inst,
                                         shortdata,
-                                        (uint8_t*)payload);
+                                        payload);
 
 				if(stream_len < 0)
 				{
 					// exit if returned with error
 					//errType=WebRtcIsac_GetErrorCode(ISAC_main_inst);
 					fprintf(stderr,"\nError in encoder\n");
-					getchar();
+					getc(stdin);
 					exit(EXIT_FAILURE);
 				}
 
@@ -395,14 +395,18 @@ valid values are 8 and 16.\n", sampFreqKHz);
 				break;
 			}
 
-			rcuStreamLen = WebRtcIsac_GetRedPayload(ISAC_main_inst, (int16_t*)payloadRCU);
+                        rcuStreamLen = WebRtcIsac_GetRedPayload(
+                            ISAC_main_inst, payloadRCU);
 
 			get_arrival_time(cur_framesmpls, stream_len, bottleneck, &packetData,
 				sampFreqKHz * 1000, sampFreqKHz * 1000);
 			if(WebRtcIsac_UpdateBwEstimate(ISAC_main_inst,
-				payload,  stream_len, packetData.rtp_number,
-				packetData.sample_count,
-				packetData.arrival_time) < 0)
+                                                       payload,
+                                                       stream_len,
+                                                       packetData.rtp_number,
+                                                       packetData.sample_count,
+                                                       packetData.arrival_time)
+                           < 0)
 			{
 				printf(" BWE Error at client\n");
 				return -1;
@@ -454,20 +458,28 @@ valid values are 8 and 16.\n", sampFreqKHz);
 
 			if((rand() % 100) < packetLossPercent)
 			{
-				declen = WebRtcIsac_DecodeRcu(ISAC_main_inst, payloadRCU,
-					rcuStreamLen, decoded, speechType);
+                                declen = WebRtcIsac_DecodeRcu(
+                                    ISAC_main_inst,
+                                    payloadRCU,
+                                    rcuStreamLen,
+                                    decoded,
+                                    speechType);
 				lostPacketCntr++;
 			}
 			else
 			{
-				declen = WebRtcIsac_Decode(ISAC_main_inst, payload,
-					stream_len, decoded, speechType);
-			}
-			if(declen <= 0)
+                                declen = WebRtcIsac_Decode(
+                                    ISAC_main_inst,
+                                    payload,
+                                    stream_len,
+                                    decoded,
+                                    speechType);
+                        }
+                        if(declen <= 0)
 			{
 				//errType=WebRtcIsac_GetErrorCode(ISAC_main_inst);
 				fprintf(stderr,"\nError in decoder.\n");
-				getchar();
+				getc(stdin);
 				exit(1);
 			}
 

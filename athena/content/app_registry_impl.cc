@@ -12,17 +12,16 @@ namespace athena {
 class AppRegistryImpl : public AppRegistry {
  public:
   AppRegistryImpl();
-  virtual ~AppRegistryImpl();
+  ~AppRegistryImpl() override;
 
   // AppRegistry:
-  virtual AppActivityRegistry* GetAppActivityRegistry(
+  AppActivityRegistry* GetAppActivityRegistry(
       const std::string& app_id,
-      content::BrowserContext* browser_context) OVERRIDE;
-  virtual int NumberOfApplications() const OVERRIDE { return app_list_.size(); }
+      content::BrowserContext* browser_context) override;
+  int NumberOfApplications() const override { return app_list_.size(); }
 
  private:
-  virtual void RemoveAppActivityRegistry(
-      AppActivityRegistry* registry) OVERRIDE;
+  void RemoveAppActivityRegistry(AppActivityRegistry* registry) override;
 
   std::vector<AppActivityRegistry*> app_list_;
 
@@ -31,7 +30,7 @@ class AppRegistryImpl : public AppRegistry {
 
 namespace {
 
-AppRegistryImpl* instance = NULL;
+AppRegistryImpl* instance = nullptr;
 
 }  // namespace
 
@@ -88,7 +87,7 @@ void AppRegistry::ShutDown() {
 AppRegistry::AppRegistry() {}
 
 AppRegistry::~AppRegistry() {
-  instance = NULL;
+  instance = nullptr;
 }
 
 }  // namespace athena

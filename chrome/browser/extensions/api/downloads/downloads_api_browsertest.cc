@@ -85,7 +85,7 @@ class DownloadsEventsListener : public content::NotificationObserver {
                    content::NotificationService::AllSources());
   }
 
-  virtual ~DownloadsEventsListener() {
+  ~DownloadsEventsListener() override {
     registrar_.Remove(this,
                       extensions::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT,
                       content::NotificationService::AllSources());
@@ -174,9 +174,9 @@ class DownloadsEventsListener : public content::NotificationObserver {
   typedef ExtensionDownloadsEventRouter::DownloadsNotificationSource
     DownloadsNotificationSource;
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     switch (type) {
       case extensions::NOTIFICATION_EXTENSION_DOWNLOADS_EVENT: {
           DownloadsNotificationSource* dns =
@@ -312,7 +312,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
   Browser* current_browser() { return current_browser_; }
 
   // InProcessBrowserTest
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
@@ -617,12 +617,12 @@ class MockIconExtractorImpl : public DownloadFileIconExtractor {
         expected_icon_size_(icon_size),
         response_(response) {
   }
-  virtual ~MockIconExtractorImpl() {}
+  ~MockIconExtractorImpl() override {}
 
-  virtual bool ExtractIconURLForPath(const base::FilePath& path,
-                                     float scale,
-                                     IconLoader::IconSize icon_size,
-                                     IconURLCallback callback) OVERRIDE {
+  bool ExtractIconURLForPath(const base::FilePath& path,
+                             float scale,
+                             IconLoader::IconSize icon_size,
+                             IconURLCallback callback) override {
     EXPECT_STREQ(expected_path_.value().c_str(), path.value().c_str());
     EXPECT_EQ(expected_icon_size_, icon_size);
     if (expected_path_ == path &&
@@ -758,10 +758,10 @@ class JustInProgressDownloadObserver
       : content::DownloadTestObserverInProgress(download_manager, wait_count) {
   }
 
-  virtual ~JustInProgressDownloadObserver() {}
+  ~JustInProgressDownloadObserver() override {}
 
  private:
-  virtual bool IsDownloadInFinalState(DownloadItem* item) OVERRIDE {
+  bool IsDownloadInFinalState(DownloadItem* item) override {
     return item->GetState() == DownloadItem::IN_PROGRESS;
   }
 
@@ -1573,7 +1573,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(test_server()->Start());
   GoOnTheRecord();
 
-  static const char* kUnsafeHeaders[] = {
+  static const char* const kUnsafeHeaders[] = {
     "Accept-chArsEt",
     "accept-eNcoding",
     "coNNection",
@@ -1731,7 +1731,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   LoadExtension("downloads_split");
   GoOnTheRecord();
 
-  static const char* kInvalidURLs[] = {
+  static const char* const kInvalidURLs[] = {
     "foo bar",
     "../hello",
     "/hello",
@@ -2122,7 +2122,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(test_server()->Start());
   std::string download_url = test_server()->GetURL("auth-basic").spec();
   // This is just base64 of 'username:secret'.
-  static const char* kAuthorization = "dXNlcm5hbWU6c2VjcmV0";
+  static const char kAuthorization[] = "dXNlcm5hbWU6c2VjcmV0";
   GoOnTheRecord();
 
   scoped_ptr<base::Value> result(RunFunctionAndReturnResult(
@@ -2351,7 +2351,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 // NOTE: chrome disallows creating HTML5 FileSystem Files in incognito.
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        MAYBE_DownloadExtensionTest_Download_FileSystemURL) {
-  static const char* kPayloadData = "on the record\ndata";
+  static const char kPayloadData[] = "on the record\ndata";
   GoOnTheRecord();
   LoadExtension("downloads_split");
 
@@ -4024,9 +4024,9 @@ void OnDangerPromptCreated(DownloadDangerPrompt* prompt) {
 #if defined(OS_MACOSX)
 // Flakily triggers and assert on Mac.
 // http://crbug.com/180759
-#define MAYBE_DownloadExtensionTest_AcceptDanger DownloadExtensionTest_AcceptDanger
-#else
 #define MAYBE_DownloadExtensionTest_AcceptDanger DISABLED_DownloadExtensionTest_AcceptDanger
+#else
+#define MAYBE_DownloadExtensionTest_AcceptDanger DownloadExtensionTest_AcceptDanger
 #endif
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        MAYBE_DownloadExtensionTest_AcceptDanger) {
@@ -4067,7 +4067,8 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 class DownloadsApiTest : public ExtensionApiTest {
  public:
   DownloadsApiTest() {}
-  virtual ~DownloadsApiTest() {}
+  ~DownloadsApiTest() override {}
+
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsApiTest);
 };
@@ -4086,7 +4087,7 @@ TEST(DownloadInterruptReasonEnumsSynced,
   EXPECT_EQ(                                                                 \
       InterruptReasonExtensionToContent(downloads::INTERRUPT_REASON_##name), \
       content::DOWNLOAD_INTERRUPT_REASON_##name);
-#include "content/public/browser/download_interrupt_reason_values.h"
+#include "content/public/browser/download_interrupt_reason_values.h"  // NOLINT
 #undef INTERRUPT_REASON
 }
 

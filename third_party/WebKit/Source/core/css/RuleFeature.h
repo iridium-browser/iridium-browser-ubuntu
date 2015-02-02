@@ -147,7 +147,8 @@ private:
         InvalidationSetFeatures()
             : customPseudoElement(false)
             , treeBoundaryCrossing(false)
-            , wholeSubtree(false)
+            , adjacent(false)
+            , insertionPointCrossing(false)
         { }
         Vector<AtomicString> classes;
         Vector<AtomicString> attributes;
@@ -155,11 +156,14 @@ private:
         AtomicString tagName;
         bool customPseudoElement;
         bool treeBoundaryCrossing;
-        bool wholeSubtree;
+        bool adjacent;
+        bool insertionPointCrossing;
     };
 
     static void extractInvalidationSetFeature(const CSSSelector&, InvalidationSetFeatures&);
     const CSSSelector* extractInvalidationSetFeatures(const CSSSelector&, InvalidationSetFeatures&, bool negated);
+
+    void addFeaturesToInvalidationSet(DescendantInvalidationSet&, const InvalidationSetFeatures&);
     void addFeaturesToInvalidationSets(const CSSSelector&, InvalidationSetFeatures&);
 
     void addClassToInvalidationSet(const AtomicString& className, Element&);
@@ -174,15 +178,5 @@ private:
 
 
 } // namespace blink
-
-namespace WTF {
-
-template <> struct VectorTraits<blink::RuleFeature> : VectorTraitsBase<blink::RuleFeature> {
-    static const bool needsDestruction = false;
-    static const bool canInitializeWithMemset = true;
-    static const bool canMoveWithMemcpy = true;
-};
-
-} // namespace WTF
 
 #endif // RuleFeature_h

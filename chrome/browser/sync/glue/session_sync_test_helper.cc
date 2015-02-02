@@ -69,7 +69,7 @@ void SessionSyncTestHelper::VerifySyncedSession(
       FAIL();
     ASSERT_EQ(win_iter->size(), win_ptr->tabs.size());
     ASSERT_EQ(0, win_ptr->selected_tab_index);
-    ASSERT_EQ(1, win_ptr->type);
+    ASSERT_EQ(SessionWindow::TYPE_TABBED, win_ptr->type);
     int j = 0;
     for (std::vector<int>::const_iterator tab_iter = (*win_iter).begin();
          tab_iter != (*win_iter).end(); ++tab_iter, ++j) {
@@ -82,7 +82,7 @@ void SessionSyncTestHelper::VerifySyncedSession(
       ASSERT_EQ(kAppId, tab->extension_app_id);
       ASSERT_EQ(1U, tab->navigations.size());
       ASSERT_EQ(tab->navigations[0].virtual_url(), GURL(kVirtualUrl));
-      ASSERT_EQ(tab->navigations[0].referrer().url, GURL(kReferrer));
+      ASSERT_EQ(tab->navigations[0].referrer_url(), GURL(kReferrer));
       ASSERT_EQ(tab->navigations[0].title(),
                 base::ASCIIToUTF16(kTitle));
       ASSERT_EQ(tab->navigations[0].transition_type(),

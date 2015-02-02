@@ -35,9 +35,9 @@ using power::OriginPowerMapFactory;
 class BrowserProcessPowerTest : public BrowserWithTestWindowTest {
  public:
   BrowserProcessPowerTest() {}
-  virtual ~BrowserProcessPowerTest() {}
+  ~BrowserProcessPowerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
     collector.reset(new ProcessPowerCollector);
 
@@ -55,7 +55,7 @@ class BrowserProcessPowerTest : public BrowserWithTestWindowTest {
     ASSERT_TRUE(profile_manager_->SetUp());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     collector.reset();
     BrowserWithTestWindowTest::TearDown();
   }
@@ -95,14 +95,13 @@ class TestAppWindowContents : public extensions::AppWindowContents {
       : web_contents_(web_contents) {}
 
   // apps:AppWindowContents
-  virtual void Initialize(content::BrowserContext* context,
-                          const GURL& url) OVERRIDE {}
-  virtual void LoadContents(int32 creator_process_id) OVERRIDE {}
-  virtual void NativeWindowChanged(
-      extensions::NativeAppWindow* native_app_window) OVERRIDE {}
-  virtual void NativeWindowClosed() OVERRIDE {}
-  virtual void DispatchWindowShownForTests() const OVERRIDE {}
-  virtual content::WebContents* GetWebContents() const OVERRIDE {
+  void Initialize(content::BrowserContext* context, const GURL& url) override {}
+  void LoadContents(int32 creator_process_id) override {}
+  void NativeWindowChanged(
+      extensions::NativeAppWindow* native_app_window) override {}
+  void NativeWindowClosed() override {}
+  void DispatchWindowShownForTests() const override {}
+  content::WebContents* GetWebContents() const override {
     return web_contents_.get();
   }
 

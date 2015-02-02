@@ -13,9 +13,9 @@ namespace {
 class GnubbyAuthHandlerWin : public GnubbyAuthHandler {
  private:
   // GnubbyAuthHandler interface.
-  virtual void DeliverClientMessage(const std::string& message) OVERRIDE;
+  virtual void DeliverClientMessage(const std::string& message) override;
   virtual void DeliverHostDataMessage(int connection_id,
-                                      const std::string& data) const OVERRIDE;
+                                      const std::string& data) const override;
 
   DISALLOW_COPY_AND_ASSIGN(GnubbyAuthHandlerWin);
 };
@@ -25,7 +25,7 @@ class GnubbyAuthHandlerWin : public GnubbyAuthHandler {
 // static
 scoped_ptr<GnubbyAuthHandler> GnubbyAuthHandler::Create(
     protocol::ClientStub* client_stub) {
-  return scoped_ptr<GnubbyAuthHandler>();
+  return nullptr;
 }
 
 // static

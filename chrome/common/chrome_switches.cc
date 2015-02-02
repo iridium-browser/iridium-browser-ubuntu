@@ -187,10 +187,6 @@ const char kCrashOnHangThreads[]            = "crash-on-hang-threads";
 const char kCreateBrowserOnStartupForTests[] =
     "create-browser-on-startup-for-tests";
 
-// Specifies the chrome-extension:// URL for the contents of an additional page
-// added to the experimental app launcher.
-const char kCustomLauncherPage[]            = "custom-launcher-page";
-
 // Enables a frame context menu item that toggles the frame in and out of glass
 // mode (Windows Vista and up only).
 const char kDebugEnableFrameToggle[]        = "debug-enable-frame-toggle";
@@ -228,6 +224,10 @@ const char kDisableBackgroundNetworking[]   = "disable-background-networking";
 
 // Disables the bundled PPAPI version of Flash.
 const char kDisableBundledPpapiFlash[]      = "disable-bundled-ppapi-flash";
+
+// Disable hardware encoding support for Cast Streaming.
+const char kDisableCastStreamingHWEncoding[] =
+    "disable-cast-streaming-hw-encoding";
 
 // Disables the client-side phishing detection feature. Note that even if
 // client-side phishing detection is enabled, it will only be active if the
@@ -334,11 +334,6 @@ const char kDisableQuicPacing[]             = "disable-quic-pacing";
 // This only has an effect if QUIC protocol is enabled.
 const char kDisableQuicPortSelection[]      = "disable-quic-port-selection";
 
-// Disable use of time-base loss detection for QUIC connections.
-// This only has an effect if QUIC protocol is enabled.
-const char kDisableQuicTimeBasedLossDetection[] =
-    "disable-quic-time-based-loss-detection";
-
 // Prevents the save password bubble from being enabled.
 const char kDisableSavePasswordBubble[] = "disable-save-password-bubble";
 
@@ -349,11 +344,16 @@ const char kDisableSearchButtonInOmnibox[]  =
 // Disables using bubbles for session restore request.
 const char kDisableSessionCrashedBubble[] = "disable-session-crashed-bubble";
 
-// Disable SPDY/3.1. This is a temporary testing flag.
-const char kDisableSpdy31[]                 = "disable-spdy31";
-
 // Disables the suggestions service.
 const char kDisableSuggestionsService[]     = "disable-suggestions-service";
+
+// Disables the supervised user host blacklist.
+const char kDisableSupervisedUserBlacklist[] =
+    "disable-supervised-user-blacklist";
+
+// Disables SafeSites filtering for supervised users.
+const char kDisableSupervisedUserSafeSites[] =
+    "disable-supervised-user-safesites";
 
 // Disables syncing browser data to a Google Account.
 const char kDisableSync[]                   = "disable-sync";
@@ -516,6 +516,9 @@ const char kEnablePanels[]                  = "enable-panels";
 const char kEnablePluginPlaceholderShadowDom[] =
     "enable-plugin-placeholder-shadow-dom";
 
+// Enables the Power overlay in Settings.
+const char kEnablePowerOverlay[]            = "enable-power-overlay";
+
 // Enables showing unregistered printers in print preview
 const char kEnablePrintPreviewRegisterPromos[] =
     "enable-print-preview-register-promos";
@@ -543,11 +546,6 @@ const char kEnableQuicPacing[]              = "enable-quic-pacing";
 // Enable use of Chromium's port selection for the ephemeral port via bind().
 // This only has an effect if QUIC protocol is enabled.
 const char kEnableQuicPortSelection[]       = "enable-quic-port-selection";
-
-// Enables use of time-base loss detection for QUIC connections.
-// This only has an effect if QUIC protocol is enabled.
-const char kEnableQuicTimeBasedLossDetection[] =
-    "enable-quic-time-based-loss-detection";
 
 // Enables context-sensitive reader mode button in the toolbar.
 const char kEnableReaderModeToolbarIcon[] =
@@ -589,17 +587,14 @@ const char kDisableSettingsWindow[]          = "disable-settings-window";
 // Enable SPDY/4, aka HTTP/2. This is a temporary testing flag.
 const char kEnableSpdy4[]                   = "enable-spdy4";
 
-// Enables auto correction for misspelled words.
-const char kEnableSpellingAutoCorrect[]     = "enable-spelling-auto-correct";
-
-// Enables participation in the field trial for user feedback to spelling
-// service.
-const char kEnableSpellingFeedbackFieldTrial[] =
-    "enable-spelling-feedback-field-trial";
-
 // Enables a feature that holds back some SSLConnectJobs in order to
 // minimize the number of full SSL handshakes completed.
 const char kEnableSSLConnectJobWaiting[] = "enable-ssl-connect-job-waiting";
+
+// Enables implementation of the Cache-Control: stale-while-revalidate directive
+// which permits servers to allow the use of stale resources while revalidation
+// proceeds in the background.
+const char kEnableStaleWhileRevalidate[]    = "enable-stale-while-revalidate";
 
 // Enables an experimental hosted app experience.
 const char kEnableStreamlinedHostedApps[]   = "enable-streamlined-hosted-apps";
@@ -610,6 +605,10 @@ const char kEnableSuggestionsService[]      = "enable-suggestions-service";
 // Enables the supervised user host blacklist.
 const char kEnableSupervisedUserBlacklist[] =
     "enable-supervised-user-blacklist";
+
+// Enables SafeSites filtering for supervised users.
+const char kEnableSupervisedUserSafeSites[] =
+    "enable-supervised-user-safesites";
 
 // Enables synced notifications.
 const char kEnableSyncSyncedNotifications[] =
@@ -1101,6 +1100,15 @@ const char kSpeculativeResourcePrefetchingLearning[] = "learning";
 // Speculative resource prefetching is enabled.
 const char kSpeculativeResourcePrefetchingEnabled[] = "enabled";
 
+#if defined(ENABLE_SPELLCHECK)
+// Enables auto correction for misspelled words.
+const char kEnableSpellingAutoCorrect[]     = "enable-spelling-auto-correct";
+
+// Enables participation in the field trial for user feedback to spelling
+// service.
+const char kEnableSpellingFeedbackFieldTrial[] =
+    "enable-spelling-feedback-field-trial";
+
 // Specifies the URL where spelling service feedback data will be sent instead
 // of the default URL. This switch is for temporary testing only.
 // TODO(rouslan): Remove this flag when feedback testing is complete. Revisit by
@@ -1114,6 +1122,7 @@ const char kSpellingServiceFeedbackUrl[] = "spelling-service-feedback-url";
 // August 2013.
 const char kSpellingServiceFeedbackIntervalSeconds[] =
     "spelling-service-feedback-interval-seconds";
+#endif
 
 // Specifies the maximum SSL/TLS version ("ssl3", "tls1", "tls1.1", or
 // "tls1.2").
@@ -1126,6 +1135,13 @@ const char kSSLVersionMin[]                 = "ssl-version-min";
 // Specifies the minimum SSL/TLS version ("ssl3", "tls1", "tls1.1", or
 // "tls1.2") that TLS fallback will accept.
 const char kSSLVersionFallbackMin[]         = "ssl-version-fallback-min";
+
+// These values aren't switches, but rather the values that kSSLVersionMax,
+// kSSLVersionMin and kSSLVersionFallbackMin can have.
+const char kSSLVersionSSLv3[]               = "ssl3";
+const char kSSLVersionTLSv1[]               = "tls1";
+const char kSSLVersionTLSv11[]              = "tls1.1";
+const char kSSLVersionTLSv12[]              = "tls1.2";
 
 // Starts the browser maximized, regardless of any previous settings.
 const char kStartMaximized[]                = "start-maximized";
@@ -1243,25 +1259,15 @@ const char kEnableAppInstallAlerts[]        = "enable-app-install-alerts";
 // Enables Contextual Search.
 const char kEnableContextualSearch[]        = "enable-contextual-search";
 
-// Enables zero suggest functionality on Dev channel, showing contextual
-// suggestions (EtherSuggest) for http pages and google.com search queries.
-const char kEnableZeroSuggestEtherSerp[] =
-    "enable-zero-suggest-ether-serp";
-
-// Enables zero suggest functionality on Dev channel, showing contextual
-// suggestions (EtherSuggest) for http pages.
-const char kEnableZeroSuggestEtherNoSerp[] =
-    "enable-zero-suggest-ether-noserp";
-
 // Enables zero suggest functionality on Dev channel, showing most visited
 // sites as default suggestions.
 const char kEnableZeroSuggestMostVisited[] =
     "enable-zero-suggest-most-visited";
 
-// Enables zero suggest functionality on Dev channel, showing recently typed
-// queries as default suggestions.
-const char kEnableZeroSuggestPersonalized[] =
-    "enable-zero-suggest-personalized";
+// Enable zero suggest functionality on Dev channel, showing most visited
+// sites on non-search-result pages as default suggestions.
+const char kEnableZeroSuggestMostVisitedWithoutSerp[] =
+    "enable-zero-suggest-most-visited-without-serp";
 
 // Enables instant search clicks feature.
 const char kEnableInstantSearchClicks[] = "enable-instant-search-clicks";
@@ -1293,10 +1299,6 @@ const char kAppsKeepChromeAliveInTests[]    = "apps-keep-chrome-alive-in-tests";
 // older, SnowLeopard-style fullscreen.
 const char kDisableSystemFullscreenForTesting[] =
     "disable-system-fullscreen-for-testing";
-
-// Makes the browser window's contentView take up the full size of the
-// window in OSX Yosemite.
-const char kEnableFullSizeContentView[]     = "enable-full-size-content-view";
 
 // A process type (switches::kProcessType) that relaunches the browser. See
 // chrome/browser/mac/relauncher.h.
@@ -1339,7 +1341,7 @@ const char kWaitForMutex[]                  = "wait-for-mutex";
 const char kWindows8Search[]                = "windows8-search";
 #endif
 
-#if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
 // Enables support to debug printing subsystem.
 const char kDebugPrint[] = "debug-print";
 #endif
@@ -1364,6 +1366,13 @@ bool SettingsWindowEnabled() {
       ::switches::kEnableSettingsWindow);
 #endif
 }
+
+#if defined(OS_CHROMEOS)
+bool PowerOverlayEnabled() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      ::switches::kEnablePowerOverlay);
+}
+#endif
 
 // -----------------------------------------------------------------------------
 // DO NOT ADD YOUR CRAP TO THE BOTTOM OF THIS FILE.

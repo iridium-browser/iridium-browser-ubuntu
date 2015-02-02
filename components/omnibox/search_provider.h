@@ -65,7 +65,7 @@ class SearchProvider : public BaseSearchProvider,
   void RegisterDisplayedAnswers(const AutocompleteResult& result);
 
   // AutocompleteProvider:
-  virtual void ResetSession() OVERRIDE;
+  void ResetSession() override;
 
   // This URL may be sent with suggest requests; see comments on CanSendURL().
   void set_current_page_url(const GURL& current_page_url) {
@@ -73,7 +73,7 @@ class SearchProvider : public BaseSearchProvider,
   }
 
  protected:
-  virtual ~SearchProvider();
+  ~SearchProvider() override;
 
  private:
   friend class SearchProviderTest;
@@ -158,19 +158,18 @@ class SearchProvider : public BaseSearchProvider,
   static ACMatches::iterator FindTopMatch(ACMatches* matches);
 
   // AutocompleteProvider:
-  virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes) OVERRIDE;
-  virtual void Stop(bool clear_cached_results) OVERRIDE;
+  void Start(const AutocompleteInput& input, bool minimal_changes) override;
+  void Stop(bool clear_cached_results) override;
 
   // BaseSearchProvider:
-  virtual const TemplateURL* GetTemplateURL(bool is_keyword) const OVERRIDE;
-  virtual const AutocompleteInput GetInput(bool is_keyword) const OVERRIDE;
-  virtual bool ShouldAppendExtraParams(
-      const SearchSuggestionParser::SuggestResult& result) const OVERRIDE;
-  virtual void RecordDeletionResult(bool success) OVERRIDE;
+  const TemplateURL* GetTemplateURL(bool is_keyword) const override;
+  const AutocompleteInput GetInput(bool is_keyword) const override;
+  bool ShouldAppendExtraParams(
+      const SearchSuggestionParser::SuggestResult& result) const override;
+  void RecordDeletionResult(bool success) override;
 
   // net::URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // Stops the suggest query.
   // NOTE: This does not update |done_|.  Callers must do so.
@@ -200,6 +199,9 @@ class SearchProvider : public BaseSearchProvider,
   // Runs the history query, if necessary. The history query is synchronous.
   // This does not update |done_|.
   void DoHistoryQuery(bool minimal_changes);
+
+  // Returns the time to delay before sending the Suggest request.
+  base::TimeDelta GetSuggestQueryDelay() const;
 
   // Determines whether an asynchronous subcomponent query should run for the
   // current input.  If so, starts it if necessary; otherwise stops it.
@@ -340,10 +342,6 @@ class SearchProvider : public BaseSearchProvider,
   // returns the query data associated with it. Otherwise, returns an empty
   // AnswersQueryData.
   AnswersQueryData FindAnswersPrefetchData();
-
-  // The amount of time to wait before sending a new suggest request after the
-  // previous one.  Non-const because some unittests modify this value.
-  static int kMinimumTimeBetweenSuggestQueriesMs;
 
   AutocompleteProviderListener* listener_;
 

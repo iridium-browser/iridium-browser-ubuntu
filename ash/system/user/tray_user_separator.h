@@ -16,23 +16,21 @@ namespace ash {
 class ASH_EXPORT TrayUserSeparator : public SystemTrayItem {
  public:
   explicit TrayUserSeparator(SystemTray* system_tray);
-  virtual ~TrayUserSeparator() {}
+  ~TrayUserSeparator() override {}
 
   // Returns true if the separator gets shown.
   bool separator_shown() { return separator_shown_; }
 
  private:
   // Overridden from SystemTrayItem.
-  virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateDetailedView(user::LoginStatus status) OVERRIDE;
-  virtual void DestroyTrayView() OVERRIDE {}
-  virtual void DestroyDefaultView() OVERRIDE;
-  virtual void DestroyDetailedView() OVERRIDE {}
-  virtual void UpdateAfterLoginStatusChange(
-      user::LoginStatus status) OVERRIDE {}
-  virtual void UpdateAfterShelfAlignmentChange(
-      ShelfAlignment alignment) OVERRIDE {}
+  views::View* CreateTrayView(user::LoginStatus status) override;
+  views::View* CreateDefaultView(user::LoginStatus status) override;
+  views::View* CreateDetailedView(user::LoginStatus status) override;
+  void DestroyTrayView() override {}
+  void DestroyDefaultView() override;
+  void DestroyDetailedView() override {}
+  void UpdateAfterLoginStatusChange(user::LoginStatus status) override {}
+  void UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) override {}
 
   // True if the separator gets shown.
   bool separator_shown_;

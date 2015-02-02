@@ -33,13 +33,12 @@ class CC_EXPORT DebugBorderDrawQuad : public DrawQuad {
   SkColor color;
   int width;
 
-  virtual void IterateResources(const ResourceIteratorCallback& callback)
-      OVERRIDE;
+  void IterateResources(const ResourceIteratorCallback& callback) override;
 
   static const DebugBorderDrawQuad* MaterialCast(const DrawQuad*);
 
  private:
-  virtual void ExtendValue(base::debug::TracedValue* value) const OVERRIDE;
+  void ExtendValue(base::debug::TracedValue* value) const override;
 };
 
 }  // namespace cc

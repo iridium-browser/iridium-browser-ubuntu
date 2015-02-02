@@ -6,8 +6,10 @@
 #include "core/paint/TablePainter.h"
 
 #include "core/paint/BoxPainter.h"
+#include "core/paint/DrawingRecorder.h"
 #include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/PaintInfo.h"
+#include "core/rendering/RenderBoxClipper.h"
 #include "core/rendering/RenderTable.h"
 #include "core/rendering/RenderTableSection.h"
 #include "core/rendering/style/CollapsedBorderValue.h"
@@ -20,8 +22,6 @@ void TablePainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 
     LayoutPoint adjustedPaintOffset = paintOffset + m_renderTable.location();
 
-    PaintPhase paintPhase = paintInfo.phase;
-
     if (!m_renderTable.isDocumentElement()) {
         LayoutRect overflowBox = m_renderTable.visualOverflowRect();
         m_renderTable.flipForWritingMode(overflowBox);
@@ -30,10 +30,8 @@ void TablePainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
             return;
     }
 
-    bool pushedClip = m_renderTable.pushContentsClip(paintInfo, adjustedPaintOffset, ForceContentsClip);
+    RenderBoxClipper boxClipper(m_renderTable, paintInfo, adjustedPaintOffset, ForceContentsClip);
     paintObject(paintInfo, adjustedPaintOffset);
-    if (pushedClip)
-        m_renderTable.popContentsClip(paintInfo, paintPhase, adjustedPaintOffset);
 }
 
 void TablePainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -106,7 +104,7 @@ void TablePainter::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOffse
 
     LayoutRect rect(paintOffset, m_renderTable.size());
     m_renderTable.subtractCaptionRect(rect);
-
+    DrawingRecorder recorder(paintInfo.context, &m_renderTable, paintInfo.phase, pixelSnappedIntRect(rect));
     BoxPainter(m_renderTable).paintMaskImages(paintInfo, rect);
 }
 

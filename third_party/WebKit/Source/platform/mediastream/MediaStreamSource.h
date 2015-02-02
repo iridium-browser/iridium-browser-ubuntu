@@ -44,7 +44,7 @@
 
 namespace blink {
 
-class PLATFORM_EXPORT MediaStreamSource FINAL : public RefCounted<MediaStreamSource> {
+class PLATFORM_EXPORT MediaStreamSource final : public RefCounted<MediaStreamSource> {
 public:
     class Observer {
     public:
@@ -68,11 +68,13 @@ public:
         ReadyStateEnded = 2
     };
 
-    static PassRefPtr<MediaStreamSource> create(const String& id, Type, const String& name, ReadyState = ReadyStateLive, bool requiresConsumer = false);
+    static PassRefPtr<MediaStreamSource> create(const String& id, Type, const String& name, bool remote, bool readonly, ReadyState = ReadyStateLive, bool requiresConsumer = false);
 
     const String& id() const { return m_id; }
     Type type() const { return m_type; }
     const String& name() const { return m_name; }
+    bool remote() const { return m_remote; }
+    bool readonly() const { return m_readonly; }
 
     void setReadyState(ReadyState);
     ReadyState readyState() const { return m_readyState; }
@@ -83,8 +85,8 @@ public:
     ExtraData* extraData() const { return m_extraData.get(); }
     void setExtraData(PassOwnPtr<ExtraData> extraData) { m_extraData = extraData; }
 
-    void setConstraints(blink::WebMediaConstraints constraints) { m_constraints = constraints; }
-    blink::WebMediaConstraints constraints() { return m_constraints; }
+    void setConstraints(WebMediaConstraints constraints) { m_constraints = constraints; }
+    WebMediaConstraints constraints() { return m_constraints; }
 
     void setAudioFormat(size_t numberOfChannels, float sampleRate);
     void consumeAudio(AudioBus*, size_t numberOfFrames);
@@ -95,18 +97,20 @@ public:
     const HeapHashSet<Member<AudioDestinationConsumer> >& audioConsumers() { return m_audioConsumers; }
 
 private:
-    MediaStreamSource(const String& id, Type, const String& name, ReadyState, bool requiresConsumer);
+    MediaStreamSource(const String& id, Type, const String& name, bool remote, bool readonly, ReadyState, bool requiresConsumer);
 
     String m_id;
     Type m_type;
     String m_name;
+    bool m_remote;
+    bool m_readonly;
     ReadyState m_readyState;
     bool m_requiresConsumer;
     Vector<Observer*> m_observers;
     Mutex m_audioConsumersLock;
     PersistentHeapHashSet<Member<AudioDestinationConsumer> > m_audioConsumers;
     OwnPtr<ExtraData> m_extraData;
-    blink::WebMediaConstraints m_constraints;
+    WebMediaConstraints m_constraints;
 };
 
 typedef Vector<RefPtr<MediaStreamSource> > MediaStreamSourceVector;

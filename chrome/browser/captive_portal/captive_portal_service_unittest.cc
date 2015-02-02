@@ -14,7 +14,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/captive_portal/captive_portal_testing_utils.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
@@ -52,9 +51,9 @@ class CaptivePortalObserver : public content::NotificationObserver {
   int num_results_received() const { return num_results_received_; }
 
  private:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     ASSERT_EQ(type, chrome::NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT);
     ASSERT_EQ(profile_, content::Source<Profile>(source).ptr());
 
@@ -90,7 +89,7 @@ class CaptivePortalServiceTest : public testing::Test,
             CaptivePortalService::get_state_for_testing()) {
   }
 
-  virtual ~CaptivePortalServiceTest() {
+  ~CaptivePortalServiceTest() override {
     CaptivePortalService::set_state_for_testing(
         old_captive_portal_testing_state_);
   }

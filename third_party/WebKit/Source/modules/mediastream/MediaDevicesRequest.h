@@ -36,10 +36,9 @@ namespace blink {
 
 class Document;
 class ExceptionState;
-class MediaStreamDescriptor;
 class UserMediaController;
 
-class MediaDevicesRequest FINAL : public GarbageCollectedFinalized<MediaDevicesRequest>, public ActiveDOMObject {
+class MediaDevicesRequest final : public GarbageCollectedFinalized<MediaDevicesRequest>, public ActiveDOMObject {
 public:
     static MediaDevicesRequest* create(ExecutionContext*, UserMediaController*, MediaDeviceInfoCallback*, ExceptionState&);
     virtual ~MediaDevicesRequest();
@@ -52,7 +51,7 @@ public:
     void succeed(const MediaDeviceInfoVector&);
 
     // ActiveDOMObject
-    virtual void stop() OVERRIDE;
+    virtual void stop() override;
 
     void trace(Visitor*);
 

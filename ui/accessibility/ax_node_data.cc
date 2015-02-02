@@ -203,6 +203,12 @@ std::string AXNodeData::ToString() const {
       case AX_ATTR_COLOR_VALUE_BLUE:
         result += " color_value_blue=" + value;
         break;
+      case AX_ATTR_TREE_ID:
+        result += " tree_id=" + value;
+        break;
+      case AX_ATTR_CHILD_TREE_ID:
+        result += " child_tree_id=" + value;
+        break;
       case AX_ATTR_TEXT_DIRECTION:
         switch (int_attributes[i].second) {
           case AX_TEXT_DIRECTION_LR:
@@ -275,6 +281,9 @@ std::string AXNodeData::ToString() const {
         break;
       case AX_ATTR_SHORTCUT:
         result += " shortcut=" + value;
+        break;
+     case AX_ATTR_TEXT_INPUT_TYPE:
+        result += " text_input_type=" + value;
         break;
       case AX_ATTR_URL:
         result += " url=" + value;

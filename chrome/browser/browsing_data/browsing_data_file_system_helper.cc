@@ -34,12 +34,13 @@ class BrowsingDataFileSystemHelperImpl : public BrowsingDataFileSystemHelper {
   // BrowsingDataFileSystemHelper implementation
   explicit BrowsingDataFileSystemHelperImpl(
       storage::FileSystemContext* filesystem_context);
-  virtual void StartFetching(const base::Callback<
-      void(const std::list<FileSystemInfo>&)>& callback) OVERRIDE;
-  virtual void DeleteFileSystemOrigin(const GURL& origin) OVERRIDE;
+  void StartFetching(
+      const base::Callback<void(const std::list<FileSystemInfo>&)>& callback)
+      override;
+  void DeleteFileSystemOrigin(const GURL& origin) override;
 
  private:
-  virtual ~BrowsingDataFileSystemHelperImpl();
+  ~BrowsingDataFileSystemHelperImpl() override;
 
   // Enumerates all filesystem files, storing the resulting list into
   // file_system_file_ for later use. This must be called on the file

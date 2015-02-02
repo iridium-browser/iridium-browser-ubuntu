@@ -46,7 +46,7 @@ void RenderObjectChildList::destroyLeftoverChildren()
 {
     while (firstChild()) {
         if (firstChild()->isListMarker() || (firstChild()->style()->styleType() == FIRST_LETTER && !firstChild()->isText())) {
-            firstChild()->remove();  // List markers are owned by their enclosing list and so don't get destroyed by this container. Similarly, first letters are destroyed by their remaining text fragment.
+            firstChild()->remove(); // List markers are owned by their enclosing list and so don't get destroyed by this container. Similarly, first letters are destroyed by their remaining text fragment.
         } else {
             // Destroy any anonymous children remaining in the render tree, as well as implicit (shadow) DOM elements like those used in the engine-based text fields.
             if (firstChild()->node())
@@ -161,7 +161,8 @@ void RenderObjectChildList::insertChildNode(RenderObject* owner, RenderObject* n
         RenderCounter::rendererSubtreeAttached(newChild);
     }
 
-    newChild->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+    newChild->setNeedsLayoutAndPrefWidthsRecalc();
+    newChild->setShouldDoFullPaintInvalidation(PaintInvalidationRendererInsertion);
     if (!owner->normalChildNeedsLayout())
         owner->setChildNeedsLayout(); // We may supply the static position for an absolute positioned child.
 
@@ -174,15 +175,11 @@ void RenderObjectChildList::invalidatePaintOnRemoval(const RenderObject& oldChil
     if (!oldChild.isRooted())
         return;
     if (oldChild.isBody()) {
-        oldChild.view()->setShouldDoFullPaintInvalidation(true);
-        return;
-    }
-    if (oldChild.isText()) {
-        oldChild.parent()->setShouldDoFullPaintInvalidation(true);
+        oldChild.view()->setShouldDoFullPaintInvalidation();
         return;
     }
     DisableCompositingQueryAsserts disabler;
-    oldChild.invalidatePaintUsingContainer(oldChild.containerForPaintInvalidation(), oldChild.previousPaintInvalidationRect(), InvalidationRendererRemoval);
+    oldChild.invalidatePaintUsingContainer(oldChild.containerForPaintInvalidation(), oldChild.previousPaintInvalidationRect(), PaintInvalidationRendererRemoval);
 }
 
 } // namespace blink

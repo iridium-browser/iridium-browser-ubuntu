@@ -43,21 +43,12 @@ namespace blink {
 class ConsoleMessage;
 class ConsoleMessageStorage;
 class DocumentLoader;
-class LocalDOMWindow;
 class LocalFrame;
-class InspectorConsoleMessage;
 class InspectorFrontend;
 class InjectedScriptManager;
 class InspectorTimelineAgent;
-class InstrumentingAgents;
-class ResourceError;
-class ResourceLoader;
-class ResourceResponse;
-class ScriptArguments;
-class ScriptCallStack;
 class ScriptProfile;
 class ThreadableLoaderClient;
-class WorkerGlobalScopeProxy;
 class XMLHttpRequest;
 
 typedef String ErrorString;
@@ -67,17 +58,16 @@ class InspectorConsoleAgent : public InspectorBaseAgent<InspectorConsoleAgent>, 
 public:
     InspectorConsoleAgent(InspectorTimelineAgent*, InjectedScriptManager*);
     virtual ~InspectorConsoleAgent();
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
-    virtual void init() OVERRIDE;
-    virtual void enable(ErrorString*) OVERRIDE FINAL;
-    virtual void disable(ErrorString*) OVERRIDE FINAL;
-    virtual void clearMessages(ErrorString*) OVERRIDE;
+    virtual void enable(ErrorString*) override final;
+    virtual void disable(ErrorString*) override final;
+    virtual void clearMessages(ErrorString*) override;
     bool enabled() { return m_enabled; }
 
-    virtual void setFrontend(InspectorFrontend*) OVERRIDE FINAL;
-    virtual void clearFrontend() OVERRIDE FINAL;
-    virtual void restore() OVERRIDE FINAL;
+    virtual void setFrontend(InspectorFrontend*) override final;
+    virtual void clearFrontend() override final;
+    virtual void restore() override final;
 
     void addMessageToConsole(ConsoleMessage*);
     void consoleMessagesCleared();
@@ -86,18 +76,18 @@ public:
     void consoleTimeline(ExecutionContext*, const String& title, ScriptState*);
     void consoleTimelineEnd(ExecutionContext*, const String& title, ScriptState*);
 
-    void frameWindowDiscarded(LocalDOMWindow*);
     void didCommitLoad(LocalFrame*, DocumentLoader*);
 
-    void didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long requestIdentifier, ScriptString, const AtomicString& method, const String& url, const String& sendURL, unsigned sendLineNumber);
-    void didFailLoading(unsigned long requestIdentifier, const ResourceError&);
+    void didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long requestIdentifier, ScriptString, const AtomicString& method, const String& url);
     void addProfileFinishedMessageToConsole(PassRefPtrWillBeRawPtr<ScriptProfile>, unsigned lineNumber, const String& sourceURL);
     void addStartProfilingMessageToConsole(const String& title, unsigned lineNumber, const String& sourceURL);
-    virtual void setMonitoringXHREnabled(ErrorString*, bool enabled) OVERRIDE;
+    virtual void setMonitoringXHREnabled(ErrorString*, bool enabled) override;
     virtual void addInspectedNode(ErrorString*, int nodeId) = 0;
-    virtual void addInspectedHeapObject(ErrorString*, int inspectedHeapObjectId) OVERRIDE;
+    virtual void addInspectedHeapObject(ErrorString*, int inspectedHeapObjectId) override;
 
     virtual bool isWorkerAgent() = 0;
+
+    virtual void setLastEvaluationResult(ErrorString*, const String& objectId) override;
 
 protected:
     void sendConsoleMessageToFrontend(ConsoleMessage*, bool generatePreview);

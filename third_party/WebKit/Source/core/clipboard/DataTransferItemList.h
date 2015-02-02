@@ -46,7 +46,7 @@ class File;
 
 class ExceptionState;
 
-class DataTransferItemList FINAL : public RefCountedWillBeGarbageCollected<DataTransferItemList>, public ScriptWrappable {
+class DataTransferItemList final : public RefCountedWillBeGarbageCollected<DataTransferItemList>, public ScriptWrappable {
     DECLARE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(DataTransferItemList);
     DEFINE_WRAPPERTYPEINFO();
 public:
@@ -57,7 +57,7 @@ public:
     void deleteItem(unsigned long index, ExceptionState&);
     void clear();
     PassRefPtrWillBeRawPtr<DataTransferItem> add(const String& data, const String& type, ExceptionState&);
-    PassRefPtrWillBeRawPtr<DataTransferItem> add(PassRefPtrWillBeRawPtr<File>);
+    PassRefPtrWillBeRawPtr<DataTransferItem> add(File*);
 
     void trace(Visitor*);
 

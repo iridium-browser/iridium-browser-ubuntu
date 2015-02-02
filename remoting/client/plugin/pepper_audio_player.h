@@ -16,12 +16,11 @@ namespace remoting {
 class PepperAudioPlayer : public AudioPlayer {
  public:
   explicit PepperAudioPlayer(pp::Instance* instance);
-  virtual ~PepperAudioPlayer();
+  ~PepperAudioPlayer() override;
 
-  virtual uint32 GetSamplesPerFrame() OVERRIDE;
+  uint32 GetSamplesPerFrame() override;
 
-  virtual bool ResetAudioPlayer(AudioPacket::SamplingRate sampling_rate)
-      OVERRIDE;
+  bool ResetAudioPlayer(AudioPacket::SamplingRate sampling_rate) override;
 
  private:
   pp::Instance* instance_;

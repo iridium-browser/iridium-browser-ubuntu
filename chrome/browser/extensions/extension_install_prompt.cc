@@ -10,24 +10,24 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/bundle_installer.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/extension_install_ui_factory.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/image_loader.h"
+#include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
@@ -43,6 +43,7 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/image/image.h"
 
 using extensions::BundleInstaller;
@@ -101,7 +102,7 @@ static const int kAcceptButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
     IDS_EXTENSION_PROMPT_RE_ENABLE_BUTTON,
     IDS_EXTENSION_PROMPT_PERMISSIONS_BUTTON,
     0,  // External installs use different strings for extensions/apps.
-    IDS_EXTENSION_PROMPT_PERMISSIONS_CLEAR_RETAINED_FILES_BUTTON,
+    0,  // Different strings depending on the files and devices retained.
     IDS_EXTENSION_PROMPT_LAUNCH_BUTTON,
     IDS_EXTENSION_PROMPT_REMOTE_INSTALL_BUTTON,
     IDS_EXTENSION_PROMPT_REPAIR_BUTTON,
@@ -176,13 +177,6 @@ Profile* ProfileForWebContents(content::WebContents* web_contents) {
   return Profile::FromBrowserContext(web_contents->GetBrowserContext());
 }
 
-gfx::NativeWindow NativeWindowForWebContents(content::WebContents* contents) {
-  if (!contents)
-    return NULL;
-
-  return contents->GetTopLevelNativeWindow();
-}
-
 }  // namespace
 
 ExtensionInstallPrompt::Prompt::InstallPromptPermissions::
@@ -229,6 +223,7 @@ std::string ExtensionInstallPrompt::PromptTypeToString(PromptType type) {
 ExtensionInstallPrompt::Prompt::Prompt(PromptType type)
     : type_(type),
       is_showing_details_for_retained_files_(false),
+      is_showing_details_for_retained_devices_(false),
       extension_(NULL),
       bundle_(NULL),
       average_rating_(0.0),
@@ -251,7 +246,25 @@ void ExtensionInstallPrompt::Prompt::SetPermissionsDetails(
     PermissionsType permissions_type) {
   InstallPromptPermissions& install_permissions =
       GetPermissionsForType(permissions_type);
-  install_permissions.details = details;
+
+  // Add a dash to the front of each permission detail.
+  for (const auto& details_entry : details) {
+    if (!details_entry.empty()) {
+      std::vector<base::string16> detail_lines;
+      base::SplitString(details_entry, base::char16('\n'), &detail_lines);
+
+      std::vector<base::string16> detail_lines_with_bullets;
+      for (const auto& detail_line : detail_lines)
+        detail_lines_with_bullets.push_back(base::ASCIIToUTF16("- ") +
+                                            detail_line);
+
+      install_permissions.details.push_back(
+          JoinString(detail_lines_with_bullets, '\n'));
+    } else {
+      install_permissions.details.push_back(details_entry);
+    }
+  }
+
   install_permissions.is_showing_details.clear();
   install_permissions.is_showing_details.insert(
       install_permissions.is_showing_details.begin(), details.size(), false);
@@ -271,6 +284,9 @@ void ExtensionInstallPrompt::Prompt::SetIsShowingDetails(
       break;
     case RETAINED_FILES_DETAILS:
       is_showing_details_for_retained_files_ = is_showing_details;
+      break;
+    case RETAINED_DEVICES_DETAILS:
+      is_showing_details_for_retained_devices_ = is_showing_details;
       break;
   }
 }
@@ -337,8 +353,7 @@ base::string16 ExtensionInstallPrompt::Prompt::GetHeading() const {
 }
 
 int ExtensionInstallPrompt::Prompt::GetDialogButtons() const {
-  if (type_ == POST_INSTALL_PERMISSIONS_PROMPT &&
-      ShouldDisplayRevokeFilesButton()) {
+  if (type_ == POST_INSTALL_PERMISSIONS_PROMPT && ShouldDisplayRevokeButton()) {
     return kButtons[type_] | ui::DIALOG_BUTTON_OK;
   }
 
@@ -351,11 +366,11 @@ bool ExtensionInstallPrompt::Prompt::ShouldShowExplanationText() const {
 }
 
 bool ExtensionInstallPrompt::Prompt::HasAcceptButtonLabel() const {
+  if (type_ == POST_INSTALL_PERMISSIONS_PROMPT)
+    return ShouldDisplayRevokeButton();
+
   if (kAcceptButtonIds[type_] == 0)
     return false;
-
-  if (type_ == POST_INSTALL_PERMISSIONS_PROMPT)
-    return ShouldDisplayRevokeFilesButton();
 
   return true;
 }
@@ -369,6 +384,18 @@ base::string16 ExtensionInstallPrompt::Prompt::GetAcceptButtonLabel() const {
       id = IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_ACCEPT_BUTTON_THEME;
     else
       id = IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_ACCEPT_BUTTON_EXTENSION;
+    return l10n_util::GetStringUTF16(id);
+  } else if (type_ == POST_INSTALL_PERMISSIONS_PROMPT) {
+    int id = -1;
+    if (GetRetainedFileCount() && GetRetainedDeviceCount()) {
+      id =
+          IDS_EXTENSION_PROMPT_PERMISSIONS_CLEAR_RETAINED_FILES_AND_DEVICES_BUTTON;
+    } else if (GetRetainedFileCount()) {
+      id = IDS_EXTENSION_PROMPT_PERMISSIONS_CLEAR_RETAINED_FILES_BUTTON;
+    } else {
+      DCHECK_LT(0U, GetRetainedDeviceCount());
+      id = IDS_EXTENSION_PROMPT_PERMISSIONS_CLEAR_RETAINED_DEVICES_BUTTON;
+    }
     return l10n_util::GetStringUTF16(id);
   }
   if (ShouldShowExplanationText())
@@ -412,11 +439,29 @@ base::string16 ExtensionInstallPrompt::Prompt::GetRetainedFilesHeading() const {
       IDS_EXTENSION_PROMPT_RETAINED_FILES_FEW,
       IDS_EXTENSION_PROMPT_RETAINED_FILES_MANY,
   };
-  std::vector<int> message_ids;
-  for (size_t i = 0; i < arraysize(kRetainedFilesMessageIDs); i++) {
-    message_ids.push_back(kRetainedFilesMessageIDs[i]);
-  }
+  std::vector<int> message_ids(
+      kRetainedFilesMessageIDs,
+      kRetainedFilesMessageIDs + arraysize(kRetainedFilesMessageIDs));
+
   return l10n_util::GetPluralStringFUTF16(message_ids, GetRetainedFileCount());
+}
+
+base::string16 ExtensionInstallPrompt::Prompt::GetRetainedDevicesHeading()
+    const {
+  const int kRetainedDevicesMessageIDs[6] = {
+      IDS_EXTENSION_PROMPT_RETAINED_DEVICES_DEFAULT,
+      IDS_EXTENSION_PROMPT_RETAINED_DEVICE_SINGULAR,
+      IDS_EXTENSION_PROMPT_RETAINED_DEVICES_ZERO,
+      IDS_EXTENSION_PROMPT_RETAINED_DEVICES_TWO,
+      IDS_EXTENSION_PROMPT_RETAINED_DEVICES_FEW,
+      IDS_EXTENSION_PROMPT_RETAINED_DEVICES_MANY,
+  };
+  std::vector<int> message_ids(
+      kRetainedDevicesMessageIDs,
+      kRetainedDevicesMessageIDs + arraysize(kRetainedDevicesMessageIDs));
+
+  return l10n_util::GetPluralStringFUTF16(message_ids,
+                                          GetRetainedDeviceCount());
 }
 
 bool ExtensionInstallPrompt::Prompt::ShouldShowPermissions() const {
@@ -530,6 +575,8 @@ bool ExtensionInstallPrompt::Prompt::GetIsShowingDetails(
       return withheld_prompt_permissions_.is_showing_details[index];
     case RETAINED_FILES_DETAILS:
       return is_showing_details_for_retained_files_;
+    case RETAINED_DEVICES_DETAILS:
+      return is_showing_details_for_retained_devices_;
   }
   return false;
 }
@@ -542,6 +589,20 @@ base::string16 ExtensionInstallPrompt::Prompt::GetRetainedFile(size_t index)
     const {
   CHECK_LT(index, retained_files_.size());
   return retained_files_[index].AsUTF16Unsafe();
+}
+
+size_t ExtensionInstallPrompt::Prompt::GetRetainedDeviceCount() const {
+  return retained_device_messages_.size();
+}
+
+base::string16 ExtensionInstallPrompt::Prompt::GetRetainedDeviceMessageString(
+    size_t index) const {
+  CHECK_LT(index, retained_device_messages_.size());
+  return retained_device_messages_[index];
+}
+
+bool ExtensionInstallPrompt::Prompt::ShouldDisplayRevokeButton() const {
+  return !retained_files_.empty() || !retained_device_messages_.empty();
 }
 
 ExtensionInstallPrompt::Prompt::InstallPromptPermissions&
@@ -562,20 +623,6 @@ ExtensionInstallPrompt::Prompt::GetPermissionsForType(
 
 bool ExtensionInstallPrompt::Prompt::ShouldDisplayRevokeFilesButton() const {
   return !retained_files_.empty();
-}
-
-ExtensionInstallPrompt::ShowParams::ShowParams(content::WebContents* contents)
-    : parent_web_contents(contents),
-      parent_window(NativeWindowForWebContents(contents)),
-      navigator(contents) {
-}
-
-ExtensionInstallPrompt::ShowParams::ShowParams(
-    gfx::NativeWindow window,
-    content::PageNavigator* navigator)
-    : parent_web_contents(NULL),
-      parent_window(window),
-      navigator(navigator) {
 }
 
 // static
@@ -610,23 +657,25 @@ scoped_refptr<Extension>
 }
 
 ExtensionInstallPrompt::ExtensionInstallPrompt(content::WebContents* contents)
-    : ui_loop_(base::MessageLoop::current()),
+    : profile_(ProfileForWebContents(contents)),
+      ui_loop_(base::MessageLoop::current()),
       extension_(NULL),
       bundle_(NULL),
-      install_ui_(ExtensionInstallUI::Create(ProfileForWebContents(contents))),
-      show_params_(contents),
+      install_ui_(extensions::CreateExtensionInstallUI(
+          ProfileForWebContents(contents))),
+      show_params_(new ExtensionInstallPromptShowParams(contents)),
       delegate_(NULL) {
 }
 
-ExtensionInstallPrompt::ExtensionInstallPrompt(
-    Profile* profile,
-    gfx::NativeWindow native_window,
-    content::PageNavigator* navigator)
-    : ui_loop_(base::MessageLoop::current()),
+ExtensionInstallPrompt::ExtensionInstallPrompt(Profile* profile,
+                                               gfx::NativeWindow native_window)
+    : profile_(profile),
+      ui_loop_(base::MessageLoop::current()),
       extension_(NULL),
       bundle_(NULL),
-      install_ui_(ExtensionInstallUI::Create(profile)),
-      show_params_(native_window, navigator),
+      install_ui_(extensions::CreateExtensionInstallUI(profile)),
+      show_params_(
+          new ExtensionInstallPromptShowParams(profile, native_window)),
       delegate_(NULL) {
 }
 
@@ -705,11 +754,11 @@ void ExtensionInstallPrompt::ConfirmReEnable(Delegate* delegate,
   extension_ = extension;
   delegate_ = delegate;
   bool is_remote_install =
-      install_ui_->profile() &&
-      extensions::ExtensionPrefs::Get(install_ui_->profile())->HasDisableReason(
+      profile_ &&
+      extensions::ExtensionPrefs::Get(profile_)->HasDisableReason(
           extension->id(), extensions::Extension::DISABLE_REMOTE_INSTALL);
   bool is_ephemeral =
-      extensions::util::IsEphemeralApp(extension->id(), install_ui_->profile());
+      extensions::util::IsEphemeralApp(extension->id(), profile_);
 
   PromptType type = UNSET_PROMPT_TYPE;
   if (is_ephemeral)
@@ -753,11 +802,13 @@ void ExtensionInstallPrompt::ConfirmPermissions(
 void ExtensionInstallPrompt::ReviewPermissions(
     Delegate* delegate,
     const Extension* extension,
-    const std::vector<base::FilePath>& retained_file_paths) {
+    const std::vector<base::FilePath>& retained_file_paths,
+    const std::vector<base::string16>& retained_device_messages) {
   DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   prompt_ = new Prompt(POST_INSTALL_PERMISSIONS_PROMPT);
   prompt_->set_retained_files(retained_file_paths);
+  prompt_->set_retained_device_messages(retained_device_messages);
   delegate_ = delegate;
 
   LoadImageIfNeeded();
@@ -796,8 +847,8 @@ void ExtensionInstallPrompt::OnImageLoaded(const gfx::Image& image) {
 
 void ExtensionInstallPrompt::LoadImageIfNeeded() {
   // Bundle install prompts do not have an icon.
-  // Also |install_ui_.profile()| can be NULL in unit tests.
-  if (!icon_.empty() || !install_ui_->profile()) {
+  // Also |profile_| can be NULL in unit tests.
+  if (!icon_.empty() || !profile_) {
     ShowConfirmation();
     return;
   }
@@ -808,8 +859,7 @@ void ExtensionInstallPrompt::LoadImageIfNeeded() {
       ExtensionIconSet::MATCH_BIGGER);
 
   // Load the image asynchronously. The response will be sent to OnImageLoaded.
-  extensions::ImageLoader* loader =
-      extensions::ImageLoader::Get(install_ui_->profile());
+  extensions::ImageLoader* loader = extensions::ImageLoader::Get(profile_);
 
   std::vector<extensions::ImageLoader::ImageRepresentation> images_list;
   images_list.push_back(extensions::ImageLoader::ImageRepresentation(
@@ -836,8 +886,7 @@ void ExtensionInstallPrompt::ShowConfirmation() {
     // Initialize permissions if they have not already been set so that
     // withheld permissions are displayed properly in the install prompt.
     extensions::PermissionsUpdater(
-        install_ui_->profile(),
-        extensions::PermissionsUpdater::INIT_FLAG_TRANSIENT)
+        profile_, extensions::PermissionsUpdater::INIT_FLAG_TRANSIENT)
         .InitializePermissions(extension_);
     permissions_to_display =
         extension_->permissions_data()->active_permissions();
@@ -896,8 +945,13 @@ void ExtensionInstallPrompt::ShowConfirmation() {
   if (AutoConfirmPrompt(delegate_))
     return;
 
+  if (show_params_->WasParentDestroyed()) {
+    delegate_->InstallUIAbort(false);
+    return;
+  }
+
   if (show_dialog_callback_.is_null())
-    GetDefaultShowDialogCallback().Run(show_params_, delegate_, prompt_);
+    GetDefaultShowDialogCallback().Run(show_params_.get(), delegate_, prompt_);
   else
-    show_dialog_callback_.Run(show_params_, delegate_, prompt_);
+    show_dialog_callback_.Run(show_params_.get(), delegate_, prompt_);
 }

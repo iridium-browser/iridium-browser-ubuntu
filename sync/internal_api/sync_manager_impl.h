@@ -65,119 +65,111 @@ class SYNC_EXPORT_PRIVATE SyncManagerImpl
  public:
   // Create an uninitialized SyncManager.  Callers must Init() before using.
   explicit SyncManagerImpl(const std::string& name);
-  virtual ~SyncManagerImpl();
+  ~SyncManagerImpl() override;
 
   // SyncManager implementation.
-  virtual void Init(InitArgs* args) OVERRIDE;
-  virtual ModelTypeSet InitialSyncEndedTypes() OVERRIDE;
-  virtual ModelTypeSet GetTypesWithEmptyProgressMarkerToken(
-      ModelTypeSet types) OVERRIDE;
-  virtual bool PurgePartiallySyncedTypes() OVERRIDE;
-  virtual void UpdateCredentials(const SyncCredentials& credentials) OVERRIDE;
-  virtual void StartSyncingNormally(
-      const ModelSafeRoutingInfo& routing_info) OVERRIDE;
-  virtual void ConfigureSyncer(
-      ConfigureReason reason,
-      ModelTypeSet to_download,
-      ModelTypeSet to_purge,
-      ModelTypeSet to_journal,
-      ModelTypeSet to_unapply,
-      const ModelSafeRoutingInfo& new_routing_info,
-      const base::Closure& ready_task,
-      const base::Closure& retry_task) OVERRIDE;
-  virtual void SetInvalidatorEnabled(bool invalidator_enabled) OVERRIDE;
-  virtual void OnIncomingInvalidation(
+  void Init(InitArgs* args) override;
+  ModelTypeSet InitialSyncEndedTypes() override;
+  ModelTypeSet GetTypesWithEmptyProgressMarkerToken(
+      ModelTypeSet types) override;
+  bool PurgePartiallySyncedTypes() override;
+  void UpdateCredentials(const SyncCredentials& credentials) override;
+  void StartSyncingNormally(const ModelSafeRoutingInfo& routing_info) override;
+  void ConfigureSyncer(ConfigureReason reason,
+                       ModelTypeSet to_download,
+                       ModelTypeSet to_purge,
+                       ModelTypeSet to_journal,
+                       ModelTypeSet to_unapply,
+                       const ModelSafeRoutingInfo& new_routing_info,
+                       const base::Closure& ready_task,
+                       const base::Closure& retry_task) override;
+  void SetInvalidatorEnabled(bool invalidator_enabled) override;
+  void OnIncomingInvalidation(
       syncer::ModelType type,
-      scoped_ptr<InvalidationInterface> invalidation) OVERRIDE;
-  virtual void AddObserver(SyncManager::Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(SyncManager::Observer* observer) OVERRIDE;
-  virtual SyncStatus GetDetailedStatus() const OVERRIDE;
-  virtual void SaveChanges() OVERRIDE;
-  virtual void ShutdownOnSyncThread(ShutdownReason reason) OVERRIDE;
-  virtual UserShare* GetUserShare() OVERRIDE;
-  virtual syncer::SyncContextProxy* GetSyncContextProxy() OVERRIDE;
-  virtual const std::string cache_guid() OVERRIDE;
-  virtual bool ReceivedExperiment(Experiments* experiments) OVERRIDE;
-  virtual bool HasUnsyncedItems() OVERRIDE;
-  virtual SyncEncryptionHandler* GetEncryptionHandler() OVERRIDE;
-  virtual ScopedVector<syncer::ProtocolEvent>
-      GetBufferedProtocolEvents() OVERRIDE;
-  virtual scoped_ptr<base::ListValue> GetAllNodesForType(
-      syncer::ModelType type) OVERRIDE;
-  virtual void RegisterDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual void UnregisterDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual bool HasDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual void RequestEmitDebugInfo() OVERRIDE;
+      scoped_ptr<InvalidationInterface> invalidation) override;
+  void AddObserver(SyncManager::Observer* observer) override;
+  void RemoveObserver(SyncManager::Observer* observer) override;
+  SyncStatus GetDetailedStatus() const override;
+  void SaveChanges() override;
+  void ShutdownOnSyncThread(ShutdownReason reason) override;
+  UserShare* GetUserShare() override;
+  syncer::SyncContextProxy* GetSyncContextProxy() override;
+  const std::string cache_guid() override;
+  bool ReceivedExperiment(Experiments* experiments) override;
+  bool HasUnsyncedItems() override;
+  SyncEncryptionHandler* GetEncryptionHandler() override;
+  ScopedVector<syncer::ProtocolEvent> GetBufferedProtocolEvents() override;
+  scoped_ptr<base::ListValue> GetAllNodesForType(
+      syncer::ModelType type) override;
+  void RegisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  void UnregisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  bool HasDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  void RequestEmitDebugInfo() override;
 
   // SyncEncryptionHandler::Observer implementation.
-  virtual void OnPassphraseRequired(
+  void OnPassphraseRequired(
       PassphraseRequiredReason reason,
-      const sync_pb::EncryptedData& pending_keys) OVERRIDE;
-  virtual void OnPassphraseAccepted() OVERRIDE;
-  virtual void OnBootstrapTokenUpdated(
-      const std::string& bootstrap_token,
-      BootstrapTokenType type) OVERRIDE;
-  virtual void OnEncryptedTypesChanged(
-      ModelTypeSet encrypted_types,
-      bool encrypt_everything) OVERRIDE;
-  virtual void OnEncryptionComplete() OVERRIDE;
-  virtual void OnCryptographerStateChanged(
-      Cryptographer* cryptographer) OVERRIDE;
-  virtual void OnPassphraseTypeChanged(
-      PassphraseType type,
-      base::Time explicit_passphrase_time) OVERRIDE;
+      const sync_pb::EncryptedData& pending_keys) override;
+  void OnPassphraseAccepted() override;
+  void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
+                               BootstrapTokenType type) override;
+  void OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
+                               bool encrypt_everything) override;
+  void OnEncryptionComplete() override;
+  void OnCryptographerStateChanged(Cryptographer* cryptographer) override;
+  void OnPassphraseTypeChanged(PassphraseType type,
+                               base::Time explicit_passphrase_time) override;
 
   // SyncEngineEventListener implementation.
-  virtual void OnSyncCycleEvent(const SyncCycleEvent& event) OVERRIDE;
-  virtual void OnActionableError(const SyncProtocolError& error) OVERRIDE;
-  virtual void OnRetryTimeChanged(base::Time retry_time) OVERRIDE;
-  virtual void OnThrottledTypesChanged(ModelTypeSet throttled_types) OVERRIDE;
-  virtual void OnMigrationRequested(ModelTypeSet types) OVERRIDE;
-  virtual void OnProtocolEvent(const ProtocolEvent& event) OVERRIDE;
+  void OnSyncCycleEvent(const SyncCycleEvent& event) override;
+  void OnActionableError(const SyncProtocolError& error) override;
+  void OnRetryTimeChanged(base::Time retry_time) override;
+  void OnThrottledTypesChanged(ModelTypeSet throttled_types) override;
+  void OnMigrationRequested(ModelTypeSet types) override;
+  void OnProtocolEvent(const ProtocolEvent& event) override;
 
   // ServerConnectionEventListener implementation.
-  virtual void OnServerConnectionEvent(
-      const ServerConnectionEvent& event) OVERRIDE;
+  void OnServerConnectionEvent(const ServerConnectionEvent& event) override;
 
   // JsBackend implementation.
-  virtual void SetJsEventHandler(
-      const WeakHandle<JsEventHandler>& event_handler) OVERRIDE;
+  void SetJsEventHandler(
+      const WeakHandle<JsEventHandler>& event_handler) override;
 
   // DirectoryChangeDelegate implementation.
   // This listener is called upon completion of a syncable transaction, and
   // builds the list of sync-engine initiated changes that will be forwarded to
   // the SyncManager's Observers.
-  virtual void HandleTransactionCompleteChangeEvent(
-      ModelTypeSet models_with_changes) OVERRIDE;
-  virtual ModelTypeSet HandleTransactionEndingChangeEvent(
+  void HandleTransactionCompleteChangeEvent(
+      ModelTypeSet models_with_changes) override;
+  ModelTypeSet HandleTransactionEndingChangeEvent(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::BaseTransaction* trans) OVERRIDE;
-  virtual void HandleCalculateChangesChangeEventFromSyncApi(
-      const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::BaseTransaction* trans,
-      std::vector<int64>* entries_changed) OVERRIDE;
-  virtual void HandleCalculateChangesChangeEventFromSyncer(
+      syncable::BaseTransaction* trans) override;
+  void HandleCalculateChangesChangeEventFromSyncApi(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
       syncable::BaseTransaction* trans,
-      std::vector<int64>* entries_changed) OVERRIDE;
+      std::vector<int64>* entries_changed) override;
+  void HandleCalculateChangesChangeEventFromSyncer(
+      const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
+      syncable::BaseTransaction* trans,
+      std::vector<int64>* entries_changed) override;
 
   // Handle explicit requests to fetch updates for the given types.
-  virtual void RefreshTypes(ModelTypeSet types) OVERRIDE;
+  void RefreshTypes(ModelTypeSet types) override;
 
   // These OnYYYChanged() methods are only called by our NetworkChangeNotifier.
   // Called when IP address of primary interface changes.
-  virtual void OnIPAddressChanged() OVERRIDE;
+  void OnIPAddressChanged() override;
   // Called when the connection type of the system has changed.
-  virtual void OnConnectionTypeChanged(
-      net::NetworkChangeNotifier::ConnectionType) OVERRIDE;
+  void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType) override;
 
   // NudgeHandler implementation.
-  virtual void NudgeForInitialDownload(syncer::ModelType type) OVERRIDE;
-  virtual void NudgeForCommit(syncer::ModelType type) OVERRIDE;
-  virtual void NudgeForRefresh(syncer::ModelType type) OVERRIDE;
+  void NudgeForInitialDownload(syncer::ModelType type) override;
+  void NudgeForCommit(syncer::ModelType type) override;
+  void NudgeForRefresh(syncer::ModelType type) override;
 
   const SyncScheduler* scheduler() const;
 

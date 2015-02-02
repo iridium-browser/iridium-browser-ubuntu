@@ -45,11 +45,10 @@ class FormStructureBrowserTest : public InProcessBrowserTest,
                                  public DataDrivenTest {
  protected:
   FormStructureBrowserTest();
-  virtual ~FormStructureBrowserTest();
+  ~FormStructureBrowserTest() override;
 
   // DataDrivenTest:
-  virtual void GenerateResults(const std::string& input,
-                               std::string* output) OVERRIDE;
+  void GenerateResults(const std::string& input, std::string* output) override;
 
   // Serializes the given |forms| into a string.
   std::string FormStructuresToString(const std::vector<FormStructure*>& forms);
@@ -77,37 +76,34 @@ void FormStructureBrowserTest::GenerateResults(const std::string& input,
   AutofillManager* autofill_manager = autofill_driver->autofill_manager();
   ASSERT_NE(static_cast<AutofillManager*>(NULL), autofill_manager);
   std::vector<FormStructure*> forms = autofill_manager->form_structures_.get();
-  *output = FormStructureBrowserTest::FormStructuresToString(forms);
+  *output = FormStructuresToString(forms);
 }
 
 std::string FormStructureBrowserTest::FormStructuresToString(
     const std::vector<FormStructure*>& forms) {
   std::string forms_string;
-  for (std::vector<FormStructure*>::const_iterator iter = forms.begin();
-       iter != forms.end();
-       ++iter) {
-
-    for (std::vector<AutofillField*>::const_iterator field_iter =
-            (*iter)->begin();
-         field_iter != (*iter)->end();
-         ++field_iter) {
-      forms_string += (*field_iter)->Type().ToString();
-      forms_string += " | " + base::UTF16ToUTF8((*field_iter)->name);
-      forms_string += " | " + base::UTF16ToUTF8((*field_iter)->label);
-      forms_string += " | " + base::UTF16ToUTF8((*field_iter)->value);
+  for (const FormStructure* form : forms) {
+    for (const AutofillField* field : *form) {
+      forms_string += field->Type().ToString();
+      forms_string += " | " + base::UTF16ToUTF8(field->name);
+      forms_string += " | " + base::UTF16ToUTF8(field->label);
+      forms_string += " | " + base::UTF16ToUTF8(field->value);
+      forms_string += " | " + field->section();
       forms_string += "\n";
     }
   }
   return forms_string;
 }
 
-// Heuristics tests timeout on Windows.  See http://crbug.com/85276
-#if defined(OS_WIN)
+// Heuristics tests time out on Windows (http://crbug.com/85276) and Chrome OS
+// (http://crbug.com/423791).
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
 #define MAYBE_DataDrivenHeuristics(n) DISABLED_DataDrivenHeuristics##n
 #else
 #define MAYBE_DataDrivenHeuristics(n) DataDrivenHeuristics##n
 #endif
-IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest, DataDrivenHeuristics00) {
+IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
+    MAYBE_DataDrivenHeuristics(00)) {
   const base::FilePath::CharType kFileNamePattern[] =
       FILE_PATH_LITERAL("00_*.html");
   RunDataDrivenTest(GetInputDirectory(kTestName),
@@ -249,9 +245,8 @@ IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
                     kFileNamePattern);
 }
 
-// This test has real failures. http://crbug.com/323093
 IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
-    DISABLED_DataDrivenHeuristics16) {
+    MAYBE_DataDrivenHeuristics(16)) {
   const base::FilePath::CharType kFileNamePattern[] =
       FILE_PATH_LITERAL("16_*.html");
   RunDataDrivenTest(GetInputDirectory(kTestName),
@@ -272,6 +267,33 @@ IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
     MAYBE_DataDrivenHeuristics(20)) {
   const base::FilePath::CharType kFileNamePattern[] =
       FILE_PATH_LITERAL("20_*.html");
+  RunDataDrivenTest(GetInputDirectory(kTestName),
+                    GetOutputDirectory(kTestName),
+                    kFileNamePattern);
+}
+
+IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
+    MAYBE_DataDrivenHeuristics(21)) {
+  const base::FilePath::CharType kFileNamePattern[] =
+      FILE_PATH_LITERAL("21_*.html");
+  RunDataDrivenTest(GetInputDirectory(kTestName),
+                    GetOutputDirectory(kTestName),
+                    kFileNamePattern);
+}
+
+IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
+    MAYBE_DataDrivenHeuristics(22)) {
+  const base::FilePath::CharType kFileNamePattern[] =
+      FILE_PATH_LITERAL("22_*.html");
+  RunDataDrivenTest(GetInputDirectory(kTestName),
+                    GetOutputDirectory(kTestName),
+                    kFileNamePattern);
+}
+
+IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
+    MAYBE_DataDrivenHeuristics(23)) {
+  const base::FilePath::CharType kFileNamePattern[] =
+      FILE_PATH_LITERAL("23_*.html");
   RunDataDrivenTest(GetInputDirectory(kTestName),
                     GetOutputDirectory(kTestName),
                     kFileNamePattern);

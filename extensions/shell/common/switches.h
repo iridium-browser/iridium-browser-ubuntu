@@ -12,7 +12,10 @@ namespace switches {
 // alongside the definition of their values in the .cc file.
 extern const char kAppShellAppPath[];
 extern const char kAppShellHostWindowBounds[];
+extern const char kAppShellInstallCrx[];
 extern const char kAppShellPreferredNetwork[];
+extern const char kAppShellRefreshToken[];
+extern const char kAppShellUser[];
 
 }  // namespace switches
 }  // namespace extensions

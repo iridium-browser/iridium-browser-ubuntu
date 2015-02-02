@@ -13,7 +13,6 @@
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/requirements_checker.h"
@@ -80,7 +79,7 @@ class ExtensionSettingsHandler
       public base::SupportsWeakPtr<ExtensionSettingsHandler> {
  public:
   ExtensionSettingsHandler();
-  virtual ~ExtensionSettingsHandler();
+  ~ExtensionSettingsHandler() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
@@ -99,57 +98,57 @@ class ExtensionSettingsHandler
   friend class BrokerDelegate;
 
   // content::WebContentsObserver implementation.
-  virtual void RenderViewDeleted(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidStartNavigationToPendingEntry(
+  void RenderViewDeleted(content::RenderViewHost* render_view_host) override;
+  void DidStartNavigationToPendingEntry(
       const GURL& url,
-      content::NavigationController::ReloadType reload_type) OVERRIDE;
+      content::NavigationController::ReloadType reload_type) override;
 
   // Allows injection for testing by friend classes.
   ExtensionSettingsHandler(ExtensionService* service,
                            ManagementPolicy* policy);
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // ErrorConsole::Observer implementation.
-  virtual void OnErrorAdded(const ExtensionError* error) OVERRIDE;
+  void OnErrorAdded(const ExtensionError* error) override;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
-                                 const Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const Extension* extension) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const Extension* extension,
+                              extensions::UninstallReason reason) override;
 
   // ExtensionPrefsObserver implementation.
-  virtual void OnExtensionDisableReasonsChanged(const std::string& extension_id,
-                                                int disable_reasons) OVERRIDE;
+  void OnExtensionDisableReasonsChanged(const std::string& extension_id,
+                                        int disable_reasons) override;
 
   // ExtensionManagement::Observer implementation.
-  virtual void OnExtensionManagementSettingsChanged() OVERRIDE;
+  void OnExtensionManagementSettingsChanged() override;
 
   // ExtensionUninstallDialog::Delegate implementation, used for receiving
   // notification about uninstall confirmation dialog selections.
-  virtual void ExtensionUninstallAccepted() OVERRIDE;
-  virtual void ExtensionUninstallCanceled() OVERRIDE;
+  void ExtensionUninstallAccepted() override;
+  void ExtensionUninstallCanceled() override;
 
   // WarningService::Observer implementation.
-  virtual void ExtensionWarningsChanged() OVERRIDE;
+  void ExtensionWarningsChanged() override;
 
   // ExtensionInstallPrompt::Delegate implementation.
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
+
+  // Called after the App Info Dialog has closed.
+  virtual void AppInfoDialogClosed();
 
   // Helper method that reloads all unpacked extensions.
   void ReloadUnpackedExtensions();

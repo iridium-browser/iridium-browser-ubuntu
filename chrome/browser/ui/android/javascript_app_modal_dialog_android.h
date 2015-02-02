@@ -8,7 +8,7 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
+#include "components/app_modal_dialogs/native_app_modal_dialog.h"
 
 class JavaScriptAppModalDialog;
 
@@ -19,12 +19,12 @@ class JavascriptAppModalDialogAndroid : public NativeAppModalDialog {
                                   gfx::NativeWindow parent);
 
   // NativeAppModalDialog:
-  virtual int GetAppModalDialogButtons() const OVERRIDE;
-  virtual void ShowAppModalDialog() OVERRIDE;
-  virtual void ActivateAppModalDialog() OVERRIDE;
-  virtual void CloseAppModalDialog() OVERRIDE;
-  virtual void AcceptAppModalDialog() OVERRIDE;
-  virtual void CancelAppModalDialog() OVERRIDE;
+  virtual int GetAppModalDialogButtons() const override;
+  virtual void ShowAppModalDialog() override;
+  virtual void ActivateAppModalDialog() override;
+  virtual void CloseAppModalDialog() override;
+  virtual void AcceptAppModalDialog() override;
+  virtual void CancelAppModalDialog() override;
 
   // Called when java confirms or cancels the dialog.
   void DidAcceptAppModalDialog(JNIEnv* env,

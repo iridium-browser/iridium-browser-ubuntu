@@ -161,7 +161,7 @@ class TestingProfile : public Profile {
                  scoped_ptr<policy::PolicyService> policy_service,
                  const TestingFactories& factories);
 
-  virtual ~TestingProfile();
+  ~TestingProfile() override;
 
   // Creates the favicon service. Consequent calls would recreate the service.
   void CreateFaviconService();
@@ -181,6 +181,10 @@ class TestingProfile : public Profile {
   // loaded. Use BlockUntilTopSitesLoaded to ensure TopSites has finished
   // loading.
   void CreateTopSites();
+
+  // Allows to set a test implementation |top_sites|. Testing profile owns
+  // the reference and is responsible for releasing memory.
+  void SetTopSites(history::TopSites* top_sites);
 
   // Shuts down and nulls out the reference to TopSites.
   void DestroyTopSites();
@@ -216,28 +220,27 @@ class TestingProfile : public Profile {
   void SetOffTheRecordProfile(scoped_ptr<Profile> profile);
 
   // content::BrowserContext
-  virtual base::FilePath GetPath() const OVERRIDE;
-  virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() OVERRIDE;
-  virtual bool IsOffTheRecord() const OVERRIDE;
-  virtual content::DownloadManagerDelegate*
-      GetDownloadManagerDelegate() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* CreateRequestContext(
+  base::FilePath GetPath() const override;
+  scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() override;
+  bool IsOffTheRecord() const override;
+  content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
+  net::URLRequestContextGetter* GetRequestContext() override;
+  net::URLRequestContextGetter* CreateRequestContext(
       content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual content::ResourceContext* GetResourceContext() OVERRIDE;
-  virtual content::BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
-  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
-  virtual content::PushMessagingService* GetPushMessagingService() OVERRIDE;
-  virtual content::SSLHostStateDelegate* GetSSLHostStateDelegate() OVERRIDE;
+      content::URLRequestInterceptorScopedVector request_interceptors) override;
+  net::URLRequestContextGetter* GetRequestContextForRenderProcess(
+      int renderer_child_id) override;
+  content::ResourceContext* GetResourceContext() override;
+  content::BrowserPluginGuestManager* GetGuestManager() override;
+  storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
+  content::PushMessagingService* GetPushMessagingService() override;
+  content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
 
-  virtual TestingProfile* AsTestingProfile() OVERRIDE;
+  TestingProfile* AsTestingProfile() override;
 
   // Profile
-  virtual std::string GetProfileName() OVERRIDE;
-  virtual ProfileType GetProfileType() const OVERRIDE;
+  std::string GetProfileName() override;
+  ProfileType GetProfileType() const override;
 
   // DEPRECATED, because it's fragile to change a profile from non-incognito
   // to incognito after the ProfileKeyedServices have been created (some
@@ -256,79 +259,75 @@ class TestingProfile : public Profile {
     force_incognito_ = force_incognito;
   }
 
-  virtual Profile* GetOffTheRecordProfile() OVERRIDE;
-  virtual void DestroyOffTheRecordProfile() OVERRIDE {}
-  virtual bool HasOffTheRecordProfile() OVERRIDE;
-  virtual Profile* GetOriginalProfile() OVERRIDE;
-  virtual bool IsSupervised() OVERRIDE;
+  Profile* GetOffTheRecordProfile() override;
+  void DestroyOffTheRecordProfile() override {}
+  bool HasOffTheRecordProfile() override;
+  Profile* GetOriginalProfile() override;
+  bool IsSupervised() override;
 #if defined(ENABLE_EXTENSIONS)
   void SetExtensionSpecialStoragePolicy(
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
 #endif
-  virtual ExtensionSpecialStoragePolicy*
-      GetExtensionSpecialStoragePolicy() OVERRIDE;
+  ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
   // TODO(ajwong): Remove this API in favor of directly retrieving the
   // CookieStore from the StoragePartition after ExtensionURLRequestContext
   // has been removed.
   net::CookieMonster* GetCookieMonster();
 
-  virtual PrefService* GetPrefs() OVERRIDE;
+  PrefService* GetPrefs() override;
 
-  virtual history::TopSites* GetTopSites() OVERRIDE;
-  virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
+  history::TopSites* GetTopSites() override;
+  history::TopSites* GetTopSitesWithoutCreating() override;
 
-  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter*
-      GetRequestContextForExtensions() OVERRIDE;
-  virtual net::URLRequestContextGetter*
-      GetMediaRequestContextForStoragePartition(
-          const base::FilePath& partition_path,
-          bool in_memory) OVERRIDE;
-  virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
+  net::URLRequestContextGetter* GetMediaRequestContext() override;
+  net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+      int renderer_child_id) override;
+  net::URLRequestContextGetter* GetRequestContextForExtensions() override;
+  net::URLRequestContextGetter* GetMediaRequestContextForStoragePartition(
+      const base::FilePath& partition_path,
+      bool in_memory) override;
+  net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
       const base::FilePath& partition_path,
       bool in_memory,
       content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) OVERRIDE;
-  virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
-  virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
+      content::URLRequestInterceptorScopedVector request_interceptors) override;
+  net::SSLConfigService* GetSSLConfigService() override;
+  HostContentSettingsMap* GetHostContentSettingsMap() override;
   void set_last_session_exited_cleanly(bool value) {
     last_session_exited_cleanly_ = value;
   }
-  virtual bool IsSameProfile(Profile *p) OVERRIDE;
-  virtual base::Time GetStartTime() const OVERRIDE;
-  virtual base::FilePath last_selected_directory() OVERRIDE;
-  virtual void set_last_selected_directory(const base::FilePath& path) OVERRIDE;
-  virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
-  virtual bool IsGuestSession() const OVERRIDE;
-  virtual void SetExitType(ExitType exit_type) OVERRIDE {}
-  virtual ExitType GetLastSessionExitType() OVERRIDE;
+  bool IsSameProfile(Profile* p) override;
+  base::Time GetStartTime() const override;
+  base::FilePath last_selected_directory() override;
+  void set_last_selected_directory(const base::FilePath& path) override;
+  bool WasCreatedByVersionOrLater(const std::string& version) override;
+  bool IsGuestSession() const override;
+  void SetExitType(ExitType exit_type) override {}
+  ExitType GetLastSessionExitType() override;
 #if defined(OS_CHROMEOS)
   virtual void ChangeAppLocale(const std::string&,
-                               AppLocaleChangedVia) OVERRIDE {
+                               AppLocaleChangedVia) override {
   }
-  virtual void OnLogin() OVERRIDE {
+  virtual void OnLogin() override {
   }
-  virtual void InitChromeOSPreferences() OVERRIDE {
+  virtual void InitChromeOSPreferences() override {
   }
 #endif  // defined(OS_CHROMEOS)
 
-  virtual PrefProxyConfigTracker* GetProxyConfigTracker() OVERRIDE;
+  PrefProxyConfigTracker* GetProxyConfigTracker() override;
 
   // Schedules a task on the history backend and runs a nested loop until the
   // task is processed.  This has the effect of blocking the caller until the
   // history service processes all pending requests.
   void BlockUntilHistoryProcessesPendingRequests();
 
-  virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
-  virtual DevToolsNetworkController* GetDevToolsNetworkController() OVERRIDE;
-  virtual void ClearNetworkingHistorySince(
-      base::Time time,
-      const base::Closure& completion) OVERRIDE;
-  virtual GURL GetHomePage() OVERRIDE;
+  chrome_browser_net::Predictor* GetNetworkPredictor() override;
+  DevToolsNetworkController* GetDevToolsNetworkController() override;
+  void ClearNetworkingHistorySince(base::Time time,
+                                   const base::Closure& completion) override;
+  GURL GetHomePage() override;
 
-  virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
+  PrefService* GetOffTheRecordPrefs() override;
 
   void set_profile_name(const std::string& profile_name) {
     profile_name_ = profile_name;

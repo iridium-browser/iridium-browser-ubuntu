@@ -38,10 +38,6 @@ SharedUserScriptMaster* MockExtensionSystem::shared_user_script_master() {
   return NULL;
 }
 
-ProcessManager* MockExtensionSystem::process_manager() {
-  return NULL;
-}
-
 StateStore* MockExtensionSystem::state_store() {
   return NULL;
 }
@@ -59,14 +55,6 @@ LazyBackgroundTaskQueue* MockExtensionSystem::lazy_background_task_queue() {
 }
 
 EventRouter* MockExtensionSystem::event_router() {
-  return NULL;
-}
-
-WarningService* MockExtensionSystem::warning_service() {
-  return NULL;
-}
-
-Blacklist* MockExtensionSystem::blacklist() {
   return NULL;
 }
 

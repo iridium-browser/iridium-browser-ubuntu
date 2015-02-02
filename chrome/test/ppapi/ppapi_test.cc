@@ -10,7 +10,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "components/nacl/common/nacl_switches.h"
@@ -175,8 +175,6 @@ void PPAPITestBase::RunTest(const std::string& test_case) {
 void PPAPITestBase::RunTestViaHTTP(const std::string& test_case) {
   base::FilePath document_root;
   ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&document_root));
-  base::FilePath http_document_root;
-  ASSERT_TRUE(ui_test_utils::GetRelativeBuildDirectory(&http_document_root));
   net::SpawnedTestServer http_server(net::SpawnedTestServer::TYPE_HTTP,
                                      net::SpawnedTestServer::kLocalhost,
                                      document_root);

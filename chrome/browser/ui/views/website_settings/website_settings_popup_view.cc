@@ -122,7 +122,7 @@ const int kSiteDataSectionRowSpacing = 11;
 class PopupHeaderView : public views::View {
  public:
   explicit PopupHeaderView(views::ButtonListener* close_button_listener);
-  virtual ~PopupHeaderView();
+  ~PopupHeaderView() override;
 
   // Sets the name of the site's identity.
   void SetIdentityName(const base::string16& name);
@@ -146,10 +146,10 @@ class PopupHeaderView : public views::View {
 class InternalPageInfoPopupView : public views::BubbleDelegateView {
  public:
   explicit InternalPageInfoPopupView(views::View* anchor_view);
-  virtual ~InternalPageInfoPopupView();
+  ~InternalPageInfoPopupView() override;
 
   // views::BubbleDelegateView:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InternalPageInfoPopupView);
@@ -390,16 +390,21 @@ void WebsiteSettingsPopupView::LinkClicked(views::Link* source,
                                            int event_flags) {
   if (source == cookie_dialog_link_) {
     // Count how often the Collected Cookies dialog is opened.
-    content::RecordAction(
-        base::UserMetricsAction("WebsiteSettings_CookiesDialogOpened"));
+    presenter_->RecordWebsiteSettingsAction(
+        WebsiteSettings::WEBSITE_SETTINGS_COOKIES_DIALOG_OPENED);
+
     new CollectedCookiesViews(web_contents_);
   } else if (source == certificate_dialog_link_) {
     gfx::NativeWindow parent = GetAnchorView() ?
         GetAnchorView()->GetWidget()->GetNativeWindow() : NULL;
+    presenter_->RecordWebsiteSettingsAction(
+        WebsiteSettings::WEBSITE_SETTINGS_CERTIFICATE_DIALOG_OPENED);
     ShowCertificateViewerByID(web_contents_, parent, cert_id_);
   } else if (source == signed_certificate_timestamps_link_) {
     chrome::ShowSignedCertificateTimestampsViewer(
         web_contents_, signed_certificate_timestamp_ids_);
+    presenter_->RecordWebsiteSettingsAction(
+        WebsiteSettings::WEBSITE_SETTINGS_TRANSPARENCY_VIEWER_OPENED);
   } else if (source == help_center_link_) {
     browser_->OpenURL(
         content::OpenURLParams(GURL(chrome::kPageInfoHelpCenterURL),
@@ -407,10 +412,29 @@ void WebsiteSettingsPopupView::LinkClicked(views::Link* source,
                                NEW_FOREGROUND_TAB,
                                ui::PAGE_TRANSITION_LINK,
                                false));
+    presenter_->RecordWebsiteSettingsAction(
+        WebsiteSettings::WEBSITE_SETTINGS_CONNECTION_HELP_OPENED);
   }
 }
 
 void WebsiteSettingsPopupView::TabSelectedAt(int index) {
+  switch (index) {
+    case TAB_ID_PERMISSIONS:
+      presenter_->RecordWebsiteSettingsAction(
+          WebsiteSettings::WEBSITE_SETTINGS_PERMISSIONS_TAB_SELECTED);
+      break;
+    case TAB_ID_CONNECTION:
+      // If the Connection tab is selected first, we're still inside the
+      // construction of presenter_. In that case, the action is already logged
+      // by WEBSITE_SETTINGS_CONNECTION_TAB_SHOWN_IMMEDIATELY.
+      if (presenter_) {
+        presenter_->RecordWebsiteSettingsAction(
+            WebsiteSettings::WEBSITE_SETTINGS_CONNECTION_TAB_SELECTED);
+      }
+      break;
+    default:
+      NOTREACHED();
+  }
   tabbed_pane_->GetSelectedTab()->Layout();
   SizeToContents();
 }

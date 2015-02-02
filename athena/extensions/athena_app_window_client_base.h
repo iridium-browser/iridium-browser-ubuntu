@@ -14,13 +14,13 @@ namespace athena {
 class AthenaAppWindowClientBase : public extensions::AppWindowClient {
  public:
   AthenaAppWindowClientBase();
-  virtual ~AthenaAppWindowClientBase();
+  ~AthenaAppWindowClientBase() override;
 
  private:
   // extensions::AppWindowClient
-  virtual extensions::NativeAppWindow* CreateNativeAppWindow(
+  extensions::NativeAppWindow* CreateNativeAppWindow(
       extensions::AppWindow* window,
-      const extensions::AppWindow::CreateParams& params) OVERRIDE;
+      extensions::AppWindow::CreateParams* params) override;
 
   DISALLOW_COPY_AND_ASSIGN(AthenaAppWindowClientBase);
 };

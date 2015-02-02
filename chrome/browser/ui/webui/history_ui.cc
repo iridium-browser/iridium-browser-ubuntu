@@ -173,6 +173,8 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddLocalizedString("cancel", IDS_CANCEL);
   source->AddLocalizedString("deleteConfirm",
                              IDS_HISTORY_DELETE_PRIOR_VISITS_CONFIRM_BUTTON);
+  source->AddLocalizedString("bookmarked", IDS_HISTORY_ENTRY_BOOKMARKED);
+  source->AddLocalizedString("entrySummary", IDS_HISTORY_ENTRY_SUMMARY);
   source->AddBoolean("isFullHistorySyncEnabled",
                      WebHistoryServiceFactory::GetForProfile(profile) != NULL);
   source->AddBoolean("groupByDomain",
@@ -187,7 +189,6 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddResourcePath(kHistoryJsFile, IDR_HISTORY_JS);
   source->AddResourcePath(kOtherDevicesJsFile, IDR_OTHER_DEVICES_JS);
   source->SetDefaultResource(IDR_HISTORY_HTML);
-  source->SetUseJsonJSFormatV2();
   source->DisableDenyXFrameOptions();
   source->AddBoolean("isSupervisedProfile", profile->IsSupervised());
   source->AddBoolean("showDeleteVisitUI", !profile->IsSupervised());

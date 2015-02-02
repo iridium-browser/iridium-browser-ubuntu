@@ -22,17 +22,17 @@ class ShellBrowserMainDelegate;
 class ShellMainDelegate : public content::ContentMainDelegate {
  public:
   ShellMainDelegate();
-  virtual ~ShellMainDelegate();
+  ~ShellMainDelegate() override;
 
   // ContentMainDelegate implementation:
-  virtual bool BasicStartupComplete(int* exit_code) OVERRIDE;
-  virtual void PreSandboxStartup() OVERRIDE;
-  virtual content::ContentBrowserClient* CreateContentBrowserClient() OVERRIDE;
-  virtual content::ContentRendererClient* CreateContentRendererClient()
-      OVERRIDE;
+  bool BasicStartupComplete(int* exit_code) override;
+  void PreSandboxStartup() override;
+  content::ContentBrowserClient* CreateContentBrowserClient() override;
+  content::ContentRendererClient* CreateContentRendererClient() override;
+  content::ContentUtilityClient* CreateContentUtilityClient() override;
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
-  virtual void ZygoteStarting(
-      ScopedVector<content::ZygoteForkDelegate>* delegates) OVERRIDE;
+  void ZygoteStarting(
+      ScopedVector<content::ZygoteForkDelegate>* delegates) override;
 #endif
 
  protected:
@@ -40,6 +40,7 @@ class ShellMainDelegate : public content::ContentMainDelegate {
   virtual content::ContentClient* CreateContentClient();
   virtual content::ContentBrowserClient* CreateShellContentBrowserClient();
   virtual content::ContentRendererClient* CreateShellContentRendererClient();
+  virtual content::ContentUtilityClient* CreateShellContentUtilityClient();
 
   // Initializes the resource bundle and resources.pak.
   virtual void InitializeResourceBundle();
@@ -52,6 +53,7 @@ class ShellMainDelegate : public content::ContentMainDelegate {
   scoped_ptr<content::ContentClient> content_client_;
   scoped_ptr<content::ContentBrowserClient> browser_client_;
   scoped_ptr<content::ContentRendererClient> renderer_client_;
+  scoped_ptr<content::ContentUtilityClient> utility_client_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellMainDelegate);
 };

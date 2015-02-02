@@ -23,6 +23,10 @@
 #include "net/proxy/proxy_resolver_v8.h"
 #endif
 
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+#include "gin/public/isolate_holder.h"
+#endif
+
 using net::internal::ClientSocketPoolBaseHelper;
 using net::SpdySession;
 
@@ -48,7 +52,7 @@ int main(int argc, char** argv) {
   NetTestSuite test_suite(argc, argv);
   ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(false);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_OPENSSL)
   // We want to be sure to init NSPR on the main thread.
   crypto::EnsureNSPRInit();
 #endif
@@ -56,6 +60,10 @@ int main(int argc, char** argv) {
   // Enable support for SSL server sockets, which must be done while
   // single-threaded.
   net::EnableSSLServerSockets();
+
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+  gin::IsolateHolder::LoadV8Snapshot();
+#endif
 
 #if !defined(OS_IOS)
   net::ProxyResolverV8::EnsureIsolateCreated();

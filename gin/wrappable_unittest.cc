@@ -40,9 +40,8 @@ class MyObject : public BaseClass,
 
  protected:
   MyObject() : value_(0) {}
-  virtual ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
-  virtual ~MyObject() {}
+  ObjectTemplateBuilder GetObjectTemplateBuilder(v8::Isolate* isolate) override;
+  ~MyObject() override {}
 
  private:
   int value_;
@@ -61,8 +60,8 @@ class MyObjectSubclass : public MyObject {
   std::string result;
 
  private:
-  virtual ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE {
+  ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override {
     return MyObject::GetObjectTemplateBuilder(isolate)
         .SetMethod("sayHello", &MyObjectSubclass::SayHello);
   }
@@ -70,8 +69,7 @@ class MyObjectSubclass : public MyObject {
   MyObjectSubclass() {
   }
 
-  virtual ~MyObjectSubclass() {
-  }
+  ~MyObjectSubclass() override {}
 };
 
 class MyCallableObject : public Wrappable<MyCallableObject> {
@@ -85,8 +83,8 @@ class MyCallableObject : public Wrappable<MyCallableObject> {
   int result() { return result_; }
 
  private:
-  virtual ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE {
+  ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override {
     return Wrappable<MyCallableObject>::GetObjectTemplateBuilder(isolate)
         .SetCallAsFunctionHandler(&MyCallableObject::Call);
   }
@@ -94,14 +92,13 @@ class MyCallableObject : public Wrappable<MyCallableObject> {
   MyCallableObject() : result_(0) {
   }
 
-  virtual ~MyCallableObject() {
-  }
+  ~MyCallableObject() override {}
 
-  void Call(int val, const gin::Arguments& arguments) {
+  void Call(int val1, int val2, int val3, const gin::Arguments& arguments) {
     if (arguments.IsConstructCall())
       arguments.ThrowTypeError("Cannot be called as constructor.");
     else
-      result_ = val;
+      result_ = val1;
   }
 
   int result_;
@@ -233,7 +230,7 @@ TEST_F(WrappableTest, CallAsFunction) {
   EXPECT_EQ(0, object->result());
   v8::Handle<v8::String> source = StringToV8(isolate,
                                              "(function(obj) {"
-                                             "obj(42);"
+                                             "obj(42, 2, 5);"
                                              "})");
   gin::TryCatch try_catch;
   v8::Handle<v8::Script> script = v8::Script::Compile(source);
@@ -256,7 +253,7 @@ TEST_F(WrappableTest, CallAsConstructor) {
   EXPECT_EQ(0, object->result());
   v8::Handle<v8::String> source = StringToV8(isolate,
                                              "(function(obj) {"
-                                             "new obj(42);"
+                                             "new obj(42, 2, 5);"
                                              "})");
   gin::TryCatch try_catch;
   v8::Handle<v8::Script> script = v8::Script::Compile(source);

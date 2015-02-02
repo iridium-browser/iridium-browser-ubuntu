@@ -6,9 +6,9 @@
 
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/login_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
@@ -34,26 +34,24 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
   }
 
   // LoginModelObserver:
-  virtual void OnAutofillDataAvailable(
-      const base::string16& username,
-      const base::string16& password) OVERRIDE {
+  void OnAutofillDataAvailable(const base::string16& username,
+                               const base::string16& password) override {
     // Nothing to do here since LoginView takes care of autofill for win.
   }
-  virtual void OnLoginModelDestroying() OVERRIDE {}
+  void OnLoginModelDestroying() override {}
 
   // views::DialogDelegate:
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE {
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override {
     if (button == ui::DIALOG_BUTTON_OK)
       return l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL);
     return DialogDelegate::GetDialogButtonLabel(button);
   }
 
-  virtual base::string16 GetWindowTitle() const OVERRIDE {
+  base::string16 GetWindowTitle() const override {
     return l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_TITLE);
   }
 
-  virtual void WindowClosing() OVERRIDE {
+  void WindowClosing() override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     content::WebContents* web_contents = GetWebContentsForLogin();
     if (web_contents)
@@ -64,7 +62,7 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
     CancelAuth();
   }
 
-  virtual void DeleteDelegate() OVERRIDE {
+  void DeleteDelegate() override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
     // The widget is going to delete itself; clear our pointer.
@@ -74,40 +72,33 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
     ReleaseSoon();
   }
 
-  virtual ui::ModalType GetModalType() const OVERRIDE {
-    return ui::MODAL_TYPE_CHILD;
-  }
+  ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_CHILD; }
 
-  virtual bool Cancel() OVERRIDE {
+  bool Cancel() override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     CancelAuth();
     return true;
   }
 
-  virtual bool Accept() OVERRIDE {
+  bool Accept() override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     SetAuth(login_view_->GetUsername(), login_view_->GetPassword());
     return true;
   }
 
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE {
+  views::View* GetInitiallyFocusedView() override {
     return login_view_->GetInitiallyFocusedView();
   }
 
-  virtual views::View* GetContentsView() OVERRIDE {
-    return login_view_;
-  }
-  virtual views::Widget* GetWidget() OVERRIDE {
-    return login_view_->GetWidget();
-  }
-  virtual const views::Widget* GetWidget() const OVERRIDE {
+  views::View* GetContentsView() override { return login_view_; }
+  views::Widget* GetWidget() override { return login_view_->GetWidget(); }
+  const views::Widget* GetWidget() const override {
     return login_view_->GetWidget();
   }
 
   // LoginHandler:
-  virtual void BuildViewForPasswordManager(
-      password_manager::PasswordManager* manager,
-      const base::string16& explanation) OVERRIDE {
+  void BuildViewForPasswordManager(password_manager::PasswordManager* manager,
+                                   const base::string16& explanation) override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
     // Create a new LoginView and set the model for it.  The model (password
@@ -126,7 +117,7 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
     NotifyAuthNeeded();
   }
 
-  virtual void CloseDialog() OVERRIDE {
+  void CloseDialog() override {
     // The hosting widget may have been freed.
     if (dialog_)
       dialog_->Close();
@@ -136,7 +127,7 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
   friend class base::RefCountedThreadSafe<LoginHandlerViews>;
   friend class LoginPrompt;
 
-  virtual ~LoginHandlerViews() {}
+  ~LoginHandlerViews() override {}
 
   // The LoginView that contains the user's login information.
   LoginView* login_view_;

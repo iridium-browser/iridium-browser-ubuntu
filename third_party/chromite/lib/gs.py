@@ -6,8 +6,10 @@
 
 from __future__ import print_function
 
+import collections
 import contextlib
 import datetime
+import errno
 import getpass
 import hashlib
 import logging
@@ -33,8 +35,22 @@ DATETIME_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
 # Regexp for parsing each line of output from "gsutil ls -l".
 # This regexp is prepared for the generation and meta_generation values,
 # too, even though they are not expected until we use "-a".
+#
+# A detailed listing looks like:
+#    99908  2014-03-01T05:50:08Z  gs://bucket/foo/abc#1234  metageneration=1
+#                                 gs://bucket/foo/adir/
+#    99908  2014-03-04T01:16:55Z  gs://bucket/foo/def#5678  metageneration=1
+# TOTAL: 2 objects, 199816 bytes (495.36 KB)
 LS_LA_RE = re.compile(
-    r'^\s*(\d*?)\s+(\S*?)\s+([^#$]+).*?(#(\d+)\s+meta_?generation=(\d+))?\s*$')
+    r'^\s*(?P<content_length>\d*?)\s+'
+    r'(?P<creation_time>\S*?)\s+'
+    r'(?P<url>[^#$]+).*?'
+    r'('
+     r'#(?P<generation>\d+)\s+'
+     r'meta_?generation=(?P<metageneration>\d+)'
+    r')?\s*$')
+LS_RE = re.compile(r'^\s*(?P<content_length>)(?P<creation_time>)(?P<url>.*)'
+                   r'(?P<generation>)(?P<metageneration>)\s*$')
 
 
 def CanonicalizeURL(url, strict=False):
@@ -92,6 +108,36 @@ class GSNoSuchKey(GSContextException):
   """Thrown when google storage returns code=NoSuchKey."""
 
 
+# Detailed results of GSContext.Stat.
+#
+# The fields directory correspond to gsutil stat results.
+#
+#  Field name        Type         Example
+#   creation_time     datetime     Sat, 23 Aug 2014 06:53:20 GMT
+#   content_length    int          74
+#   content_type      string       application/octet-stream
+#   hash_crc32c       string       BBPMPA==
+#   hash_md5          string       ms+qSYvgI9SjXn8tW/5UpQ==
+#   etag              string       CNCgocbmqMACEAE=
+#   generation        int          1408776800850000
+#   metageneration    int          1
+#
+# Note: We omit a few stat fields as they are not always available, and we
+# have no callers that want this currently.
+#
+#   content_language  string/None  en   # This field may be None.
+GSStatResult = collections.namedtuple(
+    'GSStatResult',
+    ('creation_time', 'content_length', 'content_type', 'hash_crc32c',
+     'hash_md5', 'etag', 'generation', 'metageneration'))
+
+
+# Detailed results of GSContext.List.
+GSListResult = collections.namedtuple(
+    'GSListResult',
+    ('url', 'creation_time', 'content_length', 'generation', 'metageneration'))
+
+
 class GSCounter(object):
   """A counter class for Google Storage."""
 
@@ -108,7 +154,7 @@ class GSCounter(object):
   def Get(self):
     """Get the current value of a counter."""
     try:
-      return int(self.ctx.Cat(self.path).output)
+      return int(self.ctx.Cat(self.path))
     except GSNoSuchKey:
       return 0
 
@@ -199,8 +245,9 @@ class GSContext(object):
   # (1*sleep) the first time, then (2*sleep), continuing via attempt * sleep.
   DEFAULT_SLEEP_TIME = 60
 
-  GSUTIL_TAR = 'gsutil_4.5.tar.gz'
-  GSUTIL_URL = PUBLIC_BASE_HTTPS_URL + 'pub/%s' % GSUTIL_TAR
+  GSUTIL_VERSION = '4.7pre_retrydns'
+  GSUTIL_TAR = 'gsutil_%s.tar.gz' % GSUTIL_VERSION
+  GSUTIL_URL = PUBLIC_BASE_HTTPS_URL + 'prerelease/%s' % GSUTIL_TAR
   GSUTIL_API_SELECTOR = 'JSON'
 
   RESUMABLE_UPLOAD_ERROR = ('Too many resumable upload attempts failed without '
@@ -266,11 +313,10 @@ class GSContext(object):
     # The version of gsutil is retrieved on demand and cached here.
     self._gsutil_version = None
 
-    # TODO (yjhong): disable parallel composite upload for now because
-    # it is not backward compatible (older gsutil versions cannot
-    # download files uploaded with this option enabled). Remove this
-    # after all users transition to newer versions (3.37 and above).
-    self.gsutil_flags = ['-o', 'GSUtil:parallel_composite_upload_threshold=0']
+    # Increase the number of retries. With 10 retries, Boto will try a total of
+    # 11 times and wait up to 2**11 seconds (~30 minutes) in total, not
+    # not including the time spent actually uploading or downloading.
+    self.gsutil_flags = ['-o', 'Boto:num_retries=10']
 
     # Set HTTP proxy if environment variable http_proxy is set
     # (crbug.com/325032).
@@ -287,11 +333,6 @@ class GSContext(object):
           self.gsutil_flags += ['-o', 'Boto:proxy_pass=%s' % url.password]
         if url.port:
           self.gsutil_flags += ['-o', 'Boto:proxy_port=%d' % url.port]
-
-    # Increase the number of retries. With 10 retries, Boto will try a total of
-    # 11 times and wait up to 2**11 seconds (~30 minutes) in total, not
-    # not including the time spent actually uploading or downloading.
-    self.gsutil_flags += ['-o', 'Boto:num_retries=10']
 
     # Prefer boto_file if specified, else prefer the env then the default.
     if boto_file is None:
@@ -313,21 +354,24 @@ class GSContext(object):
   def gsutil_version(self):
     """Return the version of the gsutil in this context."""
     if not self._gsutil_version:
-      cmd = ['-q', 'version']
-
-      # gsutil has been known to return version to stderr in the past, so
-      # use combine_stdout_stderr=True.
-      result = self.DoCommand(cmd, combine_stdout_stderr=True,
-                              redirect_stdout=True)
-
-      # Expect output like: 'gsutil version 3.35' or 'gsutil version: 4.5'.
-      match = re.search(r'^\s*gsutil\s+version:?\s+([\d.]+)', result.output,
-                        re.IGNORECASE)
-      if match:
-        self._gsutil_version = match.group(1)
+      if self.dry_run:
+        self._gsutil_version = self.GSUTIL_VERSION
       else:
-        raise GSContextException('Unexpected output format from "%s":\n%s.' %
-                                 (result.cmdstr, result.output))
+        cmd = ['-q', 'version']
+
+        # gsutil has been known to return version to stderr in the past, so
+        # use combine_stdout_stderr=True.
+        result = self.DoCommand(cmd, combine_stdout_stderr=True,
+                                redirect_stdout=True)
+
+        # Expect output like: 'gsutil version 3.35' or 'gsutil version: 4.5'.
+        match = re.search(r'^\s*gsutil\s+version:?\s+([\d.]+)', result.output,
+                          re.IGNORECASE)
+        if match:
+          self._gsutil_version = match.group(1)
+        else:
+          raise GSContextException('Unexpected output format from "%s":\n%s.' %
+                                   (result.cmdstr, result.output))
 
     return self._gsutil_version
 
@@ -368,17 +412,18 @@ class GSContext(object):
     """Returns the contents of a GS object."""
     kwargs.setdefault('redirect_stdout', True)
     if not path.startswith(BASE_GS_URL):
-      # gsutil doesn't support cat-ting a local path, so just run 'cat' in that
-      # case.
-      kwargs.pop('retries', None)
-      kwargs.pop('headers', None)
-      if not os.path.exists(path):
-        raise GSNoSuchKey('%s: file does not exist' % path)
+      # gsutil doesn't support cat-ting a local path, so read it ourselves.
       try:
-        return cros_build_lib.RunCommand(['cat', path], **kwargs)
-      except cros_build_lib.RunCommandError as e:
-        raise GSCommandError(e.msg, e.result, e.exception)
-    return self.DoCommand(['cat', path], **kwargs)
+        return osutils.ReadFile(path)
+      except Exception as e:
+        if getattr(e, 'errno', None) == errno.ENOENT:
+          raise GSNoSuchKey('%s: file does not exist' % path)
+        else:
+          raise GSContextException(str(e))
+    elif self.dry_run:
+      return ''
+    else:
+      return self.DoCommand(['cat', path], **kwargs).output
 
   def CopyInto(self, local_path, remote_dir, filename=None, **kwargs):
     """Upload a local file into a directory in google storage.
@@ -389,13 +434,16 @@ class GSContext(object):
       filename: If given, the filename to place the content at; if not given,
         it's discerned from basename(local_path).
       **kwargs: See Copy() for documentation.
+
+    Returns:
+      The generation of the remote file.
     """
     filename = filename if filename is not None else local_path
     # Basename it even if an explicit filename was given; we don't want
     # people using filename as a multi-directory path fragment.
     return self.Copy(local_path,
-                      '%s/%s' % (remote_dir, os.path.basename(filename)),
-                      **kwargs)
+                     '%s/%s' % (remote_dir, os.path.basename(filename)),
+                     **kwargs)
 
   @staticmethod
   def GetTrackerFilenames(dest_path):
@@ -486,6 +534,7 @@ class GSContext(object):
           'ResumableDownloadException',
           'ssl.SSLError: The read operation timed out',
           'Unable to find the server',
+          'doesn\'t match cloud-supplied digest',
       )
       if any(x in error for x in RESUMABLE_ERROR_MESSAGE):
         # Only remove the tracker files if we try to upload/download a file.
@@ -509,8 +558,14 @@ class GSContext(object):
 
       # We have seen flaky errors with 5xx return codes
       # See b/17376491 for the "JSON decoding" error.
-      if ('ServiceException: 5' in error or
-          'Failure: No JSON object could be decoded' in error):
+      # We have seen transient Oauth 2.0 credential errors (crbug.com/414345).
+      TRANSIENT_ERROR_MESSAGE = (
+          'ServiceException: 5',
+          'Failure: No JSON object could be decoded',
+          'Oauth 2.0 User Account',
+          'InvalidAccessKeyId',
+      )
+      if any(x in error for x in TRANSIENT_ERROR_MESSAGE):
         return True
 
     return False
@@ -576,7 +631,7 @@ class GSContext(object):
         raise GSCommandError(e.msg, e.result, e.exception)
 
   def Copy(self, src_path, dest_path, acl=None, recursive=False,
-           skip_symlinks=True, **kwargs):
+           skip_symlinks=True, auto_compress=False, **kwargs):
     """Copy to/from GS bucket.
 
     Canned ACL permissions can be specified on the gsutil cp command line.
@@ -591,14 +646,17 @@ class GSContext(object):
       acl: One of the google storage canned_acls to apply.
       recursive: Whether to copy recursively.
       skip_symlinks: Skip symbolic links when copying recursively.
+      auto_compress: Automatically compress with gzip when uploading.
 
     Returns:
-      Return the CommandResult from the run.
+      The generation of the remote file.
 
     Raises:
       RunCommandError if the command failed despite retries.
     """
-    cmd = ['cp']
+    # -v causes gs://bucket/path#generation to be listed in output.
+    cmd = ['cp', '-v']
+
     # Certain versions of gsutil (at least 4.3) assume the source of a copy is
     # a directory if the -r option is used. If it's really a file, gsutil will
     # look like it's uploading it but not actually do anything. We'll work
@@ -608,6 +666,14 @@ class GSContext(object):
       cmd.append('-r')
       if skip_symlinks:
         cmd.append('-e')
+
+    if auto_compress:
+      # Pass the suffix without the '.' as that is what gsutil wants.
+      suffix = os.path.splitext(src_path)[1]
+      if not suffix:
+        raise ValueError('src file "%s" needs an extension to compress' %
+                         (src_path,))
+      cmd += ['-z', suffix[1:]]
 
     acl = self.acl if acl is None else acl
     if acl is not None:
@@ -630,8 +696,19 @@ class GSContext(object):
         # Don't retry on local copies.
         kwargs.setdefault('retries', 0)
 
+      kwargs['capture_output'] = True
       try:
-        return self.DoCommand(cmd, **kwargs)
+        result = self.DoCommand(cmd, **kwargs)
+        if self.dry_run:
+          return None
+
+        # Now we parse the output for the current generation number.  Example:
+        #   Created: gs://chromeos-throw-away-bucket/foo#1360630664537000.1
+        m = re.search(r'Created: .*#(\d+)([.](\d+))?$', result.error)
+        if m:
+          return int(m.group(1))
+        else:
+          return None
       except GSNoSuchKey as e:
         # If the source was a local file, the error is a quirk of gsutil 4.5
         # and should be ignored. If the source was remote, there might
@@ -641,75 +718,102 @@ class GSContext(object):
           return e.args[0].result
         raise
 
-  # TODO(mtennant): Merge with LS() after it supports returning details.
-  def LSWithDetails(self, path, **kwargs):
-    """Does a detailed directory listing of the given gs path.
-
-    Args:
-      path: The path to get a listing of.
-
-    Returns:
-      List of tuples, where each tuple is (gs path, file size in bytes integer,
-        file modified time as datetime.datetime object).
-    """
-    kwargs['redirect_stdout'] = True
-    result = self.DoCommand(['ls', '-l', '--', path], **kwargs)
-
-    lines = result.output.splitlines()
-
-    # Output like the followig is expected:
-    #    99908  2014-03-01T05:50:08Z  gs://somebucket/foo/abc
-    #    99908  2014-03-04T01:16:55Z  gs://somebucket/foo/def
-    # TOTAL: 2 objects, 199816 bytes (495.36 KB)
-
-    # The last line is expected to be a summary line.  Ignore it.
-    url_tuples = []
-    for line in lines[:-1]:
-      match = LS_LA_RE.search(line)
-      size, timestamp, url = (match.group(1), match.group(2), match.group(3))
-      if timestamp:
-        timestamp = datetime.datetime.strptime(timestamp, DATETIME_FORMAT)
-      else:
-        timestamp = None
-      size = int(size) if size else None
-      url_tuples.append((url, size, timestamp))
-
-    return url_tuples
-
-  # TODO(mtennant): Enhance to add details to returned results, such as
-  # size, modified time, generation.
-  def LS(self, path, raw=False, **kwargs):
+  # TODO: Merge LS() and List()?
+  def LS(self, path, **kwargs):
     """Does a directory listing of the given gs path.
 
     Args:
       path: The path to get a listing of.
-      raw: Return the raw CommandResult object instead of parsing it.
       kwargs: See options that DoCommand takes.
 
     Returns:
-      If raw is False, a list of paths that matched |path|.  Might be more
-      than one if a directory or path include wildcards/etc...
-      If raw is True, then the CommandResult object.
+      A list of paths that matched |path|.  Might be more than one if a
+      directory or path include wildcards/etc...
     """
-    kwargs['redirect_stdout'] = True
+    if self.dry_run:
+      return []
+
     if not path.startswith(BASE_GS_URL):
       # gsutil doesn't support listing a local path, so just run 'ls'.
       kwargs.pop('retries', None)
       kwargs.pop('headers', None)
       result = cros_build_lib.RunCommand(['ls', path], **kwargs)
-    else:
-      result = self.DoCommand(['ls', '--', path], **kwargs)
-
-    if raw:
-      return result
-    else:
-      # TODO: Process resulting lines when given -l/-a.
-      # See http://crbug.com/342918 for more details.
       return result.output.splitlines()
+    else:
+      return [x.url for x in self.List(path, **kwargs)]
 
-  def DU(self, path, **kwargs):
-    """Returns size of an object."""
-    return self.DoCommand(['du', path], redirect_stdout=True, **kwargs)
+  def List(self, path, details=False, **kwargs):
+    """Does a directory listing of the given gs path.
+
+    Args:
+      path: The path to get a listing of.
+      details: Whether to include size/timestamp info.
+      kwargs: See options that DoCommand takes.
+
+    Returns:
+      A list of GSListResult objects that matched |path|.  Might be more
+      than one if a directory or path include wildcards/etc...
+    """
+    ret = []
+    if self.dry_run:
+      return ret
+
+    cmd = ['ls']
+    if details:
+      cmd += ['-l']
+    cmd += ['--', path]
+
+    # We always request the extended details as the overhead compared to a plain
+    # listing is negligible.
+    kwargs['redirect_stdout'] = True
+    lines = self.DoCommand(cmd, **kwargs).output.splitlines()
+
+    if details:
+      # The last line is expected to be a summary line.  Ignore it.
+      lines = lines[:-1]
+      ls_re = LS_LA_RE
+    else:
+      ls_re = LS_RE
+
+    # Handle optional fields.
+    intify = lambda x: int(x) if x else None
+
+    # Parse out each result and build up the results list.
+    for line in lines:
+      match = ls_re.search(line)
+      if not match:
+        raise GSContextException('unable to parse line: %s' % line)
+      if match.group('creation_time'):
+        timestamp = datetime.datetime.strptime(match.group('creation_time'),
+                                               DATETIME_FORMAT)
+      else:
+        timestamp = None
+
+      ret.append(GSListResult(
+          content_length=intify(match.group('content_length')),
+          creation_time=timestamp,
+          url=match.group('url'),
+          generation=intify(match.group('generation')),
+          metageneration=intify(match.group('metageneration'))))
+
+    return ret
+
+  def GetSize(self, path, **kwargs):
+    """Returns size of a single object (local or GS)."""
+    if not path.startswith(BASE_GS_URL):
+      return os.path.getsize(path)
+    else:
+      return self.Stat(path, **kwargs).content_length
+
+  def Move(self, src_path, dest_path, **kwargs):
+    """Move/rename to/from GS bucket.
+
+    Args:
+      src_path: Fully qualified local path or full gs:// path of the src file.
+      dest_path: Fully qualified local path or full gs:// path of the dest file.
+    """
+    cmd = ['mv', '--', src_path, dest_path]
+    return self.DoCommand(cmd, **kwargs)
 
   def SetACL(self, upload_url, acl=None):
     """Set access on a file already in google storage.
@@ -758,28 +862,23 @@ class GSContext(object):
     """Checks whether the given object exists.
 
     Args:
-      path: Full gs:// url of the path to check.
+      path: Local path or gs:// url to check.
+      kwargs: Flags to pass to DoCommand.
 
     Returns:
       True if the path exists; otherwise returns False.
     """
+    if not path.startswith(BASE_GS_URL):
+      return os.path.exists(path)
+
     try:
-      # Use 'gsutil stat' command to check for existence.  It is not
-      # subject to caching behavior of 'gsutil ls', and it only requires
-      # read access to the file, unlike 'gsutil acl get'.
-      self.DoCommand(['stat', path], redirect_stdout=True, **kwargs)
-    except cros_build_lib.RunCommandError as e:
-      if e.result.output and 'No URLs matched' in e.result.output:
-        # A path that does not exist will result in output on stdout like:
-        # No URLs matched gs://foo/bar
-        # That behavior is different from any other command and is handled
-        # here specially. See b/16020252.
-        return False
-      else:
-        raise
+      self.Stat(path, **kwargs)
+    except GSNoSuchKey:
+      return False
+
     return True
 
-  def Remove(self, path, recurse=False, ignore_missing=False):
+  def Remove(self, path, recurse=False, ignore_missing=False, **kwargs):
     """Remove the specified file.
 
     Args:
@@ -787,13 +886,14 @@ class GSContext(object):
       recurse: Remove recursively starting at path. Same as rm -R. Defaults
         to False.
       ignore_missing: Whether to suppress errors about missing files.
+      kwargs: Flags to pass to DoCommand.
     """
     cmd = ['rm']
     if recurse:
       cmd.append('-R')
     cmd.append(path)
     try:
-      self.DoCommand(cmd)
+      self.DoCommand(cmd, **kwargs)
     except GSNoSuchKey:
       if not ignore_missing:
         raise
@@ -804,24 +904,88 @@ class GSContext(object):
     Returns:
       A tuple of the generation and metageneration.
     """
-    def _Field(name):
-      if res and res.returncode == 0 and res.output is not None:
-        # Search for a field that looks like this:
-        # Generation: 1378856506589000
-        m = re.search(r'%s:\s*(\d+)' % name, res.output)
-        if m:
-          return int(m.group(1))
-      return 0
-
     try:
-      res = self.DoCommand(['stat', path],
-                           error_code_ok=True, redirect_stdout=True)
+      res = self.Stat(path)
     except GSNoSuchKey:
-      # If a DoCommand throws an error, 'res' will be None, so _Header(...)
-      # will return 0 in both of the cases below.
-      pass
+      return 0, 0
 
-    return (_Field('Generation'), _Field('Metageneration'))
+    return res.generation, res.metageneration
+
+  def Stat(self, path, **kwargs):
+    """Stat a GS file, and get detailed information.
+
+    Args:
+      path: A GS path for files to Stat. Wildcards are NOT supported.
+      kwargs: Flags to pass to DoCommand.
+
+    Returns:
+      A GSStatResult object with all fields populated.
+
+    Raises:
+      Assorted GSContextException exceptions.
+    """
+    try:
+      res = self.DoCommand(['stat', path], redirect_stdout=True, **kwargs)
+    except GSCommandError as e:
+      # Because the 'gsutil stat' command returns errors on stdout (unlike other
+      # commands), we have to look for standard errors ourselves.
+      # That behavior is different from any other command and is handled
+      # here specially. See b/16020252.
+      if e.result.output.startswith('No URLs matched'):
+        raise GSNoSuchKey(path)
+
+      # No idea what this is, so just choke.
+      raise
+
+    # In dryrun mode, DoCommand doesn't return an object, so we need to fake
+    # out the behavior ourselves.
+    if self.dry_run:
+      return GSStatResult(
+          creation_time=datetime.datetime.now(),
+          content_length=0,
+          content_type='application/octet-stream',
+          hash_crc32c='AAAAAA==',
+          hash_md5='',
+          etag='',
+          generation=0,
+          metageneration=0)
+
+    # We expect Stat output like the following. However, the Content-Language
+    # line appears to be optional based on how the file in question was
+    # created.
+    #
+    # gs://bucket/path/file:
+    #     Creation time:      Sat, 23 Aug 2014 06:53:20 GMT
+    #     Content-Language:   en
+    #     Content-Length:     74
+    #     Content-Type:       application/octet-stream
+    #     Hash (crc32c):      BBPMPA==
+    #     Hash (md5):         ms+qSYvgI9SjXn8tW/5UpQ==
+    #     ETag:               CNCgocbmqMACEAE=
+    #     Generation:         1408776800850000
+    #     Metageneration:     1
+
+    if not res.output.startswith('gs://'):
+      raise GSContextException('Unexpected stat output: %s' % res.output)
+
+    def _GetField(name):
+      m = re.search(r'%s:\s*(.+)' % re.escape(name), res.output)
+      if m:
+        return m.group(1)
+      else:
+        raise GSContextException('Field "%s" missing in "%s"' %
+                                 (name, res.output))
+
+    return GSStatResult(
+        creation_time=datetime.datetime.strptime(
+            _GetField('Creation time'), '%a, %d %b %Y %H:%M:%S %Z'),
+        content_length=int(_GetField('Content-Length')),
+        content_type=_GetField('Content-Type'),
+        hash_crc32c=_GetField('Hash (crc32c)'),
+        hash_md5=_GetField('Hash (md5)'),
+        etag=_GetField('ETag'),
+        generation=int(_GetField('Generation')),
+        metageneration=int(_GetField('Metageneration')))
 
   def Counter(self, path):
     """Return a GSCounter object pointing at a |path| in Google Storage.
@@ -867,8 +1031,8 @@ def TemporaryURL(prefix):
   url = '%s/chromite-temp/%s/%s/%s' % (constants.TRASH_BUCKET, prefix,
                                        getpass.getuser(), md5.hexdigest())
   ctx = GSContext()
-  ctx.Remove(url, ignore_missing=True)
+  ctx.Remove(url, ignore_missing=True, recurse=True)
   try:
     yield url
   finally:
-    ctx.Remove(url, ignore_missing=True)
+    ctx.Remove(url, ignore_missing=True, recurse=True)

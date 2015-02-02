@@ -73,12 +73,12 @@ class MockSearchIPCRouterDelegate : public SearchIPCRouter::Delegate {
 
 class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     SearchTabHelper::CreateForWebContents(web_contents());
   }
 
-  virtual content::BrowserContext* CreateBrowserContext() OVERRIDE {
+  content::BrowserContext* CreateBrowserContext() override {
     TestingProfile::Builder builder;
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
                               FakeSigninManagerBase::Build);
@@ -103,7 +103,7 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
     ProfileSyncServiceMock* sync_service = static_cast<ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile()));
 
-    EXPECT_CALL(*sync_service, sync_initialized()).WillRepeatedly(Return(true));
+    EXPECT_CALL(*sync_service, SyncActive()).WillRepeatedly(Return(true));
     syncer::ModelTypeSet result;
     if (sync_history) {
       result.Put(syncer::HISTORY_DELETE_DIRECTIVES);
@@ -215,7 +215,7 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckSignedOutMatch) {
   // This test does not sign in.
   ProfileSyncServiceMock* sync_service = static_cast<ProfileSyncServiceMock*>(
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile()));
-  EXPECT_CALL(*sync_service, sync_initialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*sync_service, SyncActive()).WillRepeatedly(Return(false));
   SearchTabHelper* search_tab_helper =
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
@@ -238,7 +238,7 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckSignedOutMismatch) {
   // This test does not sign in.
   ProfileSyncServiceMock* sync_service = static_cast<ProfileSyncServiceMock*>(
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile()));
-  EXPECT_CALL(*sync_service, sync_initialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*sync_service, SyncActive()).WillRepeatedly(Return(false));
   SearchTabHelper* search_tab_helper =
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
@@ -285,17 +285,17 @@ class TabTitleObserver : public content::WebContentsObserver {
   base::string16 title_on_commit() { return title_on_commit_; }
 
  private:
-  virtual void DidStartProvisionalLoadForFrame(
+  void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* /* render_frame_host */,
       const GURL& /* validated_url */,
       bool /* is_error_page */,
-      bool /* is_iframe_srcdoc */) OVERRIDE {
+      bool /* is_iframe_srcdoc */) override {
     title_on_start_ = web_contents()->GetTitle();
   }
 
-  virtual void DidNavigateMainFrame(
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& /* details */,
-      const content::FrameNavigateParams& /* params */) OVERRIDE {
+      const content::FrameNavigateParams& /* params */) override {
     title_on_commit_ = web_contents()->GetTitle();
   }
 
@@ -314,7 +314,7 @@ TEST_F(SearchTabHelperTest, TitleIsSetForNTP) {
 
 class SearchTabHelperWindowTest : public BrowserWithTestWindowTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
     TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
         profile(), &TemplateURLServiceFactory::BuildInstanceFor);
@@ -401,10 +401,10 @@ TEST_F(SearchTabHelperWindowTest, OnProvisionalLoadFailDontRedirectNonNTP) {
 
 class SearchTabHelperPrerenderTest : public InstantUnitTestBase {
  public:
-  virtual ~SearchTabHelperPrerenderTest() {}
+  ~SearchTabHelperPrerenderTest() override {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
         "EmbeddedSearch",
         "Group1 espv:89 prefetch_results:1 "

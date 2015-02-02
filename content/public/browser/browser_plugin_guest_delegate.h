@@ -57,15 +57,18 @@ class CONTENT_EXPORT BrowserPluginGuestDelegate {
       bool last_unlocked_by_target,
       const base::Callback<void(bool)>& callback) {}
 
-  // Requests that the delegate destroy itself along with its associated
-  // WebContents.
-  virtual void Destroy() {}
-
   // Registers a |callback| with the delegate that the delegate would call when
   // it is about to be destroyed.
   typedef base::Callback<void()> DestructionCallback;
   virtual void RegisterDestructionCallback(
       const DestructionCallback& callback) {}
+
+  // Find the given |search_text| in the page. Returns true if the find request
+  // is handled by this browser plugin guest delegate.
+  virtual bool Find(int request_id,
+                    const base::string16& search_text,
+                    const blink::WebFindOptions& options,
+                    bool is_full_page_plugin);
 };
 
 }  // namespace content

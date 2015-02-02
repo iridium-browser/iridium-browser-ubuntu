@@ -9,8 +9,10 @@
 #include "public/web/WebSecurityOrigin.h"
 
 namespace blink {
+class WebInputEvent;
 class WebLocalFrame;
 class WebRemoteFrame;
+struct WebRect;
 
 class WebRemoteFrameClient {
 public:
@@ -30,6 +32,13 @@ public:
     virtual void initializeChildFrame(
         const WebRect& frameRect,
         float scaleFactor) { }
+
+    // A remote frame was asked to start a navigation.
+    virtual void navigate(const WebURLRequest& request, bool shouldReplaceCurrentEntry) { }
+
+    // FIXME: Remove this method once we have input routing in the browser
+    // process. See http://crbug.com/339659.
+    virtual void forwardInputEvent(const WebInputEvent*) { }
 };
 
 } // namespace blink

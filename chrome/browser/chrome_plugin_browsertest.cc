@@ -17,7 +17,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
@@ -256,12 +255,11 @@ IN_PROC_BROWSER_TEST_F(ChromePluginTest, InstalledPlugins) {
 #if defined(OS_CHROMEOS)
     "Google Talk Plugin",
     "Google Talk Plugin Video Accelerator",
-    "Netflix",
 #endif
   };
 
   std::vector<content::WebPluginInfo> plugins = GetPlugins();
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(expected); ++i) {
+  for (size_t i = 0; i < arraysize(expected); ++i) {
     size_t j = 0;
     for (; j < plugins.size(); ++j) {
       if (plugins[j].name == base::ASCIIToUTF16(expected[i]))

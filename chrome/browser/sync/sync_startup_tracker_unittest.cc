@@ -29,7 +29,7 @@ class SyncStartupTrackerTest : public testing::Test {
   SyncStartupTrackerTest() :
       no_error_(GoogleServiceAuthError::NONE) {
   }
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     profile_.reset(new TestingProfile());
     mock_pss_ = static_cast<ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -47,14 +47,13 @@ class SyncStartupTrackerTest : public testing::Test {
     mock_pss_->Initialize();
   }
 
-  virtual void TearDown() OVERRIDE {
-    profile_.reset();
-  }
+  void TearDown() override { profile_.reset(); }
 
   void SetupNonInitializedPSS() {
     EXPECT_CALL(*mock_pss_, GetAuthError())
         .WillRepeatedly(ReturnRef(no_error_));
-    EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(false));
+    EXPECT_CALL(*mock_pss_, backend_initialized())
+        .WillRepeatedly(Return(false));
     EXPECT_CALL(*mock_pss_, HasUnrecoverableError())
         .WillRepeatedly(Return(false));
     EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn())
@@ -69,7 +68,7 @@ class SyncStartupTrackerTest : public testing::Test {
 };
 
 TEST_F(SyncStartupTrackerTest, SyncAlreadyInitialized) {
-  EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_pss_, backend_initialized()).WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(observer_, SyncStartupCompleted());
@@ -79,7 +78,7 @@ TEST_F(SyncStartupTrackerTest, SyncAlreadyInitialized) {
 TEST_F(SyncStartupTrackerTest, SyncNotSignedIn) {
   // Make sure that we get a SyncStartupFailed() callback if sync is not logged
   // in.
-  EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, backend_initialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn()).WillRepeatedly(
       Return(false));
   EXPECT_CALL(observer_, SyncStartupFailed());
@@ -89,7 +88,7 @@ TEST_F(SyncStartupTrackerTest, SyncNotSignedIn) {
 TEST_F(SyncStartupTrackerTest, SyncAuthError) {
   // Make sure that we get a SyncStartupFailed() callback if sync gets an auth
   // error.
-  EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, backend_initialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn()).WillRepeatedly(
       Return(true));
   GoogleServiceAuthError error(
@@ -107,7 +106,7 @@ TEST_F(SyncStartupTrackerTest, SyncDelayedInitialization) {
   SyncStartupTracker tracker(profile_.get(), &observer_);
   Mock::VerifyAndClearExpectations(&observer_);
   // Now, mark the PSS as initialized.
-  EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_pss_, backend_initialized()).WillRepeatedly(Return(true));
   EXPECT_CALL(observer_, SyncStartupCompleted());
   tracker.OnStateChanged();
 }
@@ -122,7 +121,7 @@ TEST_F(SyncStartupTrackerTest, SyncDelayedAuthError) {
   Mock::VerifyAndClearExpectations(mock_pss_);
 
   // Now, mark the PSS as having an auth error.
-  EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, backend_initialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn()).WillRepeatedly(
       Return(true));
   GoogleServiceAuthError error(
@@ -142,7 +141,7 @@ TEST_F(SyncStartupTrackerTest, SyncDelayedUnrecoverableError) {
   Mock::VerifyAndClearExpectations(mock_pss_);
 
   // Now, mark the PSS as having an unrecoverable error.
-  EXPECT_CALL(*mock_pss_, sync_initialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, backend_initialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn()).WillRepeatedly(
       Return(true));
   GoogleServiceAuthError error(

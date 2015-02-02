@@ -21,20 +21,18 @@ const float kScreenScaleFactor = 2;
 class TestGPUMetricsProvider : public GPUMetricsProvider {
  public:
   TestGPUMetricsProvider() {}
-  virtual ~TestGPUMetricsProvider() {}
+  ~TestGPUMetricsProvider() override {}
 
  private:
-  virtual gfx::Size GetScreenSize() const OVERRIDE {
+  gfx::Size GetScreenSize() const override {
     return gfx::Size(kScreenWidth, kScreenHeight);
   }
 
-  virtual float GetScreenDeviceScaleFactor() const OVERRIDE {
+  float GetScreenDeviceScaleFactor() const override {
     return kScreenScaleFactor;
   }
 
-  virtual int GetScreenCount() const OVERRIDE {
-    return kScreenCount;
-  }
+  int GetScreenCount() const override { return kScreenCount; }
 
   DISALLOW_COPY_AND_ASSIGN(TestGPUMetricsProvider);
 };
@@ -44,7 +42,7 @@ class TestGPUMetricsProvider : public GPUMetricsProvider {
 class GPUMetricsProviderTest : public testing::Test {
  public:
   GPUMetricsProviderTest() {}
-  virtual ~GPUMetricsProviderTest() {}
+  ~GPUMetricsProviderTest() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GPUMetricsProviderTest);
@@ -52,12 +50,12 @@ class GPUMetricsProviderTest : public testing::Test {
 
 TEST_F(GPUMetricsProviderTest, ProvideSystemProfileMetrics) {
   TestGPUMetricsProvider provider;
-  metrics::ChromeUserMetricsExtension uma_proto;
+  ChromeUserMetricsExtension uma_proto;
 
   provider.ProvideSystemProfileMetrics(uma_proto.mutable_system_profile());
 
   // Check that the system profile has the correct values set.
-  const metrics::SystemProfileProto::Hardware& hardware =
+  const SystemProfileProto::Hardware& hardware =
       uma_proto.system_profile().hardware();
   EXPECT_EQ(kScreenWidth, hardware.primary_screen_width());
   EXPECT_EQ(kScreenHeight, hardware.primary_screen_height());

@@ -60,7 +60,7 @@ class ThumbnailStore : ThumbnailDelegate {
 
   void Put(TabId tab_id, const SkBitmap& bitmap, float thumbnail_scale);
   void Remove(TabId tab_id);
-  Thumbnail* Get(TabId tab_id, bool force_disk_read, bool allow_approximation);
+  Thumbnail* Get(TabId tab_id, bool force_disk_read);
 
   void RemoveFromDiskAtAndAboveId(TabId min_id);
   void InvalidateThumbnailIfChanged(TabId tab_id, const GURL& url);
@@ -72,7 +72,7 @@ class ThumbnailStore : ThumbnailDelegate {
           post_decompress_callback);
 
   // ThumbnailDelegate implementation
-  virtual void InvalidateCachedThumbnail(Thumbnail* thumbnail) OVERRIDE;
+  virtual void InvalidateCachedThumbnail(Thumbnail* thumbnail) override;
 
  private:
   class ThumbnailMetaData {

@@ -4,7 +4,7 @@
 
 #include "athena/resource_manager/memory_pressure_notifier.h"
 #include "athena/resource_manager/public/resource_manager_delegate.h"
-#include "athena/test/athena_test_base.h"
+#include "athena/test/base/athena_test_base.h"
 
 namespace athena {
 namespace test {
@@ -15,14 +15,14 @@ namespace {
 class TestResourceManagerDelegate : public ResourceManagerDelegate {
  public:
   TestResourceManagerDelegate() : memory_fill_level_percent_(0) {}
-  virtual ~TestResourceManagerDelegate() {}
+  ~TestResourceManagerDelegate() override {}
 
-  virtual int GetUsedMemoryInPercent() OVERRIDE {
+  virtual int GetUsedMemoryInPercent() override {
     timer_called_++;
     return memory_fill_level_percent_;
   }
 
-  virtual int MemoryPressureIntervalInMS() OVERRIDE {
+  virtual int MemoryPressureIntervalInMS() override {
     return 5;
   }
 
@@ -49,21 +49,22 @@ class TestMemoryPressureObserver : public MemoryPressureObserver {
   TestMemoryPressureObserver(ResourceManagerDelegate* delegate)
       : delegate_(delegate),
         number_of_calls_(0),
-        pressure_(MEMORY_PRESSURE_UNKNOWN) {}
-  virtual ~TestMemoryPressureObserver() {}
+        pressure_(ResourceManager::MEMORY_PRESSURE_UNKNOWN) {}
+  ~TestMemoryPressureObserver() override {}
 
   // The observer.
-  virtual void OnMemoryPressure(MemoryPressure pressure) OVERRIDE {
+  virtual void OnMemoryPressure(
+      ResourceManager::MemoryPressure pressure) override {
     number_of_calls_++;
     pressure_ = pressure;
   }
 
-  virtual ResourceManagerDelegate* GetDelegate() OVERRIDE {
+  virtual ResourceManagerDelegate* GetDelegate() override {
     return delegate_.get();
   }
 
   int number_of_calls() { return number_of_calls_; }
-  MemoryPressureObserver::MemoryPressure pressure() { return pressure_; }
+  ResourceManager::MemoryPressure pressure() { return pressure_; }
 
  private:
   scoped_ptr<ResourceManagerDelegate> delegate_;
@@ -72,7 +73,7 @@ class TestMemoryPressureObserver : public MemoryPressureObserver {
   int number_of_calls_;
 
   // Last posted memory pressure.
-  MemoryPressureObserver::MemoryPressure pressure_;
+  ResourceManager::MemoryPressure pressure_;
 
   DISALLOW_COPY_AND_ASSIGN(TestMemoryPressureObserver);
 };
@@ -82,11 +83,11 @@ class TestMemoryPressureObserver : public MemoryPressureObserver {
 // Our testing base.
 class MemoryPressureTest : public AthenaTestBase {
  public:
-  MemoryPressureTest() : test_resource_manager_delegate_(NULL) {}
-  virtual ~MemoryPressureTest() {}
+  MemoryPressureTest() : test_resource_manager_delegate_(nullptr) {}
+  ~MemoryPressureTest() override {}
 
   // AthenaTestBase:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     AthenaTestBase::SetUp();
     // Create and install our TestAppContentDelegate with instrumentation.
     test_resource_manager_delegate_ =
@@ -97,7 +98,7 @@ class MemoryPressureTest : public AthenaTestBase {
         new MemoryPressureNotifier(test_memory_pressure_observer_.get()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     memory_pressure_notifier_.reset();
     RunAllPendingInMessageLoop();
     test_memory_pressure_observer_.reset();
@@ -149,11 +150,11 @@ TEST_F(MemoryPressureTest, OneEventOnLowPressure) {
   test_resource_manager_delegate()->set_memory_fill_level_percent(49);
   ASSERT_TRUE(WaitForTimer());
   EXPECT_EQ(1, test_memory_pressure_observer()->number_of_calls());
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_LOW,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_LOW,
             test_memory_pressure_observer()->pressure());
   ASSERT_TRUE(WaitForTimer());
   EXPECT_EQ(1, test_memory_pressure_observer()->number_of_calls());
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_LOW,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_LOW,
             test_memory_pressure_observer()->pressure());
 }
 
@@ -164,7 +165,7 @@ TEST_F(MemoryPressureTest, TestNoCallsOnMemoryPressureUnknown) {
   // We shouldn't have gotten a single call.
   EXPECT_FALSE(test_memory_pressure_observer()->number_of_calls());
   // And the memory pressure should be unknown.
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_UNKNOWN,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_UNKNOWN,
             test_memory_pressure_observer()->pressure());
 }
 
@@ -175,12 +176,12 @@ TEST_F(MemoryPressureTest, TestModeratePressure) {
   // At least one call should have happened.
   int calls = test_memory_pressure_observer()->number_of_calls();
   EXPECT_TRUE(calls);
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_MODERATE,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_MODERATE,
             test_memory_pressure_observer()->pressure());
   // Even if the value does not change, we should get more calls.
   ASSERT_TRUE(WaitForTimer());
   EXPECT_LT(calls, test_memory_pressure_observer()->number_of_calls());
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_MODERATE,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_MODERATE,
             test_memory_pressure_observer()->pressure());
 }
 
@@ -191,7 +192,7 @@ TEST_F(MemoryPressureTest, TestPressureUpAndDown) {
   // At least one call should have happened.
   int calls1 = test_memory_pressure_observer()->number_of_calls();
   EXPECT_TRUE(calls1);
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_MODERATE,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_MODERATE,
             test_memory_pressure_observer()->pressure());
 
   // Check to the next level.
@@ -199,7 +200,7 @@ TEST_F(MemoryPressureTest, TestPressureUpAndDown) {
   ASSERT_TRUE(WaitForTimer());
   int calls2 = test_memory_pressure_observer()->number_of_calls();
   EXPECT_LT(calls1, calls2);
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_HIGH,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_HIGH,
             test_memory_pressure_observer()->pressure());
 
   // Check to no pressure again.
@@ -207,13 +208,13 @@ TEST_F(MemoryPressureTest, TestPressureUpAndDown) {
   ASSERT_TRUE(WaitForTimer());
   int calls3 = test_memory_pressure_observer()->number_of_calls();
   EXPECT_LT(calls2, calls3);
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_LOW,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_LOW,
             test_memory_pressure_observer()->pressure());
 
   // Even if the value does not change, we should not get any more calls.
   ASSERT_TRUE(WaitForTimer());
   EXPECT_EQ(calls3, test_memory_pressure_observer()->number_of_calls());
-  EXPECT_EQ(MemoryPressureObserver::MEMORY_PRESSURE_LOW,
+  EXPECT_EQ(ResourceManager::MEMORY_PRESSURE_LOW,
             test_memory_pressure_observer()->pressure());
 }
 

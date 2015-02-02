@@ -41,11 +41,14 @@ class DevToolsNetworkControllerHelper;
 // net::ERR_INTERNET_DISCONNECTED result value.
 class DevToolsNetworkTransaction : public net::HttpTransaction {
  public:
+  static const char kDevToolsRequestInitiator[];
+  static const char kDevToolsEmulateNetworkConditionsClientId[];
+
   DevToolsNetworkTransaction(
       DevToolsNetworkController* controller,
       scoped_ptr<net::HttpTransaction> network_transaction);
 
-  virtual ~DevToolsNetworkTransaction();
+  ~DevToolsNetworkTransaction() override;
 
   const net::HttpRequestInfo* request() const { return request_; }
 
@@ -72,44 +75,37 @@ class DevToolsNetworkTransaction : public net::HttpTransaction {
   void FireThrottledCallback();
 
   // HttpTransaction methods:
-  virtual int Start(
-      const net::HttpRequestInfo* request,
-      const net::CompletionCallback& callback,
-      const net::BoundNetLog& net_log) OVERRIDE;
-  virtual int RestartIgnoringLastError(
-      const net::CompletionCallback& callback) OVERRIDE;
-  virtual int RestartWithCertificate(
-      net::X509Certificate* client_cert,
-      const net::CompletionCallback& callback) OVERRIDE;
-  virtual int RestartWithAuth(
-      const net::AuthCredentials& credentials,
-      const net::CompletionCallback& callback) OVERRIDE;
-  virtual bool IsReadyToRestartForAuth() OVERRIDE;
+  int Start(const net::HttpRequestInfo* request,
+            const net::CompletionCallback& callback,
+            const net::BoundNetLog& net_log) override;
+  int RestartIgnoringLastError(
+      const net::CompletionCallback& callback) override;
+  int RestartWithCertificate(net::X509Certificate* client_cert,
+                             const net::CompletionCallback& callback) override;
+  int RestartWithAuth(const net::AuthCredentials& credentials,
+                      const net::CompletionCallback& callback) override;
+  bool IsReadyToRestartForAuth() override;
 
-  virtual int Read(
-      net::IOBuffer* buf,
-      int buf_len,
-      const net::CompletionCallback& callback) OVERRIDE;
-  virtual void StopCaching() OVERRIDE;
-  virtual bool GetFullRequestHeaders(
-      net::HttpRequestHeaders* headers) const OVERRIDE;
-  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
-  virtual void DoneReading() OVERRIDE;
-  virtual const net::HttpResponseInfo* GetResponseInfo() const OVERRIDE;
-  virtual net::LoadState GetLoadState() const OVERRIDE;
-  virtual net::UploadProgress GetUploadProgress() const OVERRIDE;
-  virtual void SetQuicServerInfo(
-      net::QuicServerInfo* quic_server_info) OVERRIDE;
-  virtual bool GetLoadTimingInfo(
-      net::LoadTimingInfo* load_timing_info) const OVERRIDE;
-  virtual void SetPriority(net::RequestPriority priority) OVERRIDE;
-  virtual void SetWebSocketHandshakeStreamCreateHelper(
-      net::WebSocketHandshakeStreamBase::CreateHelper* create_helper) OVERRIDE;
-  virtual void SetBeforeNetworkStartCallback(
-      const BeforeNetworkStartCallback& callback) OVERRIDE;
-  virtual void SetBeforeProxyHeadersSentCallback(
-      const BeforeProxyHeadersSentCallback& callback) OVERRIDE;
-  virtual int ResumeNetworkStart() OVERRIDE;
+  int Read(net::IOBuffer* buf,
+           int buf_len,
+           const net::CompletionCallback& callback) override;
+  void StopCaching() override;
+  bool GetFullRequestHeaders(net::HttpRequestHeaders* headers) const override;
+  int64 GetTotalReceivedBytes() const override;
+  void DoneReading() override;
+  const net::HttpResponseInfo* GetResponseInfo() const override;
+  net::LoadState GetLoadState() const override;
+  net::UploadProgress GetUploadProgress() const override;
+  void SetQuicServerInfo(net::QuicServerInfo* quic_server_info) override;
+  bool GetLoadTimingInfo(net::LoadTimingInfo* load_timing_info) const override;
+  void SetPriority(net::RequestPriority priority) override;
+  void SetWebSocketHandshakeStreamCreateHelper(
+      net::WebSocketHandshakeStreamBase::CreateHelper* create_helper) override;
+  void SetBeforeNetworkStartCallback(
+      const BeforeNetworkStartCallback& callback) override;
+  void SetBeforeProxyHeadersSentCallback(
+      const BeforeProxyHeadersSentCallback& callback) override;
+  int ResumeNetworkStart() override;
 
  protected:
   friend class test::DevToolsNetworkControllerHelper;

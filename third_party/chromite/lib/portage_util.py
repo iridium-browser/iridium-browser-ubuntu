@@ -4,6 +4,8 @@
 
 """Routines and classes for working with Portage overlays and ebuilds."""
 
+from __future__ import print_function
+
 import collections
 import filecmp
 import fileinput
@@ -22,12 +24,6 @@ from chromite.lib import git
 from chromite.lib import osutils
 
 _PRIVATE_PREFIX = '%(buildroot)s/src/private-overlays'
-_GLOBAL_OVERLAYS = [
-  '%s/chromeos-overlay' % _PRIVATE_PREFIX,
-  '%s/chromeos-*-overlay' % _PRIVATE_PREFIX,
-  '%(buildroot)s/src/third_party/chromiumos-overlay',
-  '%(buildroot)s/src/third_party/portage-stable',
-]
 
 # Define datastructures for holding PV and CPV objects.
 _PV_FIELDS = ['pv', 'package', 'version', 'version_no_rev', 'rev']
@@ -47,6 +43,10 @@ _pvr_re = re.compile(r'^(?P<pv>%s-%s)$' % (_pkg, _ver), re.VERBOSE)
 _blank_or_eapi_re = re.compile(r'^\s*(?:#|EAPI=|$)')
 
 
+class MissingOverlayException(Exception):
+  """This exception indicates that a needed overlay is missing."""
+
+
 def _ListOverlays(board=None, buildroot=constants.SOURCE_ROOT):
   """Return the list of overlays to use for a given buildbot.
 
@@ -57,23 +57,86 @@ def _ListOverlays(board=None, buildroot=constants.SOURCE_ROOT):
     board: Board to look at.
     buildroot: Source root to find overlays.
   """
-  overlays, patterns = [], []
+  # Load all the known overlays so we can extract the details below.
+  paths = (
+      'src/overlays',
+      'src/private-overlays',
+      'src/third_party',
+  )
+  overlays = {}
+  for path in paths:
+    path = os.path.join(buildroot, path, '*')
+    for overlay in glob.glob(path):
+      name = GetOverlayName(overlay)
+      if name is None:
+        continue
+
+      # Sanity check the sets of repos.
+      if name in overlays:
+        raise RuntimeError('multiple repos with same name "%s": %s and %s' % (
+                           name, overlays[name]['path'], overlay))
+
+      try:
+        masters = cros_build_lib.LoadKeyValueFile(
+            '%s/metadata/layout.conf' % overlay)['masters'].split()
+      except (KeyError, IOError):
+        masters = []
+      overlays[name] = {
+          'masters': masters,
+          'path': overlay,
+      }
+
+  # Easy enough -- dump them all.
   if board is None:
-    patterns += ['overlay*']
-  else:
-    board_no_variant, _, variant = board.partition('_')
-    patterns += ['overlay-%s' % board_no_variant]
-    if variant:
-      patterns += ['overlay-variant-%s' % board.replace('_', '-')]
+    return [x['path'] for x in overlays.values()]
 
-  for d in _GLOBAL_OVERLAYS:
-    overlays += glob.glob(d % dict(buildroot=buildroot))
+  # Build up the list of repos we need.
+  ret = []
+  seen = set()
+  def _AddRepo(repo, optional=False):
+    """Recursively add |repo|'s masters from |overlays| to |ret|.
 
-  for p in patterns:
-    overlays += glob.glob('%s/src/overlays/%s' % (buildroot, p))
-    overlays += glob.glob('%s/src/private-overlays/%s-private' % (buildroot, p))
+    Args:
+      repo: The repo name to look up.
+      optional: If |repo| does not exist, return False, else
+        throw a KeyError exception.
 
-  return overlays
+    Returns:
+      True if |repo| was found.
+    """
+    if optional and repo not in overlays:
+      return False
+    for master in overlays[repo]['masters'] + [repo]:
+      if master not in seen:
+        seen.add(master)
+        _AddRepo(master)
+        ret.append(overlays[master]['path'])
+    return True
+
+  # Legacy: load the global configs.  In the future, this should be found
+  # via the overlay's masters.
+  _AddRepo('chromeos', optional=True)
+  path = os.path.join(buildroot, 'src', 'private-overlays',
+                      'chromeos-*-overlay')
+  ret += glob.glob(path)
+  _AddRepo('chromiumos')
+  _AddRepo('portage-stable')
+
+  # Locate the board repo by name.
+  board_no_variant = board.split('_', 1)[0]
+  search_boards = [board_no_variant]
+  if board != board_no_variant:
+    search_boards.append(board)
+  for b in search_boards:
+    # Load the public & private versions if available.
+    found_pub = _AddRepo(b, optional=True)
+    found_priv = _AddRepo('%s-private' % b, optional=True)
+
+    # If neither public nor private board was found, die.
+    if not found_pub and not found_priv:
+      raise MissingOverlayException('board overlay not found: %s' % b)
+
+  return ret
 
 
 def FindOverlays(overlay_type, board=None, buildroot=constants.SOURCE_ROOT):
@@ -127,10 +190,6 @@ def ReadOverlayFile(filename, overlay_type='both', board=None,
     except IOError as e:
       if e.errno != os.errno.ENOENT:
         raise
-
-
-class MissingOverlayException(Exception):
-  """This exception indicates that a needed overlay is missing."""
 
 
 def FindPrimaryOverlay(overlay_type, board, buildroot=constants.SOURCE_ROOT):

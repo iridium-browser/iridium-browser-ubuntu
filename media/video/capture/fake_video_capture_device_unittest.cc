@@ -29,7 +29,7 @@ class MockClient : public media::VideoCaptureDevice::Client {
   explicit MockClient(base::Callback<void(const VideoCaptureFormat&)> frame_cb)
       : main_thread_(base::MessageLoopProxy::current()), frame_cb_(frame_cb) {}
 
-  virtual void OnError(const std::string& error_message) OVERRIDE {
+  virtual void OnError(const std::string& error_message) override {
     OnErr();
   }
 
@@ -37,7 +37,7 @@ class MockClient : public media::VideoCaptureDevice::Client {
                                       int length,
                                       const VideoCaptureFormat& format,
                                       int rotation,
-                                      base::TimeTicks timestamp) OVERRIDE {
+                                      base::TimeTicks timestamp) override {
     main_thread_->PostTask(FROM_HERE, base::Bind(frame_cb_, format));
   }
 
@@ -45,7 +45,7 @@ class MockClient : public media::VideoCaptureDevice::Client {
       const scoped_refptr<Buffer>& buffer,
       const media::VideoCaptureFormat& buffer_format,
       const scoped_refptr<media::VideoFrame>& frame,
-      base::TimeTicks timestamp) OVERRIDE {
+      base::TimeTicks timestamp) override {
     NOTREACHED();
   }
 
@@ -83,8 +83,7 @@ class FakeVideoCaptureDeviceTest : public testing::Test {
     device_enumeration_listener_ = new DeviceEnumerationListener();
   }
 
-  virtual void SetUp() {
-  }
+  void SetUp() override {}
 
   void OnFrameCaptured(const VideoCaptureFormat& format) {
     last_format_ = format;
@@ -134,7 +133,7 @@ TEST_F(FakeVideoCaptureDeviceTest, Capture) {
   capture_params.requested_format.frame_size.SetSize(640, 480);
   capture_params.requested_format.frame_rate = 30;
   capture_params.requested_format.pixel_format = PIXEL_FORMAT_I420;
-  device->AllocateAndStart(capture_params, client_.PassAs<Client>());
+  device->AllocateAndStart(capture_params, client_.Pass());
   WaitForCapturedFrame();
   EXPECT_EQ(last_format().frame_size.width(), 640);
   EXPECT_EQ(last_format().frame_size.height(), 480);
@@ -196,7 +195,7 @@ TEST_F(FakeVideoCaptureDeviceTest, DISABLED_CaptureVariableResolution) {
       .Times(0);
   int action_count = 200;
 
-  device->AllocateAndStart(capture_params, client_.PassAs<Client>());
+  device->AllocateAndStart(capture_params, client_.Pass());
 
   // We set TimeWait to 200 action timeouts and this should be enough for at
   // least action_count/kFakeCaptureCapabilityChangePeriod calls.

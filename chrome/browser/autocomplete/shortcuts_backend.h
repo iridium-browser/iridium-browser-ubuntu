@@ -18,7 +18,7 @@
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "chrome/browser/history/shortcuts_database.h"
-#include "components/keyed_service/content/refcounted_browser_context_keyed_service.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -32,7 +32,7 @@ class ShortcutsDatabase;
 
 // This class manages the shortcut provider backend - access to database on the
 // db thread, etc.
-class ShortcutsBackend : public RefcountedBrowserContextKeyedService,
+class ShortcutsBackend : public RefcountedKeyedService,
                          public content::NotificationObserver {
  public:
   typedef std::multimap<base::string16,
@@ -91,18 +91,18 @@ class ShortcutsBackend : public RefcountedBrowserContextKeyedService,
 
   typedef std::map<std::string, ShortcutMap::iterator> GuidMap;
 
-  virtual ~ShortcutsBackend();
+  ~ShortcutsBackend() override;
 
   static history::ShortcutsDatabase::Shortcut::MatchCore MatchToMatchCore(
       const AutocompleteMatch& match, Profile* profile);
 
-  // RefcountedBrowserContextKeyedService:
-  virtual void ShutdownOnUIThread() OVERRIDE;
+  // RefcountedKeyedService:
+  void ShutdownOnUIThread() override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Internal initialization of the back-end. Posted by Init() to the DB thread.
   // On completion posts InitCompleted() back to UI thread.

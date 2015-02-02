@@ -2,10 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-def CustomizeBrowserOptionsForFastPath(options):
-  """Enables flags needed for bleeding edge rendering fast paths."""
-  options.AppendExtraBrowserArgs('--enable-bleeding-edge-rendering-fast-paths')
-
 def CustomizeBrowserOptionsForSoftwareRasterization(options):
   """Enables flags needed for forced software rasterization."""
   options.AppendExtraBrowserArgs('--disable-gpu-rasterization')
@@ -15,3 +11,7 @@ def CustomizeBrowserOptionsForGpuRasterization(options):
   options.AppendExtraBrowserArgs('--enable-threaded-compositing')
   options.AppendExtraBrowserArgs('--enable-impl-side-painting')
   options.AppendExtraBrowserArgs('--force-gpu-rasterization')
+
+def CustomizeBrowserOptionsForSyncScrolling(options):
+  """Enables flags needed for synchronous (main thread) scrolling."""
+  options.AppendExtraBrowserArgs('--disable-threaded-scrolling')

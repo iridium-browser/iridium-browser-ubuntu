@@ -16,21 +16,19 @@ found in the LICENSE file.
 /**
  * @fileoverview Helper functions for use in tracing tests.
  */
-tvcm.exportTo('tracing.test_utils', function() {
+tv.exportTo('tracing.test_utils', function() {
   function newAsyncSlice(start, duration, startThread, endThread) {
     return newAsyncSliceNamed('a', start, duration, startThread, endThread);
   }
 
   function newAsyncSliceNamed(name, start, duration, startThread, endThread) {
-    var s = new tracing.trace_model.AsyncSlice('', name, 0, start);
+    var asyncSliceConstructor =
+        tracing.trace_model.AsyncSlice.getConstructor('', name);
+
+    var s = new asyncSliceConstructor('', name, 0, start);
     s.duration = duration;
     s.startThread = startThread;
     s.endThread = endThread;
-    var subSlice = new tracing.trace_model.AsyncSlice('', name, 0, start);
-    subSlice.duration = duration;
-    subSlice.startThread = startThread;
-    subSlice.endThread = endThread;
-    s.subSlices = [subSlice];
     return s;
   }
 
@@ -74,7 +72,7 @@ tvcm.exportTo('tracing.test_utils', function() {
   function newStackTrace(category, titles) {
     var frame = undefined;
     for (var i = 0; i < titles.length; i++)
-      frame = new tracing.trace_model.StackFrame(frame, tvcm.GUID.allocate(),
+      frame = new tracing.trace_model.StackFrame(frame, tv.GUID.allocate(),
                                                  category, titles[i], 7);
     return frame;
   }

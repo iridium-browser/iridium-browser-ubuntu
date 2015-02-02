@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * @param {WebView} webView Web View tag.
  * @param {?string} ext File extension.
@@ -14,6 +12,7 @@
  * @param {string} url Share Url for an entry.
  * @param {string} target Target (scheme + host + port) of the widget.
  * @constructor
+ * @extends {cr.EventTarget}
  */
 function CWSContainerClient(
     webView, ext, mime, searchQuery, width, height, url, target) {
@@ -205,7 +204,7 @@ CWSContainerClient.prototype.postInitializeMessage_ = function() {
  * Send a message to the widget. This method shouldn't be called directly,
  * should from more specified posting function (eg. postXyzMessage_()).
  *
- * @param {object} message Message object to be posted.
+ * @param {Object} message Message object to be posted.
  * @private
  */
 CWSContainerClient.prototype.postMessage_ = function(message) {

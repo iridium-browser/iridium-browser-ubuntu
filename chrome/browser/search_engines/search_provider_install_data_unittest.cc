@@ -17,7 +17,6 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url.h"
-#include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -120,8 +119,8 @@ class SearchProviderInstallDataTest : public testing::Test {
  public:
   SearchProviderInstallDataTest();
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   TemplateURL* AddNewTemplateURL(const std::string& url,
                                  const base::string16& keyword);
@@ -154,10 +153,6 @@ SearchProviderInstallDataTest::SearchProviderInstallDataTest()
 
 void SearchProviderInstallDataTest::SetUp() {
   testing::Test::SetUp();
-#if defined(OS_ANDROID)
-  TemplateURLPrepopulateData::InitCountryCode(
-      std::string() /* unknown country code */);
-#endif
   process_.reset(new content::MockRenderProcessHost(util_.profile()));
   install_data_ = new SearchProviderInstallData(
       util_.model(), SearchTermsData().GoogleBaseURLValue(), NULL,

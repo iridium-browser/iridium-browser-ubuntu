@@ -63,55 +63,56 @@ class WebContentsViewMac : public WebContentsView,
   // because that's what was easiest when they were split.
   WebContentsViewMac(WebContentsImpl* web_contents,
                      WebContentsViewDelegate* delegate);
-  virtual ~WebContentsViewMac();
+  ~WebContentsViewMac() override;
 
   // WebContentsView implementation --------------------------------------------
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
-  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
-  virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
-  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void SetInitialFocus() OVERRIDE;
-  virtual void StoreFocus() OVERRIDE;
-  virtual void RestoreFocus() OVERRIDE;
-  virtual DropData* GetDropData() const OVERRIDE;
-  virtual gfx::Rect GetViewBounds() const OVERRIDE;
-  virtual void SetAllowOtherViews(bool allow) OVERRIDE;
-  virtual bool GetAllowOtherViews() const OVERRIDE;
-  virtual void CreateView(
-      const gfx::Size& initial_size, gfx::NativeView context) OVERRIDE;
-  virtual RenderWidgetHostViewBase* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual RenderWidgetHostViewBase* CreateViewForPopupWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
-  virtual void SetPageTitle(const base::string16& title) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void RenderViewSwappedIn(RenderViewHost* host) OVERRIDE;
-  virtual void SetOverscrollControllerEnabled(bool enabled) OVERRIDE;
-  virtual bool IsEventTracking() const OVERRIDE;
-  virtual void CloseTabAfterEventTracking() OVERRIDE;
+  gfx::NativeView GetNativeView() const override;
+  gfx::NativeView GetContentNativeView() const override;
+  gfx::NativeWindow GetTopLevelNativeWindow() const override;
+  void GetContainerBounds(gfx::Rect* out) const override;
+  void SizeContents(const gfx::Size& size) override;
+  void Focus() override;
+  void SetInitialFocus() override;
+  void StoreFocus() override;
+  void RestoreFocus() override;
+  DropData* GetDropData() const override;
+  gfx::Rect GetViewBounds() const override;
+  void SetAllowOtherViews(bool allow) override;
+  bool GetAllowOtherViews() const override;
+  void CreateView(const gfx::Size& initial_size,
+                  gfx::NativeView context) override;
+  RenderWidgetHostViewBase* CreateViewForWidget(
+      RenderWidgetHost* render_widget_host,
+      bool is_guest_view_hack) override;
+  RenderWidgetHostViewBase* CreateViewForPopupWidget(
+      RenderWidgetHost* render_widget_host) override;
+  void SetPageTitle(const base::string16& title) override;
+  void RenderViewCreated(RenderViewHost* host) override;
+  void RenderViewSwappedIn(RenderViewHost* host) override;
+  void SetOverscrollControllerEnabled(bool enabled) override;
+  bool IsEventTracking() const override;
+  void CloseTabAfterEventTracking() override;
 
   // Backend implementation of RenderViewHostDelegateView.
-  virtual void ShowContextMenu(RenderFrameHost* render_frame_host,
-                               const ContextMenuParams& params) OVERRIDE;
-  virtual void ShowPopupMenu(RenderFrameHost* render_frame_host,
-                             const gfx::Rect& bounds,
-                             int item_height,
-                             double item_font_size,
-                             int selected_item,
-                             const std::vector<MenuItem>& items,
-                             bool right_aligned,
-                             bool allow_multiple_selection) OVERRIDE;
-  virtual void HidePopupMenu() OVERRIDE;
-  virtual void StartDragging(const DropData& drop_data,
-                             blink::WebDragOperationsMask allowed_operations,
-                             const gfx::ImageSkia& image,
-                             const gfx::Vector2d& image_offset,
-                             const DragEventSourceInfo& event_info) OVERRIDE;
-  virtual void UpdateDragCursor(blink::WebDragOperation operation) OVERRIDE;
-  virtual void GotFocus() OVERRIDE;
-  virtual void TakeFocus(bool reverse) OVERRIDE;
+  void ShowContextMenu(RenderFrameHost* render_frame_host,
+                       const ContextMenuParams& params) override;
+  void ShowPopupMenu(RenderFrameHost* render_frame_host,
+                     const gfx::Rect& bounds,
+                     int item_height,
+                     double item_font_size,
+                     int selected_item,
+                     const std::vector<MenuItem>& items,
+                     bool right_aligned,
+                     bool allow_multiple_selection) override;
+  void HidePopupMenu() override;
+  void StartDragging(const DropData& drop_data,
+                     blink::WebDragOperationsMask allowed_operations,
+                     const gfx::ImageSkia& image,
+                     const gfx::Vector2d& image_offset,
+                     const DragEventSourceInfo& event_info) override;
+  void UpdateDragCursor(blink::WebDragOperation operation) override;
+  void GotFocus() override;
+  void TakeFocus(bool reverse) override;
 
   // A helper method for closing the tab in the
   // CloseTabAfterEventTracking() implementation.
@@ -121,6 +122,11 @@ class WebContentsViewMac : public WebContentsView,
   WebContentsViewDelegate* delegate() { return delegate_.get(); }
 
  private:
+  // Returns the fullscreen view, if one exists; otherwise, returns the content
+  // native view. This ensures that the view currently attached to a NSWindow is
+  // being used to query or set first responder state.
+  gfx::NativeView GetNativeViewForFocus() const;
+
   // The WebContentsImpl whose contents we display.
   WebContentsImpl* web_contents_;
 

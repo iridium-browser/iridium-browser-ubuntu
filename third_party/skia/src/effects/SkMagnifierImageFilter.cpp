@@ -47,8 +47,6 @@ public:
     static const char* Name() { return "Magnifier"; }
 
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     float x_offset() const { return fXOffset; }
     float y_offset() const { return fYOffset; }
     float x_inv_zoom() const { return fXInvZoom; }
@@ -74,7 +72,9 @@ private:
         , fXInvInset(xInvInset)
         , fYInvInset(yInvInset) {}
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
 
@@ -95,7 +95,7 @@ class GrGLMagnifierEffect : public GrGLFragmentProcessor {
 public:
     GrGLMagnifierEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -118,7 +118,7 @@ GrGLMagnifierEffect::GrGLMagnifierEffect(const GrBackendProcessorFactory& factor
     : INHERITED(factory) {
 }
 
-void GrGLMagnifierEffect::emitCode(GrGLProgramBuilder* builder,
+void GrGLMagnifierEffect::emitCode(GrGLFPBuilder* builder,
                                    const GrFragmentProcessor&,
                                    const GrProcessorKey& key,
                                    const char* outputColor,
@@ -138,7 +138,7 @@ void GrGLMagnifierEffect::emitCode(GrGLProgramBuilder* builder,
         GrGLProgramBuilder::kVertex_Visibility,
         kVec2f_GrSLType, "InvInset");
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     SkString coords2D = fsBuilder->ensureFSCoords2D(coords, 0);
     fsBuilder->codeAppendf("\t\tvec2 coord = %s;\n", coords2D.c_str());
     fsBuilder->codeAppendf("\t\tvec2 zoom_coord = %s + %s * %s;\n",
@@ -168,7 +168,7 @@ void GrGLMagnifierEffect::emitCode(GrGLProgramBuilder* builder,
 
     fsBuilder->codeAppendf("\t\t%s = output_color;", outputColor);
     SkString modulate;
-    GrGLSLMulVarBy4f(&modulate, 2, outputColor, inputColor);
+    GrGLSLMulVarBy4f(&modulate, outputColor, inputColor);
     fsBuilder->codeAppend(modulate.c_str());
 }
 
@@ -216,10 +216,9 @@ const GrBackendFragmentProcessorFactory& GrMagnifierEffect::getFactory() const {
     return GrTBackendFragmentProcessorFactory<GrMagnifierEffect>::getInstance();
 }
 
-bool GrMagnifierEffect::onIsEqual(const GrProcessor& sBase) const {
+bool GrMagnifierEffect::onIsEqual(const GrFragmentProcessor& sBase) const {
     const GrMagnifierEffect& s = sBase.cast<GrMagnifierEffect>();
-    return (this->texture(0) == s.texture(0) &&
-            this->fXOffset == s.fXOffset &&
+    return (this->fXOffset == s.fXOffset &&
             this->fYOffset == s.fYOffset &&
             this->fXInvZoom == s.fXInvZoom &&
             this->fYInvZoom == s.fYInvZoom &&
@@ -227,8 +226,8 @@ bool GrMagnifierEffect::onIsEqual(const GrProcessor& sBase) const {
             this->fYInvInset == s.fYInvInset);
 }
 
-void GrMagnifierEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    this->updateConstantColorComponentsForModulation(color, validFlags);
+void GrMagnifierEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    this->updateInvariantOutputForModulation(inout);
 }
 
 #endif

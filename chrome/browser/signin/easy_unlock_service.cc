@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/metrics/field_trial.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
@@ -27,6 +26,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/proximity_auth/switches.h"
 #include "components/user_manager/user.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
@@ -81,19 +81,8 @@ EasyUnlockService* EasyUnlockService::GetForUser(
 
 // static
 bool EasyUnlockService::IsSignInEnabled() {
-#if defined(OS_CHROMEOS)
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("EasySignIn");
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          chromeos::switches::kDisableEasySignin)) {
-    return false;
-  }
-
-  return group_name == "Enable";
-#else
-  return false;
-#endif
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+      proximity_auth::switches::kDisableEasySignin);
 }
 
 class EasyUnlockService::BluetoothDetector
@@ -104,7 +93,7 @@ class EasyUnlockService::BluetoothDetector
         weak_ptr_factory_(this) {
   }
 
-  virtual ~BluetoothDetector() {
+  ~BluetoothDetector() override {
     if (adapter_.get())
       adapter_->RemoveObserver(this);
   }
@@ -121,8 +110,8 @@ class EasyUnlockService::BluetoothDetector
   bool IsPresent() const { return adapter_.get() && adapter_->IsPresent(); }
 
   // device::BluetoothAdapter::Observer:
-  virtual void AdapterPresentChanged(device::BluetoothAdapter* adapter,
-                                     bool present) OVERRIDE {
+  void AdapterPresentChanged(device::BluetoothAdapter* adapter,
+                             bool present) override {
     service_->OnBluetoothAdapterPresentChanged();
   }
 
@@ -162,11 +151,11 @@ class EasyUnlockService::PowerMonitor
 
  private:
   // chromeos::PowerManagerClient::Observer:
-  virtual void SuspendImminent() OVERRIDE {
+  virtual void SuspendImminent() override {
     service_->PrepareForSuspend();
   }
 
-  virtual void SuspendDone(const base::TimeDelta& sleep_duration) OVERRIDE {
+  virtual void SuspendDone(const base::TimeDelta& sleep_duration) override {
     waking_up_ = true;
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
@@ -208,6 +197,10 @@ EasyUnlockService::~EasyUnlockService() {
 void EasyUnlockService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
+      prefs::kEasyUnlockAllowed,
+      true,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(
       prefs::kEasyUnlockEnabled,
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -216,9 +209,9 @@ void EasyUnlockService::RegisterProfilePrefs(
       new base::DictionaryValue(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kEasyUnlockAllowed,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+      prefs::kEasyUnlockProximityRequired,
+      false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }
 
 // static
@@ -241,6 +234,11 @@ void EasyUnlockService::ResetLocalStateForUser(const std::string& user_id) {
 bool EasyUnlockService::IsAllowed() {
   if (shut_down_)
     return false;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kDisableEasyUnlock)) {
+    return false;
+  }
 
   if (!IsAllowedInternal())
     return false;
@@ -335,8 +333,13 @@ bool EasyUnlockService::UpdateScreenlockState(
 
   handler->ChangeState(state);
 
-  if (state != EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED)
+  if (state != EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED &&
+      auth_attempt_.get()) {
     auth_attempt_.reset();
+
+    if (!handler->InStateValidOnRemoteAuthFailure())
+      HandleAuthFailure(GetUserEmail());
+  }
   return true;
 }
 
@@ -351,18 +354,41 @@ void EasyUnlockService::AttemptAuth(const std::string& user_id) {
 }
 
 void EasyUnlockService::FinalizeUnlock(bool success) {
-  if (auth_attempt_)
-    auth_attempt_->FinalizeUnlock(GetUserEmail(), success);
+  if (!auth_attempt_.get())
+    return;
+
+  auth_attempt_->FinalizeUnlock(GetUserEmail(), success);
   auth_attempt_.reset();
+
+  // Make sure that the lock screen is updated on failure.
+  if (!success)
+    HandleAuthFailure(GetUserEmail());
 }
 
 void EasyUnlockService::FinalizeSignin(const std::string& key) {
-  if (!auth_attempt_)
+  if (!auth_attempt_.get())
     return;
   std::string wrapped_secret = GetWrappedSecret();
   if (!wrapped_secret.empty())
     auth_attempt_->FinalizeSignin(GetUserEmail(), wrapped_secret, key);
   auth_attempt_.reset();
+
+  // Processing empty key is equivalent to auth cancellation. In this case the
+  // signin request will not actually be processed by login stack, so the lock
+  // screen state should be set from here.
+  if (key.empty())
+    HandleAuthFailure(GetUserEmail());
+}
+
+void EasyUnlockService::HandleAuthFailure(const std::string& user_id) {
+  if (user_id != GetUserEmail())
+    return;
+
+  if (!screenlock_state_handler_.get())
+    return;
+
+  screenlock_state_handler_->SetHardlockState(
+      EasyUnlockScreenlockStateHandler::LOGIN_FAILED);
 }
 
 void EasyUnlockService::CheckCryptohomeKeysAndMaybeHardlock() {

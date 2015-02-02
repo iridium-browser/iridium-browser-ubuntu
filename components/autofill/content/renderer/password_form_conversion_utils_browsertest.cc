@@ -105,7 +105,7 @@ class PasswordFormBuilder {
 class PasswordFormConversionUtilsTest : public content::RenderViewTest {
  public:
   PasswordFormConversionUtilsTest() : content::RenderViewTest() {}
-  virtual ~PasswordFormConversionUtilsTest() {}
+  ~PasswordFormConversionUtilsTest() override {}
 
  protected:
   // Loads the given |html|, retrieves the sole WebFormElement from it, and then
@@ -165,7 +165,6 @@ TEST_F(PasswordFormConversionUtilsTest, BasicFormAttributes) {
   EXPECT_FALSE(password_form->preferred);
   EXPECT_FALSE(password_form->blacklisted_by_user);
   EXPECT_EQ(PasswordForm::TYPE_MANUAL, password_form->type);
-  EXPECT_FALSE(password_form->use_additional_authentication);
 }
 
 TEST_F(PasswordFormConversionUtilsTest, DisabledFieldsAreIgnored) {
@@ -220,7 +219,7 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingUsernameFields) {
       {{"USERNAME", NULL, "uSeRNaMe"}, "username1", "John", "Smith"},
       {{"uSeRNaMe", NULL, "USERNAME"}, "username1", "John", "Smith"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     for (size_t nonempty_username_fields = 0; nonempty_username_fields < 2;
          ++nonempty_username_fields) {
       SCOPED_TRACE(testing::Message()
@@ -294,7 +293,7 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingTwoPasswordFields) {
       {{"", "beta"}, "password1", "", "password2", "beta"},
       {{"alpha", "beta"}, "password1", "alpha", "password2", "beta"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);
@@ -351,7 +350,7 @@ TEST_F(PasswordFormConversionUtilsTest, IdentifyingThreePasswordFields) {
       // Note: In all other cases, we give up and consider the form invalid.
       // This is tested in InvalidFormDueToConfusingPasswordFields.
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);
@@ -483,7 +482,7 @@ TEST_F(PasswordFormConversionUtilsTest,
       {{NULL, "nEw-PaSsWoRd", NULL},
        "", "", "password2", "beta"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);
@@ -557,7 +556,7 @@ TEST_F(PasswordFormConversionUtilsTest,
       {"alpha", "alpha", "alpha"},
       {"alpha", "beta", "alpha"}};
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     SCOPED_TRACE(testing::Message() << "Iteration " << i);
 
     PasswordFormBuilder builder(kTestFormActionURL);

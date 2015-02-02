@@ -2,7 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
+/**
+ * @typedef {{
+ *   cache: (boolean|undefined),
+ *   priority: (number|undefined),
+ *   taskId: number,
+ *   timestamp: (number|undefined),
+ *   url: string
+ * }}
+ */
+var LoadImageRequest;
 
 /**
  * Creates and starts downloading and then resizing of the image. Finally,
@@ -10,8 +19,8 @@
  *
  * @param {string} id Request ID.
  * @param {Cache} cache Cache object.
- * @param {Object} request Request message as a hash array.
- * @param {function} callback Callback used to send the response.
+ * @param {LoadImageRequest} request Request message as a hash array.
+ * @param {function(Object)} callback Callback used to send the response.
  * @constructor
  */
 function Request(id, cache, request, callback) {
@@ -28,13 +37,13 @@ function Request(id, cache, request, callback) {
   this.cache_ = cache;
 
   /**
-   * @type {Object}
+   * @type {LoadImageRequest}
    * @private
    */
   this.request_ = request;
 
   /**
-   * @type {function}
+   * @type {function(Object)}
    * @private
    */
   this.sendResponse_ = callback;
@@ -48,7 +57,7 @@ function Request(id, cache, request, callback) {
 
   /**
    * MIME type of the fetched image.
-   * @type {string}
+   * @type {?string}
    * @private
    */
   this.contentType_ = null;
@@ -65,17 +74,19 @@ function Request(id, cache, request, callback) {
    * @type {HTMLCanvasElement}
    * @private
    */
-  this.canvas_ = document.createElement('canvas');
+  this.canvas_ =
+      /** @type {HTMLCanvasElement} */ (document.createElement('canvas'));
 
   /**
    * @type {CanvasRenderingContext2D}
    * @private
    */
-  this.context_ = this.canvas_.getContext('2d');
+  this.context_ =
+      /** @type {CanvasRenderingContext2D} */ (this.canvas_.getContext('2d'));
 
   /**
    * Callback to be called once downloading is finished.
-   * @type {function()}
+   * @type {?function()}
    * @private
    */
   this.downloadCallback_ = null;
@@ -130,7 +141,7 @@ Request.prototype.downloadAndProcess = function(callback) {
 /**
  * Fetches the image from the persistent cache.
  *
- * @param {function()} onSuccess Success callback.
+ * @param {function(string)} onSuccess Success callback.
  * @param {function()} onFailure Failure callback.
  * @private
  */
@@ -183,8 +194,14 @@ Request.prototype.saveToCache_ = function(data) {
  * @private
  */
 Request.prototype.downloadOriginal_ = function(onSuccess, onFailure) {
-  this.image_.onload = onSuccess;
-  this.image_.onerror = onFailure;
+  this.image_.onload = function() {
+    URL.revokeObjectURL(this.image_.src);
+    onSuccess();
+  }.bind(this);
+  this.image_.onerror = function() {
+    URL.revokeObjectURL(this.image_.src);
+    onFailure();
+  }.bind(this);
 
   // Download data urls directly since they are not supported by XmlHttpRequest.
   var dataUrlMatches = this.request_.url.match(/^data:([^,;]*)[,;]/);
@@ -196,14 +213,7 @@ Request.prototype.downloadOriginal_ = function(onSuccess, onFailure) {
 
   // Fetch the image via authorized XHR and parse it.
   var parseImage = function(contentType, blob) {
-    var reader = new FileReader();
-    reader.onerror = onFailure;
-    reader.onload = function(e) {
-      this.image_.src = e.target.result;
-    }.bind(this);
-
-    // Load the data to the image as a data url.
-    reader.readAsDataURL(blob);
+    this.image_.src = URL.createObjectURL(blob);
   }.bind(this);
 
   // Request raw data via XHR.
@@ -233,7 +243,7 @@ AuthorizedXHR.prototype.abort = function() {
  * a refreshed OAuth2 token.
  *
  * @param {string} url URL to the resource to be fetched.
- * @param {function(string, Blob}) onSuccess Success callback with the content
+ * @param {function(string, Blob)} onSuccess Success callback with the content
  *     type and the fetched data.
  * @param {function()} onFailure Failure callback.
  */
@@ -241,14 +251,17 @@ AuthorizedXHR.prototype.load = function(url, onSuccess, onFailure) {
   this.aborted_ = false;
 
   // Do not call any callbacks when aborting.
-  var onMaybeSuccess = function(contentType, response) {
-    if (!this.aborted_)
-      onSuccess(contentType, response);
-  }.bind(this);
-  var onMaybeFailure = function(opt_code) {
-    if (!this.aborted_)
-      onFailure();
-  }.bind(this);
+  var onMaybeSuccess = /** @type {function(string, Blob)} */ (
+      function(contentType, response) {
+        if (!this.aborted_)
+          onSuccess(contentType, response);
+      }.bind(this));
+
+  var onMaybeFailure = /** @type {function(number=)} */ (
+      function(opt_code) {
+        if (!this.aborted_)
+          onFailure();
+      }.bind(this));
 
   // Fetches the access token and makes an authorized call. If refresh is true,
   // then forces refreshing the access token.
@@ -296,11 +309,11 @@ AuthorizedXHR.prototype.load = function(url, onSuccess, onFailure) {
  * @param {?string} token OAuth2 token to be injected to the request. Null for
  *     no token.
  * @param {string} url URL to the resource to be fetched.
- * @param {function(string, Blob}) onSuccess Success callback with the content
+ * @param {function(string, Blob)} onSuccess Success callback with the content
  *     type and the fetched data.
  * @param {function(number=)} onFailure Failure callback with the error code
  *     if available.
- * @return {AuthorizedXHR} XHR instance.
+ * @return {XMLHttpRequest} XHR instance.
  * @private
  */
 AuthorizedXHR.load_ = function(token, url, onSuccess, onFailure) {
@@ -315,7 +328,7 @@ AuthorizedXHR.load_ = function(token, url, onSuccess, onFailure) {
       return;
     }
     var contentType = xhr.getResponseHeader('Content-Type');
-    onSuccess(contentType, xhr.response);
+    onSuccess(contentType, /** @type {Blob} */ (xhr.response));
   }.bind(this);
 
   // Perform a xhr request.
@@ -378,11 +391,9 @@ Request.prototype.sendImageData_ = function(data) {
 /**
  * Handler, when contents are loaded into the image element. Performs resizing
  * and finalizes the request process.
- *
- * @param {function()} callback Completion callback.
  * @private
  */
-Request.prototype.onImageLoad_ = function(callback) {
+Request.prototype.onImageLoad_ = function() {
   // Perform processing if the url is not a data url, or if there are some
   // operations requested.
   if (!this.request_.url.match(/^data/) ||
@@ -401,11 +412,9 @@ Request.prototype.onImageLoad_ = function(callback) {
 /**
  * Handler, when loading of the image fails. Sends a failure response and
  * finalizes the request process.
- *
- * @param {function()} callback Completion callback.
  * @private
  */
-Request.prototype.onImageError_ = function(callback) {
+Request.prototype.onImageError_ = function() {
   this.sendResponse_(
       {status: 'error', taskId: this.request_.taskId});
   this.cleanup_();

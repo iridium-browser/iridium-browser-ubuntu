@@ -7,11 +7,11 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/DOMArrayBufferView.h"
 #include "core/fileapi/Blob.h"
 #include "modules/serviceworkers/ResponseInit.h"
 #include "public/platform/WebServiceWorkerResponse.h"
-#include "wtf/ArrayBuffer.h"
-#include "wtf/ArrayBufferView.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
@@ -29,26 +29,39 @@ FetchResponseData* createFetchResponseDataFromWebResponse(const WebServiceWorker
     response->setURL(webResponse.url());
     response->setStatus(webResponse.status());
     response->setStatusMessage(webResponse.statusText());
-    return response;
-}
 
-Headers* createHeadersFromWebResponse(const WebServiceWorkerResponse& webResponse)
-{
-    Headers* headers = Headers::create();
-    TrackExceptionState exceptionState;
     for (HTTPHeaderMap::const_iterator i = webResponse.headers().begin(), end = webResponse.headers().end(); i != end; ++i) {
-        headers->append(i->key, i->value, exceptionState);
-        if (exceptionState.hadException())
-            return 0;
+        response->headerList()->append(i->key, i->value);
     }
-    return headers;
+
+    response->setBlobDataHandle(webResponse.blobDataHandle());
+
+    // Filter the response according to |webResponse|'s ResponseType.
+    switch (webResponse.responseType()) {
+    case WebServiceWorkerResponseTypeBasic:
+        response = response->createBasicFilteredResponse();
+        break;
+    case WebServiceWorkerResponseTypeCORS:
+        response = response->createCORSFilteredResponse();
+        break;
+    case WebServiceWorkerResponseTypeOpaque:
+        response = response->createOpaqueFilteredResponse();
+        break;
+    case WebServiceWorkerResponseTypeDefault:
+        break;
+    case WebServiceWorkerResponseTypeError:
+        ASSERT(response->type() == FetchResponseData::ErrorType);
+        break;
+    }
+
+    return response;
 }
 
 }
 
 Response* Response::create(ExecutionContext* context, Blob* body, const Dictionary& responseInit, ExceptionState& exceptionState)
 {
-    return create(context, body, ResponseInit(responseInit), exceptionState);
+    return create(context, body, ResponseInit(responseInit, exceptionState), exceptionState);
 }
 
 Response* Response::create(ExecutionContext* context, const String& body, const Dictionary& responseInit, ExceptionState& exceptionState)
@@ -58,26 +71,26 @@ Response* Response::create(ExecutionContext* context, const String& body, const 
     // "Set |Content-Type| to `text/plain;charset=UTF-8`."
     blobData->setContentType("text/plain;charset=UTF-8");
     const long long length = blobData->length();
-    RefPtrWillBeRawPtr<Blob> blob = Blob::create(BlobDataHandle::create(blobData.release(), length));
-    return create(context, blob.get(), ResponseInit(responseInit), exceptionState);
+    Blob* blob = Blob::create(BlobDataHandle::create(blobData.release(), length));
+    return create(context, blob, ResponseInit(responseInit, exceptionState), exceptionState);
 }
 
-Response* Response::create(ExecutionContext* context, const ArrayBuffer* body, const Dictionary& responseInit, ExceptionState& exceptionState)
+Response* Response::create(ExecutionContext* context, const DOMArrayBuffer* body, const Dictionary& responseInit, ExceptionState& exceptionState)
 {
     OwnPtr<BlobData> blobData = BlobData::create();
-    blobData->appendArrayBuffer(body);
+    blobData->appendArrayBuffer(body->buffer());
     const long long length = blobData->length();
-    RefPtrWillBeRawPtr<Blob> blob = Blob::create(BlobDataHandle::create(blobData.release(), length));
-    return create(context, blob.get(), ResponseInit(responseInit), exceptionState);
+    Blob* blob = Blob::create(BlobDataHandle::create(blobData.release(), length));
+    return create(context, blob, ResponseInit(responseInit, exceptionState), exceptionState);
 }
 
-Response* Response::create(ExecutionContext* context, const ArrayBufferView* body, const Dictionary& responseInit, ExceptionState& exceptionState)
+Response* Response::create(ExecutionContext* context, const DOMArrayBufferView* body, const Dictionary& responseInit, ExceptionState& exceptionState)
 {
     OwnPtr<BlobData> blobData = BlobData::create();
-    blobData->appendArrayBufferView(body);
+    blobData->appendArrayBufferView(body->view());
     const long long length = blobData->length();
-    RefPtrWillBeRawPtr<Blob> blob = Blob::create(BlobDataHandle::create(blobData.release(), length));
-    return create(context, blob.get(), ResponseInit(responseInit), exceptionState);
+    Blob* blob = Blob::create(BlobDataHandle::create(blobData.release(), length));
+    return create(context, blob, ResponseInit(responseInit, exceptionState), exceptionState);
 }
 
 Response* Response::create(ExecutionContext* context, Blob* body, const ResponseInit& responseInit, ExceptionState& exceptionState)
@@ -149,7 +162,8 @@ Response* Response::create(ExecutionContext* context, FetchResponseData* respons
 
 Response* Response::create(ExecutionContext* context, const WebServiceWorkerResponse& webResponse)
 {
-    Response* r = new Response(context, webResponse);
+    FetchResponseData* responseData = createFetchResponseDataFromWebResponse(webResponse);
+    Response* r = new Response(context, responseData);
     r->suspendIfNeeded();
     return r;
 }
@@ -243,14 +257,6 @@ Response::Response(ExecutionContext* context, FetchResponseData* response)
     m_headers->setGuard(Headers::ResponseGuard);
 }
 
-// FIXME: Handle response body data.
-Response::Response(ExecutionContext* context, const WebServiceWorkerResponse& webResponse)
-    : Body(context)
-    , m_response(createFetchResponseDataFromWebResponse(webResponse))
-    , m_headers(createHeadersFromWebResponse(webResponse))
-{
-    m_headers->setGuard(Headers::ResponseGuard);
-}
 
 PassRefPtr<BlobDataHandle> Response::blobDataHandle()
 {

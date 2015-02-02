@@ -158,16 +158,14 @@ class MockDeleteCallbacks : public IndexedDBCallbacks {
         blocked_called_(false),
         success_called_(false) {}
 
-  virtual void OnBlocked(int64 existing_version) OVERRIDE {
-    blocked_called_ = true;
-  }
-  virtual void OnSuccess(int64 result) OVERRIDE { success_called_ = true; }
+  void OnBlocked(int64 existing_version) override { blocked_called_ = true; }
+  void OnSuccess(int64 result) override { success_called_ = true; }
 
   bool blocked_called() const { return blocked_called_; }
   bool success_called() const { return success_called_; }
 
  private:
-  virtual ~MockDeleteCallbacks() {}
+  ~MockDeleteCallbacks() override {}
 
   bool blocked_called_;
   bool success_called_;
@@ -230,7 +228,7 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
       : commit_success_(leveldb::Status::OK()),
         factory_(new MockIndexedDBFactory()) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     backing_store_ = new IndexedDBFakeBackingStore();
     leveldb::Status s;
     db_ = IndexedDBDatabase::Create(ASCIIToUTF16("db"),

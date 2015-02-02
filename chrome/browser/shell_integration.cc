@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -15,7 +14,6 @@
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
 #if defined(OS_CHROMEOS)

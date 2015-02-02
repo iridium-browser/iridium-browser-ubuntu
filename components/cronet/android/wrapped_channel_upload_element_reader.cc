@@ -21,7 +21,8 @@ WrappedChannelElementReader::~WrappedChannelElementReader() {
 }
 
 int WrappedChannelElementReader::Init(const net::CompletionCallback& callback) {
-  offset_ = 0;
+  if (offset_ != 0)
+    return net::ERR_UPLOAD_STREAM_REWIND_NOT_SUPPORTED;
   return net::OK;
 }
 
@@ -41,7 +42,7 @@ int WrappedChannelElementReader::Read(net::IOBuffer* buf,
                                       int buf_length,
                                       const net::CompletionCallback& callback) {
   DCHECK(!callback.is_null());
-  DCHECK(delegate_);
+  DCHECK(delegate_.get());
   // TODO(mef): Post the read to file thread.
   int bytes_read = delegate_->ReadFromUploadChannel(buf, buf_length);
   if (bytes_read < 0)

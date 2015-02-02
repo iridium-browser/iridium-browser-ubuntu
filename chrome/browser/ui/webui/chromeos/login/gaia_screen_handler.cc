@@ -21,6 +21,7 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/browser/ui/webui/signin/inline_login_ui.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
@@ -146,6 +147,7 @@ GaiaScreenHandler::GaiaScreenHandler(
       using_saml_api_(false),
       is_enrolling_consumer_management_(false),
       test_expects_complete_login_(false),
+      embedded_signin_enabled_by_shortcut_(false),
       signin_screen_handler_(NULL),
       weak_factory_(this) {
   DCHECK(network_state_informer_.get());
@@ -204,7 +206,7 @@ void GaiaScreenHandler::LoadGaia(const GaiaContext& context) {
           : GaiaUrls::GetInstance()->gaia_url();
   params.SetString("gaiaUrl", gaia_url.spec());
 
-  if (command_line->HasSwitch(chromeos::switches::kEnableEmbeddedSignin))
+  if (context.embedded_signin_enabled)
     params.SetBoolean("useEmbedded", true);
 
   frame_state_ = FRAME_STATE_LOADING;
@@ -234,6 +236,22 @@ void GaiaScreenHandler::ReloadGaia(bool force_reload) {
   CallJS("doReload");
 }
 
+void GaiaScreenHandler::SwitchToEmbeddedSignin() {
+  // This feature should not be working on Stable,Beta images.
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
+      channel == chrome::VersionInfo::CHANNEL_BETA) {
+    return;
+  }
+  embedded_signin_enabled_by_shortcut_ = true;
+  LoadAuthExtension(
+      true /* force */, true /* silent_load */, false /* offline */);
+}
+
+void GaiaScreenHandler::CancelEmbeddedSignin() {
+  embedded_signin_enabled_by_shortcut_ = false;
+}
+
 void GaiaScreenHandler::DeclareLocalizedValues(
     LocalizedValuesBuilder* builder) {
   builder->Add("signinScreenTitle", IDS_SIGNIN_SCREEN_TITLE);
@@ -249,7 +267,8 @@ void GaiaScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_CONSUMER_MANAGEMENT_ENROLLMENT);
 
   // Strings used by the SAML fatal error dialog.
-  builder->Add("fatalErrorMessageNoEmail", IDS_LOGIN_FATAL_ERROR_NO_EMAIL);
+  builder->Add("fatalErrorMessageNoAccountDetails",
+               IDS_LOGIN_FATAL_ERROR_NO_ACCOUNT_DETAILS);
   builder->Add("fatalErrorMessageNoPassword",
                IDS_LOGIN_FATAL_ERROR_NO_PASSWORD);
   builder->Add("fatalErrorMessageVerificationFailed",
@@ -301,23 +320,29 @@ void GaiaScreenHandler::HandleFrameLoadingCompleted(int status) {
 }
 
 void GaiaScreenHandler::HandleCompleteAuthentication(
+    const std::string& gaia_id,
     const std::string& email,
     const std::string& password,
     const std::string& auth_code) {
   if (!Delegate())
     return;
+
+  DCHECK(!email.empty());
+  DCHECK(!gaia_id.empty());
   Delegate()->SetDisplayEmail(gaia::SanitizeEmail(email));
   UserContext user_context(email);
+  user_context.SetGaiaID(gaia_id);
   user_context.SetKey(Key(password));
   user_context.SetAuthCode(auth_code);
   Delegate()->CompleteLogin(user_context);
 }
 
-void GaiaScreenHandler::HandleCompleteLogin(const std::string& typed_email,
+void GaiaScreenHandler::HandleCompleteLogin(const std::string& gaia_id,
+                                            const std::string& typed_email,
                                             const std::string& password,
                                             bool using_saml) {
   if (!is_enrolling_consumer_management_) {
-    DoCompleteLogin(typed_email, password, using_saml);
+    DoCompleteLogin(gaia_id, typed_email, password, using_saml);
     return;
   }
 
@@ -336,6 +361,7 @@ void GaiaScreenHandler::HandleCompleteLogin(const std::string& typed_email,
   consumer_management_->SetOwner(owner_email,
                                  base::Bind(&GaiaScreenHandler::OnSetOwnerDone,
                                             weak_factory_.GetWeakPtr(),
+                                            gaia_id,
                                             typed_email,
                                             password,
                                             using_saml));
@@ -399,7 +425,8 @@ void GaiaScreenHandler::HandleGaiaUIReady() {
     SubmitLoginFormForTest();
 }
 
-void GaiaScreenHandler::OnSetOwnerDone(const std::string& typed_email,
+void GaiaScreenHandler::OnSetOwnerDone(const std::string& gaia_id,
+                                       const std::string& typed_email,
                                        const std::string& password,
                                        bool using_saml,
                                        bool success) {
@@ -415,10 +442,11 @@ void GaiaScreenHandler::OnSetOwnerDone(const std::string& typed_email,
     // We should continue logging in the user, as there's not much we can do
     // here.
   }
-  DoCompleteLogin(typed_email, password, using_saml);
+  DoCompleteLogin(gaia_id, typed_email, password, using_saml);
 }
 
-void GaiaScreenHandler::DoCompleteLogin(const std::string& typed_email,
+void GaiaScreenHandler::DoCompleteLogin(const std::string& gaia_id,
+                                        const std::string& typed_email,
                                         const std::string& password,
                                         bool using_saml) {
   if (!Delegate())
@@ -427,9 +455,12 @@ void GaiaScreenHandler::DoCompleteLogin(const std::string& typed_email,
   if (using_saml && !using_saml_api_)
     RecordSAMLScrapingVerificationResultInHistogram(true);
 
+  DCHECK(!typed_email.empty());
+  DCHECK(!gaia_id.empty());
   const std::string sanitized_email = gaia::SanitizeEmail(typed_email);
   Delegate()->SetDisplayEmail(sanitized_email);
   UserContext user_context(sanitized_email);
+  user_context.SetGaiaID(gaia_id);
   user_context.SetKey(Key(password));
   user_context.SetAuthFlow(using_saml
                                ? UserContext::AUTH_FLOW_GAIA_WITH_SAML
@@ -653,6 +684,11 @@ void GaiaScreenHandler::LoadAuthExtension(bool force,
     context.show_users = Delegate()->IsShowUsers();
     context.has_users = !Delegate()->GetUsers().empty();
   }
+
+  context.embedded_signin_enabled =
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableEmbeddedSignin) ||
+      embedded_signin_enabled_by_shortcut_;
 
   populated_email_.clear();
 

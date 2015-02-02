@@ -44,7 +44,7 @@ class AppWindowRegistry : public KeyedService {
     // it not visible.
     virtual void OnAppWindowHidden(AppWindow* app_window);
     // Called just after a app window was shown.
-    virtual void OnAppWindowShown(AppWindow* app_window);
+    virtual void OnAppWindowShown(AppWindow* app_window, bool was_hidden);
 
    protected:
     virtual ~Observer();
@@ -55,7 +55,7 @@ class AppWindowRegistry : public KeyedService {
   typedef std::set<std::string> InspectedWindowSet;
 
   explicit AppWindowRegistry(content::BrowserContext* context);
-  virtual ~AppWindowRegistry();
+  ~AppWindowRegistry() override;
 
   // Returns the instance for the given browser context, or NULL if none. This
   // is a convenience wrapper around
@@ -67,7 +67,7 @@ class AppWindowRegistry : public KeyedService {
   // Called by |app_window| when it is activated.
   void AppWindowActivated(AppWindow* app_window);
   void AppWindowHidden(AppWindow* app_window);
-  void AppWindowShown(AppWindow* app_window);
+  void AppWindowShown(AppWindow* app_window, bool was_hidden);
   void RemoveAppWindow(AppWindow* app_window);
 
   void AddObserver(Observer* observer);
@@ -112,15 +112,15 @@ class AppWindowRegistry : public KeyedService {
     friend struct DefaultSingletonTraits<Factory>;
 
     Factory();
-    virtual ~Factory();
+    ~Factory() override;
 
     // BrowserContextKeyedServiceFactory
-    virtual KeyedService* BuildServiceInstanceFor(
-        content::BrowserContext* context) const OVERRIDE;
-    virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-    virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
-    virtual content::BrowserContext* GetBrowserContextToUse(
-        content::BrowserContext* context) const OVERRIDE;
+    KeyedService* BuildServiceInstanceFor(
+        content::BrowserContext* context) const override;
+    bool ServiceIsCreatedWithBrowserContext() const override;
+    bool ServiceIsNULLWhileTesting() const override;
+    content::BrowserContext* GetBrowserContextToUse(
+        content::BrowserContext* context) const override;
   };
 
  protected:

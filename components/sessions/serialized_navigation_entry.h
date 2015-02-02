@@ -14,18 +14,11 @@
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "components/sessions/sessions_export.h"
-#include "content/public/common/page_state.h"
-#include "content/public/common/referrer.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 
 class Pickle;
 class PickleIterator;
-
-namespace content {
-class BrowserContext;
-class NavigationEntry;
-}
 
 namespace sync_pb {
 class TabNavigation;
@@ -56,12 +49,6 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   SerializedNavigationEntry();
   ~SerializedNavigationEntry();
 
-  // Construct a SerializedNavigationEntry for a particular index from the given
-  // NavigationEntry.
-  static SerializedNavigationEntry FromNavigationEntry(
-      int index,
-      const content::NavigationEntry& entry);
-
   // Construct a SerializedNavigationEntry for a particular index from a sync
   // protocol buffer.  Note that the sync protocol buffer doesn't contain all
   // SerializedNavigationEntry fields.  Also, the timestamp of the returned
@@ -75,13 +62,6 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   // |max_size| is the max number of bytes to write.
   void WriteToPickle(int max_size, Pickle* pickle) const;
   bool ReadFromPickle(PickleIterator* iterator);
-
-  // Convert this SerializedNavigationEntry into a NavigationEntry with the
-  // given page ID and context.  The NavigationEntry will have a transition type
-  // of PAGE_TRANSITION_RELOAD and a new unique ID.
-  scoped_ptr<content::NavigationEntry> ToNavigationEntry(
-      int page_id,
-      content::BrowserContext* browser_context) const;
 
   // Convert this navigation into its sync protocol buffer equivalent.  Note
   // that the protocol buffer doesn't contain all SerializedNavigationEntry
@@ -97,11 +77,12 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   int unique_id() const { return unique_id_; }
   const GURL& virtual_url() const { return virtual_url_; }
   const base::string16& title() const { return title_; }
-  const content::PageState& page_state() const { return page_state_; }
+  const std::string& encoded_page_state() const { return encoded_page_state_; }
   const base::string16& search_terms() const { return search_terms_; }
   const GURL& favicon_url() const { return favicon_url_; }
   int http_status_code() const { return http_status_code_; }
-  const content::Referrer& referrer() const { return referrer_; }
+  const GURL& referrer_url() const { return referrer_url_; }
+  int referrer_policy() const { return referrer_policy_; }
   ui::PageTransition transition_type() const {
     return transition_type_;
   }
@@ -124,29 +105,23 @@ class SESSIONS_EXPORT SerializedNavigationEntry {
   }
   const std::vector<GURL>& redirect_chain() const { return redirect_chain_; }
 
-  // Converts a set of SerializedNavigationEntrys into a list of
-  // NavigationEntrys with sequential page IDs and the given context. The caller
-  // owns the returned NavigationEntrys.
-  static std::vector<content::NavigationEntry*> ToNavigationEntries(
-      const std::vector<SerializedNavigationEntry>& navigations,
-      content::BrowserContext* browser_context);
-
  private:
+  friend class ContentSerializedNavigationBuilder;
+  friend class ContentSerializedNavigationDriver;
   friend class SerializedNavigationEntryTestHelper;
-
-  // Sanitizes the data in this class to be more robust against faulty data
-  // written by older versions.
-  void Sanitize();
+  friend class IOSSerializedNavigationBuilder;
+  friend class IOSSerializedNavigationDriver;
 
   // Index in the NavigationController.
   int index_;
 
   // Member variables corresponding to NavigationEntry fields.
   int unique_id_;
-  content::Referrer referrer_;
+  GURL referrer_url_;
+  int referrer_policy_;
   GURL virtual_url_;
   base::string16 title_;
-  content::PageState page_state_;
+  std::string encoded_page_state_;
   ui::PageTransition transition_type_;
   bool has_post_data_;
   int64 post_id_;

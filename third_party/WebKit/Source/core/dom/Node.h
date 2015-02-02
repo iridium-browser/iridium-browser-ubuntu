@@ -28,6 +28,7 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/dom/MutationObserver.h"
 #include "core/dom/SimulatedClickOptions.h"
+#include "core/dom/StyleChangeReason.h"
 #include "core/dom/TreeScope.h"
 #include "core/dom/TreeShared.h"
 #include "core/editing/EditingBoundary.h"
@@ -81,7 +82,7 @@ class RenderStyle;
 class SVGQualifiedName;
 class ShadowRoot;
 template <typename NodeType> class StaticNodeTypeList;
-typedef StaticNodeTypeList<Node> StaticNodeList;
+using StaticNodeList = StaticNodeTypeList<Node>;
 class TagCollection;
 class Text;
 class TouchEvent;
@@ -277,12 +278,12 @@ public:
     bool hasSyntheticAttrChildNodes() const { return getFlag(HasSyntheticAttrChildNodesFlag); }
     void setHasSyntheticAttrChildNodes(bool flag) { setFlag(flag, HasSyntheticAttrChildNodesFlag); }
 
-    // If this node is in a shadow tree, returns its shadow host. Otherwise, returns 0.
+    // If this node is in a shadow tree, returns its shadow host. Otherwise, returns nullptr.
     Element* shadowHost() const;
     ShadowRoot* containingShadowRoot() const;
     ShadowRoot* youngestShadowRoot() const;
 
-    // Returns 0, a child of ShadowRoot, or a legacy shadow root.
+    // Returns nullptr, a child of ShadowRoot, or a legacy shadow root.
     Node* nonBoundaryShadowTreeRootNode();
 
     // Node's parent, shadow tree host.
@@ -293,7 +294,7 @@ public:
     // Knows about all kinds of hosts.
     ContainerNode* parentOrShadowHostOrTemplateHostNode() const;
 
-    // Returns the parent node, but 0 if the parent node is a ShadowRoot.
+    // Returns the parent node, but nullptr if the parent node is a ShadowRoot.
     ContainerNode* nonShadowBoundaryParentNode() const;
 
     bool selfOrAncestorHasDirAutoAttribute() const { return getFlag(SelfOrAncestorHasDirAutoFlag); }
@@ -312,13 +313,13 @@ public:
     Node* previousNodeConsideringAtomicNodes() const;
     Node* nextNodeConsideringAtomicNodes() const;
 
-    // Returns the next leaf node or 0 if there are no more.
+    // Returns the next leaf node or nullptr if there are no more.
     // Delivers leaf nodes as if the whole DOM tree were a linear chain of its leaf nodes.
     // Uses an editing-specific concept of what a leaf node is, and should probably be moved
     // out of the Node class into an editing-specific source file.
     Node* nextLeafNode() const;
 
-    // Returns the previous leaf node or 0 if there are no more.
+    // Returns the previous leaf node or nullptr if there are no more.
     // Delivers leaf nodes as if the whole DOM tree were a linear chain of its leaf nodes.
     // Uses an editing-specific concept of what a leaf node is, and should probably be moved
     // out of the Node class into an editing-specific source file.
@@ -333,7 +334,7 @@ public:
     virtual void notifyLoadedSheetAndAllCriticalSubresources(bool /* error loading subresource */) { }
     virtual void startLoadingDynamicSheet() { ASSERT_NOT_REACHED(); }
 
-    bool hasName() const { return !isTextNode() && getFlag(HasNameOrIsEditingTextFlag); }
+    bool hasName() const { ASSERT(!isTextNode()); return getFlag(HasNameOrIsEditingTextFlag); }
 
     bool isUserActionElement() const { return getFlag(IsUserActionElementFlag); }
     void setUserActionElement(bool flag) { setFlag(flag, IsUserActionElementFlag); }
@@ -348,13 +349,13 @@ public:
     StyleChangeType styleChangeType() const { return static_cast<StyleChangeType>(m_nodeFlags & StyleChangeMask); }
     bool childNeedsStyleRecalc() const { return getFlag(ChildNeedsStyleRecalcFlag); }
     bool isLink() const { return getFlag(IsLinkFlag); }
-    bool isEditingText() const { return isTextNode() && getFlag(HasNameOrIsEditingTextFlag); }
+    bool isEditingText() const { ASSERT(isTextNode()); return getFlag(HasNameOrIsEditingTextFlag); }
 
     void setHasName(bool f) { ASSERT(!isTextNode()); setFlag(f, HasNameOrIsEditingTextFlag); }
     void setChildNeedsStyleRecalc() { setFlag(ChildNeedsStyleRecalcFlag); }
     void clearChildNeedsStyleRecalc() { clearFlag(ChildNeedsStyleRecalcFlag); }
 
-    void setNeedsStyleRecalc(StyleChangeType);
+    void setNeedsStyleRecalc(StyleChangeType, const StyleChangeReasonForTracing&);
     void clearNeedsStyleRecalc();
 
     bool childNeedsDistributionRecalc() const { return getFlag(ChildNeedsDistributionRecalcFlag); }
@@ -508,7 +509,7 @@ public:
         RenderStyle* resolvedStyle;
         bool performingReattach;
 
-        AttachContext() : resolvedStyle(0), performingReattach(false) { }
+        AttachContext() : resolvedStyle(nullptr), performingReattach(false) { }
     };
 
     // Attaches this node to the rendering tree. This calculates the style to be applied to the node and creates an
@@ -593,23 +594,23 @@ public:
 
     unsigned short compareDocumentPosition(const Node*, ShadowTreesTreatment = TreatShadowTreesAsDisconnected) const;
 
-    virtual Node* toNode() OVERRIDE FINAL;
+    virtual Node* toNode() override final;
 
-    virtual const AtomicString& interfaceName() const OVERRIDE;
-    virtual ExecutionContext* executionContext() const OVERRIDE FINAL;
+    virtual const AtomicString& interfaceName() const override;
+    virtual ExecutionContext* executionContext() const override final;
 
-    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) OVERRIDE;
-    virtual bool removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) OVERRIDE;
-    virtual void removeAllEventListeners() OVERRIDE;
+    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
+    virtual bool removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
+    virtual void removeAllEventListeners() override;
     void removeAllEventListenersRecursively();
 
     // Handlers to do/undo actions on the target node before an event is dispatched to it and after the event
     // has been dispatched.  The data pointer is handed back by the preDispatch and passed to postDispatch.
-    virtual void* preDispatchEventHandler(Event*) { return 0; }
+    virtual void* preDispatchEventHandler(Event*) { return nullptr; }
     virtual void postDispatchEventHandler(Event*, void* /*dataFromPreDispatch*/) { }
 
     using EventTarget::dispatchEvent;
-    virtual bool dispatchEvent(PassRefPtrWillBeRawPtr<Event>) OVERRIDE;
+    virtual bool dispatchEvent(PassRefPtrWillBeRawPtr<Event>) override;
 
     void dispatchScopedEvent(PassRefPtrWillBeRawPtr<Event>);
     void dispatchScopedEventDispatchMediator(PassRefPtrWillBeRawPtr<EventDispatchMediator>);
@@ -621,7 +622,7 @@ public:
 
     bool dispatchKeyEvent(const PlatformKeyboardEvent&);
     bool dispatchWheelEvent(const PlatformWheelEvent&);
-    bool dispatchMouseEvent(const PlatformMouseEvent&, const AtomicString& eventType, int clickCount = 0, Node* relatedTarget = 0);
+    bool dispatchMouseEvent(const PlatformMouseEvent&, const AtomicString& eventType, int clickCount = 0, Node* relatedTarget = nullptr);
     bool dispatchGestureEvent(const PlatformGestureEvent&);
     bool dispatchTouchEvent(PassRefPtrWillBeRawPtr<TouchEvent>);
 
@@ -633,8 +634,8 @@ public:
     virtual void defaultEventHandler(Event*);
     virtual void willCallDefaultEventHandler(const Event&);
 
-    virtual EventTargetData* eventTargetData() OVERRIDE;
-    virtual EventTargetData& ensureEventTargetData() OVERRIDE;
+    virtual EventTargetData* eventTargetData() override;
+    virtual EventTargetData& ensureEventTargetData() override;
 
     void getRegisteredMutationObserversOfType(WillBeHeapHashMap<RawPtrWillBeMember<MutationObserver>, MutationRecordDeliveryOptions>&, MutationObserver::MutationType, const QualifiedName* attributeName);
     void registerMutationObserver(MutationObserver&, MutationObserverOptions, const HashSet<AtomicString>& attributeFilter);
@@ -656,12 +657,12 @@ public:
 
     bool isFinishedParsingChildren() const { return getFlag(IsFinishedParsingChildrenFlag); }
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     unsigned lengthOfContents() const;
 
-    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) OVERRIDE;
-    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) OVERRIDE;
+    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
+    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) override;
 
 private:
     enum NodeFlags {
@@ -791,11 +792,9 @@ private:
     bool isUserActionElementHovered() const;
     bool isUserActionElementFocused() const;
 
-    void traceStyleChange(StyleChangeType);
-    void traceStyleChangeIfNeeded(StyleChangeType);
     void setStyleChange(StyleChangeType);
 
-    virtual RenderStyle* nonRendererStyle() const { return 0; }
+    virtual RenderStyle* nonRendererStyle() const { return nullptr; }
 
     virtual RenderStyle* virtualComputedStyle(PseudoId = NOPSEUDO);
 
@@ -811,7 +810,7 @@ private:
     RawPtrWillBeMember<Node> m_next;
     // When a node has rare data we move the renderer into the rare data.
     union DataUnion {
-        DataUnion() : m_renderer(0) { }
+        DataUnion() : m_renderer(nullptr) { }
         RenderObject* m_renderer;
         NodeRareDataBase* m_rareData;
     } m_data;
@@ -831,7 +830,7 @@ inline ContainerNode* Node::parentOrShadowHostNode() const
 
 inline ContainerNode* Node::parentNode() const
 {
-    return isShadowRoot() ? 0 : parentOrShadowHostNode();
+    return isShadowRoot() ? nullptr : parentOrShadowHostNode();
 }
 
 inline void Node::lazyReattachIfAttached()
@@ -861,6 +860,13 @@ inline bool isTreeScopeRoot(const Node* node)
 inline bool isTreeScopeRoot(const Node& node)
 {
     return node.isDocumentNode() || node.isShadowRoot();
+}
+
+// See the comment at the declaration of ScriptWrappable::fromNode in
+// bindings/core/v8/ScriptWrappable.h about why this method is defined here.
+inline ScriptWrappable* ScriptWrappable::fromNode(Node* node)
+{
+    return node;
 }
 
 // Allow equality comparisons of Nodes by reference or pointer, interchangeably.

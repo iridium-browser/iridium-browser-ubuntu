@@ -69,6 +69,7 @@ void ZoomBubbleView::ShowBubble(content::WebContents* web_contents,
   if (zoom_bubble_ &&
       zoom_bubble_->GetAnchorView() == anchor_view &&
       !extension) {
+    DCHECK_EQ(web_contents, zoom_bubble_->web_contents_);
     zoom_bubble_->Refresh();
     return;
   }
@@ -112,8 +113,9 @@ void ZoomBubbleView::CloseBubble() {
 
 // static
 bool ZoomBubbleView::IsShowing() {
-  // The bubble may be in the process of closing.
-  return zoom_bubble_ != NULL && zoom_bubble_->GetWidget()->IsVisible();
+  // The bubble is considered showing while closing.
+  return zoom_bubble_ != NULL && (zoom_bubble_->GetWidget()->IsVisible() ||
+                                  zoom_bubble_->GetWidget()->IsClosed());
 }
 
 // static
@@ -173,6 +175,10 @@ void ZoomBubbleView::Refresh() {
 }
 
 void ZoomBubbleView::Close() {
+  // Widget's Close() is async, but we don't want to use zoom_bubble_ after
+  // this. Additionally web_contents_ may have been destroyed.
+  zoom_bubble_ = NULL;
+  web_contents_ = NULL;
   GetWidget()->Close();
 }
 

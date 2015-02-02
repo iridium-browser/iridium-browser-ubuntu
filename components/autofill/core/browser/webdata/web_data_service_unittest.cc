@@ -96,7 +96,7 @@ class WebDataServiceTest : public testing::Test {
   WebDataServiceTest() : db_thread_("DBThread") {}
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     db_thread_.Start();
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
@@ -116,7 +116,7 @@ class WebDataServiceTest : public testing::Test {
     wds_->Init();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     wds_->ShutdownOnUIThread();
     wdbs_->ShutdownDatabase();
     wds_ = NULL;
@@ -349,10 +349,10 @@ TEST_F(WebDataServiceAutofillTest, ProfileRemove) {
 
 TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
   // The GUIDs are alphabetical for easier testing.
-  AutofillProfile profile1("087151C8-6AB1-487C-9095-28E80BE5DA15",
+  AutofillProfile profile1("6141084B-72D7-4B73-90CF-3D6AC154673B",
                            "http://example.com");
   profile1.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Abe"));
-  AutofillProfile profile2("6141084B-72D7-4B73-90CF-3D6AC154673B",
+  AutofillProfile profile2("087151C8-6AB1-487C-9095-28E80BE5DA15",
                            "http://example.com");
   profile2.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Alice"));
 
@@ -370,8 +370,8 @@ TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
   base::MessageLoop::current()->Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(2U, consumer.result().size());
-  EXPECT_EQ(profile1, *consumer.result()[0]);
-  EXPECT_EQ(profile2, *consumer.result()[1]);
+  EXPECT_EQ(profile2, *consumer.result()[0]);
+  EXPECT_EQ(profile1, *consumer.result()[1]);
   STLDeleteElements(&consumer.result());
 
   AutofillProfile profile2_changed(profile2);
@@ -392,9 +392,9 @@ TEST_F(WebDataServiceAutofillTest, ProfileUpdate) {
   base::MessageLoop::current()->Run();
   EXPECT_EQ(handle2, consumer2.handle());
   ASSERT_EQ(2U, consumer2.result().size());
-  EXPECT_EQ(profile1, *consumer2.result()[0]);
-  EXPECT_EQ(profile2_changed, *consumer2.result()[1]);
-  EXPECT_NE(profile2, *consumer2.result()[1]);
+  EXPECT_EQ(profile2_changed, *consumer2.result()[0]);
+  EXPECT_NE(profile2, *consumer2.result()[0]);
+  EXPECT_EQ(profile1, *consumer2.result()[1]);
   STLDeleteElements(&consumer2.result());
 }
 
@@ -442,10 +442,10 @@ TEST_F(WebDataServiceAutofillTest, CreditCardRemove) {
 }
 
 TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
-  CreditCard card1("B9C52112-BD5F-4080-84E1-C651D2CB90E2",
+  CreditCard card1("E4D2662E-5E16-44F3-AF5A-5A77FAE4A6F3",
                    "https://ejemplo.mx");
   card1.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Abe"));
-  CreditCard card2("E4D2662E-5E16-44F3-AF5A-5A77FAE4A6F3",
+  CreditCard card2("B9C52112-BD5F-4080-84E1-C651D2CB90E2",
                    "https://example.com");
   card2.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Alice"));
 
@@ -459,14 +459,14 @@ TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
   base::MessageLoop::current()->Run();
   EXPECT_EQ(handle, consumer.handle());
   ASSERT_EQ(2U, consumer.result().size());
-  EXPECT_EQ(card1, *consumer.result()[0]);
-  EXPECT_EQ(card2, *consumer.result()[1]);
+  EXPECT_EQ(card2, *consumer.result()[0]);
+  EXPECT_EQ(card1, *consumer.result()[1]);
   STLDeleteElements(&consumer.result());
 
-  CreditCard card1_changed(card1);
-  card1_changed.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Bill"));
+  CreditCard card2_changed(card2);
+  card2_changed.SetRawInfo(CREDIT_CARD_NAME, ASCIIToUTF16("Bill"));
 
-  wds_->UpdateCreditCard(card1_changed);
+  wds_->UpdateCreditCard(card2_changed);
   WaitForDatabaseThread();
 
   // Check that the updates were made.
@@ -475,9 +475,9 @@ TEST_F(WebDataServiceAutofillTest, CreditUpdate) {
   base::MessageLoop::current()->Run();
   EXPECT_EQ(handle2, consumer2.handle());
   ASSERT_EQ(2U, consumer2.result().size());
-  EXPECT_NE(card1, *consumer2.result()[0]);
-  EXPECT_EQ(card1_changed, *consumer2.result()[0]);
-  EXPECT_EQ(card2, *consumer2.result()[1]);
+  EXPECT_NE(card2, *consumer2.result()[0]);
+  EXPECT_EQ(card2_changed, *consumer2.result()[0]);
+  EXPECT_EQ(card1, *consumer2.result()[1]);
   STLDeleteElements(&consumer2.result());
 }
 

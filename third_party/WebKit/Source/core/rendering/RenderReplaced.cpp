@@ -25,7 +25,7 @@
 #include "core/rendering/RenderReplaced.h"
 
 #include "core/editing/PositionWithAffinity.h"
-#include "core/paint/BoxPainter.h"
+#include "core/paint/ReplacedPainter.h"
 #include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/RenderBlock.h"
 #include "core/rendering/RenderImage.h"
@@ -94,7 +94,7 @@ void RenderReplaced::layout()
     clearNeedsLayout();
 
     if (replacedContentRect() != oldContentRect)
-        setShouldDoFullPaintInvalidation(true);
+        setShouldDoFullPaintInvalidation();
 }
 
 void RenderReplaced::intrinsicSizeChanged()
@@ -107,74 +107,7 @@ void RenderReplaced::intrinsicSizeChanged()
 
 void RenderReplaced::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, this);
-
-    if (!shouldPaint(paintInfo, paintOffset))
-        return;
-
-    LayoutPoint adjustedPaintOffset = paintOffset + location();
-
-    if (hasBoxDecorationBackground() && (paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseSelection))
-        paintBoxDecorationBackground(paintInfo, adjustedPaintOffset);
-
-    if (paintInfo.phase == PaintPhaseMask) {
-        paintMask(paintInfo, adjustedPaintOffset);
-        return;
-    }
-
-    if (paintInfo.phase == PaintPhaseClippingMask && (!hasLayer() || !layer()->hasCompositedClippingMask()))
-        return;
-
-    LayoutRect paintRect = LayoutRect(adjustedPaintOffset, size());
-    if ((paintInfo.phase == PaintPhaseOutline || paintInfo.phase == PaintPhaseSelfOutline) && style()->outlineWidth())
-        paintOutline(paintInfo, paintRect);
-
-    if (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseSelection && !canHaveChildren() && paintInfo.phase != PaintPhaseClippingMask)
-        return;
-
-    if (!paintInfo.shouldPaintWithinRoot(this))
-        return;
-
-    bool drawSelectionTint = selectionState() != SelectionNone && !document().printing();
-    if (paintInfo.phase == PaintPhaseSelection) {
-        if (selectionState() == SelectionNone)
-            return;
-        drawSelectionTint = false;
-    }
-
-    bool completelyClippedOut = false;
-    if (style()->hasBorderRadius()) {
-        LayoutRect borderRect = LayoutRect(adjustedPaintOffset, size());
-
-        if (borderRect.isEmpty())
-            completelyClippedOut = true;
-        else {
-            // Push a clip if we have a border radius, since we want to round the foreground content that gets painted.
-            paintInfo.context->save();
-            RoundedRect roundedInnerRect = style()->getRoundedInnerBorderFor(paintRect,
-                paddingTop() + borderTop(), paddingBottom() + borderBottom(), paddingLeft() + borderLeft(), paddingRight() + borderRight(), true, true);
-            BoxPainter::clipRoundedInnerRect(paintInfo.context, paintRect, roundedInnerRect);
-        }
-    }
-
-    if (!completelyClippedOut) {
-        if (paintInfo.phase == PaintPhaseClippingMask) {
-            paintClippingMask(paintInfo, adjustedPaintOffset);
-        } else {
-            paintReplaced(paintInfo, adjustedPaintOffset);
-        }
-
-        if (style()->hasBorderRadius())
-            paintInfo.context->restore();
-    }
-
-    // The selection tint never gets clipped by border-radius rounding, since we want it to run right up to the edges of
-    // surrounding content.
-    if (drawSelectionTint) {
-        LayoutRect selectionPaintingRect = localSelectionRect();
-        selectionPaintingRect.moveBy(adjustedPaintOffset);
-        paintInfo.context->fillRect(pixelSnappedIntRect(selectionPaintingRect), selectionBackgroundColor());
-    }
+    ReplacedPainter(*this).paint(paintInfo, paintOffset);
 }
 
 bool RenderReplaced::shouldPaint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -517,7 +450,7 @@ LayoutRect RenderReplaced::localSelectionRect(bool checkWhetherSelected) const
         return LayoutRect(LayoutPoint(), size());
 
     RootInlineBox& root = inlineBoxWrapper()->root();
-    LayoutUnit newLogicalTop = root.block().style()->isFlippedBlocksWritingMode() ? inlineBoxWrapper()->logicalBottom() - root.selectionBottom() : root.selectionTop() - inlineBoxWrapper()->logicalTop();
+    LayoutUnit newLogicalTop = root.block().style()->slowIsFlippedBlocksWritingMode() ? inlineBoxWrapper()->logicalBottom() - root.selectionBottom() : root.selectionTop() - inlineBoxWrapper()->logicalTop();
     if (root.block().style()->isHorizontalWritingMode())
         return LayoutRect(0, newLogicalTop, width(), root.selectionHeight());
     return LayoutRect(newLogicalTop, 0, root.selectionHeight(), height());

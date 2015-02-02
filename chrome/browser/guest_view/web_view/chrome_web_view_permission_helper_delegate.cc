@@ -10,12 +10,17 @@
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/render_messages.h"
+#include "components/content_settings/core/common/permission_request_id.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 
+namespace extensions {
+
 ChromeWebViewPermissionHelperDelegate::ChromeWebViewPermissionHelperDelegate(
-    extensions::WebViewPermissionHelper* web_view_permission_helper)
+    WebViewPermissionHelper* web_view_permission_helper)
     : WebViewPermissionHelperDelegate(web_view_permission_helper),
       weak_factory_(this) {
 }
@@ -133,7 +138,7 @@ void ChromeWebViewPermissionHelperDelegate::CanDownload(
       request_info,
       base::Bind(
           &ChromeWebViewPermissionHelperDelegate::OnDownloadPermissionResponse,
-          base::Unretained(this),
+          weak_factory_.GetWeakPtr(),
           callback),
       false /* allowed_by_default */);
 }
@@ -161,7 +166,7 @@ void ChromeWebViewPermissionHelperDelegate::RequestPointerLockPermission(
       request_info,
       base::Bind(&ChromeWebViewPermissionHelperDelegate::
                      OnPointerLockPermissionResponse,
-                 base::Unretained(this),
+                 weak_factory_.GetWeakPtr(),
                  callback),
       false /* allowed_by_default */);
 }
@@ -185,11 +190,11 @@ void ChromeWebViewPermissionHelperDelegate::RequestGeolocationPermission(
   // It is safe to hold an unretained pointer to
   // ChromeWebViewPermissionHelperDelegate because this callback is called from
   // ChromeWebViewPermissionHelperDelegate::SetPermission.
-  const extensions::WebViewPermissionHelper::PermissionResponseCallback
+  const WebViewPermissionHelper::PermissionResponseCallback
       permission_callback =
       base::Bind(&ChromeWebViewPermissionHelperDelegate::
                      OnGeolocationPermissionResponse,
-                 base::Unretained(this),
+                 weak_factory_.GetWeakPtr(),
                  bridge_id,
                  user_gesture,
                  callback);
@@ -216,20 +221,31 @@ void ChromeWebViewPermissionHelperDelegate::OnGeolocationPermissionResponse(
     return;
   }
 
+  content::WebContents* web_contents =
+      web_view_guest()->embedder_web_contents();
+  int render_process_id = web_contents->GetRenderProcessHost()->GetID();
+  int render_view_id = web_contents->GetRenderViewHost()->GetRoutingID();
+
+  const PermissionRequestID request_id(
+      render_process_id,
+      render_view_id,
+      // The geolocation permission request here is not initiated
+      // through WebGeolocationPermissionRequest. We are only interested
+      // in the fact whether the embedder/app has geolocation
+      // permission. Therefore we use an invalid |bridge_id|.
+      -1,
+      GURL());
+
   Profile* profile = Profile::FromBrowserContext(
       web_view_guest()->browser_context());
   GeolocationPermissionContextFactory::GetForProfile(profile)->
-      RequestGeolocationPermission(
-          web_view_guest()->embedder_web_contents(),
-          // The geolocation permission request here is not initiated
-          // through WebGeolocationPermissionRequest. We are only interested
-          // in the fact whether the embedder/app has geolocation
-          // permission. Therefore we use an invalid |bridge_id|.
-          -1,
-          web_view_guest()->embedder_web_contents()->GetLastCommittedURL(),
+      RequestPermission(
+          web_contents,
+          request_id,
+          web_view_guest()->embedder_web_contents()
+          ->GetLastCommittedURL().GetOrigin(),
           user_gesture,
-          callback,
-          NULL);
+          callback);
 }
 
 void ChromeWebViewPermissionHelperDelegate::CancelGeolocationPermissionRequest(
@@ -260,7 +276,7 @@ void ChromeWebViewPermissionHelperDelegate::RequestFileSystemPermission(
       request_info,
       base::Bind(&ChromeWebViewPermissionHelperDelegate::
                      OnFileSystemPermissionResponse,
-                 base::Unretained(this),
+                 weak_factory_.GetWeakPtr(),
                  callback),
       allowed_by_default);
 }
@@ -283,7 +299,7 @@ void ChromeWebViewPermissionHelperDelegate::FileSystemAccessedAsync(
       !blocked_by_policy,
       base::Bind(&ChromeWebViewPermissionHelperDelegate::
                      FileSystemAccessedAsyncResponse,
-                 base::Unretained(this),
+                 weak_factory_.GetWeakPtr(),
                  render_process_id,
                  render_frame_id,
                  request_id,
@@ -313,7 +329,7 @@ void ChromeWebViewPermissionHelperDelegate::FileSystemAccessedSync(
       !blocked_by_policy,
       base::Bind(&ChromeWebViewPermissionHelperDelegate::
                      FileSystemAccessedSyncResponse,
-                 base::Unretained(this),
+                 weak_factory_.GetWeakPtr(),
                  render_process_id,
                  render_frame_id,
                  url,
@@ -332,3 +348,5 @@ void ChromeWebViewPermissionHelperDelegate::FileSystemAccessedSyncResponse(
                                                                   allowed);
   Send(reply_msg);
 }
+
+}  // namespace extensions

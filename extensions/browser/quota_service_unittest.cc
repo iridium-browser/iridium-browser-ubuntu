@@ -21,7 +21,6 @@ typedef QuotaLimitHeuristic::Bucket Bucket;
 typedef QuotaLimitHeuristic::Config Config;
 typedef QuotaLimitHeuristic::BucketList BucketList;
 typedef QuotaService::TimedLimit TimedLimit;
-typedef QuotaService::SustainedLimit SustainedLimit;
 
 namespace {
 
@@ -35,9 +34,9 @@ const TimeTicks k1MinuteAfterStart = kStartTime + TimeDelta::FromMinutes(1);
 class Mapper : public QuotaLimitHeuristic::BucketMapper {
  public:
   Mapper() {}
-  virtual ~Mapper() { STLDeleteValues(&buckets_); }
-  virtual void GetBucketsForArgs(const base::ListValue* args,
-                                 BucketList* buckets) OVERRIDE {
+  ~Mapper() override { STLDeleteValues(&buckets_); }
+  void GetBucketsForArgs(const base::ListValue* args,
+                         BucketList* buckets) override {
     for (size_t i = 0; i < args->GetSize(); i++) {
       int id;
       ASSERT_TRUE(args->GetInteger(i, &id));
@@ -55,68 +54,50 @@ class Mapper : public QuotaLimitHeuristic::BucketMapper {
 
 class MockMapper : public QuotaLimitHeuristic::BucketMapper {
  public:
-  virtual void GetBucketsForArgs(const base::ListValue* args,
-                                 BucketList* buckets) OVERRIDE {}
+  void GetBucketsForArgs(const base::ListValue* args,
+                         BucketList* buckets) override {}
 };
 
 class MockFunction : public ExtensionFunction {
  public:
   explicit MockFunction(const std::string& name) { set_name(name); }
 
-  virtual void SetArgs(const base::ListValue* args) OVERRIDE {}
-  virtual std::string GetError() const OVERRIDE { return std::string(); }
-  virtual void SetError(const std::string& error) OVERRIDE {}
-  virtual void Destruct() const OVERRIDE { delete this; }
-  virtual ResponseAction Run() OVERRIDE { return RespondLater(); }
-  virtual void SendResponse(bool) OVERRIDE {}
+  void SetArgs(const base::ListValue* args) override {}
+  std::string GetError() const override { return std::string(); }
+  void SetError(const std::string& error) override {}
+  void Destruct() const override { delete this; }
+  ResponseAction Run() override { return RespondLater(); }
+  void SendResponse(bool) override {}
 
  protected:
-  virtual ~MockFunction() {}
+  ~MockFunction() override {}
 };
 
 class TimedLimitMockFunction : public MockFunction {
  public:
   explicit TimedLimitMockFunction(const std::string& name)
       : MockFunction(name) {}
-  virtual void GetQuotaLimitHeuristics(QuotaLimitHeuristics* heuristics) const
-      OVERRIDE {
+  void GetQuotaLimitHeuristics(
+      QuotaLimitHeuristics* heuristics) const override {
     heuristics->push_back(
         new TimedLimit(k2PerMinute, new Mapper(), kGenericName));
   }
 
  private:
-  virtual ~TimedLimitMockFunction() {}
-};
-
-class ChainedLimitsMockFunction : public MockFunction {
- public:
-  explicit ChainedLimitsMockFunction(const std::string& name)
-      : MockFunction(name) {}
-  virtual void GetQuotaLimitHeuristics(QuotaLimitHeuristics* heuristics) const
-      OVERRIDE {
-    // No more than 2 per minute sustained over 5 minutes.
-    heuristics->push_back(new SustainedLimit(
-        TimeDelta::FromMinutes(5), k2PerMinute, new Mapper(), kGenericName));
-    // No more than 20 per hour.
-    heuristics->push_back(
-        new TimedLimit(k20PerHour, new Mapper(), kGenericName));
-  }
-
- private:
-  virtual ~ChainedLimitsMockFunction() {}
+  ~TimedLimitMockFunction() override {}
 };
 
 class FrozenMockFunction : public MockFunction {
  public:
   explicit FrozenMockFunction(const std::string& name) : MockFunction(name) {}
-  virtual void GetQuotaLimitHeuristics(QuotaLimitHeuristics* heuristics) const
-      OVERRIDE {
+  void GetQuotaLimitHeuristics(
+      QuotaLimitHeuristics* heuristics) const override {
     heuristics->push_back(
         new TimedLimit(kFrozenConfig, new Mapper(), kGenericName));
   }
 
  private:
-  virtual ~FrozenMockFunction() {}
+  ~FrozenMockFunction() override {}
 };
 }  // namespace
 
@@ -128,8 +109,8 @@ class QuotaServiceTest : public testing::Test {
         extension_c_("c"),
         loop_(),
         ui_thread_(BrowserThread::UI, &loop_) {}
-  virtual void SetUp() { service_.reset(new QuotaService()); }
-  virtual void TearDown() {
+  void SetUp() override { service_.reset(new QuotaService()); }
+  void TearDown() override {
     loop_.RunUntilIdle();
     service_.reset();
   }
@@ -187,31 +168,6 @@ TEST_F(QuotaLimitHeuristicTest, Timed) {
   EXPECT_TRUE(lim.Apply(&b, k1MinuteAfterStart + TimeDelta::FromSeconds(1)));
   EXPECT_TRUE(lim.Apply(&b, k1MinuteAfterStart + TimeDelta::FromSeconds(2)));
   EXPECT_FALSE(lim.Apply(&b, k1MinuteAfterStart + TimeDelta::FromSeconds(3)));
-}
-
-TEST_F(QuotaLimitHeuristicTest, Sustained) {
-  SustainedLimit lim(
-      TimeDelta::FromMinutes(5), k2PerMinute, new MockMapper(), kGenericName);
-  Bucket bucket;
-
-  bucket.Reset(k2PerMinute, kStartTime);
-  DoMoreThan2PerMinuteFor5Minutes(kStartTime, &lim, &bucket, -1);
-  // This straw breaks the camel's back.
-  EXPECT_FALSE(lim.Apply(&bucket, kStartTime + TimeDelta::FromMinutes(6)));
-
-  // The heuristic resets itself on a safe request.
-  EXPECT_TRUE(lim.Apply(&bucket, kStartTime + TimeDelta::FromDays(1)));
-
-  // Do the same as above except don't exhaust final bucket.
-  bucket.Reset(k2PerMinute, kStartTime);
-  DoMoreThan2PerMinuteFor5Minutes(kStartTime, &lim, &bucket, -1);
-  EXPECT_TRUE(lim.Apply(&bucket, kStartTime + TimeDelta::FromMinutes(7)));
-
-  // Do the same as above except don't exhaust the 3rd (w.l.o.g) bucket.
-  bucket.Reset(k2PerMinute, kStartTime);
-  DoMoreThan2PerMinuteFor5Minutes(kStartTime, &lim, &bucket, 3);
-  // If the 3rd bucket were exhausted, this would fail (see first test).
-  EXPECT_TRUE(lim.Apply(&bucket, kStartTime + TimeDelta::FromMinutes(6)));
 }
 
 TEST_F(QuotaServiceTest, NoHeuristic) {
@@ -298,59 +254,6 @@ TEST_F(QuotaServiceTest, SingleHeuristic) {
                              kStartTime + TimeDelta::FromSeconds(30)));
 }
 
-TEST_F(QuotaServiceTest, ChainedHeuristics) {
-  scoped_refptr<MockFunction> f(new ChainedLimitsMockFunction("foo"));
-  base::ListValue args;
-  args.Append(new base::FundamentalValue(1));
-
-  // First, test that the low limit can be avoided but the higher one is hit.
-  // One event per minute for 20 minutes comes in under the sustained limit,
-  // but is equal to the timed limit.
-  for (int i = 0; i < 20; i++) {
-    EXPECT_EQ(
-        "",
-        service_->Assess(extension_a_,
-                         f.get(),
-                         &args,
-                         kStartTime + TimeDelta::FromSeconds(10 + i * 60)));
-  }
-
-  // This will bring us to 21 events in an hour, which is a violation.
-  EXPECT_NE("",
-            service_->Assess(extension_a_,
-                             f.get(),
-                             &args,
-                             kStartTime + TimeDelta::FromMinutes(30)));
-
-  // Now, check that we can still hit the lower limit.
-  for (int i = 0; i < 5; i++) {
-    EXPECT_EQ(
-        "",
-        service_->Assess(extension_b_,
-                         f.get(),
-                         &args,
-                         kStartTime + TimeDelta::FromSeconds(10 + i * 60)));
-    EXPECT_EQ(
-        "",
-        service_->Assess(extension_b_,
-                         f.get(),
-                         &args,
-                         kStartTime + TimeDelta::FromSeconds(15 + i * 60)));
-    EXPECT_EQ(
-        "",
-        service_->Assess(extension_b_,
-                         f.get(),
-                         &args,
-                         kStartTime + TimeDelta::FromSeconds(20 + i * 60)));
-  }
-
-  EXPECT_NE("",
-            service_->Assess(extension_b_,
-                             f.get(),
-                             &args,
-                             kStartTime + TimeDelta::FromMinutes(6)));
-}
-
 TEST_F(QuotaServiceTest, MultipleFunctionsDontInterfere) {
   scoped_refptr<MockFunction> f(new TimedLimitMockFunction("foo"));
   scoped_refptr<MockFunction> g(new TimedLimitMockFunction("bar"));
@@ -384,9 +287,8 @@ TEST_F(QuotaServiceTest, MultipleFunctionsDontInterfere) {
                              kStartTime + TimeDelta::FromSeconds(15)));
 }
 
-TEST_F(QuotaServiceTest, ViolatorsWillBeViolators) {
+TEST_F(QuotaServiceTest, ViolatorsWillBeForgiven) {
   scoped_refptr<MockFunction> f(new TimedLimitMockFunction("foo"));
-  scoped_refptr<MockFunction> g(new TimedLimitMockFunction("bar"));
   base::ListValue arg;
   arg.Append(new base::FundamentalValue(1));
   EXPECT_EQ("", service_->Assess(extension_a_, f.get(), &arg, kStartTime));
@@ -401,16 +303,30 @@ TEST_F(QuotaServiceTest, ViolatorsWillBeViolators) {
                              &arg,
                              kStartTime + TimeDelta::FromSeconds(15)));
 
-  // We don't allow this extension to use quota limited functions even if they
-  // wait a while.
-  EXPECT_NE(
-      "",
-      service_->Assess(
-          extension_a_, f.get(), &arg, kStartTime + TimeDelta::FromDays(1)));
-  EXPECT_NE(
-      "",
-      service_->Assess(
-          extension_a_, g.get(), &arg, kStartTime + TimeDelta::FromDays(1)));
+  // Waiting a while will give the extension access to the function again.
+  EXPECT_EQ("", service_->Assess(extension_a_, f.get(), &arg,
+                                 kStartTime + TimeDelta::FromDays(1)));
+
+  // And lose it again soon after.
+  EXPECT_EQ("", service_->Assess(extension_a_, f.get(), &arg,
+                                 kStartTime + TimeDelta::FromDays(1) +
+                                     TimeDelta::FromSeconds(10)));
+  EXPECT_NE("", service_->Assess(extension_a_, f.get(), &arg,
+                                 kStartTime + TimeDelta::FromDays(1) +
+                                     TimeDelta::FromSeconds(15)));
+
+  // Going further over quota should continue to fail within this time period,
+  // but still all restored later.
+  EXPECT_NE("", service_->Assess(extension_a_, f.get(), &arg,
+                                 kStartTime + TimeDelta::FromDays(1) +
+                                     TimeDelta::FromSeconds(20)));
+  EXPECT_NE("", service_->Assess(extension_a_, f.get(), &arg,
+                                 kStartTime + TimeDelta::FromDays(1) +
+                                     TimeDelta::FromSeconds(25)));
+
+  // Like now.
+  EXPECT_EQ("", service_->Assess(extension_a_, f.get(), &arg,
+                                 kStartTime + TimeDelta::FromDays(2)));
 }
 
 }  // namespace extensions

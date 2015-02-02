@@ -17,22 +17,21 @@ class AutofillDialogCocoa;
 class AutofillDialogViewTesterCocoa: public AutofillDialogViewTester {
  public:
   explicit AutofillDialogViewTesterCocoa(AutofillDialogCocoa* dialog);
-  virtual ~AutofillDialogViewTesterCocoa();
+  ~AutofillDialogViewTesterCocoa() override;
 
   // TestableAutofillDialogView implementation:
-  virtual void SubmitForTesting() OVERRIDE;
-  virtual void CancelForTesting() OVERRIDE;
-  virtual base::string16 GetTextContentsOfInput(ServerFieldType type) OVERRIDE;
-  virtual void SetTextContentsOfInput(ServerFieldType type,
-                                      const base::string16& contents) OVERRIDE;
-  virtual void SetTextContentsOfSuggestionInput(
-      DialogSection section,
-      const base::string16& text) OVERRIDE;
-  virtual void ActivateInput(ServerFieldType type) OVERRIDE;
-  virtual gfx::Size GetSize() const OVERRIDE;
-  virtual content::WebContents* GetSignInWebContents() OVERRIDE;
-  virtual bool IsShowingOverlay() const OVERRIDE;
-  virtual bool IsShowingSection(DialogSection section) const OVERRIDE;
+  void SubmitForTesting() override;
+  void CancelForTesting() override;
+  base::string16 GetTextContentsOfInput(ServerFieldType type) override;
+  void SetTextContentsOfInput(ServerFieldType type,
+                              const base::string16& contents) override;
+  void SetTextContentsOfSuggestionInput(DialogSection section,
+                                        const base::string16& text) override;
+  void ActivateInput(ServerFieldType type) override;
+  gfx::Size GetSize() const override;
+  content::WebContents* GetSignInWebContents() override;
+  bool IsShowingOverlay() const override;
+  bool IsShowingSection(DialogSection section) const override;
 
  private:
   AutofillDialogWindowController* controller() const;

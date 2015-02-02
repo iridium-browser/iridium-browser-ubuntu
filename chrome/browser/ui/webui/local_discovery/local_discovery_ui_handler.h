@@ -19,7 +19,7 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
-#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
 #define CLOUD_PRINT_CONNECTOR_UI_AVAILABLE
 #endif
 
@@ -48,57 +48,52 @@ class LocalDiscoveryUIHandler : public content::WebUIMessageHandler,
                                 public SigninManagerBase::Observer {
  public:
   LocalDiscoveryUIHandler();
-  virtual ~LocalDiscoveryUIHandler();
+  ~LocalDiscoveryUIHandler() override;
 
   static bool GetHasVisible();
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
   // PrivetRegisterOperation::Delegate implementation.
-  virtual void OnPrivetRegisterClaimToken(
-      PrivetRegisterOperation* operation,
-      const std::string& token,
-      const GURL& url) OVERRIDE;
-  virtual void OnPrivetRegisterError(
-      PrivetRegisterOperation* operation,
-      const std::string& action,
-      PrivetRegisterOperation::FailureReason reason,
-      int printer_http_code,
-      const base::DictionaryValue* json) OVERRIDE;
-  virtual void OnPrivetRegisterDone(
-      PrivetRegisterOperation* operation,
-      const std::string& device_id) OVERRIDE;
+  void OnPrivetRegisterClaimToken(PrivetRegisterOperation* operation,
+                                  const std::string& token,
+                                  const GURL& url) override;
+  void OnPrivetRegisterError(PrivetRegisterOperation* operation,
+                             const std::string& action,
+                             PrivetRegisterOperation::FailureReason reason,
+                             int printer_http_code,
+                             const base::DictionaryValue* json) override;
+  void OnPrivetRegisterDone(PrivetRegisterOperation* operation,
+                            const std::string& device_id) override;
 
   // PrivetV3SetupFlow::Delegate implementation.
-  virtual scoped_ptr<GCDApiFlow> CreateApiFlow() OVERRIDE;
-  virtual void GetWiFiCredentials(const CredentialsCallback& callback) OVERRIDE;
-  virtual void SwitchToSetupWiFi(const ResultCallback& callback) OVERRIDE;
-  virtual void CreatePrivetV3Client(
-      const std::string& service_name,
-      const PrivetClientCallback& callback) OVERRIDE;
-  virtual void ConfirmSecurityCode(const std::string& confirmation_code,
-                                   const ResultCallback& callback) OVERRIDE;
-  virtual void RestoreWifi(const ResultCallback& callback) OVERRIDE;
-  virtual void OnSetupDone() OVERRIDE;
-  virtual void OnSetupError() OVERRIDE;
+  scoped_ptr<GCDApiFlow> CreateApiFlow() override;
+  void GetWiFiCredentials(const CredentialsCallback& callback) override;
+  void SwitchToSetupWiFi(const ResultCallback& callback) override;
+  void CreatePrivetV3Client(const std::string& service_name,
+                            const PrivetClientCallback& callback) override;
+  void ConfirmSecurityCode(const ResultCallback& callback) override;
+  void RestoreWifi(const ResultCallback& callback) override;
+  void OnSetupDone() override;
+  void OnSetupError() override;
 
   // PrivetDeviceLister::Delegate implementation.
-  virtual void DeviceChanged(bool added,
-                             const std::string& name,
-                             const DeviceDescription& description) OVERRIDE;
-  virtual void DeviceRemoved(const std::string& name) OVERRIDE;
-  virtual void DeviceCacheFlushed() OVERRIDE;
+  void DeviceChanged(bool added,
+                     const std::string& name,
+                     const DeviceDescription& description) override;
+  void DeviceRemoved(const std::string& name) override;
+  void DeviceCacheFlushed() override;
 
   // CloudDeviceListDelegate implementation.
-  virtual void OnDeviceListReady(const std::vector<Device>& devices) OVERRIDE;
-  virtual void OnDeviceListUnavailable() OVERRIDE;
+  void OnDeviceListReady(const std::vector<Device>& devices) override;
+  void OnDeviceListUnavailable() override;
 
   // SigninManagerBase::Observer implementation.
-  virtual void GoogleSigninSucceeded(const std::string& account_id,
-                                     const std::string& username,
-                                     const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& account_id,
-                               const std::string& username) OVERRIDE;
+  void GoogleSigninSucceeded(const std::string& account_id,
+                             const std::string& username,
+                             const std::string& password) override;
+  void GoogleSignedOut(const std::string& account_id,
+                       const std::string& username) override;
 
  private:
   typedef std::map<std::string, DeviceDescription> DeviceDescriptionMap;

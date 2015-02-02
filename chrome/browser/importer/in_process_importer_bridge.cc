@@ -5,7 +5,6 @@
 #include "chrome/browser/importer/in_process_importer_bridge.h"
 
 #include "base/bind.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/files/file_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -63,15 +62,6 @@ history::VisitSource ConvertImporterVisitSourceToHistoryVisitSource(
   return history::SOURCE_SYNCED;
 }
 
-// http://crbug.com/404012. Let's see where the empty fields come from.
-void CheckForEmptyUsernameAndPassword(const autofill::PasswordForm& form) {
-  if (form.username_value.empty() &&
-      form.password_value.empty() &&
-      !form.blacklisted_by_user) {
-    base::debug::DumpWithoutCrashing();
-  }
-}
-
 }  // namespace
 
 using content::BrowserThread;
@@ -83,11 +73,11 @@ namespace {
 class FirefoxURLParameterFilter : public TemplateURLParser::ParameterFilter {
  public:
   FirefoxURLParameterFilter() {}
-  virtual ~FirefoxURLParameterFilter() {}
+  ~FirefoxURLParameterFilter() override {}
 
   // TemplateURLParser::ParameterFilter method.
-  virtual bool KeepParameter(const std::string& key,
-                             const std::string& value) OVERRIDE {
+  bool KeepParameter(const std::string& key,
+                     const std::string& value) override {
     std::string low_value = base::StringToLowerASCII(value);
     if (low_value.find("mozilla") != std::string::npos ||
         low_value.find("firefox") != std::string::npos ||
@@ -261,7 +251,6 @@ void InProcessImporterBridge::SetFirefoxSearchEnginesXMLData(
 
 void InProcessImporterBridge::SetPasswordForm(
     const autofill::PasswordForm& form) {
-  CheckForEmptyUsernameAndPassword(form);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&ProfileWriter::AddPasswordForm, writer_, form));

@@ -57,22 +57,24 @@ public:
     RenderFlowThread();
     virtual ~RenderFlowThread() { };
 
-    virtual bool isRenderFlowThread() const OVERRIDE FINAL { return true; }
+    virtual bool isRenderFlowThread() const override final { return true; }
     virtual bool isRenderMultiColumnFlowThread() const { return false; }
     virtual bool isRenderPagedFlowThread() const { return false; }
 
-    virtual void layout() OVERRIDE;
+    virtual void layout() override;
 
     // Always create a RenderLayer for the RenderFlowThread so that we
     // can easily avoid drawing the children directly.
-    virtual LayerType layerTypeRequired() const OVERRIDE FINAL { return NormalLayer; }
+    virtual LayerType layerTypeRequired() const override final { return NormalLayer; }
 
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) OVERRIDE FINAL;
+    virtual void flowThreadDescendantWasInserted(RenderObject*) { }
+
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override final;
 
     virtual void addRegionToThread(RenderMultiColumnSet*) = 0;
     virtual void removeRegionFromThread(RenderMultiColumnSet*);
 
-    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const OVERRIDE;
+    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const override;
 
     bool hasRegions() const { return m_multiColumnSetList.size(); }
 
@@ -102,6 +104,11 @@ public:
     void collectLayerFragments(LayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect);
     LayoutRect fragmentsBoundingBox(const LayoutRect& layerBoundingBox);
 
+    LayoutPoint flowThreadPointToVisualPoint(const LayoutPoint& flowThreadPoint) const
+    {
+        return flowThreadPoint + columnOffset(flowThreadPoint);
+    }
+
     void pushFlowThreadLayoutState(const RenderObject&);
     void popFlowThreadLayoutState();
     LayoutUnit offsetFromLogicalTopOfFirstRegion(const RenderBlock*) const;
@@ -124,32 +131,6 @@ protected:
     const RenderBox* currentStatePusherRenderBox() const;
 
     RenderMultiColumnSetList m_multiColumnSetList;
-
-    class RenderMultiColumnSetRange {
-    public:
-        RenderMultiColumnSetRange()
-        {
-            setRange(0, 0);
-        }
-
-        RenderMultiColumnSetRange(RenderMultiColumnSet* start, RenderMultiColumnSet* end)
-        {
-            setRange(start, end);
-        }
-
-        void setRange(RenderMultiColumnSet* start, RenderMultiColumnSet* end)
-        {
-            m_startColumnSet = start;
-            m_endColumnSet = end;
-        }
-
-        RenderMultiColumnSet* startColumnSet() const { return m_startColumnSet; }
-        RenderMultiColumnSet* endColumnSet() const { return m_endColumnSet; }
-
-    private:
-        RenderMultiColumnSet* m_startColumnSet;
-        RenderMultiColumnSet* m_endColumnSet;
-    };
 
     typedef PODInterval<LayoutUnit, RenderMultiColumnSet*> MultiColumnSetInterval;
     typedef PODIntervalTree<LayoutUnit, RenderMultiColumnSet*> MultiColumnSetIntervalTree;

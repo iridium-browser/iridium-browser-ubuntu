@@ -20,7 +20,7 @@ class SourcePageHandleWebContents : public SourcePageHandle {
  public:
   explicit SourcePageHandleWebContents(
       scoped_ptr<content::WebContents> web_contents);
-  virtual ~SourcePageHandleWebContents();
+  ~SourcePageHandleWebContents() override;
 
   scoped_ptr<content::WebContents> GetWebContents();
 
@@ -34,12 +34,12 @@ class DistillerPageWebContentsFactory : public DistillerPageFactory {
   explicit DistillerPageWebContentsFactory(
       content::BrowserContext* browser_context)
       : DistillerPageFactory(), browser_context_(browser_context) {}
-  virtual ~DistillerPageWebContentsFactory() {}
+  ~DistillerPageWebContentsFactory() override {}
 
-  virtual scoped_ptr<DistillerPage> CreateDistillerPage(
-      const gfx::Size& render_view_size) const OVERRIDE;
-  virtual scoped_ptr<DistillerPage> CreateDistillerPageWithHandle(
-      scoped_ptr<SourcePageHandle> handle) const OVERRIDE;
+  scoped_ptr<DistillerPage> CreateDistillerPage(
+      const gfx::Size& render_view_size) const override;
+  scoped_ptr<DistillerPage> CreateDistillerPageWithHandle(
+      scoped_ptr<SourcePageHandle> handle) const override;
 
  private:
   content::BrowserContext* browser_context_;
@@ -53,24 +53,23 @@ class DistillerPageWebContents : public DistillerPage,
       content::BrowserContext* browser_context,
       const gfx::Size& render_view_size,
       scoped_ptr<SourcePageHandleWebContents> optional_web_contents_handle);
-  virtual ~DistillerPageWebContents();
+  ~DistillerPageWebContents() override;
 
   // content::WebContentsDelegate implementation.
-  virtual gfx::Size GetSizeForNewRenderView(
-      content::WebContents* web_contents) const OVERRIDE;
+  gfx::Size GetSizeForNewRenderView(
+      content::WebContents* web_contents) const override;
 
   // content::WebContentsObserver implementation.
-  virtual void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
+  void DocumentLoadedInFrame(
+      content::RenderFrameHost* render_frame_host) override;
 
-  virtual void DidFailLoad(content::RenderFrameHost* render_frame_host,
-                           const GURL& validated_url,
-                           int error_code,
-                           const base::string16& error_description) OVERRIDE;
+  void DidFailLoad(content::RenderFrameHost* render_frame_host,
+                   const GURL& validated_url,
+                   int error_code,
+                   const base::string16& error_description) override;
 
  protected:
-  virtual void DistillPageImpl(const GURL& url,
-                               const std::string& script) OVERRIDE;
+  void DistillPageImpl(const GURL& url, const std::string& script) override;
 
  private:
   friend class TestDistillerPageWebContents;

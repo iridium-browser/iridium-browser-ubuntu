@@ -56,8 +56,6 @@
     'ext/lazy_pixel_ref.h',
     'ext/opacity_draw_filter.cc',
     'ext/opacity_draw_filter.h',
-    'ext/paint_simplifier.cc',
-    'ext/paint_simplifier.h',
     'ext/pixel_ref_utils.cc',
     'ext/pixel_ref_utils.h',
     'ext/platform_canvas.cc',
@@ -89,12 +87,13 @@
     'ext/vector_platform_device_skia.h',
   ],
   'conditions': [
-    [ 'OS == "android" and enable_printing == 0', {
+    [ 'OS == "android" and '
+      'enable_basic_printing==0 and enable_print_preview==0', {
       'sources!': [
         'ext/skia_utils_base.cc',
       ],
     }],
-    [ 'enable_printing == 0', {
+    [ 'enable_basic_printing==0 and enable_print_preview==0', {
       'sources!': [
         'ext/vector_platform_device_skia.cc',
       ],

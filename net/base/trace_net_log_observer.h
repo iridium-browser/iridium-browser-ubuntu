@@ -19,10 +19,10 @@ class NET_EXPORT TraceNetLogObserver
       public base::debug::TraceLog::EnabledStateObserver {
  public:
   TraceNetLogObserver();
-  virtual ~TraceNetLogObserver();
+  ~TraceNetLogObserver() override;
 
   // net::NetLog::ThreadSafeObserver implementation:
-  virtual void OnAddEntry(const NetLog::Entry& entry) OVERRIDE;
+  void OnAddEntry(const NetLog::Entry& entry) override;
 
   // Start to watch for TraceLog enable and disable events.
   // This can't be called if already watching for events.
@@ -35,8 +35,8 @@ class NET_EXPORT TraceNetLogObserver
   void StopWatchForTraceStart();
 
   // base::debug::TraceLog::EnabledStateChangedObserver implementation:
-  virtual void OnTraceLogEnabled() OVERRIDE;
-  virtual void OnTraceLogDisabled() OVERRIDE;
+  void OnTraceLogEnabled() override;
+  void OnTraceLogDisabled() override;
 
  private:
   NetLog* net_log_to_watch_;

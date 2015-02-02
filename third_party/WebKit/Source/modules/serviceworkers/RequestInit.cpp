@@ -6,11 +6,11 @@
 #include "RequestInit.h"
 
 #include "bindings/core/v8/Dictionary.h"
+#include "bindings/core/v8/V8ArrayBuffer.h"
+#include "bindings/core/v8/V8ArrayBufferView.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8Blob.h"
 #include "bindings/core/v8/V8FormData.h"
-#include "bindings/core/v8/custom/V8ArrayBufferCustom.h"
-#include "bindings/core/v8/custom/V8ArrayBufferViewCustom.h"
 #include "core/fileapi/Blob.h"
 #include "modules/serviceworkers/Headers.h"
 #include "platform/blob/BlobData.h"
@@ -24,7 +24,11 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
     DictionaryHelper::get(options, "method", method);
     DictionaryHelper::get(options, "headers", headers);
     if (!headers) {
-        DictionaryHelper::get(options, "headers", headersDictionary);
+        Vector<Vector<String> > headersVector;
+        if (DictionaryHelper::get(options, "headers", headersVector, exceptionState))
+            headers = Headers::create(headersVector, exceptionState);
+        else
+            DictionaryHelper::get(options, "headers", headersDictionary);
     }
     DictionaryHelper::get(options, "mode", mode);
     DictionaryHelper::get(options, "credentials", credentials);
@@ -35,13 +39,13 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
     OwnPtr<BlobData> blobData = BlobData::create();
     v8::Isolate* isolate = toIsolate(context);
     if (body->IsArrayBuffer()) {
-        ArrayBuffer* arrayBuffer = V8ArrayBuffer::toImpl(v8::Handle<v8::Object>::Cast(body));
+        DOMArrayBuffer* arrayBuffer = V8ArrayBuffer::toImpl(v8::Handle<v8::Object>::Cast(body));
         ASSERT(arrayBuffer);
-        blobData->appendArrayBuffer(arrayBuffer);
+        blobData->appendArrayBuffer(arrayBuffer->buffer());
     } else if (body->IsArrayBufferView()) {
-        ArrayBufferView* arrayBufferView = V8ArrayBufferView::toImpl(v8::Handle<v8::Object>::Cast(body));
+        DOMArrayBufferView* arrayBufferView = V8ArrayBufferView::toImpl(v8::Handle<v8::Object>::Cast(body));
         ASSERT(arrayBufferView);
-        blobData->appendArrayBufferView(arrayBufferView);
+        blobData->appendArrayBufferView(arrayBufferView->view());
     } else if (V8Blob::hasInstance(body, isolate)) {
         Blob* blob = V8Blob::toImpl(v8::Handle<v8::Object>::Cast(body));
         ASSERT(blob);
@@ -74,7 +78,7 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
         }
         blobData->setContentType(AtomicString("multipart/form-data; boundary=", AtomicString::ConstructFromLiteral) + httpBody->boundary().data());
     } else if (body->IsString()) {
-        String stringValue(toScalarValueString(body, exceptionState));
+        String stringValue(toUSVString(body, exceptionState));
         blobData->appendText(stringValue, false);
         blobData->setContentType("text/plain;charset=UTF-8");
     } else {

@@ -64,8 +64,7 @@ class TestPacketSender : public PacketSender {
         paused_(false) {}
 
   // A singular packet implies a RTCP packet.
-  virtual bool SendPacket(PacketRef packet,
-                          const base::Closure& cb) OVERRIDE {
+  bool SendPacket(PacketRef packet, const base::Closure& cb) override {
     if (paused_) {
       stored_packet_ = packet;
       callback_ = cb;
@@ -85,9 +84,7 @@ class TestPacketSender : public PacketSender {
     return true;
   }
 
-  virtual int64 GetBytesSent() OVERRIDE {
-    return 0;
-  }
+  int64 GetBytesSent() override { return 0; }
 
   int number_of_rtp_packets() const { return number_of_rtp_packets_; }
 
@@ -158,9 +155,9 @@ class VideoSenderTest : public ::testing::Test {
         &transport_));
   }
 
-  virtual ~VideoSenderTest() {}
+  ~VideoSenderTest() override {}
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     video_sender_.reset();
     task_runner_->RunTasks();
   }
@@ -221,19 +218,25 @@ class VideoSenderTest : public ::testing::Test {
   }
 
   scoped_refptr<media::VideoFrame> GetNewVideoFrame() {
+    if (first_frame_timestamp_.is_null())
+      first_frame_timestamp_ = testing_clock_->NowTicks();
     gfx::Size size(kWidth, kHeight);
     scoped_refptr<media::VideoFrame> video_frame =
         media::VideoFrame::CreateFrame(
-            VideoFrame::I420, size, gfx::Rect(size), size, base::TimeDelta());
+            VideoFrame::I420, size, gfx::Rect(size), size,
+            testing_clock_->NowTicks() - first_frame_timestamp_);
     PopulateVideoFrame(video_frame.get(), last_pixel_value_++);
     return video_frame;
   }
 
   scoped_refptr<media::VideoFrame> GetLargeNewVideoFrame() {
+    if (first_frame_timestamp_.is_null())
+      first_frame_timestamp_ = testing_clock_->NowTicks();
     gfx::Size size(kWidth, kHeight);
     scoped_refptr<media::VideoFrame> video_frame =
         media::VideoFrame::CreateFrame(
-            VideoFrame::I420, size, gfx::Rect(size), size, base::TimeDelta());
+            VideoFrame::I420, size, gfx::Rect(size), size,
+            testing_clock_->NowTicks() - first_frame_timestamp_);
     PopulateVideoFrameWithNoise(video_frame.get());
     return video_frame;
   }
@@ -250,6 +253,7 @@ class VideoSenderTest : public ::testing::Test {
   std::vector<uint32> stored_bitrates_;
   scoped_refptr<CastEnvironment> cast_environment_;
   int last_pixel_value_;
+  base::TimeTicks first_frame_timestamp_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoSenderTest);
 };
@@ -258,8 +262,8 @@ TEST_F(VideoSenderTest, BuiltInEncoder) {
   EXPECT_EQ(STATUS_VIDEO_INITIALIZED, InitEncoder(false, true));
   scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
 
-  const base::TimeTicks capture_time = testing_clock_->NowTicks();
-  video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+  const base::TimeTicks reference_time = testing_clock_->NowTicks();
+  video_sender_->InsertRawVideoFrame(video_frame, reference_time);
 
   task_runner_->RunTasks();
   EXPECT_LE(1, transport_.number_of_rtp_packets());
@@ -271,12 +275,12 @@ TEST_F(VideoSenderTest, ExternalEncoder) {
 
   scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
 
-  const base::TimeTicks capture_time = testing_clock_->NowTicks();
-  video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+  const base::TimeTicks reference_time = testing_clock_->NowTicks();
+  video_sender_->InsertRawVideoFrame(video_frame, reference_time);
   task_runner_->RunTasks();
-  video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+  video_sender_->InsertRawVideoFrame(video_frame, reference_time);
   task_runner_->RunTasks();
-  video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+  video_sender_->InsertRawVideoFrame(video_frame, reference_time);
   task_runner_->RunTasks();
 
   // Fixed bitrate is used for external encoder. Bitrate is only once
@@ -298,8 +302,8 @@ TEST_F(VideoSenderTest, RtcpTimer) {
 
   scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
 
-  const base::TimeTicks capture_time = testing_clock_->NowTicks();
-  video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+  const base::TimeTicks reference_time = testing_clock_->NowTicks();
+  video_sender_->InsertRawVideoFrame(video_frame, reference_time);
 
   // Make sure that we send at least one RTCP packet.
   base::TimeDelta max_rtcp_timeout =
@@ -322,8 +326,8 @@ TEST_F(VideoSenderTest, ResendTimer) {
 
   scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
 
-  const base::TimeTicks capture_time = testing_clock_->NowTicks();
-  video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+  const base::TimeTicks reference_time = testing_clock_->NowTicks();
+  video_sender_->InsertRawVideoFrame(video_frame, reference_time);
 
   // ACK the key frame.
   RtcpCastMessage cast_feedback(1);
@@ -332,7 +336,7 @@ TEST_F(VideoSenderTest, ResendTimer) {
   video_sender_->OnReceivedCastFeedback(cast_feedback);
 
   video_frame = GetNewVideoFrame();
-  video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+  video_sender_->InsertRawVideoFrame(video_frame, reference_time);
 
   base::TimeDelta max_resend_timeout =
       base::TimeDelta::FromMilliseconds(1 + kDefaultRtpMaxDelayMs);
@@ -354,8 +358,8 @@ TEST_F(VideoSenderTest, LogAckReceivedEvent) {
   for (int i = 0; i < num_frames; i++) {
     scoped_refptr<media::VideoFrame> video_frame = GetNewVideoFrame();
 
-    const base::TimeTicks capture_time = testing_clock_->NowTicks();
-    video_sender_->InsertRawVideoFrame(video_frame, capture_time);
+    const base::TimeTicks reference_time = testing_clock_->NowTicks();
+    video_sender_->InsertRawVideoFrame(video_frame, reference_time);
     RunTasks(33);
   }
 

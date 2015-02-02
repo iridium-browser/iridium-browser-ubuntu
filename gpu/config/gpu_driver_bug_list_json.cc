@@ -19,7 +19,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
 {
   "name": "gpu driver bug list",
   // Please update the version number whenever you change this file.
-  "version": "7.10",
+  "version": "7.12",
   "entries": [
     {
       "id": 1,
@@ -589,22 +589,6 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       ]
     },
     {
-      "id": 50,
-      "description": "NVIDIA driver requires unbinding a GpuMemoryBuffer from the texture before mapping it to main memory",
-      "os": {
-        "type": "android"
-      },
-      "gl_type": "gles",
-      "gl_version": {
-        "op": "<",
-        "value": "3.1"
-      },
-      "gl_vendor": "NVIDIA.*",
-      "features": [
-        "release_image_after_use"
-      ]
-    },
-    {
       "id": 51,
       "description": "TexSubImage2D() is faster for full uploads on ANGLE",
       "os": {
@@ -787,6 +771,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "os": {
         "type": "linux"
       },
+      "driver_vendor": "Mesa",
       "features": [
         "disable_post_sub_buffers_for_onscreen_surfaces"
       ]
@@ -845,18 +830,6 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
       "gl_vendor": "NVIDIA.*",
       "features": [
         "use_virtualized_gl_contexts"
-      ]
-    },
-    {
-      "id": 73,
-      "description": "Using D3D11 causes browser crashes on certain Intel GPUs",
-      "cr_bugs": [310808],
-      "os": {
-        "type": "win"
-      },
-      "vendor_id": "0x8086",
-      "features": [
-        "disable_d3d11"
       ]
     },
 )  // LONG_STRING_CONST macro
@@ -1049,6 +1022,22 @@ LONG_STRING_CONST(
       ]
     },
     {
+      "id": 92,
+      "description": "Old Intel drivers cannot reliably support D3D11",
+      "cr_bugs": [363721],
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x8086",
+      "driver_version": {
+        "op": "<",
+        "value": "8.16"
+      },
+      "features": [
+        "disable_d3d11"
+      ]
+    },
+    {
       "id": 93,
       "description": "The GL implementation on the Android emulator has problems with PBOs.",
       "cr_bugs": [340882],
@@ -1064,6 +1053,38 @@ LONG_STRING_CONST(
       },
       "features": [
         "disable_async_readpixels"
+      ]
+    },
+    {
+      "id": 94,
+      "description": "Disable EGL_KHR_wait_sync on NVIDIA with GLES 3.1",
+      "cr_bugs": [433057],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<=",
+          "value": "5.0.1"
+        }
+      },
+      "gl_vendor": "NVIDIA.*",
+      "gl_type": "gles",
+      "gl_version": {
+        "op": "=",
+        "value": "3.1"
+      },
+      "features": [
+        "disable_egl_khr_wait_sync"
+      ]
+    },
+    {
+      "id": 96,
+      "description": "glBindFramebuffer sometimes requires a glBegin/End to take effect",
+      "cr_bugs": [435786],
+      "os": {
+        "type": "macosx"
+      },
+      "features": [
+        "gl_begin_gl_end_on_fbo_change_to_backbuffer"
       ]
     }
   ]

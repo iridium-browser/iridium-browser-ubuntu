@@ -12,13 +12,11 @@
 #include "base/debug/trace_event.h"
 #include "base/files/file_util.h"
 #include "base/hash.h"
-#include "base/metrics/field_trial.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/win/iat_patch_function.h"
-#include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "base/win/windows_version.h"
@@ -30,7 +28,7 @@
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/sandbox_nt_util.h"
 #include "sandbox/win/src/win_utils.h"
-#include "ui/gfx/win/dpi.h"
+#include "ui/gfx/win/direct_write.h"
 
 static sandbox::BrokerServices* g_broker_services = NULL;
 static sandbox::TargetServices* g_target_services = NULL;
@@ -84,6 +82,8 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"pavshookwow.dll",             // Panda Antivirus.
   L"pctavhook.dll",               // PC Tools Antivirus.
   L"pctgmhk.dll",                 // PC Tools Spyware Doctor.
+  L"picrmi32.dll",                // PicRec.
+  L"picrmi64.dll",                // PicRec.
   L"prntrack.dll",                // Pharos Systems.
   L"protector.dll",               // Unknown (suspected malware).
   L"radhslib.dll",                // Radiant Naomi Internet Filter.
@@ -193,8 +193,8 @@ void BlacklistAddOneDll(const wchar_t* module_name,
     DCHECK_LE(3U, (name.size() - period));
     if (period <= 8)
       return;
-    for (int ix = 0; ix < 3; ++ix) {
-      const wchar_t suffix[] = {'~', ('1' + ix), 0};
+    for (wchar_t ix = '1'; ix <= '3'; ++ix) {
+      const wchar_t suffix[] = {'~', ix, 0};
       std::wstring alt_name = name.substr(0, 6) + suffix;
       alt_name += name.substr(period, name.size());
       if (check_in_browser) {
@@ -577,53 +577,6 @@ bool InitTargetServices(sandbox::TargetServices* target_services) {
   return sandbox::SBOX_ALL_OK == result;
 }
 
-bool ShouldUseDirectWrite() {
-  // If the flag is currently on, and we're on Win7 or above, we enable
-  // DirectWrite. Skia does not require the additions to DirectWrite in QFE
-  // 2670838, but a simple 'better than XP' check is not enough.
-  if (base::win::GetVersion() < base::win::VERSION_WIN7)
-    return false;
-
-  base::win::OSInfo::VersionNumber os_version =
-      base::win::OSInfo::GetInstance()->version_number();
-  if ((os_version.major == 6) && (os_version.minor == 1)) {
-    // We can't use DirectWrite for pre-release versions of Windows 7.
-    if (os_version.build < 7600)
-      return false;
-  }
-
-  // If forced off, don't use it.
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kDisableDirectWrite))
-    return false;
-
-#if !defined(NACL_WIN64)
-  // Can't use GDI on HiDPI.
-  if (gfx::GetDPIScale() > 1.0f)
-    return true;
-#endif
-
-  // We have logic in renderer_font_platform_win.cc for falling back to safe
-  // font list if machine has more than 1750 fonts installed. Users have
-  // complained about this as safe font list is usually not sufficient.
-  // We now disable direct write (gdi) if we encounter more number
-  // of fonts than a threshold (currently 1750).
-  // Refer: crbug.com/421305
-  const wchar_t kWindowsFontsRegistryKey[] =
-      L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts";
-  base::win::RegistryValueIterator reg_iterator(HKEY_LOCAL_MACHINE,
-                                                kWindowsFontsRegistryKey);
-  const DWORD kMaxAllowedFontsBeforeFallbackToGDI = 1750;
-  if (reg_iterator.ValueCount() >= kMaxAllowedFontsBeforeFallbackToGDI)
-    return false;
-
-  // Otherwise, check the field trial.
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("DirectWrite");
-  return group_name != "Disabled";
-}
-
 base::ProcessHandle StartSandboxedProcess(
     SandboxedProcessLauncherDelegate* delegate,
     base::CommandLine* cmd_line) {
@@ -695,13 +648,15 @@ base::ProcessHandle StartSandboxedProcess(
     return 0;
 
   if (type_str == switches::kRendererProcess) {
-    if (ShouldUseDirectWrite()) {
+#if !defined(NACL_WIN64)
+    if (gfx::win::ShouldUseDirectWrite()) {
       AddDirectory(base::DIR_WINDOWS_FONTS,
                   NULL,
                   true,
                   sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                   policy);
     }
+#endif
   } else {
     // Hack for Google Desktop crash. Trick GD into not injecting its DLL into
     // this subprocess. See
@@ -767,7 +722,7 @@ base::ProcessHandle StartSandboxedProcess(
   if (delegate)
     delegate->PostSpawnTarget(target.process_handle());
 
-  ResumeThread(target.thread_handle());
+  CHECK(ResumeThread(target.thread_handle()) != -1);
   TRACE_EVENT_END_ETW("StartProcessWithAccess", 0, type_str);
   return target.TakeProcessHandle();
 }

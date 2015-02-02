@@ -48,15 +48,15 @@ namespace app_list {
 class SearchBoxModelObserverBridge : public SearchBoxModelObserver {
  public:
   SearchBoxModelObserverBridge(AppsSearchBoxController* parent);
-  virtual ~SearchBoxModelObserverBridge();
+  ~SearchBoxModelObserverBridge() override;
 
   void SetSearchText(const base::string16& text);
 
-  virtual void IconChanged() OVERRIDE;
-  virtual void SpeechRecognitionButtonPropChanged() OVERRIDE;
-  virtual void HintTextChanged() OVERRIDE;
-  virtual void SelectionModelChanged() OVERRIDE;
-  virtual void TextChanged() OVERRIDE;
+  void IconChanged() override;
+  void SpeechRecognitionButtonPropChanged() override;
+  void HintTextChanged() override;
+  void SelectionModelChanged() override;
+  void TextChanged() override;
 
  private:
   SearchBoxModel* GetModel();

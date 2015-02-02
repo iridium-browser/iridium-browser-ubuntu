@@ -32,25 +32,23 @@ class AppShortcutLauncherItemController : public LauncherItemController {
   AppShortcutLauncherItemController(const std::string& app_id,
                                     ChromeLauncherController* controller);
 
-  virtual ~AppShortcutLauncherItemController();
+  ~AppShortcutLauncherItemController() override;
 
   std::vector<content::WebContents*> GetRunningApplications();
 
   // LauncherItemController overrides:
-  virtual bool IsOpen() const OVERRIDE;
-  virtual bool IsVisible() const OVERRIDE;
-  virtual void Launch(ash::LaunchSource source, int event_flags) OVERRIDE;
-  virtual bool Activate(ash::LaunchSource source) OVERRIDE;
-  virtual ChromeLauncherAppMenuItems GetApplicationList(
-      int event_flags) OVERRIDE;
-  virtual bool ItemSelected(const ui::Event& event) OVERRIDE;
-  virtual base::string16 GetTitle() OVERRIDE;
-  virtual ui::MenuModel* CreateContextMenu(
-      aura::Window* root_window) OVERRIDE;
-  virtual ash::ShelfMenuModel* CreateApplicationMenu(int event_flags) OVERRIDE;
-  virtual bool IsDraggable() OVERRIDE;
-  virtual bool ShouldShowTooltip() OVERRIDE;
-  virtual void Close() OVERRIDE;
+  bool IsOpen() const override;
+  bool IsVisible() const override;
+  void Launch(ash::LaunchSource source, int event_flags) override;
+  bool Activate(ash::LaunchSource source) override;
+  ChromeLauncherAppMenuItems GetApplicationList(int event_flags) override;
+  bool ItemSelected(const ui::Event& event) override;
+  base::string16 GetTitle() override;
+  ui::MenuModel* CreateContextMenu(aura::Window* root_window) override;
+  ash::ShelfMenuModel* CreateApplicationMenu(int event_flags) override;
+  bool IsDraggable() override;
+  bool ShouldShowTooltip() override;
+  void Close() override;
 
   // Get the refocus url pattern, which can be used to identify this application
   // from a URL link.

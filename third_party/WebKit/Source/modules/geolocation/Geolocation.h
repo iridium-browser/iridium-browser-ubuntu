@@ -44,12 +44,10 @@ namespace blink {
 class Dictionary;
 class Document;
 class LocalFrame;
-class GeolocationController;
 class GeolocationError;
-class GeolocationPosition;
 class ExecutionContext;
 
-class Geolocation FINAL
+class Geolocation final
     : public GarbageCollectedFinalized<Geolocation>
     , public ScriptWrappable
     , public ActiveDOMObject {
@@ -59,7 +57,7 @@ public:
     virtual ~Geolocation();
     void trace(Visitor*);
 
-    virtual void stop() OVERRIDE;
+    virtual void stop() override;
     Document* document() const;
     LocalFrame* frame() const;
 
@@ -163,6 +161,11 @@ private:
     // Runs the success callbacks for the set of notifiers awaiting a cached
     // position, the set is then cleared. The oneshots are removed everywhere.
     void makeCachedPositionCallbacks();
+
+    // Record whether the origin trying to access Geolocation would be allowed
+    // to access a feature that can only be accessed by secure origins.
+    // See http://goo.gl/lq4gCo
+    void recordOriginTypeAccess() const;
 
     GeoNotifierSet m_oneShots;
     GeolocationWatchers m_watchers;

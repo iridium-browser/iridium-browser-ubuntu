@@ -19,6 +19,7 @@ namespace net {
 namespace test {
 
 const QuicByteCount kBytesInFlight = 1024;
+const int kInitialBurstPackets = 10;
 
 class PacingSenderTest : public ::testing::Test {
  protected:
@@ -34,7 +35,7 @@ class PacingSenderTest : public ::testing::Test {
     clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(9));
   }
 
-  virtual ~PacingSenderTest() {}
+  ~PacingSenderTest() override {}
 
   void CheckPacketIsSentImmediately() {
     // In order for the packet to be sendable, the underlying sender must
@@ -133,19 +134,10 @@ TEST_F(PacingSenderTest, SendNow) {
 }
 
 TEST_F(PacingSenderTest, VariousSending) {
-  // Start the test in slow start.
-  EXPECT_CALL(*mock_sender_, InSlowStart()).WillRepeatedly(Return(true));
-
-  // Configure bandwith of 1 packet per 2 ms, for which the pacing rate
-  // will be 1 packet per 1 ms.
-  EXPECT_CALL(*mock_sender_, BandwidthEstimate())
+  // Configure pacing rate of 1 packet per 1 ms.
+  EXPECT_CALL(*mock_sender_, PacingRate())
       .WillRepeatedly(Return(QuicBandwidth::FromBytesAndTimeDelta(
-          kMaxPacketSize, QuicTime::Delta::FromMilliseconds(2))));
-
-  // Send a whole pile of packets, and verify that they are not paced.
-  for (int i = 0 ; i < 1000; ++i) {
-    CheckPacketIsSentImmediately();
-  }
+          kMaxPacketSize, QuicTime::Delta::FromMilliseconds(1))));
 
   // Now update the RTT and verify that packets are actually paced.
   EXPECT_CALL(*mock_sender_, OnCongestionEvent(true, kBytesInFlight, _, _));
@@ -208,19 +200,10 @@ TEST_F(PacingSenderTest, VariousSending) {
 }
 
 TEST_F(PacingSenderTest, CongestionAvoidanceSending) {
-  // Start the test in congestion avoidance.
-  EXPECT_CALL(*mock_sender_, InSlowStart()).WillRepeatedly(Return(false));
-
-  // Configure bandwith of 1 packet per 2 ms, for which the pacing rate
-  // will be 1 packet per 1 ms.
-  EXPECT_CALL(*mock_sender_, BandwidthEstimate())
+  // Configure pacing rate of 1 packet per 1 ms.
+  EXPECT_CALL(*mock_sender_, PacingRate())
       .WillRepeatedly(Return(QuicBandwidth::FromBytesAndTimeDelta(
-          kMaxPacketSize, QuicTime::Delta::FromMilliseconds(2))));
-
-  // Send a whole pile of packets, and verify that they are not paced.
-  for (int i = 0 ; i < 1000; ++i) {
-    CheckPacketIsSentImmediately();
-  }
+          kMaxPacketSize * 1.25, QuicTime::Delta::FromMilliseconds(2))));
 
   // Now update the RTT and verify that packets are actually paced.
   EXPECT_CALL(*mock_sender_, OnCongestionEvent(true, kBytesInFlight, _, _));
@@ -281,14 +264,11 @@ TEST_F(PacingSenderTest, InitialBurst) {
   pacing_sender_.reset(new PacingSender(mock_sender_,
                                         QuicTime::Delta::FromMilliseconds(1),
                                         10));
-  // Start the test in slow start.
-  EXPECT_CALL(*mock_sender_, InSlowStart()).WillRepeatedly(Return(true));
 
-  // Configure bandwith of 1 packet per 2 ms, for which the pacing rate
-  // will be 1 packet per 1 ms.
-  EXPECT_CALL(*mock_sender_, BandwidthEstimate())
+  // Configure pacing rate of 1 packet per 1 ms.
+  EXPECT_CALL(*mock_sender_, PacingRate())
       .WillRepeatedly(Return(QuicBandwidth::FromBytesAndTimeDelta(
-          kMaxPacketSize, QuicTime::Delta::FromMilliseconds(2))));
+          kMaxPacketSize, QuicTime::Delta::FromMilliseconds(1))));
 
   // Update the RTT and verify that the first 10 packets aren't paced.
   EXPECT_CALL(*mock_sender_, OnCongestionEvent(true, kBytesInFlight, _, _));
@@ -296,17 +276,17 @@ TEST_F(PacingSenderTest, InitialBurst) {
   pacing_sender_->OnCongestionEvent(true, kBytesInFlight, empty_map, empty_map);
 
   // Send 10 packets, and verify that they are not paced.
-  for (int i = 0 ; i < 10; ++i) {
+  for (int i = 0 ; i < kInitialBurstPackets; ++i) {
     CheckPacketIsSentImmediately();
   }
 
-  CheckPacketIsSentImmediately();
-  CheckPacketIsSentImmediately();
-  CheckPacketIsSentImmediately();
-
   // The first packet was a "make up", then we sent two packets "into the
-  // future", so the delay should be 2.
+  // future", so the delay should be 2ms.
+  CheckPacketIsSentImmediately();
+  CheckPacketIsSentImmediately();
+  CheckPacketIsSentImmediately();
   CheckPacketIsDelayed(QuicTime::Delta::FromMilliseconds(2));
+
   clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
   CheckPacketIsSentImmediately();
 
@@ -321,14 +301,67 @@ TEST_F(PacingSenderTest, InitialBurst) {
             pacing_sender_->TimeUntilSend(clock_.Now(),
                                           0,
                                           HAS_RETRANSMITTABLE_DATA));
-  for (int i = 0 ; i < 10; ++i) {
+  for (int i = 0 ; i < kInitialBurstPackets; ++i) {
     CheckPacketIsSentImmediately();
   }
 
+  // The first packet was a "make up", then we sent two packets "into the
+  // future", so the delay should be 2ms.
   CheckPacketIsSentImmediately();
   CheckPacketIsSentImmediately();
+  CheckPacketIsSentImmediately();
+  CheckPacketIsDelayed(QuicTime::Delta::FromMilliseconds(2));
+}
+
+TEST_F(PacingSenderTest, InitialBurstNoRttMeasurement) {
+  pacing_sender_.reset();
+  mock_sender_ = new StrictMock<MockSendAlgorithm>();
+  pacing_sender_.reset(new PacingSender(mock_sender_,
+                                        QuicTime::Delta::FromMilliseconds(1),
+                                        10));
+
+  // Configure pacing rate of 1 packet per 1 ms.
+  EXPECT_CALL(*mock_sender_, PacingRate())
+      .WillRepeatedly(Return(QuicBandwidth::FromBytesAndTimeDelta(
+          kMaxPacketSize, QuicTime::Delta::FromMilliseconds(1))));
+
+  // Send 10 packets, and verify that they are not paced.
+  for (int i = 0 ; i < kInitialBurstPackets; ++i) {
+    CheckPacketIsSentImmediately();
+  }
+
+  // The first packet was a "make up", then we sent two packets "into the
+  // future", so the delay should be 2ms.
+  CheckPacketIsSentImmediately();
+  CheckPacketIsSentImmediately();
+  CheckPacketIsSentImmediately();
+  CheckPacketIsDelayed(QuicTime::Delta::FromMilliseconds(2));
+
+
+  clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(5));
   CheckPacketIsSentImmediately();
 
+  // Next time TimeUntilSend is called with no bytes in flight, the tokens
+  // should be refilled and there should be no delay.
+  EXPECT_CALL(*mock_sender_,
+              TimeUntilSend(clock_.Now(),
+                            0,
+                            HAS_RETRANSMITTABLE_DATA)).
+      WillOnce(Return(zero_time_));
+  EXPECT_EQ(zero_time_,
+            pacing_sender_->TimeUntilSend(clock_.Now(),
+                                          0,
+                                          HAS_RETRANSMITTABLE_DATA));
+  // Send 10 packets, and verify that they are not paced.
+  for (int i = 0 ; i < kInitialBurstPackets; ++i) {
+    CheckPacketIsSentImmediately();
+  }
+
+  // The first packet was a "make up", then we sent two packets "into the
+  // future", so the delay should be 2ms.
+  CheckPacketIsSentImmediately();
+  CheckPacketIsSentImmediately();
+  CheckPacketIsSentImmediately();
   CheckPacketIsDelayed(QuicTime::Delta::FromMilliseconds(2));
 }
 

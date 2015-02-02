@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
+#include "ui/gfx/display_observer.h"
 
 class ChromeBrowserMainParts;
 
@@ -16,17 +17,39 @@ namespace chrome {
 void AddMetricsExtraParts(ChromeBrowserMainParts* main_parts);
 }
 
-class ChromeBrowserMainExtraPartsMetrics : public ChromeBrowserMainExtraParts {
+class ChromeBrowserMainExtraPartsMetrics : public ChromeBrowserMainExtraParts,
+                                           public gfx::DisplayObserver {
  public:
   ChromeBrowserMainExtraPartsMetrics();
-  virtual ~ChromeBrowserMainExtraPartsMetrics();
+  ~ChromeBrowserMainExtraPartsMetrics() override;
 
   // Overridden from ChromeBrowserMainExtraParts:
-  virtual void PreProfileInit() OVERRIDE;
-  virtual void PreBrowserStart() OVERRIDE;
-  virtual void PostBrowserStart() OVERRIDE;
+  void PreProfileInit() override;
+  void PreBrowserStart() override;
+  void PostBrowserStart() override;
 
  private:
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  // Records Mac specific metrics.
+  void RecordMacMetrics();
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
+  // DisplayObserver overrides.
+  virtual void OnDisplayAdded(const gfx::Display& new_display) override;
+  virtual void OnDisplayRemoved(const gfx::Display& old_display) override;
+  virtual void OnDisplayMetricsChanged(const gfx::Display& display,
+                                       uint32_t changed_metrics) override;
+
+  // If the number of displays has changed, emit a UMA metric.
+  void EmitDisplaysChangedMetric();
+
+  // A cached value for the number of displays.
+  int display_count_;
+
+  // True iff |this| instance is registered as an observer of the native
+  // screen.
+  bool is_screen_observer_;
+
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainExtraPartsMetrics);
 };
 

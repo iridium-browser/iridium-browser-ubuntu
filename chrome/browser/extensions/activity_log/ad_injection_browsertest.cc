@@ -93,7 +93,7 @@ class ActivityLogObserver : public ActivityLog::Observer {
   bool found_multiple_injections() const { return found_multiple_injections_; }
 
  private:
-  virtual void OnExtensionActivity(scoped_refptr<Action> action) OVERRIDE;
+  void OnExtensionActivity(scoped_refptr<Action> action) override;
 
   ScopedObserver<ActivityLog, ActivityLog::Observer> scoped_observer_;
 
@@ -139,10 +139,10 @@ void ActivityLogObserver::OnExtensionActivity(scoped_refptr<Action> action) {
 class TestAdNetworkDatabase : public AdNetworkDatabase {
  public:
   TestAdNetworkDatabase();
-  virtual ~TestAdNetworkDatabase();
+  ~TestAdNetworkDatabase() override;
 
  private:
-  virtual bool IsAdNetwork(const GURL& url) const OVERRIDE;
+  bool IsAdNetwork(const GURL& url) const override;
 
   GURL ad_network_url1_;
   GURL ad_network_url2_;
@@ -163,7 +163,7 @@ scoped_ptr<net::test_server::HttpResponse> HandleRequest(
   scoped_ptr<net::test_server::BasicHttpResponse> response(
       new net::test_server::BasicHttpResponse());
   response->set_code(net::HTTP_OK);
-  return response.PassAs<net::test_server::HttpResponse>();
+  return response.Pass();
 }
 
 }  // namespace
@@ -171,10 +171,10 @@ scoped_ptr<net::test_server::HttpResponse> HandleRequest(
 class AdInjectionBrowserTest : public ExtensionBrowserTest {
  protected:
   AdInjectionBrowserTest();
-  virtual ~AdInjectionBrowserTest();
+  ~AdInjectionBrowserTest() override;
 
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
 
   // Handle the "Reset Begin" stage of the test.
   testing::AssertionResult HandleResetBeginStage();
@@ -380,6 +380,58 @@ IN_PROC_BROWSER_TEST_F(AdInjectionBrowserTest, DetectAdInjections) {
     listener()->Reply("Continue");
     listener()->Reset();
   }
+}
+
+// If this test grows, we should consolidate it and AdInjectionBrowserTest.
+class ExecuteScriptAdInjectionBrowserTest : public ExtensionBrowserTest {
+ protected:
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
+};
+
+void ExecuteScriptAdInjectionBrowserTest::SetUpOnMainThread() {
+  ExtensionBrowserTest::SetUpOnMainThread();
+
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  embedded_test_server()->RegisterRequestHandler(base::Bind(&HandleRequest));
+
+  // Enable the activity log for this test.
+  ActivityLog::GetInstance(profile())->SetWatchdogAppActiveForTesting(true);
+
+  // Set the ad network database.
+  AdNetworkDatabase::SetForTesting(
+      scoped_ptr<AdNetworkDatabase>(new TestAdNetworkDatabase));
+}
+
+void ExecuteScriptAdInjectionBrowserTest::TearDownOnMainThread() {
+  ActivityLog::GetInstance(profile())->SetWatchdogAppActiveForTesting(false);
+  ExtensionBrowserTest::TearDownOnMainThread();
+}
+
+// Test that using chrome.tabs.executeScript doesn't circumvent our detection.
+// Since each type of injection is tested more thoroughly in the test above,
+// this test just needs to make sure that we detect anything from executeScript.
+IN_PROC_BROWSER_TEST_F(ExecuteScriptAdInjectionBrowserTest,
+                       ExecuteScriptAdInjection) {
+  const Extension* extension =
+      LoadExtension(test_data_dir_.AppendASCII("activity_log")
+                                  .AppendASCII("execute_script_ad_injection"));
+  ASSERT_TRUE(extension);
+
+  ExtensionTestMessageListener listener(false);  // Won't reply.
+  listener.set_extension_id(extension->id());
+  ActivityLogObserver observer(profile());
+  observer.enable();
+
+  ui_test_utils::NavigateToURL(browser(), embedded_test_server()->GetURL("/"));
+
+  // The extension sends a "Done" message when the script has executed.
+  listener.WaitUntilSatisfied();
+  EXPECT_EQ("Done", listener.message());
+
+  // We should have injected an ad.
+  EXPECT_EQ(Action::INJECTION_NEW_AD, observer.injection_type());
+  EXPECT_FALSE(observer.found_multiple_injections());
 }
 
 // TODO(rdevlin.cronin): We test a good amount of ways of injecting ads with

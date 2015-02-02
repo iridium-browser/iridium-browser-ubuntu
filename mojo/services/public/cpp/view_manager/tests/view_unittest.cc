@@ -85,6 +85,23 @@ TEST_F(ViewTest, GetChildById) {
   EXPECT_EQ(&v111, v1.GetChildById(v111.id()));
 }
 
+TEST_F(ViewTest, DrawnAndVisible) {
+  TestView v1;
+  EXPECT_TRUE(v1.visible());
+  EXPECT_FALSE(v1.IsDrawn());
+
+  ViewPrivate(&v1).set_drawn(true);
+
+  TestView v11;
+  v1.AddChild(&v11);
+  EXPECT_TRUE(v11.visible());
+  EXPECT_TRUE(v11.IsDrawn());
+
+  v1.RemoveChild(&v11);
+  EXPECT_TRUE(v11.visible());
+  EXPECT_FALSE(v11.IsDrawn());
+}
+
 // ViewObserver --------------------------------------------------------
 
 typedef testing::Test ViewObserverTest;
@@ -100,9 +117,7 @@ class TreeChangeObserver : public ViewObserver {
   explicit TreeChangeObserver(View* observee) : observee_(observee) {
     observee_->AddObserver(this);
   }
-  virtual ~TreeChangeObserver() {
-    observee_->RemoveObserver(this);
-  }
+  ~TreeChangeObserver() override { observee_->RemoveObserver(this); }
 
   void Reset() {
     received_params_.clear();
@@ -114,10 +129,10 @@ class TreeChangeObserver : public ViewObserver {
 
  private:
   // Overridden from ViewObserver:
-   virtual void OnTreeChanging(const TreeChangeParams& params) OVERRIDE {
+  void OnTreeChanging(const TreeChangeParams& params) override {
      received_params_.push_back(params);
    }
-  virtual void OnTreeChanged(const TreeChangeParams& params) OVERRIDE {
+   void OnTreeChanged(const TreeChangeParams& params) override {
     received_params_.push_back(params);
   }
 
@@ -336,9 +351,7 @@ class OrderChangeObserver : public ViewObserver {
   explicit OrderChangeObserver(View* observee) : observee_(observee) {
     observee_->AddObserver(this);
   }
-  virtual ~OrderChangeObserver() {
-    observee_->RemoveObserver(this);
-  }
+  ~OrderChangeObserver() override { observee_->RemoveObserver(this); }
 
   Changes GetAndClearChanges() {
     Changes changes;
@@ -348,15 +361,15 @@ class OrderChangeObserver : public ViewObserver {
 
  private:
   // Overridden from ViewObserver:
-  virtual void OnViewReordering(View* view,
-                                View* relative_view,
-                                OrderDirection direction) OVERRIDE {
+  void OnViewReordering(View* view,
+                        View* relative_view,
+                        OrderDirection direction) override {
     OnViewReordered(view, relative_view, direction);
   }
 
-  virtual void OnViewReordered(View* view,
-                               View* relative_view,
-                               OrderDirection direction) OVERRIDE {
+  void OnViewReordered(View* view,
+                       View* relative_view,
+                       OrderDirection direction) override {
     Change change;
     change.view = view;
     change.relative_view = relative_view;
@@ -393,7 +406,7 @@ TEST_F(ViewObserverTest, Order) {
     EXPECT_EQ(&v11, v1.children().back());
 
     OrderChangeObserver::Changes changes = observer.GetAndClearChanges();
-    EXPECT_EQ(2U, changes.size());
+    ASSERT_EQ(2U, changes.size());
     EXPECT_EQ(&v11, changes[0].view);
     EXPECT_EQ(&v13, changes[0].relative_view);
     EXPECT_EQ(ORDER_DIRECTION_ABOVE, changes[0].direction);
@@ -413,7 +426,7 @@ TEST_F(ViewObserverTest, Order) {
     EXPECT_EQ(&v13, v1.children().back());
 
     OrderChangeObserver::Changes changes = observer.GetAndClearChanges();
-    EXPECT_EQ(2U, changes.size());
+    ASSERT_EQ(2U, changes.size());
     EXPECT_EQ(&v11, changes[0].view);
     EXPECT_EQ(&v12, changes[0].relative_view);
     EXPECT_EQ(ORDER_DIRECTION_BELOW, changes[0].direction);
@@ -433,7 +446,7 @@ TEST_F(ViewObserverTest, Order) {
     EXPECT_EQ(&v13, v1.children().back());
 
     OrderChangeObserver::Changes changes = observer.GetAndClearChanges();
-    EXPECT_EQ(2U, changes.size());
+    ASSERT_EQ(2U, changes.size());
     EXPECT_EQ(&v11, changes[0].view);
     EXPECT_EQ(&v12, changes[0].relative_view);
     EXPECT_EQ(ORDER_DIRECTION_ABOVE, changes[0].direction);
@@ -453,7 +466,7 @@ TEST_F(ViewObserverTest, Order) {
     EXPECT_EQ(&v13, v1.children().back());
 
     OrderChangeObserver::Changes changes = observer.GetAndClearChanges();
-    EXPECT_EQ(2U, changes.size());
+    ASSERT_EQ(2U, changes.size());
     EXPECT_EQ(&v11, changes[0].view);
     EXPECT_EQ(&v12, changes[0].relative_view);
     EXPECT_EQ(ORDER_DIRECTION_BELOW, changes[0].direction);
@@ -473,9 +486,9 @@ std::string ViewIdToString(Id id) {
       base::StringPrintf("%d,%d", HiWord(id), LoWord(id));
 }
 
-std::string RectToString(const gfx::Rect& rect) {
+std::string RectToString(const Rect& rect) {
   return base::StringPrintf("%d,%d %dx%d",
-                            rect.x(), rect.y(), rect.width(), rect.height());
+                            rect.x, rect.y, rect.width, rect.height);
 }
 
 class BoundsChangeObserver : public ViewObserver {
@@ -483,9 +496,7 @@ class BoundsChangeObserver : public ViewObserver {
   explicit BoundsChangeObserver(View* view) : view_(view) {
     view_->AddObserver(this);
   }
-  virtual ~BoundsChangeObserver() {
-    view_->RemoveObserver(this);
-  }
+  ~BoundsChangeObserver() override { view_->RemoveObserver(this); }
 
   Changes GetAndClearChanges() {
     Changes changes;
@@ -495,9 +506,9 @@ class BoundsChangeObserver : public ViewObserver {
 
  private:
   // Overridden from ViewObserver:
-  virtual void OnViewBoundsChanging(View* view,
-                                    const gfx::Rect& old_bounds,
-                                    const gfx::Rect& new_bounds) OVERRIDE {
+  void OnViewBoundsChanging(View* view,
+                            const Rect& old_bounds,
+                            const Rect& new_bounds) override {
     changes_.push_back(
         base::StringPrintf(
             "view=%s old_bounds=%s new_bounds=%s phase=changing",
@@ -505,9 +516,9 @@ class BoundsChangeObserver : public ViewObserver {
             RectToString(old_bounds).c_str(),
             RectToString(new_bounds).c_str()));
   }
-  virtual void OnViewBoundsChanged(View* view,
-                                   const gfx::Rect& old_bounds,
-                                   const gfx::Rect& new_bounds) OVERRIDE {
+  void OnViewBoundsChanged(View* view,
+                           const Rect& old_bounds,
+                           const Rect& new_bounds) override {
     changes_.push_back(
         base::StringPrintf(
             "view=%s old_bounds=%s new_bounds=%s phase=changed",
@@ -528,16 +539,163 @@ TEST_F(ViewObserverTest, SetBounds) {
   TestView v1;
   {
     BoundsChangeObserver observer(&v1);
-    v1.SetBounds(gfx::Rect(0, 0, 100, 100));
+    Rect rect;
+    rect.width = rect.height = 100;
+    v1.SetBounds(rect);
 
     Changes changes = observer.GetAndClearChanges();
-    EXPECT_EQ(2U, changes.size());
+    ASSERT_EQ(2U, changes.size());
     EXPECT_EQ(
         "view=0,1 old_bounds=0,0 0x0 new_bounds=0,0 100x100 phase=changing",
         changes[0]);
     EXPECT_EQ(
         "view=0,1 old_bounds=0,0 0x0 new_bounds=0,0 100x100 phase=changed",
         changes[1]);
+  }
+}
+
+namespace {
+
+class VisibilityChangeObserver : public ViewObserver {
+ public:
+  explicit VisibilityChangeObserver(View* view) : view_(view) {
+    view_->AddObserver(this);
+  }
+  ~VisibilityChangeObserver() override { view_->RemoveObserver(this); }
+
+  Changes GetAndClearChanges() {
+    Changes changes;
+    changes.swap(changes_);
+    return changes;
+  }
+
+ private:
+  // Overridden from ViewObserver:
+  void OnViewVisibilityChanging(View* view) override {
+    changes_.push_back(
+        base::StringPrintf("view=%s phase=changing visibility=%s",
+                           ViewIdToString(view->id()).c_str(),
+                           view->visible() ? "true" : "false"));
+  }
+  void OnViewVisibilityChanged(View* view) override {
+    changes_.push_back(base::StringPrintf("view=%s phase=changed visibility=%s",
+                                          ViewIdToString(view->id()).c_str(),
+                                          view->visible() ? "true" : "false"));
+  }
+
+  View* view_;
+  Changes changes_;
+
+  DISALLOW_COPY_AND_ASSIGN(VisibilityChangeObserver);
+};
+
+}  // namespace
+
+TEST_F(ViewObserverTest, SetVisible) {
+  TestView v1;
+  EXPECT_TRUE(v1.visible());
+  {
+    // Change visibility from true to false and make sure we get notifications.
+    VisibilityChangeObserver observer(&v1);
+    v1.SetVisible(false);
+
+    Changes changes = observer.GetAndClearChanges();
+    ASSERT_EQ(2U, changes.size());
+    EXPECT_EQ("view=0,1 phase=changing visibility=true", changes[0]);
+    EXPECT_EQ("view=0,1 phase=changed visibility=false", changes[1]);
+  }
+  {
+    // Set visible to existing value and verify no notifications.
+    VisibilityChangeObserver observer(&v1);
+    v1.SetVisible(false);
+    EXPECT_TRUE(observer.GetAndClearChanges().empty());
+  }
+}
+
+namespace {
+
+class PropertyChangeObserver : public ViewObserver {
+ public:
+  explicit PropertyChangeObserver(View* view) : view_(view) {
+    view_->AddObserver(this);
+  }
+  virtual ~PropertyChangeObserver() { view_->RemoveObserver(this); }
+
+  Changes GetAndClearChanges() {
+    Changes changes;
+    changes.swap(changes_);
+    return changes;
+  }
+
+ private:
+  // Overridden from ViewObserver:
+  void OnViewPropertyChanged(View* view,
+                             const std::string& name,
+                             const std::vector<uint8_t>* old_data,
+                             const std::vector<uint8_t>* new_data) override {
+    changes_.push_back(base::StringPrintf(
+        "view=%s property changed key=%s old_value=%s new_value=%s",
+        ViewIdToString(view->id()).c_str(),
+        name.c_str(),
+        VectorToString(old_data).c_str(),
+        VectorToString(new_data).c_str()));
+  }
+
+  std::string VectorToString(const std::vector<uint8_t>* data) {
+    if (!data)
+      return "NULL";
+    std::string s;
+    for (char c : *data)
+      s += c;
+    return s;
+  }
+
+  View* view_;
+  Changes changes_;
+
+  DISALLOW_COPY_AND_ASSIGN(PropertyChangeObserver);
+};
+
+}  // namespace
+
+TEST_F(ViewObserverTest, SetProperty) {
+  TestView v1;
+  std::vector<uint8_t> one(1, '1');
+
+  {
+    // Change visibility from true to false and make sure we get notifications.
+    PropertyChangeObserver observer(&v1);
+    v1.SetProperty("one", &one);
+    Changes changes = observer.GetAndClearChanges();
+    ASSERT_EQ(1U, changes.size());
+    EXPECT_EQ("view=0,1 property changed key=one old_value=NULL new_value=1",
+              changes[0]);
+    EXPECT_EQ(1U, v1.properties().size());
+  }
+  {
+    // Set visible to existing value and verify no notifications.
+    PropertyChangeObserver observer(&v1);
+    v1.SetProperty("one", &one);
+    EXPECT_TRUE(observer.GetAndClearChanges().empty());
+    EXPECT_EQ(1U, v1.properties().size());
+  }
+  {
+    // Set the value to NULL to delete it.
+    // Change visibility from true to false and make sure we get notifications.
+    PropertyChangeObserver observer(&v1);
+    v1.SetProperty("one", NULL);
+    Changes changes = observer.GetAndClearChanges();
+    ASSERT_EQ(1U, changes.size());
+    EXPECT_EQ("view=0,1 property changed key=one old_value=1 new_value=NULL",
+              changes[0]);
+    EXPECT_EQ(0U, v1.properties().size());
+  }
+  {
+    // Setting a null property to null shouldn't update us.
+    PropertyChangeObserver observer(&v1);
+    v1.SetProperty("one", NULL);
+    EXPECT_TRUE(observer.GetAndClearChanges().empty());
+    EXPECT_EQ(0U, v1.properties().size());
   }
 }
 

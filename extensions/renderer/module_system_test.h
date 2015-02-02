@@ -79,10 +79,10 @@ class ModuleSystemTestEnvironment {
 class ModuleSystemTest : public testing::Test {
  public:
   ModuleSystemTest();
-  virtual ~ModuleSystemTest();
+  ~ModuleSystemTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   ModuleSystemTestEnvironment* env() { return env_.get(); }

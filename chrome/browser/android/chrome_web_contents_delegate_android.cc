@@ -15,13 +15,13 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_dialog_manager.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/app_modal_dialogs/javascript_dialog_manager.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -335,21 +335,6 @@ void ChromeWebContentsDelegateAndroid::AddNewContents(
     *was_blocked = !handled;
   if (!handled)
     delete new_contents;
-}
-
-void ChromeWebContentsDelegateAndroid::WebContentsCreated(
-    content::WebContents* source_contents, int opener_render_frame_id,
-    const base::string16& frame_name, const GURL& target_url,
-    content::WebContents* new_contents) {
-  JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
-    return;
-  Java_ChromeWebContentsDelegateAndroid_webContentsCreated(env, obj.obj(),
-      reinterpret_cast<intptr_t>(source_contents), opener_render_frame_id,
-      base::android::ConvertUTF16ToJavaString(env, frame_name).Release(),
-      base::android::ConvertUTF8ToJavaString(env, target_url.spec()).Release(),
-      reinterpret_cast<intptr_t>(new_contents));
 }
 
 }  // namespace android

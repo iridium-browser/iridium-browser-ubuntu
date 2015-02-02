@@ -26,7 +26,7 @@ class SimpleMenuModel;
 class ToolkitDelegateViews : public RenderViewContextMenuBase::ToolkitDelegate {
  public:
   ToolkitDelegateViews();
-  virtual ~ToolkitDelegateViews();
+  ~ToolkitDelegateViews() override;
 
   void RunMenuAt(views::Widget* parent,
                  const gfx::Point& point,
@@ -34,12 +34,12 @@ class ToolkitDelegateViews : public RenderViewContextMenuBase::ToolkitDelegate {
 
  private:
   // ToolkitDelegate:
-  virtual void Init(ui::SimpleMenuModel* menu_model) OVERRIDE;
-  virtual void Cancel() OVERRIDE;
-  virtual void UpdateMenuItem(int command_id,
-                              bool enabled,
-                              bool hidden,
-                              const base::string16& title) OVERRIDE;
+  void Init(ui::SimpleMenuModel* menu_model) override;
+  void Cancel() override;
+  void UpdateMenuItem(int command_id,
+                      bool enabled,
+                      bool hidden,
+                      const base::string16& title) override;
 
   scoped_ptr<views::MenuModelAdapter> menu_adapter_;
   scoped_ptr<views::MenuRunner> menu_runner_;

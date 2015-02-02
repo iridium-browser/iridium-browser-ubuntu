@@ -8,6 +8,7 @@
 #include "base/lazy_instance.h"
 #include "cc/blink/web_layer_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/child/bluetooth/web_bluetooth_impl.h"
 #include "content/common/gpu/image_transport_surface.h"
 #include "content/public/common/page_state.h"
 #include "content/public/renderer/renderer_gamepad_provider.h"
@@ -17,7 +18,7 @@
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
-#include "content/renderer/renderer_webkitplatformsupport_impl.h"
+#include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/shell/renderer/test_runner/test_common.h"
 #include "content/shell/renderer/test_runner/web_frame_test_proxy.h"
 #include "content/shell/renderer/test_runner/web_test_proxy.h"
@@ -95,37 +96,43 @@ void FetchManifestDoneCallback(
 
 void FetchManifest(blink::WebView* view, const GURL& url,
                    const FetchManifestCallback& callback) {
-  scoped_ptr<ManifestFetcher> fetcher(new ManifestFetcher(url));
+  ManifestFetcher* fetcher = new ManifestFetcher(url);
+  scoped_ptr<ManifestFetcher> autodeleter(fetcher);
 
+  // Start is called on fetcher which is also bound to the callback.
+  // A raw pointer is used instead of a scoped_ptr as base::Passes passes
+  // ownership and thus nulls the scoped_ptr. On MSVS this happens before
+  // the call to Start, resulting in a crash.
   fetcher->Start(view->mainFrame(),
     base::Bind(&FetchManifestDoneCallback,
-               base::Passed(&fetcher),
+               base::Passed(&autodeleter),
                callback));
 }
 
 void SetMockGamepadProvider(scoped_ptr<RendererGamepadProvider> provider) {
-  RenderThreadImpl::current()->webkit_platform_support()->
-      SetPlatformEventObserverForTesting(
+  RenderThreadImpl::current()
+      ->blink_platform_impl()
+      ->SetPlatformEventObserverForTesting(
           blink::WebPlatformEventGamepad,
-          provider.PassAs<PlatformEventObserverBase>());
+          provider.Pass());
 }
 
 void SetMockDeviceLightData(const double data) {
-  RendererWebKitPlatformSupportImpl::SetMockDeviceLightDataForTesting(data);
+  RendererBlinkPlatformImpl::SetMockDeviceLightDataForTesting(data);
 }
 
 void SetMockDeviceMotionData(const WebDeviceMotionData& data) {
-  RendererWebKitPlatformSupportImpl::SetMockDeviceMotionDataForTesting(data);
+  RendererBlinkPlatformImpl::SetMockDeviceMotionDataForTesting(data);
 }
 
 void SetMockDeviceOrientationData(const WebDeviceOrientationData& data) {
-  RendererWebKitPlatformSupportImpl::
-      SetMockDeviceOrientationDataForTesting(data);
+  RendererBlinkPlatformImpl::SetMockDeviceOrientationDataForTesting(data);
 }
 
 void MockBatteryStatusChanged(const WebBatteryStatus& status) {
-  RenderThreadImpl::current()->webkit_platform_support()->
-    MockBatteryStatusChangedForTesting(status);
+  RenderThreadImpl::current()
+      ->blink_platform_impl()
+      ->MockBatteryStatusChangedForTesting(status);
 }
 
 void EnableRendererLayoutTestMode() {
@@ -302,6 +309,13 @@ void SetDeviceColorProfile(RenderView* render_view, const std::string& name) {
 
   static_cast<RenderViewImpl*>(render_view)->
       SetDeviceColorProfileForTesting(color_profile);
+}
+
+void SetBluetoothMockDataSetForTesting(const std::string& name) {
+  RenderThreadImpl::current()
+      ->blink_platform_impl()
+      ->BluetoothImplForTesting()
+      ->SetBluetoothMockDataSetForTesting(name);
 }
 
 void UseSynchronousResizeMode(RenderView* render_view, bool enable) {

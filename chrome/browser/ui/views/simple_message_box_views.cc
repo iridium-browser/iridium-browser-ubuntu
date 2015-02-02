@@ -8,8 +8,8 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -35,24 +35,23 @@ class SimpleMessageBoxViews : public views::DialogDelegate {
                         const base::string16& yes_text,
                         const base::string16& no_text,
                         bool is_system_modal);
-  virtual ~SimpleMessageBoxViews();
+  ~SimpleMessageBoxViews() override;
 
   MessageBoxResult RunDialogAndGetResult();
 
   // Overridden from views::DialogDelegate:
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
+  int GetDialogButtons() const override;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool Cancel() override;
+  bool Accept() override;
 
   // Overridden from views::WidgetDelegate:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
+  base::string16 GetWindowTitle() const override;
+  void DeleteDelegate() override;
+  ui::ModalType GetModalType() const override;
+  views::View* GetContentsView() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
 
  private:
 

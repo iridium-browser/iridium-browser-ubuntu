@@ -65,13 +65,14 @@
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/InlineTextBox.h"
 #include "core/rendering/RenderLayer.h"
+#include "core/rendering/RenderPart.h"
 #include "core/rendering/RenderText.h"
 #include "core/rendering/RenderTheme.h"
 #include "core/rendering/RenderView.h"
-#include "core/rendering/RenderWidget.h"
 #include "platform/SecureTextInput.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/graphics/GraphicsContext.h"
+#include "platform/text/UnicodeUtilities.h"
 #include "wtf/text/CString.h"
 #include <stdio.h>
 
@@ -482,8 +483,8 @@ TextDirection FrameSelection::directionOfEnclosingBlock()
 
 TextDirection FrameSelection::directionOfSelection()
 {
-    InlineBox* startBox = 0;
-    InlineBox* endBox = 0;
+    InlineBox* startBox = nullptr;
+    InlineBox* endBox = nullptr;
     int unusedOffset;
     // Cache the VisiblePositions because visibleStart() and visibleEnd()
     // can cause layout, which has the potential to invalidate lineboxes.
@@ -1376,7 +1377,7 @@ void FrameSelection::selectAll()
     }
 
     RefPtrWillBeRawPtr<Node> root = nullptr;
-    Node* selectStartTarget = 0;
+    Node* selectStartTarget = nullptr;
     if (isContentEditable()) {
         root = highestEditableRoot(m_selection.start());
         if (Node* shadowRoot = m_selection.nonBoundaryShadowTreeRootNode())
@@ -1659,9 +1660,9 @@ static bool isFrameElement(const Node* n)
     if (!n)
         return false;
     RenderObject* renderer = n->renderer();
-    if (!renderer || !renderer->isWidget())
+    if (!renderer || !renderer->isRenderPart())
         return false;
-    Widget* widget = toRenderWidget(renderer)->widget();
+    Widget* widget = toRenderPart(renderer)->widget();
     return widget && widget->isFrameView();
 }
 
@@ -1715,7 +1716,16 @@ String FrameSelection::selectedTextForClipboard() const
     return selectedText();
 }
 
-FloatRect FrameSelection::bounds() const
+LayoutRect FrameSelection::bounds() const
+{
+    FrameView* view = m_frame->view();
+    if (!view)
+        return LayoutRect();
+
+    return intersection(unclippedBounds(), view->visibleContentRect());
+}
+
+LayoutRect FrameSelection::unclippedBounds() const
 {
     m_frame->document()->updateRenderTreeIfNeeded();
 
@@ -1723,10 +1733,9 @@ FloatRect FrameSelection::bounds() const
     RenderView* renderView = m_frame->contentRenderer();
 
     if (!view || !renderView)
-        return FloatRect();
+        return LayoutRect();
 
-    LayoutRect selectionRect = renderView->selectionBounds();
-    return selectionRect;
+    return renderView->selectionBounds();
 }
 
 static inline HTMLFormElement* associatedFormElement(HTMLElement& element)
@@ -1742,13 +1751,12 @@ static HTMLFormElement* scanForForm(Node* start)
     if (!start)
         return 0;
 
-    HTMLElement* element = start->isHTMLElement() ? toHTMLElement(start) : Traversal<HTMLElement>::next(*start);
-    for (; element; element = Traversal<HTMLElement>::next(*element)) {
-        if (HTMLFormElement* form = associatedFormElement(*element))
+    for (HTMLElement& element : Traversal<HTMLElement>::startsAt(start->isHTMLElement() ? toHTMLElement(start) : Traversal<HTMLElement>::next(*start))) {
+        if (HTMLFormElement* form = associatedFormElement(element))
             return form;
 
-        if (isHTMLFrameElementBase(*element)) {
-            Node* childDocument = toHTMLFrameElementBase(*element).contentDocument();
+        if (isHTMLFrameElementBase(element)) {
+            Node* childDocument = toHTMLFrameElementBase(element).contentDocument();
             if (HTMLFormElement* frameResult = scanForForm(childDocument))
                 return frameResult;
         }
@@ -1787,7 +1795,7 @@ void FrameSelection::revealSelection(const ScrollAlignment& alignment, RevealExt
         rect = absoluteCaretBounds();
         break;
     case RangeSelection:
-        rect = revealExtentOption == RevealExtent ? VisiblePosition(extent()).absoluteCaretBounds() : enclosingIntRect(bounds());
+        rect = revealExtentOption == RevealExtent ? VisiblePosition(extent()).absoluteCaretBounds() : enclosingIntRect(unclippedBounds());
         break;
     }
 
@@ -1921,6 +1929,22 @@ void FrameSelection::scheduleVisualUpdate() const
         return;
     if (Page* page = m_frame->page())
         page->animator().scheduleVisualUpdate();
+}
+
+bool FrameSelection::selectWordAroundPosition(const VisiblePosition& position)
+{
+    static const EWordSide wordSideList[2] = { RightWordIfOnBoundary, LeftWordIfOnBoundary };
+    for (EWordSide wordSide : wordSideList) {
+        VisiblePosition start = startOfWord(position, wordSide);
+        VisiblePosition end = endOfWord(position, wordSide);
+        String text = plainText(start.deepEquivalent(), end.deepEquivalent());
+        if (!text.isEmpty() && !isSeparator(text.characterStartingAt(0))) {
+            setSelection(VisibleSelection(start, end), WordGranularity);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 }

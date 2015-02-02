@@ -1,20 +1,19 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-'use strict';
 
 /**
  * The root of the file manager's view managing the DOM of Files.app.
  *
- * @param {HTMLElement} element Top level element of Files.app.
+ * @param {!HTMLElement} element Top level element of Files.app.
  * @param {DialogType} dialogType Dialog type.
- * @constructor.
+ * @constructor
+ * @struct
  */
-var FileManagerUI = function(element, dialogType) {
+function FileManagerUI(element, dialogType) {
   /**
    * Top level element of Files.app.
-   * @type {HTMLElement}
+   * @type {!HTMLElement}
    * @private
    */
   this.element_ = element;
@@ -70,7 +69,7 @@ var FileManagerUI = function(element, dialogType) {
 
   /**
    * Default task picker.
-   * @type {DefaultActionDialog}
+   * @type {cr.filebrowser.DefaultActionDialog}
    */
   this.defaultTaskPicker = null;
 
@@ -87,111 +86,59 @@ var FileManagerUI = function(element, dialogType) {
   this.conflictDialog = null;
 
   /**
-   * Volume icon of location information on the toolbar.
-   * @type {HTMLElement}
+   * Location line.
+   * @type {LocationLine}
    */
-  this.locationVolumeIcon = null;
-
-  /**
-   * Breadcrumbs of location information on the toolbar.
-   * @type {BreadcrumbsController}
-   */
-  this.locationBreadcrumbs = null;
-
-  /**
-   * Search button.
-   * @type {HTMLElement}
-   */
-  this.searchButton = null;
+  this.locationLine = null;
 
   /**
    * Search box.
-   * @type {SearchBox}
+   * @type {!SearchBox}
    */
-  this.searchBox = null;
+  this.searchBox = new SearchBox(
+      this.element_.querySelector('#search-box'),
+      this.element_.querySelector('#search-button'),
+      this.element_.querySelector('#no-search-results'));
 
   /**
    * Toggle-view button.
-   * @type {HTMLElement}
+   * @type {!Element}
    */
-  this.toggleViewButton = null;
+  this.toggleViewButton = queryRequiredElement(this.element_, '#view-button');
 
   /**
-   * File type selector in the footer.
-   * @type {HTMLElement}
+   * List container.
+   * @type {ListContainer}
    */
-  this.fileTypeSelector = null;
+  this.listContainer = null;
 
   /**
-   * OK button in the footer.
-   * @type {HTMLElement}
+   * @type {PreviewPanel}
    */
-  this.okButton = null;
+  this.previewPanel = null;
 
   /**
-   * Cancel button in the footer.
-   * @type {HTMLElement}
+   * Dialog footer.
+   * @type {!DialogFooter}
    */
-  this.cancelButton = null;
+  this.dialogFooter = DialogFooter.findDialogFooter(
+      this.dialogType_, /** @type {!Document} */(this.element_.ownerDocument));
 
   Object.seal(this);
 
-  // Initialize the header.
+  // Initialize attributes.
   this.element_.querySelector('#app-name').innerText =
       chrome.runtime.getManifest().name;
+  this.element_.setAttribute('type', this.dialogType_);
 
-  // Initialize dialog type.
-  this.initDialogType_();
+  // Prevent opening an URL by dropping it onto the page.
+  this.element_.addEventListener('drop', function(e) {
+    e.preventDefault();
+  });
 
   // Pre-populate the static localized strings.
   i18nTemplate.process(this.element_.ownerDocument, loadTimeData);
-};
-
-/**
- * Tweak the UI to become a particular kind of dialog, as determined by the
- * dialog type parameter passed to the constructor.
- *
- * @private
- */
-FileManagerUI.prototype.initDialogType_ = function() {
-  // Obtain elements.
-  var hasFooterPanel =
-      this.dialogType_ == DialogType.SELECT_SAVEAS_FILE;
-
-  // If the footer panel exists, the buttons are placed there. Otherwise,
-  // the buttons are on the preview panel.
-  var parentPanelOfButtons = this.element_.ownerDocument.querySelector(
-      !hasFooterPanel ? '.preview-panel' : '.dialog-footer');
-  parentPanelOfButtons.classList.add('button-panel');
-  this.fileTypeSelector = parentPanelOfButtons.querySelector('.file-type');
-  this.okButton = parentPanelOfButtons.querySelector('.ok');
-  this.cancelButton = parentPanelOfButtons.querySelector('.cancel');
-
-  // Set attributes.
-  var okLabel = str('OPEN_LABEL');
-
-  switch (this.dialogType_) {
-    case DialogType.SELECT_UPLOAD_FOLDER:
-      okLabel = str('UPLOAD_LABEL');
-      break;
-
-    case DialogType.SELECT_SAVEAS_FILE:
-      okLabel = str('SAVE_LABEL');
-      break;
-
-    case DialogType.SELECT_FOLDER:
-    case DialogType.SELECT_OPEN_FILE:
-    case DialogType.SELECT_OPEN_MULTI_FILE:
-    case DialogType.FULL_PAGE:
-      break;
-
-    default:
-      throw new Error('Unknown dialog type: ' + this.dialogType);
-  }
-
-  this.okButton.textContent = okLabel;
-  this.element_.setAttribute('type', this.dialogType_);
-};
+}
 
 /**
  * Initialize the dialogs.
@@ -220,27 +167,110 @@ FileManagerUI.prototype.initDialogs = function() {
 };
 
 /**
- * Initializes here elements, which are expensive
- * or hidden in the beginning.
+ * Initializes here elements, which are expensive or hidden in the beginning.
+ *
+ * @param {!FileTable} table
+ * @param {!FileGrid} grid
+ * @param {PreviewPanel} previewPanel
+ *
  */
-FileManagerUI.prototype.initAdditionalUI = function() {
-  this.locationVolumeIcon =
-      this.element_.querySelector('#location-volume-icon');
+FileManagerUI.prototype.initAdditionalUI = function(table, grid, previewPanel) {
+  // Listen to drag events to hide preview panel while user is dragging files.
+  // Files.app prevents default actions in 'dragstart' in some situations,
+  // so we listen to 'drag' to know the list is actually being dragged.
+  var draggingBound = this.onDragging_.bind(this);
+  var dragEndBound = this.onDragEnd_.bind(this);
+  table.list.addEventListener('drag', draggingBound);
+  grid.addEventListener('drag', draggingBound);
+  table.list.addEventListener('dragend', dragEndBound);
+  grid.addEventListener('dragend', dragEndBound);
 
-  this.searchButton = this.element_.querySelector('#search-button');
-  this.searchButton.addEventListener('click',
-      this.onSearchButtonClick_.bind(this));
-  this.searchBox = new SearchBox(this.element_.querySelector('#search-box'));
+  // Listen to dragselection events to hide preview panel while the user is
+  // selecting files by drag operation.
+  table.list.addEventListener('dragselectionstart', draggingBound);
+  grid.addEventListener('dragselectionstart', draggingBound);
+  table.list.addEventListener('dragselectionend', dragEndBound);
+  grid.addEventListener('dragselectionend', dragEndBound);
 
-  this.toggleViewButton = this.element_.querySelector('#view-button');
+  // List container.
+  this.listContainer = new ListContainer(
+      queryRequiredElement(this.element_, '#list-container'), table, grid);
+
+  // Preview panel.
+  this.previewPanel = previewPanel;
+  this.previewPanel.addEventListener(
+      PreviewPanel.Event.VISIBILITY_CHANGE,
+      this.onPreviewPanelVisibilityChange_.bind(this));
+  this.previewPanel.initialize();
 };
 
 /**
- * Handles click event on the search button.
- * @param {Event} event Click event.
- * @private
+ * Relayout the UI.
  */
-FileManagerUI.prototype.onSearchButtonClick_ = function(event) {
-  this.searchBox.inputElement.focus();
+FileManagerUI.prototype.relayout = function() {
+  this.locationLine.truncate();
+  if (this.listContainer.currentListType !==
+      ListContainer.ListType.UNINITIALIZED) {
+    this.listContainer.currentView.relayout();
+  }
 };
 
+/**
+ * Sets the current list type.
+ * @param {ListContainer.ListType} listType New list type.
+ */
+FileManagerUI.prototype.setCurrentListType = function(listType) {
+  this.listContainer.setCurrentListType(listType);
+
+  switch (listType) {
+    case ListContainer.ListType.DETAIL:
+      this.toggleViewButton.classList.remove('table');
+      this.toggleViewButton.classList.add('grid');
+      break;
+
+    case ListContainer.ListType.THUMBNAIL:
+      this.toggleViewButton.classList.remove('grid');
+      this.toggleViewButton.classList.add('table');
+      break;
+
+    default:
+      assertNotReached();
+      break;
+  }
+};
+
+/**
+ * Invoked while the drag is being performed on the list or the grid.
+ * Note: this method may be called multiple times before onDragEnd_().
+ * @private
+ */
+FileManagerUI.prototype.onDragging_ = function() {
+  // On open file dialog, the preview panel is always shown.
+  if (DialogType.isOpenDialog(this.dialogType_))
+    return;
+  this.previewPanel.visibilityType = PreviewPanel.VisibilityType.ALWAYS_HIDDEN;
+};
+
+/**
+ * Invoked when the drag is ended on the list or the grid.
+ * @private
+ */
+FileManagerUI.prototype.onDragEnd_ = function() {
+  // On open file dialog, the preview panel is always shown.
+  if (DialogType.isOpenDialog(this.dialogType_))
+    return;
+  this.previewPanel.visibilityType = PreviewPanel.VisibilityType.AUTO;
+};
+
+/**
+ * Resize details and thumb views to fit the new window size.
+ * @private
+ */
+FileManagerUI.prototype.onPreviewPanelVisibilityChange_ = function() {
+  // This method may be called on initialization. Some object may not be
+  // initialized.
+  var panelHeight = this.previewPanel.visible ?
+      this.previewPanel.height : 0;
+  this.listContainer.table.setBottomMarginForPanel(panelHeight);
+  this.listContainer.grid.setBottomMarginForPanel(panelHeight);
+};

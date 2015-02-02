@@ -78,7 +78,6 @@ pageCacheSupportsPlugins initial=false
 offlineWebApplicationCacheEnabled initial=false
 usesEncodingDetector initial=false
 allowScriptsToCloseWindows initial=false
-deferredFiltersEnabled initial=true
 regionBasedColumnsEnabled initial=false
 
 containerCullingEnabled initial=false
@@ -100,6 +99,7 @@ webGLEnabled initial=false
 webGLErrorsToConsoleEnabled initial=true
 accelerated2dCanvasEnabled initial=false
 antialiased2dCanvasEnabled initial=true
+antialiasedClips2dCanvasEnabled initial=false
 accelerated2dCanvasMSAASampleCount type=int, initial=0
 
 # WebAudio support.
@@ -122,6 +122,10 @@ scrollAnimatorEnabled initial=true
 # crbug.com/410974 tracks removal once alternative solutions for selective
 # main thread scrolling are supported.
 threadedScrollingEnabled initial=true, invalidate=Style
+
+# Handles frame-level scrolls via the root RenderLayer instead of the FrameView.
+# crbug.com/417782 tracks enabling this by default.
+rootLayerScrolls initial=false
 
 # Used in layout tests for gesture tap highlights. Makes the highlights square
 # (rather than rounded) to make it possible to reftest the results.
@@ -277,18 +281,11 @@ maxBeaconTransmission type=int, initial=65536
 # http://fullscreen.spec.whatwg.org/#dom-element-requestfullscreen
 fullscreenSupported initial=true
 
-# FIXME: This is a temporary flag and should be removed once
-# the Android WebView framework supports fullscreen for non-media elements
-# (crbug.com/398485).
-# This value is set to false if the platform does not support fullscreen
-# for non-media elements. When set to true all the requests to enter fullscreen
-# on non-media elements will return an error.
-disallowFullscreenForNonMediaElements initial=false
-
 # V8 supports different types of caching. Used by V8 bindings.
 v8CacheOptions type=V8CacheOptions, initial=V8CacheOptionsOff
 
 v8ScriptStreamingEnabled initial=false
+v8ScriptStreamingMode type=ScriptStreamingMode, initial=ScriptStreamingModeAll
 
 # These values are bit fields for the properties of available pointing devices
 # and may take on multiple values (e.g. laptop with touchpad and touchscreen
@@ -300,5 +297,11 @@ availableHoverTypes type=int, initial=HoverTypeNone, invalidate=MediaQuery
 primaryPointerType type=PointerType, initial=PointerTypeNone, invalidate=MediaQuery
 primaryHoverType type=HoverType, initial=HoverTypeNone, invalidate=MediaQuery
 
-accessibilityEnabled initial=false
+# Whether accessibility support is enabled at all.
+accessibilityEnabled initial=false, invalidate=AccessibilityState
+
+# If true, the value in password fields is exposed to assistive technologies.
+accessibilityPasswordValuesEnabled initial=false
+
+# If true, static text nodes expose inline text box children.
 inlineTextBoxAccessibilityEnabled initial=false

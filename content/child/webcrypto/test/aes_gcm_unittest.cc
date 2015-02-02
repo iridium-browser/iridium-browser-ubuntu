@@ -109,8 +109,8 @@ TEST(WebCryptoAesGcmTest, GenerateKeyBadLength) {
   }
 
   const unsigned short kKeyLen[] = {0, 127, 257};
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kKeyLen); ++i) {
+  blink::WebCryptoKey key;
+  for (size_t i = 0; i < arraysize(kKeyLen); ++i) {
     SCOPED_TRACE(i);
     EXPECT_EQ(Status::ErrorGenerateKeyLength(),
               GenerateSecretKey(

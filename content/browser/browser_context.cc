@@ -9,7 +9,7 @@
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
-#include "content/browser/push_messaging_router.h"
+#include "content/browser/push_messaging/push_messaging_router.h"
 #include "content/browser/storage_partition_impl_map.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/public/browser/blob_handle.h"
@@ -82,6 +82,13 @@ void SaveSessionStateOnIOThread(
 void SaveSessionStateOnIndexedDBThread(
     scoped_refptr<IndexedDBContextImpl> indexed_db_context) {
   indexed_db_context->SetForceKeepSessionState();
+}
+
+void ShutdownServiceWorkerContext(StoragePartition* partition) {
+  ServiceWorkerContextWrapper* wrapper =
+      static_cast<ServiceWorkerContextWrapper*>(
+          partition->GetServiceWorkerContext());
+  wrapper->process_manager()->Shutdown();
 }
 
 }  // namespace
@@ -219,10 +226,19 @@ void BrowserContext::DeliverPushMessage(
     const GURL& origin,
     int64 service_worker_registration_id,
     const std::string& data,
-    const base::Callback<void(PushMessagingStatus)>& callback) {
+    const base::Callback<void(PushDeliveryStatus)>& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   PushMessagingRouter::DeliverMessage(
       browser_context, origin, service_worker_registration_id, data, callback);
+}
+
+// static
+void BrowserContext::NotifyWillBeDestroyed(BrowserContext* browser_context) {
+  // Service Workers must shutdown before the browser context is destroyed,
+  // since they keep render process hosts alive and the codebase assumes that
+  // render process hosts die before their profile (browser context) dies.
+  ForEachStoragePartition(browser_context,
+                          base::Bind(ShutdownServiceWorkerContext));
 }
 
 void BrowserContext::EnsureResourceContextInitialized(BrowserContext* context) {

@@ -10,7 +10,7 @@
 #include "cc/resources/tile.h"
 #include "cc/resources/tile_manager.h"
 #include "cc/test/fake_tile_manager_client.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace cc {
 
@@ -18,27 +18,27 @@ class FakePictureLayerTilingClient : public PictureLayerTilingClient {
  public:
   FakePictureLayerTilingClient();
   explicit FakePictureLayerTilingClient(ResourceProvider* resource_provider);
-  virtual ~FakePictureLayerTilingClient();
+  ~FakePictureLayerTilingClient() override;
 
   // PictureLayerTilingClient implementation.
-  virtual scoped_refptr<Tile> CreateTile(
-      PictureLayerTiling* tiling, const gfx::Rect& rect) OVERRIDE;
-  virtual PicturePileImpl* GetPile() OVERRIDE;
-  virtual gfx::Size CalculateTileSize(
-      const gfx::Size& content_bounds) const OVERRIDE;
-  virtual size_t GetMaxTilesForInterestArea() const OVERRIDE;
-  virtual float GetSkewportTargetTimeInSeconds() const OVERRIDE;
-  virtual int GetSkewportExtrapolationLimitInContentPixels() const OVERRIDE;
+  scoped_refptr<Tile> CreateTile(PictureLayerTiling* tiling,
+                                 const gfx::Rect& rect) override;
+  RasterSource* GetRasterSource() override;
+  gfx::Size CalculateTileSize(const gfx::Size& content_bounds) const override;
+  size_t GetMaxTilesForInterestArea() const override;
+  float GetSkewportTargetTimeInSeconds() const override;
+  int GetSkewportExtrapolationLimitInContentPixels() const override;
+  bool RequiresHighResToDraw() const override;
 
   void SetTileSize(const gfx::Size& tile_size);
   gfx::Size TileSize() const { return tile_size_; }
 
-  virtual const Region* GetInvalidation() OVERRIDE;
-  virtual const PictureLayerTiling* GetTwinTiling(
-      const PictureLayerTiling* tiling) const OVERRIDE;
-  virtual PictureLayerTiling* GetRecycledTwinTiling(
-      const PictureLayerTiling* tiling) OVERRIDE;
-  virtual WhichTree GetTree() const OVERRIDE;
+  const Region* GetPendingInvalidation() override;
+  const PictureLayerTiling* GetPendingOrActiveTwinTiling(
+      const PictureLayerTiling* tiling) const override;
+  PictureLayerTiling* GetRecycledTwinTiling(
+      const PictureLayerTiling* tiling) override;
+  WhichTree GetTree() const override;
 
   void set_twin_tiling(PictureLayerTiling* tiling) { twin_tiling_ = tiling; }
   void set_recycled_twin_tiling(PictureLayerTiling* tiling) {

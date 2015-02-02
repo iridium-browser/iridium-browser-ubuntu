@@ -13,6 +13,7 @@
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/local_auth.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -29,12 +30,13 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/url_constants.h"
 #include "components/signin/core/browser/about_signin_internals.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
-#include "components/signin/core/browser/signin_oauth_helper.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_ui.h"
+#include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
@@ -43,7 +45,7 @@
 
 namespace {
 
-class InlineSigninHelper : public SigninOAuthHelper::Consumer {
+class InlineSigninHelper : public GaiaAuthConsumer {
  public:
   InlineSigninHelper(
       base::WeakPtr<InlineLoginHandlerImpl> handler,
@@ -51,6 +53,7 @@ class InlineSigninHelper : public SigninOAuthHelper::Consumer {
       Profile* profile,
       const GURL& current_url,
       const std::string& email,
+      const std::string& gaia_id,
       const std::string& password,
       const std::string& session_index,
       const std::string& signin_scoped_device_id,
@@ -58,19 +61,17 @@ class InlineSigninHelper : public SigninOAuthHelper::Consumer {
       bool confirm_untrusted_signin);
 
  private:
-  // Overriden from SigninOAuthHelper::Consumer.
-  virtual void OnSigninOAuthInformationAvailable(
-      const std::string& email,
-      const std::string& display_email,
-      const std::string& refresh_token) OVERRIDE;
-  virtual void OnSigninOAuthInformationFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
+  // Overridden from GaiaAuthConsumer.
+  void OnClientOAuthSuccess(const ClientOAuthResult& result) override;
+  void OnClientOAuthFailure(const GoogleServiceAuthError& error)
+      override;
 
-  SigninOAuthHelper signin_oauth_helper_;
+  GaiaAuthFetcher gaia_auth_fetcher_;
   base::WeakPtr<InlineLoginHandlerImpl> handler_;
   Profile* profile_;
   GURL current_url_;
   std::string email_;
+  std::string gaia_id_;
   std::string password_;
   std::string session_index_;
   bool choose_what_to_sync_;
@@ -85,29 +86,29 @@ InlineSigninHelper::InlineSigninHelper(
     Profile* profile,
     const GURL& current_url,
     const std::string& email,
+    const std::string& gaia_id,
     const std::string& password,
     const std::string& session_index,
     const std::string& signin_scoped_device_id,
     bool choose_what_to_sync,
     bool confirm_untrusted_signin)
-    : signin_oauth_helper_(getter, session_index, signin_scoped_device_id,
-                           this),
+    : gaia_auth_fetcher_(this, GaiaConstants::kChromeSource, getter),
       handler_(handler),
       profile_(profile),
       current_url_(current_url),
       email_(email),
+      gaia_id_(gaia_id),
       password_(password),
       session_index_(session_index),
       choose_what_to_sync_(choose_what_to_sync),
       confirm_untrusted_signin_(confirm_untrusted_signin) {
   DCHECK(profile_);
   DCHECK(!email_.empty());
+  gaia_auth_fetcher_.StartCookieForOAuthLoginTokenExchangeWithDeviceId(
+      session_index, signin_scoped_device_id);
 }
 
-void InlineSigninHelper::OnSigninOAuthInformationAvailable(
-    const std::string& email,
-    const std::string& display_email,
-    const std::string& refresh_token) {
+void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
   content::WebContents* contents = NULL;
   Browser* browser = NULL;
   if (handler_) {
@@ -119,11 +120,19 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
       AboutSigninInternalsFactory::GetForProfile(profile_);
   about_signin_internals->OnRefreshTokenReceived("Successful");
 
+  AccountTrackerService* account_tracker =
+      AccountTrackerServiceFactory::GetForProfile(profile_);
+  std::string account_id =
+      account_tracker->PickAccountIdForAccount(gaia_id_, email_);
+
+  // Prime the account tracker with this combination of gaia id/display email.
+  account_tracker->SeedAccountInfo(gaia_id_, email_);
+
   signin::Source source = signin::GetSourceForPromoURL(current_url_);
 
   std::string primary_email =
       SigninManagerFactory::GetForProfile(profile_)->GetAuthenticatedUsername();
-  if (gaia::AreEmailsSame(email, primary_email) &&
+  if (gaia::AreEmailsSame(email_, primary_email) &&
       source == signin::SOURCE_REAUTH &&
       switches::IsNewProfileManagement()) {
     chrome::SetLocalAuthCredentials(profile_, password_);
@@ -132,7 +141,7 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
   if (source == signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT ||
       source == signin::SOURCE_REAUTH) {
     ProfileOAuth2TokenServiceFactory::GetForProfile(profile_)->
-        UpdateCredentials(email, refresh_token);
+        UpdateCredentials(account_id, result.refresh_token);
 
     if (signin::IsAutoCloseEnabledInURL(current_url_)) {
       // Close the gaia sign in tab via a task to make sure we aren't in the
@@ -184,7 +193,7 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
     bool start_signin =
         !OneClickSigninHelper::HandleCrossAccountError(
             profile_, "",
-            email, password_, refresh_token,
+            email_, password_, result.refresh_token,
             OneClickSigninHelper::AUTO_ACCEPT_EXPLICIT,
             source, start_mode,
             base::Bind(&InlineLoginHandlerImpl::SyncStarterCallback,
@@ -194,7 +203,7 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
       // OneClickSigninSyncStarter will delete itself once the job is done.
       new OneClickSigninSyncStarter(
           profile_, browser,
-          email, password_, refresh_token,
+          email_, password_, result.refresh_token,
           start_mode,
           contents,
           confirmation_required,
@@ -206,7 +215,7 @@ void InlineSigninHelper::OnSigninOAuthInformationAvailable(
   base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-void InlineSigninHelper::OnSigninOAuthInformationFailure(
+void InlineSigninHelper::OnClientOAuthFailure(
   const GoogleServiceAuthError& error) {
   if (handler_)
     handler_->HandleLoginError(error.ToString());
@@ -226,15 +235,6 @@ InlineLoginHandlerImpl::InlineLoginHandlerImpl()
 }
 
 InlineLoginHandlerImpl::~InlineLoginHandlerImpl() {}
-
-bool InlineLoginHandlerImpl::HandleContextMenu(
-    const content::ContextMenuParams& params) {
-#ifndef NDEBUG
-  return false;
-#else
-  return true;
-#endif
-}
 
 void InlineLoginHandlerImpl::DidCommitProvisionalLoadForFrame(
     content::RenderFrameHost* render_frame_host,
@@ -270,8 +270,6 @@ void InlineLoginHandlerImpl::SetExtraInitParams(base::DictionaryValue& params) {
   const GURL& current_url = contents->GetURL();
   std::string is_constrained;
   net::GetValueForKeyInQuery(current_url, "constrained", &is_constrained);
-  if (is_constrained == "1")
-    contents->SetDelegate(this);
 
   content::WebContentsObserver::Observe(contents);
 
@@ -303,6 +301,11 @@ void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
   base::string16 password_string16;
   dict->GetString("password", &password_string16);
   std::string password(base::UTF16ToASCII(password_string16));
+
+  base::string16 gaia_id_string16;
+  dict->GetString("gaiaId", &gaia_id_string16);
+  DCHECK(!gaia_id_string16.empty());
+  std::string gaia_id = base::UTF16ToASCII(gaia_id_string16);
 
   // When doing a SAML sign in, this email check may result in a false
   // positive.  This happens when the user types one email address in the
@@ -370,10 +373,12 @@ void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
   about_signin_internals->OnAuthenticationResultReceived(
       "GAIA Auth Successful");
 
+  GURL partition_url(switches::IsEnableWebviewBasedSignin() ?
+      "chrome-guest://chrome-signin/?" :
+      chrome::kChromeUIChromeSigninURL);
   content::StoragePartition* partition =
       content::BrowserContext::GetStoragePartitionForSite(
-          contents->GetBrowserContext(),
-          GURL(chrome::kChromeUIChromeSigninURL));
+          contents->GetBrowserContext(), partition_url);
 
   SigninClient* signin_client =
       ChromeSigninClientFactory::GetForProfile(Profile::FromWebUI(web_ui()));
@@ -382,7 +387,7 @@ void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
   // InlineSigninHelper will delete itself.
   new InlineSigninHelper(GetWeakPtr(), partition->GetURLRequestContext(),
                          Profile::FromWebUI(web_ui()), current_url,
-                         email, password, session_index,
+                         email, gaia_id, password, session_index,
                          signin_scoped_device_id, choose_what_to_sync,
                          confirm_untrusted_signin_);
 

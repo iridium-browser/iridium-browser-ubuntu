@@ -11,7 +11,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/browser/shell_browser_context.h"
-#include "content/shell/browser/shell_devtools_delegate.h"
+#include "content/shell/browser/shell_devtools_manager_delegate.h"
 #include "extensions/browser/extension_message_filter.h"
 #include "extensions/browser/extension_protocols.h"
 #include "extensions/browser/extension_registry.h"
@@ -113,9 +113,8 @@ net::URLRequestContextGetter* ShellContentBrowserClient::CreateRequestContext(
       linked_ptr<net::URLRequestJobFactory::ProtocolHandler>(
           CreateExtensionProtocolHandler(false /* is_incognito */,
                                          extension_info_map));
-  // Let content::ShellBrowserContext handle the rest of the setup.
   return browser_main_parts_->browser_context()->CreateRequestContext(
-      protocol_handlers, request_interceptors.Pass());
+      protocol_handlers, request_interceptors.Pass(), extension_info_map);
 }
 
 bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {

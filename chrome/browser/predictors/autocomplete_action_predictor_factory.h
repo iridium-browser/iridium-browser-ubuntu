@@ -29,13 +29,13 @@ class AutocompleteActionPredictorFactory
   friend struct DefaultSingletonTraits<AutocompleteActionPredictorFactory>;
 
   AutocompleteActionPredictorFactory();
-  virtual ~AutocompleteActionPredictorFactory();
+  ~AutocompleteActionPredictorFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteActionPredictorFactory);
 };

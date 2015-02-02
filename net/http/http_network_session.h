@@ -79,6 +79,7 @@ class NET_EXPORT HttpNetworkSession
     HostMappingRules* host_mapping_rules;
     bool enable_ssl_connect_job_waiting;
     bool ignore_certificate_errors;
+    bool use_stale_while_revalidate;
     uint16 testing_fixed_http_port;
     uint16 testing_fixed_https_port;
     bool enable_tcp_fast_open_for_ssl;
@@ -112,9 +113,9 @@ class NET_EXPORT HttpNetworkSession
 
     bool enable_quic;
     bool enable_quic_port_selection;
-    bool enable_quic_time_based_loss_detection;
     bool quic_always_require_handshake_confirmation;
     bool quic_disable_connection_pooling;
+    int quic_load_server_info_timeout_ms;
     HostPortPair origin_to_force_quic_on;
     QuicClock* quic_clock;  // Will be owned by QuicStreamFactory.
     QuicRandom* quic_random;

@@ -141,12 +141,16 @@ class WebTestDelegate {
   virtual void GrantWebNotificationPermission(const GURL& origin,
                                               bool permission_granted) = 0;
   virtual void ClearWebNotificationPermissions() = 0;
+  virtual void SimulateWebNotificationClick(const std::string& title) = 0;
 
   // Controls the device scale factor of the main WebView for hidpi tests.
   virtual void SetDeviceScaleFactor(float factor) = 0;
 
   // Change the device color profile while running a layout test.
   virtual void SetDeviceColorProfile(const std::string& name) = 0;
+
+  // Change the bluetooth test data while running a layout test.
+  virtual void SetBluetoothMockDataSet(const std::string& data_set) = 0;
 
   // Controls which WebView should be focused.
   virtual void SetFocus(WebTestProxyBase* proxy, bool focus) = 0;

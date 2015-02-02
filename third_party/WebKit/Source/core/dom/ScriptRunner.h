@@ -38,10 +38,9 @@ namespace blink {
 
 class ScriptResource;
 class Document;
-class PendingScript;
 class ScriptLoader;
 
-class ScriptRunner FINAL : public NoBaseWillBeGarbageCollectedFinalized<ScriptRunner> {
+class ScriptRunner final : public NoBaseWillBeGarbageCollectedFinalized<ScriptRunner> {
     WTF_MAKE_NONCOPYABLE(ScriptRunner); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     static PassOwnPtrWillBeRawPtr<ScriptRunner> create(Document* document)
@@ -51,7 +50,7 @@ public:
     ~ScriptRunner();
 
     enum ExecutionType { ASYNC_EXECUTION, IN_ORDER_EXECUTION };
-    void queueScriptForExecution(ScriptLoader*, ResourcePtr<ScriptResource>, ExecutionType);
+    void queueScriptForExecution(ScriptLoader*, ExecutionType);
     bool hasPendingScripts() const { return !m_scriptsToExecuteSoon.isEmpty() || !m_scriptsToExecuteInOrder.isEmpty() || !m_pendingAsyncScripts.isEmpty(); }
     void suspend();
     void resume();
@@ -67,14 +66,13 @@ private:
 
     void timerFired(Timer<ScriptRunner>*);
 
-    void addPendingAsyncScript(ScriptLoader*, const PendingScript&);
+    void addPendingAsyncScript(ScriptLoader*);
 
     RawPtrWillBeMember<Document> m_document;
-    // FIXME: Oilpan: consider using heap vectors and hash map here;
-    // PendingScript does have a (trivial) destructor, however.
-    Vector<PendingScript> m_scriptsToExecuteInOrder;
-    Vector<PendingScript> m_scriptsToExecuteSoon; // http://www.whatwg.org/specs/web-apps/current-work/#set-of-scripts-that-will-execute-as-soon-as-possible
-    WillBeHeapHashMap<ScriptLoader*, PendingScript> m_pendingAsyncScripts;
+    WillBeHeapVector<RawPtrWillBeMember<ScriptLoader> > m_scriptsToExecuteInOrder;
+    // http://www.whatwg.org/specs/web-apps/current-work/#set-of-scripts-that-will-execute-as-soon-as-possible
+    WillBeHeapVector<RawPtrWillBeMember<ScriptLoader> > m_scriptsToExecuteSoon;
+    WillBeHeapHashSet<RawPtrWillBeMember<ScriptLoader> > m_pendingAsyncScripts;
     Timer<ScriptRunner> m_timer;
 };
 

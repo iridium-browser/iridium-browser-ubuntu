@@ -6,6 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -17,7 +18,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_window.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_unittest_helper.h"
-#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_view.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
@@ -210,38 +211,21 @@ class FakeTheme : public ui::ThemeProvider {
   FakeTheme(NSColor* color) : color_(color) {}
   base::scoped_nsobject<NSColor> color_;
 
-  virtual bool UsingSystemTheme() const OVERRIDE {
-    return true;
-  }
-  virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const OVERRIDE {
+  bool UsingSystemTheme() const override { return true; }
+  gfx::ImageSkia* GetImageSkiaNamed(int id) const override { return NULL; }
+  SkColor GetColor(int id) const override { return SkColor(); }
+  int GetDisplayProperty(int id) const override { return -1; }
+  bool ShouldUseNativeFrame() const override { return false; }
+  bool HasCustomImage(int id) const override { return false; }
+  base::RefCountedMemory* GetRawData(int id, ui::ScaleFactor scale_factor)
+      const override {
     return NULL;
   }
-  virtual SkColor GetColor(int id) const OVERRIDE { return SkColor(); }
-  virtual int GetDisplayProperty(int id) const OVERRIDE {
-    return -1;
-  }
-  virtual bool ShouldUseNativeFrame() const OVERRIDE { return false; }
-  virtual bool HasCustomImage(int id) const OVERRIDE { return false; }
-  virtual base::RefCountedMemory* GetRawData(
-      int id,
-      ui::ScaleFactor scale_factor) const OVERRIDE {
-    return NULL;
-  }
-  virtual NSImage* GetNSImageNamed(int id) const OVERRIDE {
-    return nil;
-  }
-  virtual NSColor* GetNSImageColorNamed(int id) const OVERRIDE {
-    return nil;
-  }
-  virtual NSColor* GetNSColor(int id) const OVERRIDE {
-    return color_.get();
-  }
-  virtual NSColor* GetNSColorTint(int id) const OVERRIDE {
-    return nil;
-  }
-  virtual NSGradient* GetNSGradient(int id) const OVERRIDE {
-    return nil;
-  }
+  NSImage* GetNSImageNamed(int id) const override { return nil; }
+  NSColor* GetNSImageColorNamed(int id) const override { return nil; }
+  NSColor* GetNSColor(int id) const override { return color_.get(); }
+  NSColor* GetNSColorTint(int id) const override { return nil; }
+  NSGradient* GetNSGradient(int id) const override { return nil; }
 };
 
 
@@ -342,17 +326,22 @@ class BookmarkBarControllerTest : public BookmarkBarControllerTestBase {
  public:
   base::scoped_nsobject<BookmarkBarControllerNoOpen> bar_;
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     BookmarkBarControllerTestBase::SetUp();
     ASSERT_TRUE(browser());
     AddCommandLineSwitches();
 
-    bar_.reset(
-      [[BookmarkBarControllerNoOpen alloc]
+    // In OSX 10.10, the owner of a nib file is retain/autoreleased during the
+    // initialization of the nib. Wrapping the constructor in an
+    // autoreleasepool ensures that tests can control the destruction timing of
+    // |bar_|.
+    @autoreleasepool {
+      bar_.reset([[BookmarkBarControllerNoOpen alloc]
           initWithBrowser:browser()
              initialWidth:NSWidth([parent_view_ frame])
                  delegate:nil
            resizeDelegate:resizeDelegate_.get()]);
+    }
 
     InstallAndToggleBar(bar_.get());
   }
@@ -1276,10 +1265,10 @@ TEST_F(BookmarkBarControllerTest, TestFolderButtons) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2b ] 3b 4f:[ 4f1b 4f2b ] ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   // Validate initial model and that we do not have a folder controller.
-  std::string actualModelString = test::ModelStringFromNode(root);
+  std::string actualModelString = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actualModelString);
   EXPECT_FALSE([bar_ folderController]);
 
@@ -1495,10 +1484,10 @@ TEST_F(BookmarkBarControllerTest, MoveRemoveAddButtons) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2b ] 3b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   // Validate initial model.
-  std::string actualModelString = test::ModelStringFromNode(root);
+  std::string actualModelString = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actualModelString);
 
   // Remember how many buttons are showing.
@@ -1573,19 +1562,25 @@ TEST_F(BookmarkBarControllerTest, LastBookmarkResizeBehavior) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2b ] 3b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
   [bar_ frameDidChange];
 
-  CGFloat viewWidths[] = { 123.0, 124.0, 151.0, 152.0, 153.0, 154.0, 155.0,
-                           200.0, 155.0, 154.0, 153.0, 152.0, 151.0, 124.0,
-                           123.0 };
+  // The default font changed between OSX Mavericks and OSX Yosemite, so this
+  // test requires different widths to trigger the appropriate results.
+  CGFloat viewWidthsYosemite[] = { 121.0, 122.0, 148.0, 149.0, 150.0, 151.0,
+                                   152.0, 200.0, 152.0, 151.0, 150.0, 149.0,
+                                   148.0, 122.0, 121.0 };
+  CGFloat viewWidthsMavericks[] = { 123.0, 124.0, 151.0, 152.0, 153.0, 154.0,
+                                    155.0, 200.0, 155.0, 154.0, 153.0, 152.0,
+                                    151.0, 124.0, 123.0 };
   BOOL offTheSideButtonIsHiddenResults[] = { NO, NO, NO, NO, YES, YES, YES, YES,
                                              YES, YES, YES, NO, NO, NO, NO};
   int displayedButtonCountResults[] = { 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 2, 2,
                                         2, 1 };
+  CGFloat* viewWidths = base::mac::IsOSYosemiteOrLater() ? viewWidthsYosemite
+                                                         : viewWidthsMavericks;
 
-  for (unsigned int i = 0; i < sizeof(viewWidths) / sizeof(viewWidths[0]);
-       ++i) {
+  for (unsigned int i = 0; i < arraysize(viewWidthsYosemite); ++i) {
     NSRect frame = [[bar_ view] frame];
     frame.size.width = viewWidths[i] + bookmarks::kBookmarkRightMargin;
     [[bar_ view] setFrame:frame];
@@ -1599,7 +1594,7 @@ TEST_F(BookmarkBarControllerTest, BookmarksWithAppsPageShortcut) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2b ] 3b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
   [bar_ frameDidChange];
 
   // Apps page shortcut button should be visible.
@@ -1820,10 +1815,10 @@ TEST_F(BookmarkBarControllerDragDropTest, DragMoveBarBookmarkToOffTheSide) {
       "3bWithLongName 4bWithLongName 5bWithLongName 6bWithLongName "
       "7bWithLongName 8bWithLongName 9bWithLongName 10bWithLongName "
       "11bWithLongName 12bWithLongName 13b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   // Validate initial model.
-  std::string actualModelString = test::ModelStringFromNode(root);
+  std::string actualModelString = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actualModelString);
 
   // Insure that the off-the-side is not showing.
@@ -1872,16 +1867,16 @@ TEST_F(BookmarkBarControllerDragDropTest, DragOffTheSideToOther) {
       "11bWithLongName 12bWithLongName 13bWithLongName 14bWithLongName "
       "15bWithLongName 16bWithLongName 17bWithLongName 18bWithLongName "
       "19bWithLongName 20bWithLongName ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   const BookmarkNode* other = model->other_node();
   const std::string other_string("1other 2other 3other ");
-  test::AddNodesFromModelString(model, other, other_string);
+  bookmarks::test::AddNodesFromModelString(model, other, other_string);
 
   // Validate initial model.
-  std::string actualModelString = test::ModelStringFromNode(root);
+  std::string actualModelString = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actualModelString);
-  std::string actualOtherString = test::ModelStringFromNode(other);
+  std::string actualOtherString = bookmarks::test::ModelStringFromNode(other);
   EXPECT_EQ(other_string, actualOtherString);
 
   // Insure that the off-the-side is showing.
@@ -1925,16 +1920,16 @@ TEST_F(BookmarkBarControllerDragDropTest, DragBookmarkData) {
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
                                   "2f3b ] 3b 4b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
   const BookmarkNode* other = model->other_node();
   const std::string other_string("O1b O2b O3f:[ O3f1b O3f2f ] "
                                  "O4f:[ O4f1b O4f2f ] 05b ");
-  test::AddNodesFromModelString(model, other, other_string);
+  bookmarks::test::AddNodesFromModelString(model, other, other_string);
 
   // Validate initial model.
-  std::string actual = test::ModelStringFromNode(root);
+  std::string actual = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actual);
-  actual = test::ModelStringFromNode(other);
+  actual = bookmarks::test::ModelStringFromNode(other);
   EXPECT_EQ(other_string, actual);
 
   // Remember the little ones.
@@ -1956,7 +1951,7 @@ TEST_F(BookmarkBarControllerDragDropTest, DragBookmarkData) {
   // Verify the model.
   const std::string expected("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
                              "2f3b ] O3f:[ O3f1b O3f2f ] 3b 4b ");
-  actual = test::ModelStringFromNode(root);
+  actual = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(expected, actual);
   oldChildCount = newChildCount;
 
@@ -1976,7 +1971,7 @@ TEST_F(BookmarkBarControllerDragDropTest, DragBookmarkData) {
   const std::string expected1("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
                               "2f3b O4f:[ O4f1b O4f2f ] ] O3f:[ O3f1b O3f2f ] "
                               "3b 4b ");
-  actual = test::ModelStringFromNode(root);
+  actual = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(expected1, actual);
 }
 
@@ -1985,10 +1980,10 @@ TEST_F(BookmarkBarControllerDragDropTest, AddURLs) {
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
                                  "2f3b ] 3b 4b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   // Validate initial model.
-  std::string actual = test::ModelStringFromNode(root);
+  std::string actual = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actual);
 
   // Remember the children.
@@ -2008,7 +2003,7 @@ TEST_F(BookmarkBarControllerDragDropTest, AddURLs) {
   // Verify the model.
   const std::string expected("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
                              "2f3b ] SiteA SiteB 3b 4b ");
-  actual = test::ModelStringFromNode(root);
+  actual = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(expected, actual);
 }
 
@@ -2016,10 +2011,10 @@ TEST_F(BookmarkBarControllerDragDropTest, ControllerForNode) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2b ] 3b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   // Validate initial model.
-  std::string actualModelString = test::ModelStringFromNode(root);
+  std::string actualModelString = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actualModelString);
 
   // Find the main bar controller.
@@ -2032,7 +2027,7 @@ TEST_F(BookmarkBarControllerDragDropTest, DropPositionIndicator) {
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile());
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2b 2f3b ] 3b 4b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   // Hide the apps shortcut.
   profile()->GetPrefs()->SetBoolean(
@@ -2040,7 +2035,7 @@ TEST_F(BookmarkBarControllerDragDropTest, DropPositionIndicator) {
   ASSERT_TRUE([bar_ appsPageShortcutButtonIsHidden]);
 
   // Validate initial model.
-  std::string actualModel = test::ModelStringFromNode(root);
+  std::string actualModel = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actualModel);
 
   // Test a series of points starting at the right edge of the bar.
@@ -2107,10 +2102,10 @@ TEST_F(BookmarkBarControllerDragDropTest, DragBookmarkDataToTrash) {
   const BookmarkNode* root = model->bookmark_bar_node();
   const std::string model_string("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
                                   "2f3b ] 3b 4b ");
-  test::AddNodesFromModelString(model, root, model_string);
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
 
   // Validate initial model.
-  std::string actual = test::ModelStringFromNode(root);
+  std::string actual = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(model_string, actual);
 
   int oldChildCount = root->child_count();
@@ -2127,7 +2122,7 @@ TEST_F(BookmarkBarControllerDragDropTest, DragBookmarkDataToTrash) {
   // Verify the model.
   const std::string expected("1b 2f:[ 2f1b 2f2f:[ 2f2f1b 2f2f2b 2f2f3b ] "
                              "2f3b ] 4b ");
-  actual = test::ModelStringFromNode(root);
+  actual = bookmarks::test::ModelStringFromNode(root);
   EXPECT_EQ(expected, actual);
 
   // Verify that the other bookmark folder can't be deleted.

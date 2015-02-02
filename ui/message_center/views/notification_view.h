@@ -43,26 +43,24 @@ class MESSAGE_CENTER_EXPORT NotificationView
   static NotificationView* Create(MessageCenterController* controller,
                                   const Notification& notification,
                                   bool top_level);
-  virtual ~NotificationView();
+  ~NotificationView() override;
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual int GetHeightForWidth(int width) const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
-  virtual void ScrollRectToVisible(const gfx::Rect& rect) OVERRIDE;
-  virtual gfx::NativeCursor GetCursor(const ui::MouseEvent& event) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  int GetHeightForWidth(int width) const override;
+  void Layout() override;
+  void OnFocus() override;
+  void ScrollRectToVisible(const gfx::Rect& rect) override;
+  gfx::NativeCursor GetCursor(const ui::MouseEvent& event) override;
 
   // Overridden from MessageView:
-  virtual void UpdateWithNotification(
-      const Notification& notification) OVERRIDE;
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void UpdateWithNotification(const Notification& notification) override;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from MessageViewController:
-  virtual void ClickOnNotification(const std::string& notification_id) OVERRIDE;
-  virtual void RemoveNotification(const std::string& notification_id,
-                                  bool by_user) OVERRIDE;
+  void ClickOnNotification(const std::string& notification_id) override;
+  void RemoveNotification(const std::string& notification_id,
+                          bool by_user) override;
 
   void set_controller(MessageCenterController* controller) {
     controller_ = controller;
@@ -81,8 +79,7 @@ class MESSAGE_CENTER_EXPORT NotificationView
   friend class NotificationViewTest;
 
   // views::ViewTargeterDelegate:
-  virtual views::View* TargetForRect(views::View* root,
-                                     const gfx::Rect& rect) OVERRIDE;
+  views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
 
   void CreateOrUpdateViews(const Notification& notification);
   void SetAccessibleName(const Notification& notification);

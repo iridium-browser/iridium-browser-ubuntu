@@ -47,12 +47,12 @@ class FakeBackend : public QuotaReservationManager::QuotaBackend {
   FakeBackend()
       : on_memory_usage_(kInitialFileSize),
         on_disk_usage_(kInitialFileSize) {}
-  virtual ~FakeBackend() {}
+  ~FakeBackend() override {}
 
-  virtual void ReserveQuota(const GURL& origin,
-                            storage::FileSystemType type,
-                            int64 delta,
-                            const ReserveQuotaCallback& callback) OVERRIDE {
+  void ReserveQuota(const GURL& origin,
+                    storage::FileSystemType type,
+                    int64 delta,
+                    const ReserveQuotaCallback& callback) override {
     EXPECT_EQ(GURL(kOrigin), origin);
     EXPECT_EQ(kType, type);
     on_memory_usage_ += delta;
@@ -61,28 +61,28 @@ class FakeBackend : public QuotaReservationManager::QuotaBackend {
         base::Bind(base::IgnoreResult(callback), base::File::FILE_OK, delta));
   }
 
-  virtual void ReleaseReservedQuota(const GURL& origin,
-                                    storage::FileSystemType type,
-                                    int64 size) OVERRIDE {
+  void ReleaseReservedQuota(const GURL& origin,
+                            storage::FileSystemType type,
+                            int64 size) override {
     EXPECT_LE(0, size);
     EXPECT_EQ(GURL(kOrigin), origin);
     EXPECT_EQ(kType, type);
     on_memory_usage_ -= size;
   }
 
-  virtual void CommitQuotaUsage(const GURL& origin,
-                                storage::FileSystemType type,
-                                int64 delta) OVERRIDE {
+  void CommitQuotaUsage(const GURL& origin,
+                        storage::FileSystemType type,
+                        int64 delta) override {
     EXPECT_EQ(GURL(kOrigin), origin);
     EXPECT_EQ(kType, type);
     on_disk_usage_ += delta;
     on_memory_usage_ += delta;
   }
 
-  virtual void IncrementDirtyCount(const GURL& origin,
-                                   storage::FileSystemType type) OVERRIDE {}
-  virtual void DecrementDirtyCount(const GURL& origin,
-                                   storage::FileSystemType type) OVERRIDE {}
+  void IncrementDirtyCount(const GURL& origin,
+                           storage::FileSystemType type) override {}
+  void DecrementDirtyCount(const GURL& origin,
+                           storage::FileSystemType type) override {}
 
   int64 on_memory_usage() { return on_memory_usage_; }
   int64 on_disk_usage() { return on_disk_usage_; }
@@ -180,9 +180,9 @@ void RefreshReservation(QuotaReservation* reservation, int64 size) {
 class QuotaReservationManagerTest : public testing::Test {
  public:
   QuotaReservationManagerTest() {}
-  virtual ~QuotaReservationManagerTest() {}
+  ~QuotaReservationManagerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(work_dir_.CreateUniqueTempDir());
     file_path_ = work_dir_.path().Append(FILE_PATH_LITERAL("hoge"));
     SetFileSize(file_path_, kInitialFileSize);
@@ -191,9 +191,7 @@ class QuotaReservationManagerTest : public testing::Test {
     reservation_manager_.reset(new QuotaReservationManager(backend.Pass()));
   }
 
-  virtual void TearDown() OVERRIDE {
-    reservation_manager_.reset();
-  }
+  void TearDown() override { reservation_manager_.reset(); }
 
   FakeBackend* fake_backend() {
     return static_cast<FakeBackend*>(reservation_manager_->backend_.get());

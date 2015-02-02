@@ -8,6 +8,10 @@
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "ui/base/ui_base_types.h"
 
+namespace aura {
+class Window;
+}
+
 namespace gfx {
 class Point;
 }
@@ -18,7 +22,7 @@ class Widget;
 
 class RenderViewContextMenuViews : public RenderViewContextMenu {
  public:
-  virtual ~RenderViewContextMenuViews();
+  ~RenderViewContextMenuViews() override;
 
   // Factory function to create an instance.
   static RenderViewContextMenuViews* Create(
@@ -29,21 +33,26 @@ class RenderViewContextMenuViews : public RenderViewContextMenu {
                  const gfx::Point& point,
                  ui::MenuSourceType type);
 
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  void ExecuteCommand(int command_id, int event_flags) override;
+
+  // RenderViewContextMenuBase implementation.
+  void Show() override;
 
  protected:
   RenderViewContextMenuViews(content::RenderFrameHost* render_frame_host,
                              const content::ContextMenuParams& params);
 
   // RenderViewContextMenu implementation.
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
 
  private:
-  virtual void AppendPlatformEditableItems() OVERRIDE;
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
+  void AppendPlatformEditableItems() override;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+
+  aura::Window* GetActiveNativeView();
+  views::Widget* GetTopLevelWidget();
 
   // Model for the BiDi input submenu.
   ui::SimpleMenuModel bidi_submenu_model_;

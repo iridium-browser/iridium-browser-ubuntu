@@ -248,6 +248,7 @@
     '<(libvpx_source)/vp9/encoder/vp9_aq_cyclicrefresh.h',
     '<(libvpx_source)/vp9/encoder/vp9_aq_variance.c',
     '<(libvpx_source)/vp9/encoder/vp9_aq_variance.h',
+    '<(libvpx_source)/vp9/encoder/vp9_avg.c',
     '<(libvpx_source)/vp9/encoder/vp9_bitstream.c',
     '<(libvpx_source)/vp9/encoder/vp9_bitstream.h',
     '<(libvpx_source)/vp9/encoder/vp9_block.h',

@@ -956,15 +956,28 @@ bool HttpResponseHeaders::IsRedirectResponseCode(int response_code) {
 // Of course, there are other factors that can force a response to always be
 // validated or re-fetched.
 //
-bool HttpResponseHeaders::RequiresValidation(const Time& request_time,
-                                             const Time& response_time,
-                                             const Time& current_time) const {
-  TimeDelta lifetime =
-      GetFreshnessLifetime(response_time);
-  if (lifetime == TimeDelta())
-    return true;
+// From RFC 5861 section 3, a stale response may be used while revalidation is
+// performed in the background if
+//
+//   freshness_lifetime + stale_while_revalidate > current_age
+//
+ValidationType HttpResponseHeaders::RequiresValidation(
+    const Time& request_time,
+    const Time& response_time,
+    const Time& current_time) const {
+  FreshnessLifetimes lifetimes = GetFreshnessLifetimes(response_time);
+  if (lifetimes.freshness == TimeDelta() && lifetimes.staleness == TimeDelta())
+    return VALIDATION_SYNCHRONOUS;
 
-  return lifetime <= GetCurrentAge(request_time, response_time, current_time);
+  TimeDelta age = GetCurrentAge(request_time, response_time, current_time);
+
+  if (lifetimes.freshness > age)
+    return VALIDATION_NONE;
+
+  if (lifetimes.freshness + lifetimes.staleness > age)
+    return VALIDATION_ASYNCHRONOUS;
+
+  return VALIDATION_SYNCHRONOUS;
 }
 
 // From RFC 2616 section 13.2.4:
@@ -987,25 +1000,36 @@ bool HttpResponseHeaders::RequiresValidation(const Time& request_time,
 //
 //   freshness_lifetime = (date_value - last_modified_value) * 0.10
 //
-TimeDelta HttpResponseHeaders::GetFreshnessLifetime(
-    const Time& response_time) const {
+// If the stale-while-revalidate directive is present, then it is used to set
+// the |staleness| time, unless it overridden by another directive.
+//
+HttpResponseHeaders::FreshnessLifetimes
+HttpResponseHeaders::GetFreshnessLifetimes(const Time& response_time) const {
+  FreshnessLifetimes lifetimes;
   // Check for headers that force a response to never be fresh.  For backwards
   // compat, we treat "Pragma: no-cache" as a synonym for "Cache-Control:
   // no-cache" even though RFC 2616 does not specify it.
   if (HasHeaderValue("cache-control", "no-cache") ||
       HasHeaderValue("cache-control", "no-store") ||
       HasHeaderValue("pragma", "no-cache") ||
-      HasHeaderValue("vary", "*"))  // see RFC 2616 section 13.6
-    return TimeDelta();  // not fresh
+      // Vary: * is never usable: see RFC 2616 section 13.6.
+      HasHeaderValue("vary", "*")) {
+    return lifetimes;
+  }
+
+  // Cache-Control directive must_revalidate overrides stale-while-revalidate.
+  bool must_revalidate = HasHeaderValue("cache-control", "must-revalidate");
+
+  if (must_revalidate || !GetStaleWhileRevalidateValue(&lifetimes.staleness)) {
+    DCHECK_EQ(TimeDelta(), lifetimes.staleness);
+  }
 
   // NOTE: "Cache-Control: max-age" overrides Expires, so we only check the
-  // Expires header after checking for max-age in GetFreshnessLifetime.  This
+  // Expires header after checking for max-age in GetFreshnessLifetimes.  This
   // is important since "Expires: <date in the past>" means not fresh, but
   // it should not trump a max-age value.
-
-  TimeDelta max_age_value;
-  if (GetMaxAgeValue(&max_age_value))
-    return max_age_value;
+  if (GetMaxAgeValue(&lifetimes.freshness))
+    return lifetimes;
 
   // If there is no Date header, then assume that the server response was
   // generated at the time when we received the response.
@@ -1016,10 +1040,13 @@ TimeDelta HttpResponseHeaders::GetFreshnessLifetime(
   Time expires_value;
   if (GetExpiresValue(&expires_value)) {
     // The expires value can be a date in the past!
-    if (expires_value > date_value)
-      return expires_value - date_value;
+    if (expires_value > date_value) {
+      lifetimes.freshness = expires_value - date_value;
+      return lifetimes;
+    }
 
-    return TimeDelta();  // not fresh
+    DCHECK_EQ(TimeDelta(), lifetimes.freshness);
+    return lifetimes;
   }
 
   // From RFC 2616 section 13.4:
@@ -1047,24 +1074,31 @@ TimeDelta HttpResponseHeaders::GetFreshnessLifetime(
   // experimental RFC that adds 308 permanent redirect as well, for which "any
   // future references ... SHOULD use one of the returned URIs."
   if ((response_code_ == 200 || response_code_ == 203 ||
-       response_code_ == 206) &&
-      !HasHeaderValue("cache-control", "must-revalidate")) {
+       response_code_ == 206) && !must_revalidate) {
     // TODO(darin): Implement a smarter heuristic.
     Time last_modified_value;
     if (GetLastModifiedValue(&last_modified_value)) {
-      // The last-modified value can be a date in the past!
-      if (last_modified_value <= date_value)
-        return (date_value - last_modified_value) / 10;
+      // The last-modified value can be a date in the future!
+      if (last_modified_value <= date_value) {
+        lifetimes.freshness = (date_value - last_modified_value) / 10;
+        return lifetimes;
+      }
     }
   }
 
   // These responses are implicitly fresh (unless otherwise overruled):
   if (response_code_ == 300 || response_code_ == 301 || response_code_ == 308 ||
       response_code_ == 410) {
-    return TimeDelta::Max();
+    lifetimes.freshness = TimeDelta::Max();
+    lifetimes.staleness = TimeDelta();  // It should never be stale.
+    return lifetimes;
   }
 
-  return TimeDelta();  // not fresh
+  // Our heuristic freshness estimate for this resource is 0 seconds, in
+  // accordance with common browser behaviour. However, stale-while-revalidate
+  // may still apply.
+  DCHECK_EQ(TimeDelta(), lifetimes.freshness);
+  return lifetimes;
 }
 
 // From RFC 2616 section 13.2.3:
@@ -1169,28 +1203,40 @@ bool HttpResponseHeaders::GetTimeValuedHeader(const std::string& name,
   return Time::FromUTCString(value.c_str(), result);
 }
 
+// We accept the first value of "close" or "keep-alive" in a Connection or
+// Proxy-Connection header, in that order. Obeying "keep-alive" in HTTP/1.1 or
+// "close" in 1.0 is not strictly standards-compliant, but we'd like to
+// avoid looking at the Proxy-Connection header whenever it is reasonable to do
+// so.
+// TODO(ricea): Measure real-world usage of the "Proxy-Connection" header,
+// with a view to reducing support for it in order to make our Connection header
+// handling more RFC 7230 compliant.
 bool HttpResponseHeaders::IsKeepAlive() const {
-  if (http_version_ < HttpVersion(1, 0))
-    return false;
-
   // NOTE: It is perhaps risky to assume that a Proxy-Connection header is
   // meaningful when we don't know that this response was from a proxy, but
   // Mozilla also does this, so we'll do the same.
-  std::string connection_val;
-  if (!EnumerateHeader(NULL, "connection", &connection_val))
-    EnumerateHeader(NULL, "proxy-connection", &connection_val);
+  static const char* kConnectionHeaders[] = {"connection", "proxy-connection"};
+  struct KeepAliveToken {
+    const char* token;
+    bool keep_alive;
+  };
+  static const KeepAliveToken kKeepAliveTokens[] = {{"keep-alive", true},
+                                                    {"close", false}};
 
-  bool keep_alive;
+  if (http_version_ < HttpVersion(1, 0))
+    return false;
 
-  if (http_version_ == HttpVersion(1, 0)) {
-    // HTTP/1.0 responses default to NOT keep-alive
-    keep_alive = LowerCaseEqualsASCII(connection_val, "keep-alive");
-  } else {
-    // HTTP/1.1 responses default to keep-alive
-    keep_alive = !LowerCaseEqualsASCII(connection_val, "close");
+  for (const char* header : kConnectionHeaders) {
+    void* iterator = nullptr;
+    std::string token;
+    while (EnumerateHeader(&iterator, header, &token)) {
+      for (const KeepAliveToken& keep_alive_token : kKeepAliveTokens) {
+        if (LowerCaseEqualsASCII(token, keep_alive_token.token))
+          return keep_alive_token.keep_alive;
+      }
+    }
   }
-
-  return keep_alive;
+  return http_version_ != HttpVersion(1, 0);
 }
 
 bool HttpResponseHeaders::HasStrongValidators() const {

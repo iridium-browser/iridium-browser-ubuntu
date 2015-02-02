@@ -9,9 +9,8 @@
 #define GrGLProcessor_DEFINED
 
 #include "GrBackendProcessorFactory.h"
-#include "GrGLProgramEffects.h"
-#include "GrGLShaderVar.h"
-#include "GrGLSL.h"
+#include "GrGLProgramDataManager.h"
+#include "GrTextureAccess.h"
 
 /** @file
     This file contains specializations for OpenGL of the shader stages declared in
@@ -23,7 +22,7 @@
     that their GrGLProcessors would emit the same GLSL code.
 
     The GrGLProcessor subclass must also have a constructor of the form:
-        EffectSubclass::EffectSubclass(const GrBackendEffectFactory&, const GrProcessor&)
+        EffectSubclass::EffectSubclass(const GrBackendProcessorFactory&, const GrProcessor&)
 
     These objects are created by the factory object returned by the GrProcessor::getFactory().
 */
@@ -88,6 +87,8 @@ protected:
     const GrBackendProcessorFactory& fFactory;
 };
 
+class GrGLFPBuilder;
+
 class GrGLFragmentProcessor : public GrGLProcessor {
 public:
     GrGLFragmentProcessor(const GrBackendProcessorFactory& factory)
@@ -113,8 +114,9 @@ public:
         @param samplers     Contains one entry for each GrTextureAccess of the GrProcessor. These
                             can be passed to the builder to emit texture reads in the generated
                             code.
+        TODO this should take a struct
         */
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor& effect,
                           const GrProcessorKey& key,
                           const char* outputColor,

@@ -84,7 +84,7 @@ bool SharedStyleFinder::canShareStyleWithControl(Element& candidate) const
         if (willValidate != element().willValidate())
             return false;
 
-        if (willValidate && (candidate.isValidFormControlElement() != element().isValidFormControlElement()))
+        if (willValidate && (candidate.isValidElement() != element().isValidElement()))
             return false;
 
         if (candidate.isInRange() != element().isInRange())
@@ -265,13 +265,18 @@ bool SharedStyleFinder::canShareStyleWithElement(Element& candidate) const
             return false;
     }
 
+    if (document().containsValidityStyleRules()) {
+        if (candidate.isValidElement() != element().isValidElement())
+            return false;
+    }
+
     return true;
 }
 
 bool SharedStyleFinder::documentContainsValidCandidate() const
 {
-    for (Element* element = document().documentElement(); element; element = ElementTraversal::next(*element)) {
-        if (element->supportsStyleSharing() && canShareStyleWithElement(*element))
+    for (Element& element : ElementTraversal::startsAt(document().documentElement())) {
+        if (element.supportsStyleSharing() && canShareStyleWithElement(element))
             return true;
     }
     return false;

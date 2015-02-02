@@ -22,16 +22,16 @@ static const int kBenchmarkIterations = 100;
 class DemuxerHostImpl : public media::DemuxerHost {
  public:
   DemuxerHostImpl() {}
-  virtual ~DemuxerHostImpl() {}
+  ~DemuxerHostImpl() override {}
 
   // DemuxerHost implementation.
-  virtual void AddBufferedTimeRange(base::TimeDelta start,
-                                    base::TimeDelta end) OVERRIDE {}
-  virtual void SetDuration(base::TimeDelta duration) OVERRIDE {}
-  virtual void OnDemuxerError(media::PipelineStatus error) OVERRIDE {}
-  virtual void AddTextStream(media::DemuxerStream* text_stream,
-                             const media::TextTrackConfig& config) OVERRIDE {}
-  virtual void RemoveTextStream(media::DemuxerStream* text_stream) OVERRIDE {}
+  void AddBufferedTimeRange(base::TimeDelta start,
+                            base::TimeDelta end) override {}
+  void SetDuration(base::TimeDelta duration) override {}
+  void OnDemuxerError(media::PipelineStatus error) override {}
+  void AddTextStream(media::DemuxerStream* text_stream,
+                     const media::TextTrackConfig& config) override {}
+  void RemoveTextStream(media::DemuxerStream* text_stream) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DemuxerHostImpl);

@@ -28,9 +28,9 @@ class SYNC_EXPORT WriteTransaction : public BaseWriteTransaction {
   WriteTransaction(const tracked_objects::Location& from_here,
                    Directory* directory, int64* transaction_version);
 
-  virtual ~WriteTransaction();
+  ~WriteTransaction() override;
 
-  virtual void TrackChangesTo(const EntryKernel* entry) OVERRIDE;
+  void TrackChangesTo(const EntryKernel* entry) override;
 
  protected:
   // Overridden by tests.

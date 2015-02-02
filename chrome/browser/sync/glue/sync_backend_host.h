@@ -52,7 +52,7 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
 
   // Stubs used by implementing classes.
   SyncBackendHost();
-  virtual ~SyncBackendHost();
+  ~SyncBackendHost() override;
 
   // Called on the frontend's thread to kick off asynchronous initialization.
   // Optionally deletes the "Sync Data" folder during init in order to make
@@ -138,7 +138,7 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
       const DataTypeConfigStateMap& config_state_map,
       const base::Callback<void(syncer::ModelTypeSet,
                                 syncer::ModelTypeSet)>& ready_task,
-      const base::Callback<void()>& retry_callback) OVERRIDE = 0;
+      const base::Callback<void()>& retry_callback) override = 0;
 
   // Turns on encryption of all present and future sync data.
   virtual void EnableEncryptEverything() = 0;
@@ -184,6 +184,9 @@ class SyncBackendHost : public sync_driver::BackendDataTypeConfigurer {
 
   virtual void GetModelSafeRoutingInfo(
       syncer::ModelSafeRoutingInfo* out) const = 0;
+
+  // Send a message to the sync thread to persist the Directory to disk.
+  virtual void FlushDirectory() const = 0;
 
   // Requests that the backend forward to the fronent any protocol events in
   // its buffer and begin forwarding automatically from now on.  Repeated calls

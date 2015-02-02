@@ -16,12 +16,12 @@ class PredictorTabHelper
     : public content::WebContentsObserver,
       public content::WebContentsUserData<PredictorTabHelper> {
  public:
-  virtual ~PredictorTabHelper();
+  ~PredictorTabHelper() override;
 
   // content::WebContentsObserver implementation
-  virtual void DidStartNavigationToPendingEntry(
+  void DidStartNavigationToPendingEntry(
       const GURL& url,
-      content::NavigationController::ReloadType reload_type) OVERRIDE;
+      content::NavigationController::ReloadType reload_type) override;
 
  private:
   explicit PredictorTabHelper(content::WebContents* web_contents);

@@ -18,17 +18,20 @@
 #include "DMCpuGMTask.h"
 #include "DMGpuGMTask.h"
 #include "DMGpuSupport.h"
+#include "DMJsonWriter.h"
 #include "DMPDFTask.h"
 #include "DMReporter.h"
 #include "DMSKPTask.h"
 #include "DMTask.h"
 #include "DMTaskRunner.h"
 #include "DMTestTask.h"
-#include "DMWriteTask.h"
 
 #ifdef SK_BUILD_POPPLER
 #  include "SkPDFRasterizer.h"
 #  define RASTERIZE_PDF_PROC SkPopplerRasterizePDF
+#elif defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
+#  include "SkCGUtils.h"
+#  define RASTERIZE_PDF_PROC SkPDFDocumentToBitmap
 #else
 #  define RASTERIZE_PDF_PROC NULL
 #endif
@@ -189,7 +192,7 @@ int dm_main() {
     SkAutoGraphics ag;
     SkTaskGroup::Enabler enabled(FLAGS_threads);
 
-    if (FLAGS_dryRun) {
+    if (FLAGS_dryRun || FLAGS_veryVerbose) {
         FLAGS_verbose = true;
     }
 #if SK_ENABLE_INST_COUNT
@@ -226,7 +229,7 @@ int dm_main() {
     kick_off_skps(skps, &reporter, &tasks);
     tasks.wait();
 
-    DM::WriteTask::DumpJson();
+    DM::JsonWriter::DumpJson();
 
     SkDebugf("\n");
 #ifdef SK_DEBUG

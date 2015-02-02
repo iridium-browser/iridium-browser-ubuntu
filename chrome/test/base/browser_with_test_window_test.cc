@@ -30,12 +30,14 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
+#include "chrome/browser/ui/views/chrome_constrained_window_views_client.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "ui/views/test/test_views_delegate.h"
 #endif
 
 using content::NavigationController;
-using content::RenderViewHost;
-using content::RenderViewHostTester;
+using content::RenderFrameHost;
+using content::RenderFrameHostTester;
 using content::WebContents;
 
 BrowserWithTestWindowTest::BrowserWithTestWindowTest()
@@ -77,9 +79,13 @@ void BrowserWithTestWindowTest::SetUp() {
   aura_test_helper_->SetUp(context_factory);
   new wm::DefaultActivationClient(aura_test_helper_->root_window());
 #endif  // USE_AURA
-#if !defined(OS_CHROMEOS) && defined(TOOLKIT_VIEWS)
+
+#if defined(TOOLKIT_VIEWS)
+#if !defined(OS_CHROMEOS)
   views_delegate_.reset(CreateViewsDelegate());
-#endif
+#endif // !OS_CHROMEOS
+  SetConstrainedWindowViewsClient(CreateChromeConstrainedWindowViewsClient());
+#endif  // TOOLKIT_VIEWS
 
   // Subclasses can provide their own Profile.
   profile_ = CreateProfile();
@@ -116,6 +122,7 @@ void BrowserWithTestWindowTest::TearDown() {
   base::MessageLoop::current()->Run();
 
 #if defined(TOOLKIT_VIEWS)
+  SetConstrainedWindowViewsClient(scoped_ptr<ConstrainedWindowViewsClient>());
   views_delegate_.reset(NULL);
 #endif
 }
@@ -133,38 +140,37 @@ void BrowserWithTestWindowTest::CommitPendingLoad(
   if (!controller->GetPendingEntry())
     return;  // Nothing to commit.
 
-  RenderViewHost* old_rvh =
-      controller->GetWebContents()->GetRenderViewHost();
+  RenderFrameHost* old_rfh = controller->GetWebContents()->GetMainFrame();
 
-  RenderViewHost* pending_rvh = RenderViewHostTester::GetPendingForController(
+  RenderFrameHost* pending_rfh = RenderFrameHostTester::GetPendingForController(
       controller);
-  if (pending_rvh) {
+  if (pending_rfh) {
     // Simulate the BeforeUnload_ACK that is received from the current renderer
     // for a cross-site navigation.
-    DCHECK_NE(old_rvh, pending_rvh);
-    RenderViewHostTester::For(old_rvh)->SendBeforeUnloadACK(true);
+    DCHECK_NE(old_rfh, pending_rfh);
+    RenderFrameHostTester::For(old_rfh)->SendBeforeUnloadACK(true);
   }
-  // Commit on the pending_rvh, if one exists.
-  RenderViewHost* test_rvh = pending_rvh ? pending_rvh : old_rvh;
-  RenderViewHostTester* test_rvh_tester = RenderViewHostTester::For(test_rvh);
+  // Commit on the pending_rfh, if one exists.
+  RenderFrameHost* test_rfh = pending_rfh ? pending_rfh : old_rfh;
+  RenderFrameHostTester* test_rfh_tester = RenderFrameHostTester::For(test_rfh);
 
   // Simulate a SwapOut_ACK before the navigation commits.
-  if (pending_rvh)
-    RenderViewHostTester::For(old_rvh)->SimulateSwapOutACK();
+  if (pending_rfh)
+    RenderFrameHostTester::For(old_rfh)->SimulateSwapOutACK();
 
   // For new navigations, we need to send a larger page ID. For renavigations,
   // we need to send the preexisting page ID. We can tell these apart because
   // renavigations will have a pending_entry_index while new ones won't (they'll
   // just have a standalong pending_entry that isn't in the list already).
   if (controller->GetPendingEntryIndex() >= 0) {
-    test_rvh_tester->SendNavigateWithTransition(
+    test_rfh_tester->SendNavigateWithTransition(
         controller->GetPendingEntry()->GetPageID(),
         controller->GetPendingEntry()->GetURL(),
         controller->GetPendingEntry()->GetTransitionType());
   } else {
-    test_rvh_tester->SendNavigateWithTransition(
-        controller->GetWebContents()->
-            GetMaxPageIDForSiteInstance(test_rvh->GetSiteInstance()) + 1,
+    test_rfh_tester->SendNavigateWithTransition(
+        controller->GetWebContents()->GetMaxPageIDForSiteInstance(
+            test_rfh->GetSiteInstance()) + 1,
         controller->GetPendingEntry()->GetURL(),
         controller->GetPendingEntry()->GetTransitionType());
   }

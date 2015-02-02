@@ -8,7 +8,6 @@ import android.view.KeyEvent;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
-import org.chromium.content.browser.ContentViewCore;
 
 /**
  * Java peer of the native class of the same name.
@@ -107,6 +106,25 @@ public class WebContentsDelegateAndroid {
     }
 
     @CalledByNative
+    public void didNavigateToPendingEntry() {
+    }
+
+    @CalledByNative
+    public void webContentsCreated(long sourceWebContents, long openerRenderFrameId,
+            String frameName, String targetUrl, long newWebContents) {
+    }
+
+    @CalledByNative
+    public boolean shouldCreateWebContents(String targetUrl) {
+        return true;
+    }
+
+    @CalledByNative
+    public boolean onGoToEntryOffset(int offset) {
+        return true;
+    }
+
+    @CalledByNative
     public void onUpdateUrl(String url) {
     }
 
@@ -138,10 +156,11 @@ public class WebContentsDelegateAndroid {
 
     /**
      * Report a form resubmission. The overwriter of this function should eventually call
-     * either of ContentViewCore.ContinuePendingReload or ContentViewCore.CancelPendingReload.
+     * either of NavigationController.ContinuePendingReload or
+     * NavigationController.CancelPendingReload.
      */
     @CalledByNative
-    public void showRepostFormWarningDialog(ContentViewCore contentViewCore) {
+    public void showRepostFormWarningDialog() {
     }
 
     @CalledByNative

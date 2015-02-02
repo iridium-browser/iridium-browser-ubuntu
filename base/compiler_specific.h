@@ -94,11 +94,17 @@
 // (Typically used to silence a compiler warning when the assignment
 // is important for some other reason.)
 // Use like:
-//   int x ALLOW_UNUSED = ...;
+//   int x = ...;
+//   ALLOW_UNUSED_LOCAL(x);
+#define ALLOW_UNUSED_LOCAL(x) false ? (void)x : (void)0
+
+// Annotate a typedef or function indicating it's ok if it's not used.
+// Use like:
+//   typedef Foo Bar ALLOW_UNUSED_TYPE;
 #if defined(COMPILER_GCC)
-#define ALLOW_UNUSED __attribute__((unused))
+#define ALLOW_UNUSED_TYPE __attribute__((unused))
 #else
-#define ALLOW_UNUSED
+#define ALLOW_UNUSED_TYPE
 #endif
 
 // Annotate a function indicating it should not be inlined.
@@ -132,19 +138,6 @@
 #elif defined(COMPILER_GCC)
 #define ALIGNOF(type) __alignof__(type)
 #endif
-
-// Annotate a virtual method indicating it must be overriding a virtual
-// method in the parent class.
-// Use like:
-//   virtual void foo() OVERRIDE;
-#define OVERRIDE override
-
-// Annotate a virtual method indicating that subclasses must not override it,
-// or annotate a class to indicate that it cannot be subclassed.
-// Use like:
-//   virtual void foo() FINAL;
-//   class B FINAL : public A {};
-#define FINAL final
 
 // Annotate a function indicating the caller must examine the return value.
 // Use like:

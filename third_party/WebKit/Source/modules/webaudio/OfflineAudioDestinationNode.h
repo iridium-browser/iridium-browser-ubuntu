@@ -36,29 +36,35 @@ namespace blink {
 class AudioBus;
 class AudioContext;
 
-class OfflineAudioDestinationNode FINAL : public AudioDestinationNode {
+class OfflineAudioDestinationNode final : public AudioDestinationNode {
 public:
     static OfflineAudioDestinationNode* create(AudioContext* context, AudioBuffer* renderTarget)
     {
-        return adoptRefCountedGarbageCollectedWillBeNoop(new OfflineAudioDestinationNode(context, renderTarget));
+        return new OfflineAudioDestinationNode(context, renderTarget);
     }
 
     virtual ~OfflineAudioDestinationNode();
 
     // AudioNode
-    virtual void dispose() OVERRIDE;
-    virtual void initialize() OVERRIDE;
-    virtual void uninitialize() OVERRIDE;
+    virtual void dispose() override;
+    virtual void initialize() override;
+    virtual void uninitialize() override;
 
     // AudioDestinationNode
-    virtual void startRendering() OVERRIDE;
+    virtual void startRendering() override;
 
-    virtual float sampleRate()  const OVERRIDE { return m_renderTarget->sampleRate(); }
+    virtual float sampleRate()  const override { return m_renderTarget->sampleRate(); }
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     OfflineAudioDestinationNode(AudioContext*, AudioBuffer* renderTarget);
+
+    void offlineRender();
+    void offlineRenderInternal();
+
+    // For completion callback on main thread.
+    void notifyComplete();
 
     // This AudioNode renders into this AudioBuffer.
     Member<AudioBuffer> m_renderTarget;
@@ -68,10 +74,6 @@ private:
     // Rendering thread.
     OwnPtr<WebThread> m_renderThread;
     bool m_startedRendering;
-    void offlineRender();
-
-    // For completion callback on main thread.
-    void notifyComplete();
 };
 
 } // namespace blink

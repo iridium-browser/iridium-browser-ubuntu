@@ -19,7 +19,11 @@ config("common_audio_config") {
 
 source_set("common_audio") {
   sources = [
+    "audio_converter.cc",
+    "audio_converter.h",
     "audio_util.cc",
+    "blocker.cc",
+    "blocker.h",
     "fir_filter.cc",
     "fir_filter.h",
     "fir_filter_neon.h",
@@ -64,11 +68,12 @@ source_set("common_audio") {
     "signal_processing/resample_fractional.c",
     "signal_processing/spl_init.c",
     "signal_processing/spl_sqrt.c",
-    "signal_processing/spl_version.c",
     "signal_processing/splitting_filter.c",
     "signal_processing/sqrt_of_one_minus_x_squared.c",
     "signal_processing/vector_scaling_operations.c",
+    "vad/include/vad.h",
     "vad/include/webrtc_vad.h",
+    "vad/vad.cc",
     "vad/webrtc_vad.c",
     "vad/vad_core.c",
     "vad/vad_core.h",
@@ -80,11 +85,24 @@ source_set("common_audio") {
     "vad/vad_sp.h",
     "wav_header.cc",
     "wav_header.h",
-    "wav_writer.cc",
-    "wav_writer.h",
+    "wav_file.cc",
+    "wav_file.h",
+    "window_generator.cc",
+    "window_generator.h",
   ]
 
   deps = [ "../system_wrappers" ]
+
+  if (rtc_use_openmax_dl) {
+    sources += [
+      "lapped_transform.cc",
+      "lapped_transform.h",
+      "real_fourier.cc",
+      "real_fourier.h",
+    ]
+
+    deps += [ "//third_party/openmax_dl/dl" ]
+  }
 
   if (cpu_arch == "arm") {
     sources += [
@@ -116,15 +134,13 @@ source_set("common_audio") {
       sources += [ "signal_processing/vector_scaling_operations_mips.c" ]
     }
   } else {
-    sources += [
-      "signal_processing/complex_fft.c",
-      "signal_processing/filter_ar_fast_q12.c",
-    ]
+    sources += [ "signal_processing/complex_fft.c" ]
   }
 
   if (cpu_arch != "arm" && cpu_arch != "mipsel") {
     sources += [
       "signal_processing/complex_bit_reverse.c",
+      "signal_processing/filter_ar_fast_q12.c",
       "signal_processing/spl_sqrt_floor.c",
     ]
   }
@@ -135,7 +151,9 @@ source_set("common_audio") {
     ]
   }
 
-  direct_dependent_configs = [
+  configs += [ "..:common_config" ]
+
+  public_configs = [
     "..:common_inherited_config",
     ":common_audio_config",
   ]
@@ -181,10 +199,9 @@ if (rtc_build_armv7_neon) {
       "signal_processing/vector_scaling_operations_neon.S",
     ]
 
-    configs += [
-       "..:common_config",
-       "..:common_inherited_config",
-    ]
+    configs += [ "..:common_config" ]
+    public_configs = [ "..:common_inherited_config" ]
+
 
     # Enable compilation for the ARM v7 Neon instruction set. This is needed
     # since //build/config/arm.gni only enables Neon for iOS, not Android.

@@ -9,7 +9,6 @@
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/timer/timer.h"
 #include "ui/app_list/pagination_model_observer.h"
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/window_observer.h"
@@ -48,7 +47,7 @@ class AppListController : public ui::EventHandler,
                           public app_list::PaginationModelObserver {
  public:
   AppListController();
-  virtual ~AppListController();
+  ~AppListController() override;
 
   // Show/hide app list window. The |window| is used to deterime in
   // which display (in which the |window| exists) the app list should
@@ -92,38 +91,38 @@ class AppListController : public ui::EventHandler,
   void UpdateBounds();
 
   // ui::EventHandler overrides:
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // aura::client::FocusChangeObserver overrides:
-  virtual void OnWindowFocused(aura::Window* gained_focus,
-                               aura::Window* lost_focus) OVERRIDE;
+  void OnWindowFocused(aura::Window* gained_focus,
+                       aura::Window* lost_focus) override;
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowBoundsChanged(aura::Window* root,
-                                     const gfx::Rect& old_bounds,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
+  void OnWindowBoundsChanged(aura::Window* root,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override;
 
   // ui::ImplicitAnimationObserver overrides:
-  virtual void OnImplicitAnimationsCompleted() OVERRIDE;
+  void OnImplicitAnimationsCompleted() override;
 
   // views::WidgetObserver overrides:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
   // KeyboardControllerObserver overrides:
-  virtual void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) OVERRIDE;
+  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
 
   // ShellObserver overrides:
-  virtual void OnShelfAlignmentChanged(aura::Window* root_window) OVERRIDE;
+  void OnShelfAlignmentChanged(aura::Window* root_window) override;
 
   // ShelfIconObserver overrides:
-  virtual void OnShelfIconPositionsChanged() OVERRIDE;
+  void OnShelfIconPositionsChanged() override;
 
   // app_list::PaginationModelObserver overrides:
-  virtual void TotalPagesChanged() OVERRIDE;
-  virtual void SelectedPageChanged(int old_selected, int new_selected) OVERRIDE;
-  virtual void TransitionStarted() OVERRIDE;
-  virtual void TransitionChanged() OVERRIDE;
+  void TotalPagesChanged() override;
+  void SelectedPageChanged(int old_selected, int new_selected) override;
+  void TransitionStarted() override;
+  void TransitionChanged() override;
 
   // Whether we should show or hide app list widget.
   bool is_visible_;

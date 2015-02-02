@@ -10,6 +10,7 @@
 
 #include "SkBitmap.h"
 
+class SkCachedData;
 class SkDiscardableMemory;
 class SkMipMap;
 
@@ -30,8 +31,9 @@ public:
         void* writableContents() { return this + 1; }
 
         // must call this after your private data has been written.
+        // nameSpace must be unique per Key subclass.
         // length must be a multiple of 4
-        void init(size_t length);
+        void init(void* nameSpace, size_t length);
 
         // This is only valid after having called init().
         uint32_t hash() const { return fHash; }
@@ -39,7 +41,7 @@ public:
         bool operator==(const Key& other) const {
             const uint32_t* a = this->as32();
             const uint32_t* b = other.as32();
-            for (int i = 0; i < fCount32; ++i) {
+            for (int i = 0; i < fCount32; ++i) {  // (This checks fCount == other.fCount first.)
                 if (a[i] != b[i]) {
                     return false;
                 }
@@ -48,13 +50,12 @@ public:
         }
 
     private:
-        // store fCount32 first, so we don't consider it in operator<
-        int32_t  fCount32;  // 2 + user contents count32
+        int32_t  fCount32;   // local + user contents count32
         uint32_t fHash;
+        void*    fNamespace; // A unique namespace tag. This is hashed.
         /* uint32_t fContents32[] */
 
         const uint32_t* as32() const { return (const uint32_t*)this; }
-        const uint32_t* as32SkipCount() const { return this->as32() + 1; }
     };
 
     struct Rec {
@@ -136,6 +137,8 @@ public:
      */
     static SkBitmap::Allocator* GetAllocator();
 
+    static SkCachedData* NewCachedData(size_t bytes);
+
     /**
      *  Call SkDebugf() with diagnostic information about the state of the cache
      */
@@ -196,6 +199,8 @@ public:
 
     DiscardableFactory discardableFactory() const { return fDiscardableFactory; }
     SkBitmap::Allocator* allocator() const { return fAllocator; };
+
+    SkCachedData* newCachedData(size_t bytes);
 
     /**
      *  Call SkDebugf() with diagnostic information about the state of the cache

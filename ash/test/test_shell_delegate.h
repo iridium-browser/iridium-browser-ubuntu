@@ -25,43 +25,41 @@ class TestSessionStateDelegate;
 class TestShellDelegate : public ShellDelegate {
  public:
   TestShellDelegate();
-  virtual ~TestShellDelegate();
+  ~TestShellDelegate() override;
 
   void set_multi_profiles_enabled(bool multi_profiles_enabled) {
     multi_profiles_enabled_ = multi_profiles_enabled;
   }
 
   // Overridden from ShellDelegate:
-  virtual bool IsFirstRunAfterBoot() const OVERRIDE;
-  virtual bool IsIncognitoAllowed() const OVERRIDE;
-  virtual bool IsMultiProfilesEnabled() const OVERRIDE;
-  virtual bool IsRunningInForcedAppMode() const OVERRIDE;
-  virtual bool IsMultiAccountEnabled() const OVERRIDE;
-  virtual void PreInit() OVERRIDE;
-  virtual void PreShutdown() OVERRIDE;
-  virtual void Exit() OVERRIDE;
-  virtual keyboard::KeyboardControllerProxy*
-      CreateKeyboardControllerProxy() OVERRIDE;
-  virtual void VirtualKeyboardActivated(bool activated) OVERRIDE;
-  virtual void AddVirtualKeyboardStateObserver(
-      VirtualKeyboardStateObserver* observer) OVERRIDE;
-  virtual void RemoveVirtualKeyboardStateObserver(
-      VirtualKeyboardStateObserver* observer) OVERRIDE;
-  virtual content::BrowserContext* GetActiveBrowserContext() OVERRIDE;
-  virtual app_list::AppListViewDelegate* GetAppListViewDelegate() OVERRIDE;
-  virtual ShelfDelegate* CreateShelfDelegate(ShelfModel* model) OVERRIDE;
-  virtual SystemTrayDelegate* CreateSystemTrayDelegate() OVERRIDE;
-  virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
-  virtual SessionStateDelegate* CreateSessionStateDelegate() OVERRIDE;
-  virtual AccessibilityDelegate* CreateAccessibilityDelegate() OVERRIDE;
-  virtual NewWindowDelegate* CreateNewWindowDelegate() OVERRIDE;
-  virtual MediaDelegate* CreateMediaDelegate() OVERRIDE;
-  virtual ui::MenuModel* CreateContextMenu(
-      aura::Window* root,
-      ash::ShelfItemDelegate* item_delegate,
-      ash::ShelfItem* item) OVERRIDE;
-  virtual GPUSupport* CreateGPUSupport() OVERRIDE;
-  virtual base::string16 GetProductName() const OVERRIDE;
+  bool IsFirstRunAfterBoot() const override;
+  bool IsIncognitoAllowed() const override;
+  bool IsMultiProfilesEnabled() const override;
+  bool IsRunningInForcedAppMode() const override;
+  bool IsMultiAccountEnabled() const override;
+  void PreInit() override;
+  void PreShutdown() override;
+  void Exit() override;
+  keyboard::KeyboardControllerProxy* CreateKeyboardControllerProxy() override;
+  void VirtualKeyboardActivated(bool activated) override;
+  void AddVirtualKeyboardStateObserver(
+      VirtualKeyboardStateObserver* observer) override;
+  void RemoveVirtualKeyboardStateObserver(
+      VirtualKeyboardStateObserver* observer) override;
+  content::BrowserContext* GetActiveBrowserContext() override;
+  app_list::AppListViewDelegate* GetAppListViewDelegate() override;
+  ShelfDelegate* CreateShelfDelegate(ShelfModel* model) override;
+  SystemTrayDelegate* CreateSystemTrayDelegate() override;
+  UserWallpaperDelegate* CreateUserWallpaperDelegate() override;
+  SessionStateDelegate* CreateSessionStateDelegate() override;
+  AccessibilityDelegate* CreateAccessibilityDelegate() override;
+  NewWindowDelegate* CreateNewWindowDelegate() override;
+  MediaDelegate* CreateMediaDelegate() override;
+  ui::MenuModel* CreateContextMenu(aura::Window* root,
+                                   ash::ShelfItemDelegate* item_delegate,
+                                   ash::ShelfItem* item) override;
+  GPUSupport* CreateGPUSupport() override;
+  base::string16 GetProductName() const override;
 
   int num_exit_requests() const { return num_exit_requests_; }
 

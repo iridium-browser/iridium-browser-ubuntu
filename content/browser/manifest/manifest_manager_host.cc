@@ -44,11 +44,14 @@ void ManifestManagerHost::RenderFrameDeleted(
     return;
 
   // Before deleting the callbacks, make sure they are called with a failure
-  // state.
-  CallbackMap::const_iterator it(callbacks);
-  for (; !it.IsAtEnd(); it.Advance())
-    it.GetCurrentValue()->Run(Manifest());
+  // state. Do this in a block so the iterator is destroyed before |callbacks|.
+  {
+    CallbackMap::const_iterator it(callbacks);
+    for (; !it.IsAtEnd(); it.Advance())
+      it.GetCurrentValue()->Run(Manifest());
+  }
 
+  delete callbacks;
   pending_callbacks_.erase(render_frame_host);
 }
 
@@ -119,6 +122,10 @@ void ManifestManagerHost::OnRequestManifestResponse(
                                                Manifest::kMaxIPCStringLength),
         manifest.icons[i].type.is_null());
   }
+  manifest.gcm_sender_id = base::NullableString16(
+        manifest.gcm_sender_id.string().substr(
+            0, Manifest::kMaxIPCStringLength),
+        manifest.gcm_sender_id.is_null());
 
   callback->Run(manifest);
   callbacks->Remove(request_id);

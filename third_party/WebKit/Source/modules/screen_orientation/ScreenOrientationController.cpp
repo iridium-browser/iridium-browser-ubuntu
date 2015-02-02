@@ -214,6 +214,7 @@ void ScreenOrientationController::trace(Visitor* visitor)
     visitor->trace(m_orientation);
     FrameDestructionObserver::trace(visitor);
     WillBeHeapSupplement<LocalFrame>::trace(visitor);
+    PlatformEventController::trace(visitor);
 }
 
 } // namespace blink

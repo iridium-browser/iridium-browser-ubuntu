@@ -7,7 +7,6 @@
 #include <string>
 
 #include "base/lazy_instance.h"
-#include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
@@ -83,14 +82,25 @@ namespace extensions {
 // One of these is constructed for each utterance, and deleted
 // when the utterance gets any final event.
 class TtsExtensionEventHandler
-    : public UtteranceEventDelegate,
-      public base::SupportsWeakPtr<TtsExtensionEventHandler> {
+    : public UtteranceEventDelegate {
  public:
-  virtual void OnTtsEvent(Utterance* utterance,
-                          TtsEventType event_type,
-                          int char_index,
-                          const std::string& error_message) OVERRIDE;
+  explicit TtsExtensionEventHandler(const std::string& src_extension_id);
+
+  void OnTtsEvent(Utterance* utterance,
+                  TtsEventType event_type,
+                  int char_index,
+                  const std::string& error_message) override;
+
+ private:
+  // The extension ID of the extension that called speak() and should
+  // receive events.
+  std::string src_extension_id_;
 };
+
+TtsExtensionEventHandler::TtsExtensionEventHandler(
+    const std::string& src_extension_id)
+    : src_extension_id_(src_extension_id) {
+}
 
 void TtsExtensionEventHandler::OnTtsEvent(Utterance* utterance,
                                           TtsEventType event_type,
@@ -130,7 +140,7 @@ void TtsExtensionEventHandler::OnTtsEvent(Utterance* utterance,
   event->restrict_to_browser_context = utterance->browser_context();
   event->event_url = utterance->src_url();
   extensions::EventRouter::Get(utterance->browser_context())
-      ->DispatchEventToExtension(utterance->src_extension_id(), event.Pass());
+      ->DispatchEventToExtension(src_extension_id_, event.Pass());
 
   if (utterance->finished())
     delete this;
@@ -267,7 +277,6 @@ bool TtsSpeakFunction::RunAsync() {
   Utterance* utterance = new Utterance(GetProfile());
   utterance->set_text(text);
   utterance->set_voice_name(voice_name);
-  utterance->set_src_extension_id(extension_id());
   utterance->set_src_id(src_id);
   utterance->set_src_url(source_url());
   utterance->set_lang(lang);
@@ -278,8 +287,7 @@ bool TtsSpeakFunction::RunAsync() {
   utterance->set_desired_event_types(desired_event_types);
   utterance->set_extension_id(voice_extension_id);
   utterance->set_options(options.get());
-  utterance->set_event_delegate(
-      (new TtsExtensionEventHandler())->AsWeakPtr());
+  utterance->set_event_delegate(new TtsExtensionEventHandler(extension_id()));
 
   TtsController* controller = TtsController::GetInstance();
   controller->SpeakOrEnqueue(utterance);

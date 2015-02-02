@@ -40,19 +40,17 @@ class DownloadFileWithErrors: public DownloadFileImpl {
       const ConstructionCallback& ctor_callback,
       const DestructionCallback& dtor_callback);
 
-  virtual ~DownloadFileWithErrors();
+  ~DownloadFileWithErrors() override;
 
-  virtual void Initialize(const InitializeCallback& callback) OVERRIDE;
+  void Initialize(const InitializeCallback& callback) override;
 
   // DownloadFile interface.
-  virtual DownloadInterruptReason AppendDataToFile(
-      const char* data, size_t data_len) OVERRIDE;
-  virtual void RenameAndUniquify(
-      const base::FilePath& full_path,
-      const RenameCompletionCallback& callback) OVERRIDE;
-  virtual void RenameAndAnnotate(
-      const base::FilePath& full_path,
-      const RenameCompletionCallback& callback) OVERRIDE;
+  DownloadInterruptReason AppendDataToFile(const char* data,
+                                           size_t data_len) override;
+  void RenameAndUniquify(const base::FilePath& full_path,
+                         const RenameCompletionCallback& callback) override;
+  void RenameAndAnnotate(const base::FilePath& full_path,
+                         const RenameCompletionCallback& callback) override;
 
  private:
   // Error generating helper.
@@ -254,10 +252,10 @@ class DownloadFileWithErrorsFactory : public DownloadFileFactory {
   DownloadFileWithErrorsFactory(
       const DownloadFileWithErrors::ConstructionCallback& ctor_callback,
       const DownloadFileWithErrors::DestructionCallback& dtor_callback);
-  virtual ~DownloadFileWithErrorsFactory();
+  ~DownloadFileWithErrorsFactory() override;
 
   // DownloadFileFactory interface.
-  virtual DownloadFile* CreateFile(
+  DownloadFile* CreateFile(
       scoped_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_download_directory,
       const GURL& url,
@@ -265,7 +263,7 @@ class DownloadFileWithErrorsFactory : public DownloadFileFactory {
       bool calculate_hash,
       scoped_ptr<ByteStreamReader> stream,
       const net::BoundNetLog& bound_net_log,
-      base::WeakPtr<DownloadDestinationObserver> observer) OVERRIDE;
+      base::WeakPtr<DownloadDestinationObserver> observer) override;
 
   bool AddError(
       const TestFileErrorInjector::FileErrorInfo& error_info);

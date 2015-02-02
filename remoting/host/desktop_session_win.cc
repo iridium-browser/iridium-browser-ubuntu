@@ -14,7 +14,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_checker.h"
@@ -96,10 +95,10 @@ class ConsoleSession : public DesktopSessionWin {
 
  protected:
   // DesktopSession overrides.
-  virtual void SetScreenResolution(const ScreenResolution& resolution) OVERRIDE;
+  virtual void SetScreenResolution(const ScreenResolution& resolution) override;
 
   // DesktopSessionWin overrides.
-  virtual void InjectSas() OVERRIDE;
+  virtual void InjectSas() override;
 
  private:
   scoped_ptr<SasInjector> sas_injector_;
@@ -131,10 +130,10 @@ class RdpSession : public DesktopSessionWin {
 
  protected:
   // DesktopSession overrides.
-  virtual void SetScreenResolution(const ScreenResolution& resolution) OVERRIDE;
+  virtual void SetScreenResolution(const ScreenResolution& resolution) override;
 
   // DesktopSessionWin overrides.
-  virtual void InjectSas() OVERRIDE;
+  virtual void InjectSas() override;
 
  private:
   // An implementation of IRdpDesktopSessionEventHandler interface that forwards
@@ -145,13 +144,13 @@ class RdpSession : public DesktopSessionWin {
     virtual ~EventHandler();
 
     // IUnknown interface.
-    STDMETHOD_(ULONG, AddRef)() OVERRIDE;
-    STDMETHOD_(ULONG, Release)() OVERRIDE;
-    STDMETHOD(QueryInterface)(REFIID riid, void** ppv) OVERRIDE;
+    STDMETHOD_(ULONG, AddRef)() override;
+    STDMETHOD_(ULONG, Release)() override;
+    STDMETHOD(QueryInterface)(REFIID riid, void** ppv) override;
 
     // IRdpDesktopSessionEventHandler interface.
-    STDMETHOD(OnRdpConnected)() OVERRIDE;
-    STDMETHOD(OnRdpClosed)() OVERRIDE;
+    STDMETHOD(OnRdpConnected)() override;
+    STDMETHOD(OnRdpClosed)() override;
 
    private:
     ULONG ref_count_;
@@ -375,7 +374,7 @@ scoped_ptr<DesktopSession> DesktopSessionWin::CreateForConsole(
       caller_task_runner, io_task_runner, daemon_process, id,
       HostService::GetInstance()));
 
-  return session.PassAs<DesktopSession>();
+  return session.Pass();
 }
 
 // static
@@ -389,9 +388,9 @@ scoped_ptr<DesktopSession> DesktopSessionWin::CreateForVirtualTerminal(
       caller_task_runner, io_task_runner, daemon_process, id,
       HostService::GetInstance()));
   if (!session->Initialize(resolution))
-    return scoped_ptr<DesktopSession>();
+    return nullptr;
 
-  return session.PassAs<DesktopSession>();
+  return session.Pass();
 }
 
 DesktopSessionWin::DesktopSessionWin(
@@ -552,8 +551,7 @@ void DesktopSessionWin::OnSessionAttached(uint32 session_id) {
   }
 
   // Create a launcher for the desktop process, using the per-session delegate.
-  launcher_.reset(new WorkerProcessLauncher(
-      delegate.PassAs<WorkerProcessLauncher::Delegate>(), this));
+  launcher_.reset(new WorkerProcessLauncher(delegate.Pass(), this));
 }
 
 void DesktopSessionWin::OnSessionDetached() {

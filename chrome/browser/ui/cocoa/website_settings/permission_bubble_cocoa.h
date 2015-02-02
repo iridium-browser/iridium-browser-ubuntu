@@ -20,16 +20,16 @@ class PermissionBubbleController;
 class PermissionBubbleCocoa : public PermissionBubbleView {
  public:
   explicit PermissionBubbleCocoa(NSWindow* parent_window);
-  virtual ~PermissionBubbleCocoa();
+  ~PermissionBubbleCocoa() override;
 
   // PermissionBubbleView interface.
-  virtual void Show(const std::vector<PermissionBubbleRequest*>& requests,
-                    const std::vector<bool>& accept_state,
-                    bool customization_mode) OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual bool IsVisible() OVERRIDE;
-  virtual void SetDelegate(Delegate* delegate) OVERRIDE;
-  virtual bool CanAcceptRequestUpdate() OVERRIDE;
+  void Show(const std::vector<PermissionBubbleRequest*>& requests,
+            const std::vector<bool>& accept_state,
+            bool customization_mode) override;
+  void Hide() override;
+  bool IsVisible() override;
+  void SetDelegate(Delegate* delegate) override;
+  bool CanAcceptRequestUpdate() override;
 
   // Called when |bubbleController_| is closing.
   void OnBubbleClosing();

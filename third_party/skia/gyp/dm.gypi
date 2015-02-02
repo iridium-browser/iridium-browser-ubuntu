@@ -32,6 +32,7 @@
     '../dm/DMCpuGMTask.cpp',
     '../dm/DMGpuGMTask.cpp',
     '../dm/DMPDFRasterizeTask.cpp',
+    '../dm/DMJsonWriter.cpp',
     '../dm/DMPDFTask.cpp',
     '../dm/DMPipeTask.cpp',
     '../dm/DMQuiltTask.cpp',
@@ -44,8 +45,6 @@
     '../dm/DMUtil.cpp',
     '../dm/DMWriteTask.cpp',
     '../gm/gm.cpp',
-
-    '../src/utils/SkTaskGroup.cpp',
 
     '../src/pipe/utils/SamplePipeControllers.cpp',
     '../src/utils/debugger/SkDebugCanvas.cpp',

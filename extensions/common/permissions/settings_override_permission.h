@@ -17,26 +17,25 @@ class SettingsOverrideAPIPermission : public APIPermission {
  public:
   SettingsOverrideAPIPermission(const APIPermissionInfo* permission,
                                 const std::string& setting_value);
-  virtual ~SettingsOverrideAPIPermission();
+  ~SettingsOverrideAPIPermission() override;
 
   // APIPermission overrides.
-  virtual bool HasMessages() const OVERRIDE;
-  virtual PermissionMessages GetMessages() const OVERRIDE;
-  virtual bool Check(const APIPermission::CheckParam* param) const OVERRIDE;
-  virtual bool Contains(const APIPermission* rhs) const OVERRIDE;
-  virtual bool Equal(const APIPermission* rhs) const OVERRIDE;
-  virtual bool FromValue(
-      const base::Value* value,
-      std::string* error,
-      std::vector<std::string>* unhandled_permissions) OVERRIDE;
-  virtual scoped_ptr<base::Value> ToValue() const OVERRIDE;
-  virtual APIPermission* Clone() const OVERRIDE;
-  virtual APIPermission* Diff(const APIPermission* rhs) const OVERRIDE;
-  virtual APIPermission* Union(const APIPermission* rhs) const OVERRIDE;
-  virtual APIPermission* Intersect(const APIPermission* rhs) const OVERRIDE;
-  virtual void Write(IPC::Message* m) const OVERRIDE;
-  virtual bool Read(const IPC::Message* m, PickleIterator* iter) OVERRIDE;
-  virtual void Log(std::string* log) const OVERRIDE;
+  bool HasMessages() const override;
+  PermissionMessages GetMessages() const override;
+  bool Check(const APIPermission::CheckParam* param) const override;
+  bool Contains(const APIPermission* rhs) const override;
+  bool Equal(const APIPermission* rhs) const override;
+  bool FromValue(const base::Value* value,
+                 std::string* error,
+                 std::vector<std::string>* unhandled_permissions) override;
+  scoped_ptr<base::Value> ToValue() const override;
+  APIPermission* Clone() const override;
+  APIPermission* Diff(const APIPermission* rhs) const override;
+  APIPermission* Union(const APIPermission* rhs) const override;
+  APIPermission* Intersect(const APIPermission* rhs) const override;
+  void Write(IPC::Message* m) const override;
+  bool Read(const IPC::Message* m, PickleIterator* iter) override;
+  void Log(std::string* log) const override;
 
  private:
   std::string setting_value_;

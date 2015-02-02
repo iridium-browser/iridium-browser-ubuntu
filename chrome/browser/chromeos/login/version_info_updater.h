@@ -47,8 +47,8 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
 
  private:
   // policy::CloudPolicyStore::Observer interface:
-  virtual void OnStoreLoaded(policy::CloudPolicyStore* store) OVERRIDE;
-  virtual void OnStoreError(policy::CloudPolicyStore* store) OVERRIDE;
+  virtual void OnStoreLoaded(policy::CloudPolicyStore* store) override;
+  virtual void OnStoreError(policy::CloudPolicyStore* store) override;
 
   // Update the version label.
   void UpdateVersionLabel();
@@ -58,6 +58,9 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
 
   // Set enterprise domain name.
   void SetEnterpriseInfo(const std::string& domain_name);
+
+  // Creates a serial number string.
+  void UpdateSerialNumberInfo();
 
   // Callback from chromeos::VersionLoader giving the version.
   void OnVersion(const std::string& version);
@@ -71,6 +74,7 @@ class VersionInfoUpdater : public policy::CloudPolicyStore::Observer {
 
   // Information pieces for version label.
   std::string version_text_;
+  std::string serial_number_text_;
 
   // Full text for the OS version label.
   std::string os_version_label_text_;

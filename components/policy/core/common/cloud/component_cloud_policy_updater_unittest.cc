@@ -66,8 +66,8 @@ class MockComponentCloudPolicyStoreDelegate
 
 class ComponentCloudPolicyUpdaterTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   scoped_ptr<em::PolicyFetchResponse> CreateResponse();
 

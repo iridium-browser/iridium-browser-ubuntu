@@ -6,15 +6,14 @@
 #include "modules/battery/BatteryDispatcher.h"
 
 #include "modules/battery/BatteryStatus.h"
-#include "platform/NotImplemented.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
 
 BatteryDispatcher& BatteryDispatcher::instance()
 {
-    DEFINE_STATIC_LOCAL(BatteryDispatcher, batteryDispatcher, ());
-    return batteryDispatcher;
+    DEFINE_STATIC_LOCAL(Persistent<BatteryDispatcher>, batteryDispatcher, (new BatteryDispatcher()));
+    return *batteryDispatcher;
 }
 
 BatteryDispatcher::BatteryDispatcher()
@@ -23,6 +22,12 @@ BatteryDispatcher::BatteryDispatcher()
 
 BatteryDispatcher::~BatteryDispatcher()
 {
+}
+
+void BatteryDispatcher::trace(Visitor* visitor)
+{
+    visitor->trace(m_batteryStatus);
+    PlatformEventDispatcher::trace(visitor);
 }
 
 void BatteryDispatcher::updateBatteryStatus(const WebBatteryStatus& batteryStatus)

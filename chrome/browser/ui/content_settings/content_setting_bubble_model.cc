@@ -8,7 +8,6 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -21,11 +20,11 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
-#include "chrome/browser/ui/content_settings/media_setting_changed_infobar_delegate.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
@@ -99,11 +98,22 @@ ContentSettingTitleAndLinkModel::ContentSettingTitleAndLinkModel(
 }
 
 void ContentSettingTitleAndLinkModel::SetTitle() {
+  TabSpecificContentSettings* content_settings = NULL;
+  if (web_contents()) {
+    content_settings =
+        TabSpecificContentSettings::FromWebContents(web_contents());
+  }
+
+  if (content_type() == CONTENT_SETTINGS_TYPE_PLUGINS && content_settings &&
+      content_settings->IsContentBlocked(content_type())) {
+    set_plugin_names(content_settings->GetBlockedPluginNames());
+  }
+
   static const ContentSettingsTypeIdEntry kBlockedTitleIDs[] = {
     {CONTENT_SETTINGS_TYPE_COOKIES, IDS_BLOCKED_COOKIES_TITLE},
     {CONTENT_SETTINGS_TYPE_IMAGES, IDS_BLOCKED_IMAGES_TITLE},
     {CONTENT_SETTINGS_TYPE_JAVASCRIPT, IDS_BLOCKED_JAVASCRIPT_TITLE},
-    {CONTENT_SETTINGS_TYPE_PLUGINS, IDS_BLOCKED_PLUGINS_MESSAGE},
+    {CONTENT_SETTINGS_TYPE_PLUGINS, IDS_BLOCKED_PLUGINS_TITLE},
     {CONTENT_SETTINGS_TYPE_POPUPS, IDS_BLOCKED_POPUPS_TITLE},
     {CONTENT_SETTINGS_TYPE_MIXEDSCRIPT,
         IDS_BLOCKED_DISPLAYING_INSECURE_CONTENT},
@@ -119,11 +129,8 @@ void ContentSettingTitleAndLinkModel::SetTitle() {
   };
   const ContentSettingsTypeIdEntry *title_ids = kBlockedTitleIDs;
   size_t num_title_ids = arraysize(kBlockedTitleIDs);
-  if (web_contents() &&
-      TabSpecificContentSettings::FromWebContents(
-          web_contents())->IsContentAllowed(content_type()) &&
-      !TabSpecificContentSettings::FromWebContents(
-          web_contents())->IsContentBlocked(content_type())) {
+  if (content_settings && content_settings->IsContentAllowed(content_type()) &&
+      !content_settings->IsContentBlocked(content_type())) {
     title_ids = kAccessedTitleIDs;
     num_title_ids = arraysize(kAccessedTitleIDs);
   }
@@ -180,11 +187,11 @@ class ContentSettingTitleLinkAndCustomModel
                                         WebContents* web_contents,
                                         Profile* profile,
                                         ContentSettingsType content_type);
-  virtual ~ContentSettingTitleLinkAndCustomModel() {}
+  ~ContentSettingTitleLinkAndCustomModel() override {}
 
  private:
   void SetCustomLink();
-  virtual void OnCustomLinkClicked() OVERRIDE {}
+  void OnCustomLinkClicked() override {}
 };
 
 ContentSettingTitleLinkAndCustomModel::ContentSettingTitleLinkAndCustomModel(
@@ -216,7 +223,7 @@ class ContentSettingSingleRadioGroup
                                  WebContents* web_contents,
                                  Profile* profile,
                                  ContentSettingsType content_type);
-  virtual ~ContentSettingSingleRadioGroup();
+  ~ContentSettingSingleRadioGroup() override;
 
  protected:
   bool settings_changed() const;
@@ -225,7 +232,7 @@ class ContentSettingSingleRadioGroup
  private:
   void SetRadioGroup();
   void AddException(ContentSetting setting);
-  virtual void OnRadioClicked(int radio_index) OVERRIDE;
+  void OnRadioClicked(int radio_index) override;
 
   ContentSetting block_setting_;
   int selected_item_;
@@ -411,10 +418,10 @@ class ContentSettingCookiesBubbleModel : public ContentSettingSingleRadioGroup {
                                    Profile* profile,
                                    ContentSettingsType content_type);
 
-  virtual ~ContentSettingCookiesBubbleModel();
+  ~ContentSettingCookiesBubbleModel() override;
 
  private:
-  virtual void OnCustomLinkClicked() OVERRIDE;
+  void OnCustomLinkClicked() override;
 };
 
 ContentSettingCookiesBubbleModel::ContentSettingCookiesBubbleModel(
@@ -455,10 +462,10 @@ class ContentSettingPluginBubbleModel : public ContentSettingSingleRadioGroup {
                                   Profile* profile,
                                   ContentSettingsType content_type);
 
-  virtual ~ContentSettingPluginBubbleModel();
+  ~ContentSettingPluginBubbleModel() override;
 
  private:
-  virtual void OnCustomLinkClicked() OVERRIDE;
+  void OnCustomLinkClicked() override;
 };
 
 ContentSettingPluginBubbleModel::ContentSettingPluginBubbleModel(
@@ -505,11 +512,11 @@ class ContentSettingPopupBubbleModel : public ContentSettingSingleRadioGroup {
                                  WebContents* web_contents,
                                  Profile* profile,
                                  ContentSettingsType content_type);
-  virtual ~ContentSettingPopupBubbleModel() {}
+  ~ContentSettingPopupBubbleModel() override {}
 
  private:
   void SetPopups();
-  virtual void OnPopupClicked(int index) OVERRIDE;
+  void OnPopupClicked(int index) override;
 };
 
 ContentSettingPopupBubbleModel::ContentSettingPopupBubbleModel(
@@ -558,7 +565,7 @@ class ContentSettingMediaStreamBubbleModel
                                        WebContents* web_contents,
                                        Profile* profile);
 
-  virtual ~ContentSettingMediaStreamBubbleModel();
+  ~ContentSettingMediaStreamBubbleModel() override;
 
  private:
   void SetTitle();
@@ -566,6 +573,7 @@ class ContentSettingMediaStreamBubbleModel
   void SetRadioGroup();
   // Sets the data for the media menus of the bubble.
   void SetMediaMenus();
+  void SetCustomLink();
   // Updates the camera and microphone setting with the passed |setting|.
   void UpdateSettings(ContentSetting setting);
   // Updates the camera and microphone default device with the passed |type|
@@ -574,9 +582,9 @@ class ContentSettingMediaStreamBubbleModel
                                   const std::string& device);
 
   // ContentSettingBubbleModel implementation.
-  virtual void OnRadioClicked(int radio_index) OVERRIDE;
-  virtual void OnMediaMenuClicked(content::MediaStreamType type,
-                                  const std::string& selected_device) OVERRIDE;
+  void OnRadioClicked(int radio_index) override;
+  void OnMediaMenuClicked(content::MediaStreamType type,
+                          const std::string& selected_device) override;
 
   // The index of the selected radio item.
   int selected_item_;
@@ -604,10 +612,13 @@ ContentSettingMediaStreamBubbleModel::ContentSettingMediaStreamBubbleModel(
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents);
   state_ = content_settings->GetMicrophoneCameraState();
+  DCHECK(state_ & (TabSpecificContentSettings::MICROPHONE_ACCESSED |
+                   TabSpecificContentSettings::CAMERA_ACCESSED));
 
   SetTitle();
   SetRadioGroup();
   SetMediaMenus();
+  SetCustomLink();
 }
 
 ContentSettingMediaStreamBubbleModel::~ContentSettingMediaStreamBubbleModel() {
@@ -616,55 +627,32 @@ ContentSettingMediaStreamBubbleModel::~ContentSettingMediaStreamBubbleModel() {
   if (!web_contents())
     return;
 
-  bool media_setting_changed = false;
   for (MediaMenuMap::const_iterator it = bubble_content().media_menus.begin();
       it != bubble_content().media_menus.end(); ++it) {
     if (it->second.selected_device.id != it->second.default_device.id) {
       UpdateDefaultDeviceForType(it->first, it->second.selected_device.id);
-      media_setting_changed = true;
     }
   }
 
   // Update the media settings if the radio button selection was changed.
   if (selected_item_ != bubble_content().radio_group.default_item) {
     UpdateSettings(radio_item_setting_[selected_item_]);
-    media_setting_changed = true;
-  }
-
-  // Trigger the reload infobar if the media setting has been changed.
-  if (media_setting_changed) {
-    MediaSettingChangedInfoBarDelegate::Create(
-        InfoBarService::FromWebContents(web_contents()));
   }
 }
 
 void ContentSettingMediaStreamBubbleModel::SetTitle() {
+  DCHECK_NE(TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED, state_);
   int title_id = 0;
-  switch (state_) {
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED:
-      // If neither microphone nor camera stream was accessed, then there is no
-      // icon didplayed in the omnibox and no settings bubble availbale. Hence
-      // there is no title.
-      NOTREACHED();
-      return;
-    case TabSpecificContentSettings::MICROPHONE_ACCESSED:
-      title_id = IDS_MICROPHONE_ACCESSED;
-      break;
-    case TabSpecificContentSettings::CAMERA_ACCESSED:
-      title_id = IDS_CAMERA_ACCESSED;
-      break;
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED:
-      title_id = IDS_MICROPHONE_CAMERA_ALLOWED;
-      break;
-    case TabSpecificContentSettings::MICROPHONE_BLOCKED:
-      title_id = IDS_MICROPHONE_BLOCKED;
-      break;
-    case TabSpecificContentSettings::CAMERA_BLOCKED:
-      title_id = IDS_CAMERA_BLOCKED;
-      break;
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED:
-      title_id = IDS_MICROPHONE_CAMERA_BLOCKED;
-      break;
+  if (state_ & TabSpecificContentSettings::MICROPHONE_BLOCKED) {
+    title_id = (state_ & TabSpecificContentSettings::CAMERA_BLOCKED) ?
+        IDS_MICROPHONE_CAMERA_BLOCKED : IDS_MICROPHONE_BLOCKED;
+  } else if (state_ & TabSpecificContentSettings::CAMERA_BLOCKED) {
+    title_id = IDS_CAMERA_BLOCKED;
+  } else if (state_ & TabSpecificContentSettings::MICROPHONE_ACCESSED) {
+    title_id = (state_ & TabSpecificContentSettings::CAMERA_ACCESSED) ?
+        IDS_MICROPHONE_CAMERA_ALLOWED : IDS_MICROPHONE_ACCESSED;
+  } else if (state_ & TabSpecificContentSettings::CAMERA_ACCESSED) {
+    title_id = IDS_CAMERA_ACCESSED;
   }
   set_title(l10n_util::GetStringUTF8(title_id));
 }
@@ -685,61 +673,49 @@ void ContentSettingMediaStreamBubbleModel::SetRadioGroup() {
   if (display_host.empty())
     display_host = url.spec();
 
+  bool is_mic = (state_ & TabSpecificContentSettings::MICROPHONE_ACCESSED) != 0;
+  bool is_cam = (state_ & TabSpecificContentSettings::CAMERA_ACCESSED) != 0;
+  DCHECK(is_mic || is_cam);
   int radio_allow_label_id = 0;
   int radio_block_label_id = 0;
-  switch (state_) {
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED:
-      NOTREACHED();
-      return;
-    case TabSpecificContentSettings::MICROPHONE_ACCESSED:
-      radio_allow_label_id = IDS_ALLOWED_MEDIASTREAM_MIC_NO_ACTION;
-      radio_block_label_id = IDS_ALLOWED_MEDIASTREAM_MIC_BLOCK;
-      selected_item_ = 0;
-      break;
-    case TabSpecificContentSettings::CAMERA_ACCESSED:
-      radio_allow_label_id = IDS_ALLOWED_MEDIASTREAM_CAMERA_NO_ACTION;
-      radio_block_label_id = IDS_ALLOWED_MEDIASTREAM_CAMERA_BLOCK;
-      selected_item_ = 0;
-      break;
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED:
+  if (state_ & (TabSpecificContentSettings::MICROPHONE_BLOCKED |
+                TabSpecificContentSettings::CAMERA_BLOCKED)) {
+    if (url.SchemeIsSecure()) {
+      radio_item_setting_[0] = CONTENT_SETTING_ALLOW;
+      radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_ALLOW;
+      if (is_mic)
+        radio_allow_label_id = is_cam ?
+            IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ALLOW :
+            IDS_BLOCKED_MEDIASTREAM_MIC_ALLOW;
+    } else {
+      radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_ASK;
+      if (is_mic)
+        radio_allow_label_id = is_cam ?
+            IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ASK :
+            IDS_BLOCKED_MEDIASTREAM_MIC_ASK;
+    }
+    radio_block_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_NO_ACTION;
+    if (is_mic)
+      radio_block_label_id = is_cam ?
+          IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION :
+          IDS_BLOCKED_MEDIASTREAM_MIC_NO_ACTION;
+  } else {
+    if (is_mic && is_cam) {
       radio_allow_label_id = IDS_ALLOWED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION;
       radio_block_label_id = IDS_ALLOWED_MEDIASTREAM_MIC_AND_CAMERA_BLOCK;
-      selected_item_ = 0;
-      break;
-    case TabSpecificContentSettings::MICROPHONE_BLOCKED:
-      if (url.SchemeIsSecure()) {
-        radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_MIC_ALLOW;
-        radio_item_setting_[0] = CONTENT_SETTING_ALLOW;
-      } else {
-        radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_MIC_ASK;
-      }
-
-      radio_block_label_id = IDS_BLOCKED_MEDIASTREAM_MIC_NO_ACTION;
-      selected_item_ = 1;
-      break;
-    case TabSpecificContentSettings::CAMERA_BLOCKED:
-      if (url.SchemeIsSecure()) {
-        radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_ALLOW;
-        radio_item_setting_[0] = CONTENT_SETTING_ALLOW;
-      } else {
-        radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_ASK;
-      }
-
-      radio_block_label_id = IDS_BLOCKED_MEDIASTREAM_CAMERA_NO_ACTION;
-      selected_item_ = 1;
-      break;
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED:
-      if (url.SchemeIsSecure()) {
-        radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ALLOW;
-        radio_item_setting_[0] = CONTENT_SETTING_ALLOW;
-      } else {
-        radio_allow_label_id = IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_ASK;
-      }
-
-      radio_block_label_id = IDS_BLOCKED_MEDIASTREAM_MIC_AND_CAMERA_NO_ACTION;
-      selected_item_ = 1;
-      break;
+    } else if (is_mic) {
+      radio_allow_label_id = IDS_ALLOWED_MEDIASTREAM_MIC_NO_ACTION;
+      radio_block_label_id = IDS_ALLOWED_MEDIASTREAM_MIC_BLOCK;
+    } else {
+      radio_allow_label_id = IDS_ALLOWED_MEDIASTREAM_CAMERA_NO_ACTION;
+      radio_block_label_id = IDS_ALLOWED_MEDIASTREAM_CAMERA_BLOCK;
+    }
   }
+  selected_item_ =
+      (is_mic && content_settings->IsContentBlocked(
+          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC)) ||
+      (is_cam && content_settings->IsContentBlocked(
+          CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA)) ? 1 : 0;
 
   std::string radio_allow_label = l10n_util::GetStringFUTF8(
       radio_allow_label_id, base::UTF8ToUTF16(display_host));
@@ -770,18 +746,12 @@ void ContentSettingMediaStreamBubbleModel::UpdateSettings(
             tab_content_settings->media_stream_access_origin());
     ContentSettingsPattern secondary_pattern =
         ContentSettingsPattern::Wildcard();
-    if (state_ == TabSpecificContentSettings::MICROPHONE_ACCESSED ||
-        state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED ||
-        state_ == TabSpecificContentSettings::MICROPHONE_BLOCKED ||
-        state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED) {
+    if (state_ & TabSpecificContentSettings::MICROPHONE_ACCESSED) {
       content_settings->SetContentSetting(
           primary_pattern, secondary_pattern,
           CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, std::string(), setting);
     }
-    if (state_ == TabSpecificContentSettings::CAMERA_ACCESSED ||
-        state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED ||
-        state_ == TabSpecificContentSettings::CAMERA_BLOCKED ||
-        state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED) {
+    if (state_ & TabSpecificContentSettings::CAMERA_ACCESSED) {
       content_settings->SetContentSetting(
           primary_pattern, secondary_pattern,
           CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, std::string(), setting);
@@ -816,19 +786,7 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
   const content::MediaStreamDevices& microphones =
       dispatcher->GetAudioCaptureDevices();
 
-  bool show_mic_menu =
-      (state_ == TabSpecificContentSettings::MICROPHONE_ACCESSED ||
-       state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED ||
-       state_ == TabSpecificContentSettings::MICROPHONE_BLOCKED ||
-       state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED);
-  bool show_camera_menu =
-      (state_ == TabSpecificContentSettings::CAMERA_ACCESSED ||
-       state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED ||
-       state_ == TabSpecificContentSettings::CAMERA_BLOCKED ||
-       state_ == TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED);
-  DCHECK(show_mic_menu || show_camera_menu);
-
-  if (show_mic_menu) {
+  if (state_ & TabSpecificContentSettings::MICROPHONE_ACCESSED) {
     MediaMenu mic_menu;
     mic_menu.label = l10n_util::GetStringUTF8(IDS_MEDIA_SELECTED_MIC_LABEL);
     if (!microphones.empty()) {
@@ -850,7 +808,7 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
     add_media_menu(content::MEDIA_DEVICE_AUDIO_CAPTURE, mic_menu);
   }
 
-  if (show_camera_menu) {
+  if (state_ & TabSpecificContentSettings::CAMERA_ACCESSED) {
     const content::MediaStreamDevices& cameras =
         dispatcher->GetVideoCaptureDevices();
     MediaMenu camera_menu;
@@ -873,6 +831,15 @@ void ContentSettingMediaStreamBubbleModel::SetMediaMenus() {
       camera_menu.selected_device = camera_menu.default_device;
     }
     add_media_menu(content::MEDIA_DEVICE_VIDEO_CAPTURE, camera_menu);
+  }
+}
+
+void ContentSettingMediaStreamBubbleModel::SetCustomLink() {
+  TabSpecificContentSettings* content_settings =
+      TabSpecificContentSettings::FromWebContents(web_contents());
+  if (content_settings->IsMicrophoneCameraStateChanged()) {
+    set_custom_link(l10n_util::GetStringUTF8(
+        IDS_MEDIASTREAM_SETTING_CHANGED_MESSAGE));
   }
 }
 
@@ -902,12 +869,12 @@ class ContentSettingDomainListBubbleModel
                                       WebContents* web_contents,
                                       Profile* profile,
                                       ContentSettingsType content_type);
-  virtual ~ContentSettingDomainListBubbleModel() {}
+  ~ContentSettingDomainListBubbleModel() override {}
 
  private:
   void MaybeAddDomainList(const std::set<std::string>& hosts, int title_id);
   void SetDomainsAndCustomLink();
-  virtual void OnCustomLinkClicked() OVERRIDE;
+  void OnCustomLinkClicked() override;
 };
 
 ContentSettingDomainListBubbleModel::ContentSettingDomainListBubbleModel(
@@ -991,10 +958,10 @@ class ContentSettingMixedScriptBubbleModel
                                        Profile* profile,
                                        ContentSettingsType content_type);
 
-  virtual ~ContentSettingMixedScriptBubbleModel() {}
+  ~ContentSettingMixedScriptBubbleModel() override {}
 
  private:
-  virtual void OnCustomLinkClicked() OVERRIDE;
+  void OnCustomLinkClicked() override;
 };
 
 ContentSettingMixedScriptBubbleModel::ContentSettingMixedScriptBubbleModel(
@@ -1005,11 +972,14 @@ ContentSettingMixedScriptBubbleModel::ContentSettingMixedScriptBubbleModel(
     : ContentSettingTitleLinkAndCustomModel(
         delegate, web_contents, profile, content_type) {
   DCHECK_EQ(content_type, CONTENT_SETTINGS_TYPE_MIXEDSCRIPT);
+  TabSpecificContentSettings::RecordMixedScriptAction(
+      TabSpecificContentSettings::MIXED_SCRIPT_ACTION_DISPLAYED_BUBBLE);
   set_custom_link_enabled(true);
 }
 
 void ContentSettingMixedScriptBubbleModel::OnCustomLinkClicked() {
-  content::RecordAction(UserMetricsAction("MixedScript_LoadAnyway_Bubble"));
+  TabSpecificContentSettings::RecordMixedScriptAction(
+      TabSpecificContentSettings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW);
   DCHECK(web_contents());
   web_contents()->SendToAllFrames(
       new ChromeViewMsg_SetAllowRunningInsecureContent(MSG_ROUTING_NONE, true));
@@ -1155,12 +1125,12 @@ class ContentSettingMidiSysExBubbleModel
                                      WebContents* web_contents,
                                      Profile* profile,
                                      ContentSettingsType content_type);
-  virtual ~ContentSettingMidiSysExBubbleModel() {}
+  ~ContentSettingMidiSysExBubbleModel() override {}
 
  private:
   void MaybeAddDomainList(const std::set<std::string>& hosts, int title_id);
   void SetDomainsAndCustomLink();
-  virtual void OnCustomLinkClicked() OVERRIDE;
+  void OnCustomLinkClicked() override;
 };
 
 ContentSettingMidiSysExBubbleModel::ContentSettingMidiSysExBubbleModel(

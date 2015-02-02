@@ -119,8 +119,8 @@ GCMClient::GCMStatistics FakeGCMClient::GetStatistics() const {
   return GCMClient::GCMStatistics();
 }
 
-void FakeGCMClient::SetAccountsForCheckin(
-    const std::map<std::string, std::string>& account_tokens) {
+void FakeGCMClient::SetAccountTokens(
+    const std::vector<AccountTokenInfo>& account_tokens) {
 }
 
 void FakeGCMClient::UpdateAccountMapping(
@@ -128,6 +128,9 @@ void FakeGCMClient::UpdateAccountMapping(
 }
 
 void FakeGCMClient::RemoveAccountMapping(const std::string& account_id) {
+}
+
+void FakeGCMClient::SetLastTokenFetchTime(const base::Time& time) {
 }
 
 void FakeGCMClient::PerformDelayedLoading() {
@@ -183,7 +186,7 @@ std::string FakeGCMClient::GetRegistrationIdFromSenderIds(
 }
 
 void FakeGCMClient::CheckinFinished() {
-  delegate_->OnGCMReady(std::vector<AccountMapping>());
+  delegate_->OnGCMReady(std::vector<AccountMapping>(), base::Time());
   delegate_->OnConnected(net::IPEndPoint());
 }
 

@@ -53,13 +53,16 @@ class ExtensionServiceTestBase : public testing::Test {
     ExtensionServiceInitParams();
   };
 
+  // Public because parameterized test cases need it to be, or else the compiler
+  // barfs.
+  static void SetUpTestCase();  // faux-verride (static override).
+
  protected:
   ExtensionServiceTestBase();
-  virtual ~ExtensionServiceTestBase();
+  ~ExtensionServiceTestBase() override;
 
   // testing::Test implementation.
-  virtual void SetUp() OVERRIDE;
-  static void SetUpTestCase();  // faux-verride (static override).
+  void SetUp() override;
 
   // Create a set of InitParams to install an ExtensionService into |temp_dir_|.
   ExtensionServiceInitParams CreateDefaultInitParams();
@@ -81,9 +84,6 @@ class ExtensionServiceTestBase : public testing::Test {
 
   // Initialize an ExtensionService with autoupdate enabled.
   void InitializeExtensionServiceWithUpdater();
-
-  // Initialize the associated ProcessManager.
-  void InitializeProcessManager();
 
   // TODO(rdevlin.cronin): Pull out more methods from ExtensionServiceTest that
   // are commonly used and/or reimplemented. For instance, methods to install

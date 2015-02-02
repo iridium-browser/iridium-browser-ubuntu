@@ -9,6 +9,7 @@
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/core/keyed_service.h"
 
 namespace content {
 class BrowserContext;
@@ -26,7 +27,7 @@ class DomDistillerContextKeyedService : public KeyedService,
       scoped_ptr<DistillerFactory> distiller_factory,
       scoped_ptr<DistillerPageFactory> distiller_page_factory,
       scoped_ptr<DistilledPagePrefs> distilled_page_prefs);
-  virtual ~DomDistillerContextKeyedService() {}
+  ~DomDistillerContextKeyedService() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DomDistillerContextKeyedService);
@@ -42,13 +43,13 @@ class DomDistillerServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<DomDistillerServiceFactory>;
 
   DomDistillerServiceFactory();
-  virtual ~DomDistillerServiceFactory();
+  ~DomDistillerServiceFactory() override;
 
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 }  // namespace dom_distiller

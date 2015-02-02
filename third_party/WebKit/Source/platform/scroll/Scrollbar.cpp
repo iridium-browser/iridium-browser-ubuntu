@@ -31,7 +31,6 @@
 #include "platform/PlatformGestureEvent.h"
 #include "platform/PlatformMouseEvent.h"
 #include "platform/scroll/ScrollAnimator.h"
-#include "platform/scroll/ScrollView.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/scroll/ScrollbarTheme.h"
 
@@ -43,9 +42,9 @@
 
 namespace blink {
 
-PassRefPtr<Scrollbar> Scrollbar::create(ScrollableArea* scrollableArea, ScrollbarOrientation orientation, ScrollbarControlSize size)
+PassRefPtrWillBeRawPtr<Scrollbar> Scrollbar::create(ScrollableArea* scrollableArea, ScrollbarOrientation orientation, ScrollbarControlSize size)
 {
-    return adoptRef(new Scrollbar(scrollableArea, orientation, size));
+    return adoptRefWillBeNoop(new Scrollbar(scrollableArea, orientation, size));
 }
 
 Scrollbar::Scrollbar(ScrollableArea* scrollableArea, ScrollbarOrientation orientation, ScrollbarControlSize controlSize, ScrollbarTheme* theme)
@@ -81,6 +80,11 @@ Scrollbar::Scrollbar(ScrollableArea* scrollableArea, ScrollbarOrientation orient
     Widget::setFrameRect(IntRect(0, 0, thickness, thickness));
 
     m_currentPos = scrollableAreaCurrentPos();
+
+#if ENABLE(OILPAN)
+    if (m_scrollableArea)
+        m_animator = m_scrollableArea->scrollAnimator();
+#endif
 }
 
 Scrollbar::~Scrollbar()
@@ -88,17 +92,17 @@ Scrollbar::~Scrollbar()
     stopTimerIfNeeded();
 
     m_theme->unregisterScrollbar(this);
-}
 
-void Scrollbar::removeFromParent()
-{
-    if (parent())
-        toScrollView(parent())->removeChild(this);
-}
+#if ENABLE(OILPAN)
+    if (!m_animator)
+        return;
 
-ScrollView* Scrollbar::parentScrollView() const
-{
-    return parent() && parent()->isScrollView() ? toScrollView(parent()) : 0;
+    ASSERT(m_scrollableArea);
+    if (m_orientation == VerticalScrollbar)
+        m_animator->willRemoveVerticalScrollbar(this);
+    else
+        m_animator->willRemoveHorizontalScrollbar(this);
+#endif
 }
 
 ScrollbarOverlayStyle Scrollbar::scrollbarOverlayStyle() const
@@ -115,11 +119,6 @@ void Scrollbar::getTickmarks(Vector<IntRect>& tickmarks) const
 bool Scrollbar::isScrollableAreaActive() const
 {
     return m_scrollableArea && m_scrollableArea->isActive();
-}
-
-bool Scrollbar::isScrollViewScrollbar() const
-{
-    return parent() && parent()->isFrameView() && toScrollView(parent())->isScrollViewScrollbar(this);
 }
 
 bool Scrollbar::isLeftSideVerticalScrollbar() const
@@ -142,6 +141,14 @@ void Scrollbar::offsetDidChange()
     updateThumbPosition();
     if (m_pressedPart == ThumbPart)
         setPressedPos(m_pressedPos + theme()->thumbPosition(this) - oldThumbPosition);
+}
+
+void Scrollbar::disconnectFromScrollableArea()
+{
+    m_scrollableArea = nullptr;
+#if ENABLE(OILPAN)
+    m_animator = nullptr;
+#endif
 }
 
 void Scrollbar::setProportion(int visibleSize, int totalSize)
@@ -469,47 +476,6 @@ void Scrollbar::mouseDown(const PlatformMouseEvent& evt)
     m_pressedPos = pressedPos;
 
     autoscrollPressedPart(theme()->initialAutoscrollTimerDelay());
-}
-
-void Scrollbar::setFrameRect(const IntRect& rect)
-{
-    // Get our window resizer rect and see if we overlap. Adjust to avoid the overlap
-    // if necessary.
-    IntRect adjustedRect(rect);
-    bool overlapsResizer = false;
-    ScrollView* view = parentScrollView();
-    if (view && !rect.isEmpty() && !view->windowResizerRect().isEmpty()) {
-        IntRect resizerRect = view->convertFromContainingWindow(view->windowResizerRect());
-        if (rect.intersects(resizerRect)) {
-            if (orientation() == HorizontalScrollbar) {
-                int overlap = rect.maxX() - resizerRect.x();
-                if (overlap > 0 && resizerRect.maxX() >= rect.maxX()) {
-                    adjustedRect.setWidth(rect.width() - overlap);
-                    overlapsResizer = true;
-                }
-            } else {
-                int overlap = rect.maxY() - resizerRect.y();
-                if (overlap > 0 && resizerRect.maxY() >= rect.maxY()) {
-                    adjustedRect.setHeight(rect.height() - overlap);
-                    overlapsResizer = true;
-                }
-            }
-        }
-    }
-    if (overlapsResizer != m_overlapsResizer) {
-        m_overlapsResizer = overlapsResizer;
-        if (view)
-            view->adjustScrollbarsAvoidingResizerCount(m_overlapsResizer ? 1 : -1);
-    }
-
-    Widget::setFrameRect(adjustedRect);
-}
-
-void Scrollbar::setParent(Widget* parentView)
-{
-    if (!parentView && m_overlapsResizer && parentScrollView())
-        parentScrollView()->adjustScrollbarsAvoidingResizerCount(-1);
-    Widget::setParent(parentView);
 }
 
 void Scrollbar::setEnabled(bool e)

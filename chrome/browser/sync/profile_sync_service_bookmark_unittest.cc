@@ -274,22 +274,21 @@ class FakeServerChange {
 
 class ExtensiveChangesBookmarkModelObserver : public BaseBookmarkModelObserver {
  public:
-  explicit ExtensiveChangesBookmarkModelObserver()
+  ExtensiveChangesBookmarkModelObserver()
       : started_count_(0),
         completed_count_at_started_(0),
         completed_count_(0) {}
 
-  virtual void ExtensiveBookmarkChangesBeginning(
-      BookmarkModel* model) OVERRIDE {
+  void ExtensiveBookmarkChangesBeginning(BookmarkModel* model) override {
     ++started_count_;
     completed_count_at_started_ = completed_count_;
   }
 
-  virtual void ExtensiveBookmarkChangesEnded(BookmarkModel* model) OVERRIDE {
+  void ExtensiveBookmarkChangesEnded(BookmarkModel* model) override {
     ++completed_count_;
   }
 
-  virtual void BookmarkModelChanged() OVERRIDE {}
+  void BookmarkModelChanged() override {}
 
   int get_started() const {
     return started_count_;
@@ -400,7 +399,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     bool delete_bookmarks = load == DELETE_EXISTING_STORAGE;
     profile_.CreateBookmarkModel(delete_bookmarks);
     model_ = BookmarkModelFactory::GetForProfile(&profile_);
-    test::WaitForBookmarkModelToLoad(model_);
+    bookmarks::test::WaitForBookmarkModelToLoad(model_);
     // This noticeably speeds up the unit tests that request it.
     if (save == DONT_SAVE_TO_STORAGE)
       model_->ClearStore();

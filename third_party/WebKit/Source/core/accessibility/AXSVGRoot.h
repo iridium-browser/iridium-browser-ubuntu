@@ -33,7 +33,7 @@
 
 namespace blink {
 
-class AXSVGRoot FINAL : public AXRenderObject {
+class AXSVGRoot final : public AXRenderObject {
 
 protected:
     explicit AXSVGRoot(RenderObject*);
@@ -41,13 +41,11 @@ public:
     static PassRefPtr<AXSVGRoot> create(RenderObject*);
     virtual ~AXSVGRoot();
 
-    void setParent(AXObject*);
+    void setParent(AXObject*) override;
 
 private:
-    AXObject* m_parent;
-
-    virtual AXObject* parentObject() const OVERRIDE;
-    virtual bool isAXSVGRoot() const OVERRIDE { return true; }
+    virtual AXObject* computeParent() const override;
+    virtual bool isAXSVGRoot() const override { return true; }
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXSVGRoot, isAXSVGRoot());

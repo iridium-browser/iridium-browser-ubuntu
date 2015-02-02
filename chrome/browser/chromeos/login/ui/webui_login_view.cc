@@ -26,6 +26,7 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/render_messages.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
@@ -39,6 +40,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/common/renderer_preferences.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -66,8 +68,7 @@ const char kAccelNameDeviceRequisitionRemora[] = "device_requisition_remora";
 const char kAccelNameDeviceRequisitionShark[] = "device_requisition_shark";
 const char kAccelNameAppLaunchBailout[] = "app_launch_bailout";
 const char kAccelNameAppLaunchNetworkConfig[] = "app_launch_network_config";
-const char kAccelNameShowRollbackOption[] = "show_rollback_on_reset_screen";
-const char kAccelNameHideRollbackOption[] = "hide_rollback_on_reset_screen";
+const char kAccelNameEmbeddedSignin[] = "embedded_signin";
 
 // A class to change arrow key traversal behavior when it's alive.
 class ScopedArrowKeyTraversal {
@@ -116,6 +117,9 @@ WebUILoginView::WebUILoginView()
   accel_map_[ui::Accelerator(ui::VKEY_E,
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameEnrollment;
+  accel_map_[ui::Accelerator(
+      ui::VKEY_G, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
+      kAccelNameEmbeddedSignin;
   accel_map_[ui::Accelerator(ui::VKEY_K,
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameKioskEnable;
@@ -156,14 +160,6 @@ WebUILoginView::WebUILoginView()
   accel_map_[ui::Accelerator(ui::VKEY_N,
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameAppLaunchNetworkConfig;
-
-  ui::Accelerator show_rollback(ui::VKEY_MENU, ui::EF_ALT_DOWN);
-  show_rollback.set_type(ui::ET_KEY_PRESSED);
-  accel_map_[show_rollback] = kAccelNameShowRollbackOption;
-
-  ui::Accelerator hide_rollback(ui::VKEY_MENU, ui::EF_NONE);
-  hide_rollback.set_type(ui::ET_KEY_RELEASED);
-  accel_map_[hide_rollback] = kAccelNameHideRollbackOption;
 
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
     AddAccelerator(i->first);
@@ -213,9 +209,9 @@ void WebUILoginView::Init() {
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
   WebContentsObserver::Observe(web_contents);
+  content::RendererPreferences* prefs = web_contents->GetMutableRendererPrefs();
   renderer_preferences_util::UpdateFromSystemSettings(
-      web_contents->GetMutableRendererPrefs(),
-      signin_profile);
+      prefs, signin_profile, web_contents);
 }
 
 const char* WebUILoginView::GetClassName() const {
@@ -286,7 +282,8 @@ void WebUILoginView::LoadURL(const GURL & url) {
 
   // TODO(nkostylev): Use WebContentsObserver::RenderViewCreated to track
   // when RenderView is created.
-  GetWebContents()->GetRenderViewHost()->GetView()->SetBackgroundOpaque(false);
+  GetWebContents()->GetRenderViewHost()->GetView()->SetBackgroundColor(
+      SK_ColorTRANSPARENT);
 }
 
 content::WebUI* WebUILoginView::GetWebUI() {

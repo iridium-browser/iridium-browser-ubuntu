@@ -15,7 +15,7 @@ class FakeContentLayerUpdater : public ContentLayerUpdater {
   using ContentLayerUpdater::paint_rect;
 
  private:
-  virtual ~FakeContentLayerUpdater() {}
+  ~FakeContentLayerUpdater() override {}
 };
 
 FakeContentLayer::FakeContentLayer(ContentLayerClient* client)
@@ -32,7 +32,7 @@ FakeContentLayer::~FakeContentLayer() {}
 
 scoped_ptr<LayerImpl> FakeContentLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return FakeContentLayerImpl::Create(tree_impl, layer_id_).PassAs<LayerImpl>();
+  return FakeContentLayerImpl::Create(tree_impl, layer_id_);
 }
 
 bool FakeContentLayer::Update(ResourceUpdateQueue* queue,

@@ -34,28 +34,28 @@
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "bindings/core/v8/ScriptState.h"
-#include "bindings/core/v8/WrapperTypeInfo.h"
+#include "platform/heap/Handle.h"
 #include "platform/weborigin/SecurityOrigin.h"
-#include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/AtomicString.h"
 #include <v8.h>
 
 namespace blink {
 
-class LocalDOMWindow;
 class LocalFrame;
 class HTMLDocument;
 class SecurityOrigin;
 
 // WindowProxy represents all the per-global object state for a LocalFrame that
 // persist between navigations.
-class WindowProxy {
+class WindowProxy final : public NoBaseWillBeGarbageCollectedFinalized<WindowProxy> {
 public:
-    static PassOwnPtr<WindowProxy> create(LocalFrame*, DOMWrapperWorld&, v8::Isolate*);
+    static PassOwnPtrWillBeRawPtr<WindowProxy> create(LocalFrame*, DOMWrapperWorld&, v8::Isolate*);
+
+    ~WindowProxy();
+    void trace(Visitor*);
 
     v8::Local<v8::Context> context() const { return m_scriptState ? m_scriptState->context() : v8::Local<v8::Context>(); }
     ScriptState* scriptState() const { return m_scriptState.get(); }
@@ -106,9 +106,7 @@ private:
     void createContext();
     bool installDOMWindow();
 
-    static WindowProxy* enteredIsolatedWorldContext();
-
-    LocalFrame* m_frame;
+    RawPtrWillBeMember<LocalFrame> m_frame;
     v8::Isolate* m_isolate;
     RefPtr<ScriptState> m_scriptState;
     RefPtr<DOMWrapperWorld> m_world;

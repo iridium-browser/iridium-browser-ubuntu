@@ -24,7 +24,7 @@ namespace extensions {
 class SimpleFeature : public Feature {
  public:
   SimpleFeature();
-  virtual ~SimpleFeature();
+  ~SimpleFeature() override;
 
   // Similar to Manifest::Location, these are the classes of locations
   // supported in feature files; "component" implies
@@ -89,26 +89,26 @@ class SimpleFeature : public Feature {
   }
 
   // extension::Feature:
-  virtual Availability IsAvailableToManifest(const std::string& extension_id,
-                                             Manifest::Type type,
-                                             Manifest::Location location,
-                                             int manifest_version,
-                                             Platform platform) const OVERRIDE;
+  Availability IsAvailableToManifest(const std::string& extension_id,
+                                     Manifest::Type type,
+                                     Manifest::Location location,
+                                     int manifest_version,
+                                     Platform platform) const override;
 
-  virtual Availability IsAvailableToContext(const Extension* extension,
-                                            Context context,
-                                            const GURL& url,
-                                            Platform platform) const OVERRIDE;
+  Availability IsAvailableToContext(const Extension* extension,
+                                    Context context,
+                                    const GURL& url,
+                                    Platform platform) const override;
 
-  virtual std::string GetAvailabilityMessage(AvailabilityResult result,
-                                             Manifest::Type type,
-                                             const GURL& url,
-                                             Context context) const OVERRIDE;
+  std::string GetAvailabilityMessage(AvailabilityResult result,
+                                     Manifest::Type type,
+                                     const GURL& url,
+                                     Context context) const override;
 
-  virtual bool IsInternal() const OVERRIDE;
+  bool IsInternal() const override;
 
-  virtual bool IsIdInBlacklist(const std::string& extension_id) const OVERRIDE;
-  virtual bool IsIdInWhitelist(const std::string& extension_id) const OVERRIDE;
+  bool IsIdInBlacklist(const std::string& extension_id) const override;
+  bool IsIdInWhitelist(const std::string& extension_id) const override;
   static bool IsIdInList(const std::string& extension_id,
                          const std::set<std::string>& list);
 

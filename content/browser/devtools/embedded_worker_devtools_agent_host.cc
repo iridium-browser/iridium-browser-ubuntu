@@ -159,9 +159,6 @@ void EmbeddedWorkerDevToolsAgentHost::WorkerReadyForInspection() {
   }
 }
 
-void EmbeddedWorkerDevToolsAgentHost::WorkerContextStarted() {
-}
-
 void EmbeddedWorkerDevToolsAgentHost::WorkerRestarted(WorkerId worker_id) {
   DCHECK_EQ(WORKER_TERMINATED, state_);
   state_ = IsAttached() ? WORKER_PAUSED_FOR_REATTACH : WORKER_UNINSPECTED;
@@ -219,8 +216,12 @@ void EmbeddedWorkerDevToolsAgentHost::WorkerCreated() {
 }
 
 void EmbeddedWorkerDevToolsAgentHost::OnDispatchOnInspectorFrontend(
-    const std::string& message) {
-  SendMessageToClient(message);
+    const std::string& message,
+    uint32 total_size) {
+  if (!IsAttached())
+    return;
+
+  ProcessChunkedMessageFromAgent(message, total_size);
 }
 
 void EmbeddedWorkerDevToolsAgentHost::OnSaveAgentRuntimeState(

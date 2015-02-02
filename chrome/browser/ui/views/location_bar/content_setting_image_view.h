@@ -41,7 +41,7 @@ class ContentSettingImageView : public gfx::AnimationDelegate,
                           const gfx::FontList& font_list,
                           SkColor text_color,
                           SkColor parent_background_color);
-  virtual ~ContentSettingImageView();
+  ~ContentSettingImageView() override;
 
   // Updates the decoration from the shown WebContents.
   void Update(content::WebContents* web_contents);
@@ -63,20 +63,20 @@ class ContentSettingImageView : public gfx::AnimationDelegate,
   static int GetBubbleOuterPadding(bool by_icon);
 
   // gfx::AnimationDelegate:
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void AnimationProgressed(const gfx::Animation* animation) override;
+  void AnimationCanceled(const gfx::Animation* animation) override;
 
   // views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
-  virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void Layout() override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
+  void OnPaintBackground(gfx::Canvas* canvas) override;
 
   // views::WidgetObserver:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
   bool background_showing() const {
     return slide_animator_.is_animating() || pause_animation_;

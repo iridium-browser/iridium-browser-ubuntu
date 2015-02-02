@@ -4,7 +4,6 @@
 
 #include <windows.h>
 #include <atlstr.h>
-#include <wincrypt.h>
 #include <wintrust.h>
 
 #include "base/base_paths.h"
@@ -19,6 +18,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/app/signature_validator_win.h"
 #include "crypto/sha2.h"
+#include "crypto/wincrypt_shim.h"
 #include "net/cert/test_root_certs.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,7 +36,7 @@ class SignatureValidatorTest : public testing::Test {
  protected:
   SignatureValidatorTest() {}
 
-  void SetUp() OVERRIDE {
+  void SetUp() override {
     test_roots_ = net::TestRootCerts::GetInstance();
     base::FilePath cert_path =
         GetTestCertsDirectory().Append(L"AuthorityCert.cer");
@@ -49,7 +49,7 @@ class SignatureValidatorTest : public testing::Test {
     SetExpectedHash(GetTestCertsDirectory().Append(L"ValidCert.cer"));
   }
 
-  void TearDown() OVERRIDE {
+  void TearDown() override {
     test_roots_->Clear();
     EXPECT_TRUE(test_roots_->IsEmpty());
   }

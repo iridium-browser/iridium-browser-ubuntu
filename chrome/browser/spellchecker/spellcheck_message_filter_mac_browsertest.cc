@@ -11,7 +11,6 @@
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/spellcheck_result.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Fake filter for testing, which stores sent messages and
@@ -22,7 +21,7 @@ class TestingSpellCheckMessageFilter : public SpellCheckMessageFilterMac {
       : SpellCheckMessageFilterMac(0),
         loop_(loop) { }
 
-  virtual bool Send(IPC::Message* message) OVERRIDE {
+  bool Send(IPC::Message* message) override {
     sent_messages_.push_back(message);
     loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
     return true;
@@ -32,7 +31,7 @@ class TestingSpellCheckMessageFilter : public SpellCheckMessageFilterMac {
   base::MessageLoopForUI* loop_;
 
  private:
-  virtual ~TestingSpellCheckMessageFilter() {}
+  ~TestingSpellCheckMessageFilter() override {}
 };
 
 typedef InProcessBrowserTest SpellCheckMessageFilterMacBrowserTest;

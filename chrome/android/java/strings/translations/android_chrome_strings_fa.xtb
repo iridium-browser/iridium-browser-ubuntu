@@ -67,7 +67,6 @@
 <translation id="7267430310003164111">‏سؤال برای دریافت برنامه از فروشگاه Google Play. نام برنامه: <ph name="APP_NAME"/>. رتبه متوسط برنامه: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">در حال نصب...</translation>
 <translation id="3992315671621218278">ذخیره پیوند</translation>
-<translation id="8034522405403831421">این صفحه به زبان <ph name="SOURCE_LANGUAGE"/> است. مایلید آن را به <ph name="TARGET_LANGUAGE"/> ترجمه کنید؟</translation>
 <translation id="2476578072172137802">تنظیمات سایت</translation>
 <translation id="4195643157523330669">باز کردن در برگهٔ جدید</translation>
 <translation id="651048280540227067">نادیده گرفتن منو</translation>
@@ -93,6 +92,7 @@
 <translation id="7947953824732555851">پذیرش و ورود به سیستم</translation>
 <translation id="6333140779060797560">اشتراک‌گذاری از طریق <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">بستن</translation>
+<translation id="5138299137310274655">این صفحه به زبان <ph name="SOURCE_LANGUAGE"/> است. به <ph name="TARGET_LANGUAGE"/> ترجمه شود؟</translation>
 <translation id="969096075394517431">تغییر زبان‌ها</translation>
 <translation id="5032574515228824816">فرمان</translation>
 <translation id="7961015016161918242">هرگز</translation>

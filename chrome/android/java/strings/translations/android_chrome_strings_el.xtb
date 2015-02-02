@@ -69,7 +69,6 @@
 <translation id="7267430310003164111">Ερώτηση για λήψη εφαρμογής από το Google Play Store.  Όνομα εφαρμογής: <ph name="APP_NAME"/>.  Μέση βαθμολογία εφαρμογής: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Γίνεται εγκατάσταση...</translation>
 <translation id="3992315671621218278">Αποθήκευση συνδέσμου</translation>
-<translation id="8034522405403831421">Αυτή η σελίδα είναι στα <ph name="SOURCE_LANGUAGE"/>. Μετάφρασή της στα <ph name="TARGET_LANGUAGE"/>;</translation>
 <translation id="2476578072172137802">Ρυθμίσεις ιστότοπου</translation>
 <translation id="4195643157523330669">Άνοιγμα σε νέα καρτέλα</translation>
 <translation id="651048280540227067">Παράβλεψη μενού</translation>
@@ -95,6 +94,7 @@
 <translation id="7947953824732555851">Αποδοχή και σύνδεση</translation>
 <translation id="6333140779060797560">Κοινή χρήση μέσω <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Κλείσιμο</translation>
+<translation id="5138299137310274655">Αυτή η σελίδα είναι στα <ph name="SOURCE_LANGUAGE"/>. Να μεταφραστεί στα <ph name="TARGET_LANGUAGE"/>;</translation>
 <translation id="969096075394517431">Αλλαγή γλωσσών</translation>
 <translation id="5032574515228824816">Προτροπή</translation>
 <translation id="7961015016161918242">Ποτέ</translation>

@@ -17,6 +17,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
+#include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/seccomp-bpf-helpers/sigsys_handlers.h"
 #include "sandbox/linux/seccomp-bpf/bpf_tests.h"
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
@@ -37,14 +38,13 @@ namespace {
 
 using sandbox::bpf_dsl::Allow;
 using sandbox::bpf_dsl::ResultExpr;
-using sandbox::bpf_dsl::SandboxBPFDSLPolicy;
 
-class RestrictClockIdPolicy : public SandboxBPFDSLPolicy {
+class RestrictClockIdPolicy : public bpf_dsl::Policy {
  public:
   RestrictClockIdPolicy() {}
-  virtual ~RestrictClockIdPolicy() {}
+  ~RestrictClockIdPolicy() override {}
 
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ResultExpr EvaluateSyscall(int sysno) const override {
     switch (sysno) {
       case __NR_clock_gettime:
       case __NR_clock_getres:
@@ -91,11 +91,10 @@ class ClockSystemTesterDelegate : public sandbox::BPFTesterDelegate {
       : is_running_on_chromeos_(base::SysInfo::IsRunningOnChromeOS()) {}
   virtual ~ClockSystemTesterDelegate() {}
 
-  virtual scoped_ptr<sandbox::SandboxBPFPolicy> GetSandboxBPFPolicy() OVERRIDE {
-    return scoped_ptr<sandbox::SandboxBPFPolicy>(
-        new RestrictClockIdPolicy());
+  virtual scoped_ptr<sandbox::bpf_dsl::Policy> GetSandboxBPFPolicy() override {
+    return scoped_ptr<sandbox::bpf_dsl::Policy>(new RestrictClockIdPolicy());
   }
-  virtual void RunTestFunction() OVERRIDE {
+  virtual void RunTestFunction() override {
     if (is_running_on_chromeos_) {
       CheckClock(base::TimeTicks::kClockSystemTrace);
     } else {
@@ -143,12 +142,12 @@ BPF_DEATH_TEST_C(ParameterRestrictions,
 }
 #endif  // !defined(OS_ANDROID)
 
-class RestrictSchedPolicy : public SandboxBPFDSLPolicy {
+class RestrictSchedPolicy : public bpf_dsl::Policy {
  public:
   RestrictSchedPolicy() {}
-  virtual ~RestrictSchedPolicy() {}
+  ~RestrictSchedPolicy() override {}
 
-  virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+  ResultExpr EvaluateSyscall(int sysno) const override {
     switch (sysno) {
       case __NR_sched_getparam:
         return RestrictSchedTarget(getpid(), sysno);

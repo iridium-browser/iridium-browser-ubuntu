@@ -59,7 +59,7 @@ class OneClickSigninBubbleView : public views::BubbleDelegateView,
       const BrowserWindow::StartSyncCallback& start_sync_callback,
       bool is_sync_dialog);
 
-  virtual ~OneClickSigninBubbleView();
+  ~OneClickSigninBubbleView() override;
 
  private:
   friend class OneClickSigninBubbleViewTest;
@@ -73,21 +73,20 @@ class OneClickSigninBubbleView : public views::BubbleDelegateView,
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninBubbleViewTest, DialogLearnMoreLink);
 
   // Overridden from views::BubbleDelegateView:
-  virtual void Init() OVERRIDE;
+  void Init() override;
 
   // Overridden from views::LinkListener:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from views::View:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 
   // Overridden from views::WidgetDelegate:
-  virtual void WindowClosing() OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
+  void WindowClosing() override;
+  ui::ModalType GetModalType() const override;
 
   // Builds a popup bubble anchored under the wrench menu
   void InitBubbleContent(views::GridLayout* layout);

@@ -20,7 +20,6 @@
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/guest_view_base.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/constants.h"
@@ -49,10 +48,10 @@ class WebContentsTarget : public DevToolsTargetImpl {
   WebContentsTarget(WebContents* web_contents, bool is_tab);
 
   // DevToolsTargetImpl overrides:
-  virtual WebContents* GetWebContents() const OVERRIDE;
-  virtual int GetTabId() const OVERRIDE;
-  virtual std::string GetExtensionId() const OVERRIDE;
-  virtual void Inspect(Profile* profile) const OVERRIDE;
+  WebContents* GetWebContents() const override;
+  int GetTabId() const override;
+  std::string GetExtensionId() const override;
+  void Inspect(Profile* profile) const override;
 
  private:
   int tab_id_;
@@ -107,12 +106,10 @@ WebContentsTarget::WebContentsTarget(WebContents* web_contents, bool is_tab)
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   if (!profile)
     return;
-  extensions::ExtensionSystem* extension_system =
-      extensions::ExtensionSystem::Get(profile);
   set_title(extension->name());
   extensions::ExtensionHost* extension_host =
-      extension_system->process_manager()->GetBackgroundHostForExtension(
-          extension->id());
+      extensions::ProcessManager::Get(profile)
+          ->GetBackgroundHostForExtension(extension->id());
   if (extension_host &&
       extension_host->host_contents() == web_contents) {
     set_type(kTargetTypeBackgroundPage);
@@ -153,7 +150,7 @@ class WorkerTarget : public DevToolsTargetImpl {
   explicit WorkerTarget(scoped_refptr<DevToolsAgentHost> agent_host);
 
   // DevToolsTargetImpl overrides:
-  virtual void Inspect(Profile* profile) const OVERRIDE;
+  void Inspect(Profile* profile) const override;
 };
 
 WorkerTarget::WorkerTarget(scoped_refptr<DevToolsAgentHost> agent_host)

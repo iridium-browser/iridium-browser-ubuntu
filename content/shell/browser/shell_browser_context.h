@@ -11,6 +11,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/resource_context.h"
+#include "content/shell/browser/shell_url_request_context_getter.h"
 #include "net/url_request/url_request_job_factory.h"
 
 namespace net {
@@ -20,14 +22,12 @@ class NetLog;
 namespace content {
 
 class DownloadManagerDelegate;
-class ResourceContext;
 class ShellDownloadManagerDelegate;
-class ShellURLRequestContextGetter;
 
 class ShellBrowserContext : public BrowserContext {
  public:
   ShellBrowserContext(bool off_the_record, net::NetLog* net_log);
-  virtual ~ShellBrowserContext();
+  ~ShellBrowserContext() override;
 
   void set_guest_manager_for_testing(
       BrowserPluginGuestManager* guest_manager) {
@@ -35,24 +35,23 @@ class ShellBrowserContext : public BrowserContext {
   }
 
   // BrowserContext implementation.
-  virtual base::FilePath GetPath() const OVERRIDE;
-  virtual bool IsOffTheRecord() const OVERRIDE;
-  virtual DownloadManagerDelegate* GetDownloadManagerDelegate() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter*
-      GetMediaRequestContextForStoragePartition(
-          const base::FilePath& partition_path,
-          bool in_memory) OVERRIDE;
-  virtual ResourceContext* GetResourceContext() OVERRIDE;
-  virtual BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
-  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
-  virtual PushMessagingService* GetPushMessagingService() OVERRIDE;
-  virtual SSLHostStateDelegate* GetSSLHostStateDelegate() OVERRIDE;
+  base::FilePath GetPath() const override;
+  bool IsOffTheRecord() const override;
+  DownloadManagerDelegate* GetDownloadManagerDelegate() override;
+  net::URLRequestContextGetter* GetRequestContext() override;
+  net::URLRequestContextGetter* GetRequestContextForRenderProcess(
+      int renderer_child_id) override;
+  net::URLRequestContextGetter* GetMediaRequestContext() override;
+  net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+      int renderer_child_id) override;
+  net::URLRequestContextGetter* GetMediaRequestContextForStoragePartition(
+      const base::FilePath& partition_path,
+      bool in_memory) override;
+  ResourceContext* GetResourceContext() override;
+  BrowserPluginGuestManager* GetGuestManager() override;
+  storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
+  PushMessagingService* GetPushMessagingService() override;
+  SSLHostStateDelegate* GetSSLHostStateDelegate() override;
 
   net::URLRequestContextGetter* CreateRequestContext(
       ProtocolHandlerMap* protocol_handlers,
@@ -63,20 +62,56 @@ class ShellBrowserContext : public BrowserContext {
       ProtocolHandlerMap* protocol_handlers,
       URLRequestInterceptorScopedVector request_interceptors);
 
- private:
-  class ShellResourceContext;
+ protected:
+  // Contains URLRequestContextGetter required for resource loading.
+  class ShellResourceContext : public ResourceContext {
+   public:
+    ShellResourceContext();
+    ~ShellResourceContext() override;
 
+    // ResourceContext implementation:
+    net::HostResolver* GetHostResolver() override;
+    net::URLRequestContext* GetRequestContext() override;
+
+    void set_url_request_context_getter(ShellURLRequestContextGetter* getter) {
+      getter_ = getter;
+    }
+
+  private:
+    ShellURLRequestContextGetter* getter_;
+
+    DISALLOW_COPY_AND_ASSIGN(ShellResourceContext);
+  };
+
+  ShellURLRequestContextGetter* url_request_context_getter() {
+    return url_request_getter_.get();
+  }
+
+  // Used by ShellBrowserContext to initiate and set different types of
+  // URLRequestContextGetter.
+  virtual ShellURLRequestContextGetter* CreateURLRequestContextGetter(
+      ProtocolHandlerMap* protocol_handlers,
+      URLRequestInterceptorScopedVector request_interceptors);
+  void set_url_request_context_getter(ShellURLRequestContextGetter* getter) {
+    url_request_getter_ = getter;
+  }
+
+  bool ignore_certificate_errors() const { return ignore_certificate_errors_; }
+  net::NetLog* net_log() const { return net_log_; }
+
+  scoped_ptr<ShellResourceContext> resource_context_;
+  bool ignore_certificate_errors_;
+  scoped_ptr<ShellDownloadManagerDelegate> download_manager_delegate_;
+
+ private:
   // Performs initialization of the ShellBrowserContext while IO is still
   // allowed on the current thread.
   void InitWhileIOAllowed();
 
   bool off_the_record_;
   net::NetLog* net_log_;
-  bool ignore_certificate_errors_;
   base::FilePath path_;
   BrowserPluginGuestManager* guest_manager_;
-  scoped_ptr<ShellResourceContext> resource_context_;
-  scoped_ptr<ShellDownloadManagerDelegate> download_manager_delegate_;
   scoped_refptr<ShellURLRequestContextGetter> url_request_getter_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellBrowserContext);

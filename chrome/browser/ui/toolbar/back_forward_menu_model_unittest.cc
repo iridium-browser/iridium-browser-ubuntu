@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
 
-#include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -45,7 +44,7 @@ class FaviconDelegate : public ui::MenuModelDelegate {
  public:
   FaviconDelegate() : was_called_(false) {}
 
-  virtual void OnIconChanged(int model_index) OVERRIDE {
+  void OnIconChanged(int model_index) override {
     was_called_ = true;
     base::MessageLoop::current()->Quit();
   }

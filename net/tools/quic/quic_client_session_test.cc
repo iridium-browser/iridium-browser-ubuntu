@@ -33,21 +33,20 @@ namespace tools {
 namespace test {
 namespace {
 
-const char kServerHostname[] = "www.example.com";
+const char kServerHostname[] = "www.example.org";
 const uint16 kPort = 80;
 
 class ToolsQuicClientSessionTest
     : public ::testing::TestWithParam<QuicVersion> {
  protected:
   ToolsQuicClientSessionTest()
-      : connection_(new PacketSavingConnection(false,
-                                               SupportedVersions(GetParam()))) {
-    crypto_config_.SetDefaults();
-    session_.reset(new QuicClientSession(DefaultQuicConfig(), connection_));
+      : connection_(
+            new PacketSavingConnection(false, SupportedVersions(GetParam()))) {
+    session_.reset(new QuicClientSession(DefaultQuicConfig(), connection_,
+                                         /*is_secure=*/false));
     session_->InitializeSession(
         QuicServerId(kServerHostname, kPort, false, PRIVACY_MODE_DISABLED),
         &crypto_config_);
-    session_->config()->SetDefaults();
   }
 
   void CompleteCryptoHandshake() {
@@ -69,13 +68,12 @@ TEST_P(ToolsQuicClientSessionTest, CryptoConnect) {
 }
 
 TEST_P(ToolsQuicClientSessionTest, MaxNumStreams) {
-  session_->config()->set_max_streams_per_connection(1, 1);
+  session_->config()->SetMaxStreamsPerConnection(1, 1);
   // FLAGS_max_streams_per_connection = 1;
   // Initialize crypto before the client session will create a stream.
   CompleteCryptoHandshake();
 
-  QuicSpdyClientStream* stream =
-      session_->CreateOutgoingDataStream();
+  QuicSpdyClientStream* stream = session_->CreateOutgoingDataStream();
   ASSERT_TRUE(stream);
   EXPECT_FALSE(session_->CreateOutgoingDataStream());
 
@@ -91,7 +89,7 @@ TEST_P(ToolsQuicClientSessionTest, GoAwayReceived) {
   // After receiving a GoAway, I should no longer be able to create outgoing
   // streams.
   session_->OnGoAway(QuicGoAwayFrame(QUIC_PEER_GOING_AWAY, 1u, "Going away."));
-  EXPECT_EQ(NULL, session_->CreateOutgoingDataStream());
+  EXPECT_EQ(nullptr, session_->CreateOutgoingDataStream());
 }
 
 TEST_P(ToolsQuicClientSessionTest, SetFecProtectionFromConfig) {
@@ -114,10 +112,8 @@ TEST_P(ToolsQuicClientSessionTest, SetFecProtectionFromConfig) {
   EXPECT_EQ(FEC_PROTECT_OPTIONAL, stream->fec_policy());
 }
 
-TEST_P(ToolsQuicClientSessionTest, EmptyPacketReceived) {
-  // This test covers broken behavior that empty packets cause QUIC connection
-  // broken.
-
+// Regression test for b/17206611.
+TEST_P(ToolsQuicClientSessionTest, InvalidPacketReceived) {
   // Create Packet with 0 length.
   QuicEncryptedPacket invalid_packet(nullptr, 0, false);
   IPEndPoint server_address(TestPeerIPAddress(), kTestPort);
@@ -129,16 +125,12 @@ TEST_P(ToolsQuicClientSessionTest, EmptyPacketReceived) {
           Invoke(reinterpret_cast<MockConnection*>(session_->connection()),
                  &MockConnection::ReallyProcessUdpPacket));
 
-  // Expect call to close connection with error QUIC_INVALID_PACKET_HEADER.
-  // TODO(b/17206611): Correct behavior: packet should get dropped and
-  // connection should remain open.
-  EXPECT_CALL(*connection_, SendConnectionCloseWithDetails(
-      QUIC_INVALID_PACKET_HEADER, _)).Times(1);
+  // Validate that empty packets don't close the connection.
+  EXPECT_CALL(*connection_, SendConnectionCloseWithDetails(_, _)).Times(0);
   session_->connection()->ProcessUdpPacket(client_address, server_address,
                                            invalid_packet);
 
-  // Create a packet that causes DecryptPacket failed. The packet will get
-  // dropped without closing connection. This is a correct behavior.
+  // Verifiy that small, invalid packets don't close the connection.
   char buf[2] = {0x00, 0x01};
   QuicEncryptedPacket valid_packet(buf, 2, false);
   // Close connection shouldn't be called.

@@ -13,6 +13,7 @@
 
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "content/public/common/resource_type.h"
 #include "extensions/browser/api/declarative/rules_registry.h"
@@ -63,13 +64,13 @@ class WebRequestAPI : public BrowserContextKeyedAPI,
                       public EventRouter::Observer {
  public:
   explicit WebRequestAPI(content::BrowserContext* context);
-  virtual ~WebRequestAPI();
+  ~WebRequestAPI() override;
 
   // BrowserContextKeyedAPI support:
   static BrowserContextKeyedAPIFactory<WebRequestAPI>* GetFactoryInstance();
 
   // EventRouter::Observer overrides:
-  virtual void OnListenerRemoved(const EventListenerInfo& details) OVERRIDE;
+  void OnListenerRemoved(const EventListenerInfo& details) override;
 
  private:
   friend class BrowserContextKeyedAPIFactory<WebRequestAPI>;
@@ -488,27 +489,39 @@ class ExtensionWebRequestEventRouter
   DISALLOW_COPY_AND_ASSIGN(ExtensionWebRequestEventRouter);
 };
 
+class WebRequestInternalFunction : public SyncIOThreadExtensionFunction {
+ public:
+  WebRequestInternalFunction() {}
+
+ protected:
+  ~WebRequestInternalFunction() override {}
+
+  const std::string& extension_id_safe() const {
+    return extension() ? extension_id() : base::EmptyString();
+  }
+};
+
 class WebRequestInternalAddEventListenerFunction
-    : public SyncIOThreadExtensionFunction {
+    : public WebRequestInternalFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("webRequestInternal.addEventListener",
                              WEBREQUESTINTERNAL_ADDEVENTLISTENER)
 
  protected:
-  virtual ~WebRequestInternalAddEventListenerFunction() {}
+  ~WebRequestInternalAddEventListenerFunction() override {}
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 class WebRequestInternalEventHandledFunction
-    : public SyncIOThreadExtensionFunction {
+    : public WebRequestInternalFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("webRequestInternal.eventHandled",
                              WEBREQUESTINTERNAL_EVENTHANDLED)
 
  protected:
-  virtual ~WebRequestInternalEventHandledFunction() {}
+  ~WebRequestInternalEventHandledFunction() override {}
 
   // Unblocks the network request and sets |error_| such that the developer
   // console will show the respective error message. Use this function to handle
@@ -522,25 +535,25 @@ class WebRequestInternalEventHandledFunction
       const std::string& error);
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 class WebRequestHandlerBehaviorChangedFunction
-    : public SyncIOThreadExtensionFunction {
+    : public WebRequestInternalFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("webRequest.handlerBehaviorChanged",
                              WEBREQUEST_HANDLERBEHAVIORCHANGED)
 
  protected:
-  virtual ~WebRequestHandlerBehaviorChangedFunction() {}
+  ~WebRequestHandlerBehaviorChangedFunction() override {}
 
   // ExtensionFunction:
-  virtual void GetQuotaLimitHeuristics(
-      extensions::QuotaLimitHeuristics* heuristics) const OVERRIDE;
+  void GetQuotaLimitHeuristics(
+      extensions::QuotaLimitHeuristics* heuristics) const override;
   // Handle quota exceeded gracefully: Only warn the user but still execute the
   // function.
-  virtual void OnQuotaExceeded(const std::string& error) OVERRIDE;
-  virtual bool RunSync() OVERRIDE;
+  void OnQuotaExceeded(const std::string& error) override;
+  bool RunSync() override;
 };
 
 #endif  // EXTENSIONS_BROWSER_API_WEB_REQUEST_WEB_REQUEST_API_H_

@@ -27,7 +27,7 @@ static const char kTestUsername[] = "testuser@test.com";
 
 class SigninGlobalErrorTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Create a signed-in profile.
     TestingProfile::Builder builder;
     builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
@@ -110,11 +110,12 @@ TEST_F(SigninGlobalErrorTest, AuthStatusEnumerateAllErrors) {
     { GoogleServiceAuthError::HOSTED_NOT_ALLOWED, true },
     { GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE, true },
     { GoogleServiceAuthError::SERVICE_ERROR, true },
+    { GoogleServiceAuthError::WEB_LOGIN_REQUIRED, true },
   };
-  COMPILE_ASSERT(ARRAYSIZE_UNSAFE(table) == GoogleServiceAuthError::NUM_STATES,
+  COMPILE_ASSERT(arraysize(table) == GoogleServiceAuthError::NUM_STATES,
       kTable_size_does_not_match_number_of_auth_error_types);
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(table); ++i) {
+  for (size_t i = 0; i < arraysize(table); ++i) {
     FakeAuthStatusProvider provider(error_controller_);
     provider.SetAuthError(kTestAccountId,
                           kTestUsername,

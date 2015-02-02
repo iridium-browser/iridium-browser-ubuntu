@@ -36,11 +36,11 @@ class MessageReceiver : public EmbeddedWorkerTestHelper {
   MessageReceiver()
       : EmbeddedWorkerTestHelper(kRenderProcessId),
         current_embedded_worker_id_(0) {}
-  virtual ~MessageReceiver() {}
+  ~MessageReceiver() override {}
 
-  virtual bool OnMessageToWorker(int thread_id,
-                                 int embedded_worker_id,
-                                 const IPC::Message& message) OVERRIDE {
+  bool OnMessageToWorker(int thread_id,
+                         int embedded_worker_id,
+                         const IPC::Message& message) override {
     if (EmbeddedWorkerTestHelper::OnMessageToWorker(
             thread_id, embedded_worker_id, message)) {
       return true;
@@ -85,13 +85,11 @@ class MessageReceiverFromWorker : public EmbeddedWorkerInstance::Listener {
       : instance_(instance) {
     instance_->AddListener(this);
   }
-  virtual ~MessageReceiverFromWorker() {
-    instance_->RemoveListener(this);
-  }
+  ~MessageReceiverFromWorker() override { instance_->RemoveListener(this); }
 
-  virtual void OnStarted() OVERRIDE { NOTREACHED(); }
-  virtual void OnStopped() OVERRIDE { NOTREACHED(); }
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+  void OnStarted() override { NOTREACHED(); }
+  void OnStopped() override { NOTREACHED(); }
+  bool OnMessageReceived(const IPC::Message& message) override {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(MessageReceiverFromWorker, message)
       IPC_MESSAGE_HANDLER(TestMsg_MessageFromWorker, OnMessageFromWorker)
@@ -116,8 +114,8 @@ class ServiceWorkerVersionTest : public testing::Test {
   ServiceWorkerVersionTest()
       : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
 
-  virtual void SetUp() OVERRIDE {
-    helper_.reset(new MessageReceiver());
+  void SetUp() override {
+    helper_ = GetMessageReceiver();
 
     pattern_ = GURL("http://www.example.com/");
     registration_ = new ServiceWorkerRegistration(
@@ -136,7 +134,11 @@ class ServiceWorkerVersionTest : public testing::Test {
         ->PatternHasProcessToRun(pattern_));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual scoped_ptr<MessageReceiver> GetMessageReceiver() {
+    return make_scoped_ptr(new MessageReceiver());
+  }
+
+  void TearDown() override {
     version_ = 0;
     registration_ = 0;
     helper_.reset();
@@ -150,6 +152,37 @@ class ServiceWorkerVersionTest : public testing::Test {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerVersionTest);
+};
+
+class MessageReceiverDisallowStart : public MessageReceiver {
+ public:
+  MessageReceiverDisallowStart()
+      : MessageReceiver() {}
+  ~MessageReceiverDisallowStart() override {}
+
+  void OnStartWorker(int embedded_worker_id,
+                     int64 service_worker_version_id,
+                     const GURL& scope,
+                     const GURL& script_url,
+                     bool pause_after_download) override {
+    // Do nothing.
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MessageReceiverDisallowStart);
+};
+
+class ServiceWorkerFailToStartTest : public ServiceWorkerVersionTest {
+ protected:
+  ServiceWorkerFailToStartTest()
+      : ServiceWorkerVersionTest() {}
+
+  virtual scoped_ptr<MessageReceiver> GetMessageReceiver() override {
+    return make_scoped_ptr(new MessageReceiverDisallowStart());
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerFailToStartTest);
 };
 
 TEST_F(ServiceWorkerVersionTest, ConcurrentStartAndStop) {
@@ -367,6 +400,56 @@ TEST_F(ServiceWorkerVersionTest, ScheduleStopWorker) {
   // The timer should be running if the controllee is removed.
   version_->RemoveControllee(host.get());
   EXPECT_TRUE(version_->stop_worker_timer_.IsRunning());
+}
+
+TEST_F(ServiceWorkerVersionTest, ListenerAvailability) {
+  // Initially the worker is not running. There should be no cache_listener_.
+  EXPECT_FALSE(version_->cache_listener_.get());
+
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+  version_->StartWorker(
+      CreateReceiverOnCurrentThread(&status));
+  base::RunLoop().RunUntilIdle();
+
+  // A new cache listener should be available once the worker starts.
+  EXPECT_TRUE(version_->cache_listener_.get());
+
+  version_->StopWorker(
+      CreateReceiverOnCurrentThread(&status));
+  base::RunLoop().RunUntilIdle();
+
+  // Should be destroyed when the worker stops.
+  EXPECT_FALSE(version_->cache_listener_.get());
+
+  version_->StartWorker(
+      CreateReceiverOnCurrentThread(&status));
+  base::RunLoop().RunUntilIdle();
+
+  // Recreated when the worker starts again.
+  EXPECT_TRUE(version_->cache_listener_.get());
+}
+
+TEST_F(ServiceWorkerFailToStartTest, RendererCrash) {
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_NETWORK;  // dummy value
+  version_->StartWorker(
+      CreateReceiverOnCurrentThread(&status));
+  base::RunLoop().RunUntilIdle();
+
+  // Callback has not completed yet.
+  EXPECT_EQ(SERVICE_WORKER_ERROR_NETWORK, status);
+  EXPECT_EQ(ServiceWorkerVersion::STARTING, version_->running_status());
+
+  // Simulate renderer crash: do what
+  // ServiceWorkerDispatcherHost::OnFilterRemoved does.
+  int process_id = helper_->mock_render_process_id();
+  helper_->context()->RemoveAllProviderHostsForProcess(process_id);
+  helper_->context()->embedded_worker_registry()->RemoveChildProcessSender(
+      process_id);
+  base::RunLoop().RunUntilIdle();
+
+  // Callback completed.
+  EXPECT_EQ(SERVICE_WORKER_ERROR_START_WORKER_FAILED, status);
+  EXPECT_EQ(ServiceWorkerVersion::STOPPED, version_->running_status());
 }
 
 }  // namespace content

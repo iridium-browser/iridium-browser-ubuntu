@@ -28,21 +28,21 @@ class BrowserRootView : public views::internal::RootView {
   BrowserRootView(BrowserView* browser_view, views::Widget* widget);
 
   // Overridden from views::View:
-  virtual bool GetDropFormats(
+  bool GetDropFormats(
       int* formats,
-      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
-  virtual bool AreDropTypesRequired() OVERRIDE;
-  virtual bool CanDrop(const ui::OSExchangeData& data) OVERRIDE;
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual bool OnMouseWheel(const ui::MouseWheelEvent& event) OVERRIDE;
+      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) override;
+  bool AreDropTypesRequired() override;
+  bool CanDrop(const ui::OSExchangeData& data) override;
+  void OnDragEntered(const ui::DropTargetEvent& event) override;
+  int OnDragUpdated(const ui::DropTargetEvent& event) override;
+  void OnDragExited() override;
+  int OnPerformDrop(const ui::DropTargetEvent& event) override;
+  const char* GetClassName() const override;
+  bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
 
  private:
   // ui::EventProcessor:
-  virtual ui::EventDispatchDetails OnEventFromSource(ui::Event* event) OVERRIDE;
+  void OnEventProcessingStarted(ui::Event* event) override;
 
   // Returns true if the event should be forwarded to the tabstrip.
   bool ShouldForwardToTabStrip(const ui::DropTargetEvent& event);

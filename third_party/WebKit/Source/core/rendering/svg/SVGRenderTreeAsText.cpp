@@ -42,7 +42,6 @@
 #include "core/rendering/svg/RenderSVGResourceMasker.h"
 #include "core/rendering/svg/RenderSVGResourcePattern.h"
 #include "core/rendering/svg/RenderSVGResourceRadialGradient.h"
-#include "core/rendering/svg/RenderSVGResourceSolidColor.h"
 #include "core/rendering/svg/RenderSVGRoot.h"
 #include "core/rendering/svg/RenderSVGShape.h"
 #include "core/rendering/svg/RenderSVGText.h"
@@ -246,23 +245,23 @@ static TextStream& operator<<(TextStream& ts, const SVGSpreadMethodType& type)
     return ts;
 }
 
-static void writeSVGPaintingResource(TextStream& ts, RenderSVGResource* resource)
+static void writeSVGPaintingResource(TextStream& ts, const SVGPaintDescription& paintDescription)
 {
-    if (resource->resourceType() == SolidColorResourceType) {
-        ts << "[type=SOLID] [color=" << static_cast<RenderSVGResourceSolidColor*>(resource)->color() << "]";
+    ASSERT(paintDescription.isValid);
+    if (!paintDescription.resource) {
+        ts << "[type=SOLID] [color=" << paintDescription.color << "]";
         return;
     }
 
-    // All other resources derive from RenderSVGResourceContainer
-    RenderSVGResourceContainer* container = static_cast<RenderSVGResourceContainer*>(resource);
-    SVGElement* element = container->element();
+    RenderSVGResourcePaintServer* paintServerContainer = paintDescription.resource;
+    SVGElement* element = paintServerContainer->element();
     ASSERT(element);
 
-    if (resource->resourceType() == PatternResourceType)
+    if (paintServerContainer->resourceType() == PatternResourceType)
         ts << "[type=PATTERN]";
-    else if (resource->resourceType() == LinearGradientResourceType)
+    else if (paintServerContainer->resourceType() == LinearGradientResourceType)
         ts << "[type=LINEAR-GRADIENT]";
-    else if (resource->resourceType() == RadialGradientResourceType)
+    else if (paintServerContainer->resourceType() == RadialGradientResourceType)
         ts << "[type=RADIAL-GRADIENT]";
 
     ts << " [id=\"" << element->getIdAttribute() << "\"]";
@@ -281,11 +280,11 @@ static void writeStyle(TextStream& ts, const RenderObject& object)
         const RenderSVGShape& shape = static_cast<const RenderSVGShape&>(object);
         ASSERT(shape.element());
 
-        bool hasFallback;
-        if (RenderSVGResource* strokePaintingResource = RenderSVGResource::requestPaintingResource(ApplyToStrokeMode, const_cast<RenderSVGShape*>(&shape), shape.style(), hasFallback)) {
+        SVGPaintDescription strokePaintDescription = RenderSVGResourcePaintServer::requestPaintDescription(shape, shape.style(), ApplyToStrokeMode);
+        if (strokePaintDescription.isValid) {
             TextStreamSeparator s(" ");
             ts << " [stroke={" << s;
-            writeSVGPaintingResource(ts, strokePaintingResource);
+            writeSVGPaintingResource(ts, strokePaintDescription);
 
             SVGLengthContext lengthContext(shape.element());
             double dashOffset = svgStyle.strokeDashOffset()->value(lengthContext);
@@ -310,10 +309,11 @@ static void writeStyle(TextStream& ts, const RenderObject& object)
             ts << "}]";
         }
 
-        if (RenderSVGResource* fillPaintingResource = RenderSVGResource::requestPaintingResource(ApplyToFillMode, const_cast<RenderSVGShape*>(&shape), shape.style(), hasFallback)) {
+        SVGPaintDescription fillPaintDescription = RenderSVGResourcePaintServer::requestPaintDescription(shape, shape.style(), ApplyToFillMode);
+        if (fillPaintDescription.isValid) {
             TextStreamSeparator s(" ");
             ts << " [fill={" << s;
-            writeSVGPaintingResource(ts, fillPaintingResource);
+            writeSVGPaintingResource(ts, fillPaintDescription);
 
             writeIfNotDefault(ts, "opacity", svgStyle.fillOpacity(), 1.0f);
             writeIfNotDefault(ts, "fill rule", svgStyle.fillRule(), RULE_NONZERO);

@@ -25,7 +25,7 @@
 class ToolbarViewInteractiveUITest : public ExtensionBrowserTest {
  public:
   ToolbarViewInteractiveUITest();
-  virtual ~ToolbarViewInteractiveUITest();
+  ~ToolbarViewInteractiveUITest() override;
 
  protected:
   ToolbarView* toolbar_view() { return toolbar_view_; }
@@ -46,9 +46,9 @@ class ToolbarViewInteractiveUITest : public ExtensionBrowserTest {
   void FinishDragAndDrop(const base::Closure& quit_closure);
 
   // InProcessBrowserTest:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
 
   ToolbarView* toolbar_view_;
 
@@ -152,7 +152,7 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewInteractiveUITest,
 
   ASSERT_EQ(1u, browser_actions()->VisibleBrowserActions());
 
-  BrowserActionView* view = browser_actions()->GetBrowserActionViewAt(0);
+  ToolbarActionView* view = browser_actions()->GetToolbarActionViewAt(0);
   ASSERT_TRUE(view);
 
   gfx::Point browser_action_view_loc = test::GetCenterInScreenCoordinates(view);

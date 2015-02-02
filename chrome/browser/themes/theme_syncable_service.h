@@ -25,7 +25,7 @@ class ThemeSyncableService : public syncer::SyncableService {
  public:
   ThemeSyncableService(Profile* profile,  // Same profile used by theme_service.
                        ThemeService* theme_service);
-  virtual ~ThemeSyncableService();
+  ~ThemeSyncableService() override;
 
   static syncer::ModelType model_type() { return syncer::THEMES; }
 
@@ -33,17 +33,16 @@ class ThemeSyncableService : public syncer::SyncableService {
   void OnThemeChange();
 
   // syncer::SyncableService implementation.
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
   // Client tag and tile of theme node in sync.
   static const char kCurrentThemeClientTag[];

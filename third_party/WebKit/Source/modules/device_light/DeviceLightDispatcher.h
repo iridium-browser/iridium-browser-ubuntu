@@ -6,30 +6,31 @@
 #define DeviceLightDispatcher_h
 
 #include "core/frame/PlatformEventDispatcher.h"
+#include "platform/heap/Handle.h"
 #include "public/platform/WebDeviceLightListener.h"
-#include "wtf/RefPtr.h"
 
 namespace blink {
 
-class DeviceLightController;
-
 // This class listens to device light data and notifies all registered controllers.
-class DeviceLightDispatcher FINAL : public PlatformEventDispatcher, public WebDeviceLightListener {
+class DeviceLightDispatcher final : public GarbageCollectedFinalized<DeviceLightDispatcher>, public PlatformEventDispatcher, public WebDeviceLightListener {
+    USING_GARBAGE_COLLECTED_MIXIN(DeviceLightDispatcher);
 public:
     static DeviceLightDispatcher& instance();
+    virtual ~DeviceLightDispatcher();
 
     double latestDeviceLightData() const;
 
     // Inherited from WebDeviceLightListener.
-    virtual void didChangeDeviceLight(double) OVERRIDE;
+    virtual void didChangeDeviceLight(double) override;
+
+    virtual void trace(Visitor*) override;
 
 private:
     DeviceLightDispatcher();
-    virtual ~DeviceLightDispatcher();
 
     // Inherited from PlatformEventDispatcher.
-    virtual void startListening() OVERRIDE;
-    virtual void stopListening() OVERRIDE;
+    virtual void startListening() override;
+    virtual void stopListening() override;
 
     double m_lastDeviceLightData;
 };

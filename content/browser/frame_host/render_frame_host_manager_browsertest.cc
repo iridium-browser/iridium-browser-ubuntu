@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
-#include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -253,7 +252,8 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
 }
 
 // Test for crbug.com/24447.  Following a cross-site link with just
-// target=_blank should not create a new SiteInstance.
+// target=_blank should not create a new SiteInstance, unless we
+// are running in --site-per-process mode.
 IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
                        DontSwapProcessWithOnlyTargetBlank) {
   StartServer();
@@ -288,10 +288,14 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   EXPECT_EQ("/files/title2.html",
             new_shell->web_contents()->GetLastCommittedURL().path());
 
-  // Should have the same SiteInstance.
+  // Should have the same SiteInstance unless we're in site-per-process mode.
   scoped_refptr<SiteInstance> blank_site_instance(
       new_shell->web_contents()->GetSiteInstance());
-  EXPECT_EQ(orig_site_instance, blank_site_instance);
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSitePerProcess))
+    EXPECT_EQ(orig_site_instance, blank_site_instance);
+  else
+    EXPECT_NE(orig_site_instance, blank_site_instance);
 }
 
 // Test for crbug.com/24447.  Following a cross-site link with rel=noreferrer
@@ -329,10 +333,14 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   EXPECT_EQ("/files/title2.html",
             shell()->web_contents()->GetLastCommittedURL().path());
 
-  // Should have the same SiteInstance.
+  // Should have the same SiteInstance unless we're in site-per-process mode.
   scoped_refptr<SiteInstance> noref_site_instance(
       shell()->web_contents()->GetSiteInstance());
-  EXPECT_EQ(orig_site_instance, noref_site_instance);
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSitePerProcess))
+    EXPECT_EQ(orig_site_instance, noref_site_instance);
+  else
+    EXPECT_NE(orig_site_instance, noref_site_instance);
 }
 
 // Test for crbug.com/116192.  Targeted links should still work after the
@@ -1146,7 +1154,7 @@ class RenderViewHostDestructionObserver : public WebContentsObserver {
  public:
   explicit RenderViewHostDestructionObserver(WebContents* web_contents)
       : WebContentsObserver(web_contents) {}
-  virtual ~RenderViewHostDestructionObserver() {}
+  ~RenderViewHostDestructionObserver() override {}
   void EnsureRVHGetsDestructed(RenderViewHost* rvh) {
     watched_render_view_hosts_.insert(rvh);
   }
@@ -1156,7 +1164,7 @@ class RenderViewHostDestructionObserver : public WebContentsObserver {
 
  private:
   // WebContentsObserver implementation:
-  virtual void RenderViewDeleted(RenderViewHost* rvh) OVERRIDE {
+  void RenderViewDeleted(RenderViewHost* rvh) override {
     watched_render_view_hosts_.erase(rvh);
   }
 
@@ -1357,10 +1365,18 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
   crash_observer2.Wait();
 }
 
+// The test fails with Android ASAN with changes in v8 that seem unrelated.
+//   See http://crbug.com/428329.
+#if defined(OS_ANDROID) && defined(THREAD_SANITIZER)
+#define MAYBE_ClearPendingWebUIOnCommit DISABLED_ClearPendingWebUIOnCommit
+#else
+#define MAYBE_ClearPendingWebUIOnCommit ClearPendingWebUIOnCommit
+#endif
 // Ensure that pending_and_current_web_ui_ is cleared when a URL commits.
 // Otherwise it might get picked up by InitRenderView when granting bindings
 // to other RenderViewHosts.  See http://crbug.com/330811.
-IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, ClearPendingWebUIOnCommit) {
+IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
+                       MAYBE_ClearPendingWebUIOnCommit) {
   // Visit a WebUI page with bindings.
   GURL webui_url(GURL(std::string(kChromeUIScheme) + "://" +
                       std::string(kChromeUIGpuHost)));
@@ -1385,7 +1401,7 @@ class RFHMProcessPerTabTest : public RenderFrameHostManagerTest {
  public:
   RFHMProcessPerTabTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kProcessPerTab);
   }
 };
@@ -1466,6 +1482,29 @@ IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest, WebUIGetsBindings) {
   EXPECT_EQ(new_web_contents->GetSiteInstance(), site_instance1);
   EXPECT_EQ(BINDINGS_POLICY_WEB_UI,
       new_web_contents->GetRenderViewHost()->GetEnabledBindings());
+}
+
+// crbug.com/424526
+// The test loads a WebUI page in rocess-per-tab mode, then navigates to a blank
+// page and then to a regular page. The bug reproduces if blank page is visited
+// in between WebUI and regular page.
+IN_PROC_BROWSER_TEST_F(RenderFrameHostManagerTest,
+                       ForceSwapAfterWebUIBindings) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kProcessPerTab);
+  ASSERT_TRUE(test_server()->Start());
+
+  const GURL web_ui_url(std::string(kChromeUIScheme) + "://" +
+                        std::string(kChromeUIGpuHost));
+  NavigateToURL(shell(), web_ui_url);
+  EXPECT_TRUE(ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
+      shell()->web_contents()->GetRenderProcessHost()->GetID()));
+
+  NavigateToURL(shell(), GURL(url::kAboutBlankURL));
+
+  GURL regular_page_url(test_server()->GetURL("files/title2.html"));
+  NavigateToURL(shell(), regular_page_url);
+  EXPECT_FALSE(ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
+      shell()->web_contents()->GetRenderProcessHost()->GetID()));
 }
 
 }  // namespace content

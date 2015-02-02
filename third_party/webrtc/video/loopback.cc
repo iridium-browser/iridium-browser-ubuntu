@@ -22,13 +22,18 @@
 #include "webrtc/test/direct_transport.h"
 #include "webrtc/test/encoder_settings.h"
 #include "webrtc/test/fake_encoder.h"
+#include "webrtc/test/field_trial.h"
 #include "webrtc/test/run_loop.h"
 #include "webrtc/test/run_test.h"
+#include "webrtc/test/testsupport/trace_to_stderr.h"
 #include "webrtc/test/video_capturer.h"
 #include "webrtc/test/video_renderer.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
+
+static const int kAbsSendTimeExtensionId = 7;
+
 namespace flags {
 
 DEFINE_int32(width, 640, "Video width.");
@@ -82,6 +87,16 @@ DEFINE_int32(std_propagation_delay_ms,
 int StdPropagationDelayMs() {
   return static_cast<int>(FLAGS_std_propagation_delay_ms);
 }
+
+DEFINE_bool(logs, false, "print logs to stderr");
+
+DEFINE_string(
+    force_fieldtrials,
+    "",
+    "Field trials control experimental feature code which can be forced. "
+    "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enable/"
+    " will assign the group Enable to field trial WebRTC-FooFeature. Multiple "
+    "trials are separated by \"/\"");
 }  // namespace flags
 
 static const uint32_t kSendSsrc = 0x654321;
@@ -91,6 +106,10 @@ static const uint32_t kReceiverLocalSsrc = 0x123456;
 static const uint8_t kRtxPayloadType = 96;
 
 void Loopback() {
+  scoped_ptr<test::TraceToStderr> trace_to_stderr_;
+  if (webrtc::flags::FLAGS_logs)
+    trace_to_stderr_.reset(new test::TraceToStderr);
+
   scoped_ptr<test::VideoRenderer> local_preview(test::VideoRenderer::Create(
       "Local Preview", flags::Width(), flags::Height()));
   scoped_ptr<test::VideoRenderer> loopback_video(test::VideoRenderer::Create(
@@ -104,7 +123,7 @@ void Loopback() {
   pipe_config.delay_standard_deviation_ms = flags::StdPropagationDelayMs();
   test::DirectTransport transport(pipe_config);
   Call::Config call_config(&transport);
-  call_config.start_bitrate_bps =
+  call_config.stream_start_bitrate_bps =
       static_cast<int>(flags::StartBitrate()) * 1000;
   scoped_ptr<Call> call(Call::Create(call_config));
 
@@ -116,11 +135,15 @@ void Loopback() {
   send_config.rtp.rtx.ssrcs.push_back(kSendRtxSsrc);
   send_config.rtp.rtx.payload_type = kRtxPayloadType;
   send_config.rtp.nack.rtp_history_ms = 1000;
+  send_config.rtp.extensions.push_back(
+      RtpExtension(RtpExtension::kAbsSendTime, kAbsSendTimeExtensionId));
 
   send_config.local_renderer = local_preview.get();
   scoped_ptr<VideoEncoder> encoder;
   if (flags::Codec() == "VP8") {
     encoder.reset(VideoEncoder::Create(VideoEncoder::kVp8));
+  } else if (flags::Codec() == "VP9") {
+    encoder.reset(VideoEncoder::Create(VideoEncoder::kVp9));
   } else {
     // Codec not supported.
     assert(false && "Codec not supported!");
@@ -158,10 +181,12 @@ void Loopback() {
   receive_config.rtp.nack.rtp_history_ms = 1000;
   receive_config.rtp.rtx[kRtxPayloadType].ssrc = kSendRtxSsrc;
   receive_config.rtp.rtx[kRtxPayloadType].payload_type = kRtxPayloadType;
+  receive_config.rtp.extensions.push_back(
+      RtpExtension(RtpExtension::kAbsSendTime, kAbsSendTimeExtensionId));
   receive_config.renderer = loopback_video.get();
-  VideoCodec codec =
-      test::CreateDecoderVideoCodec(send_config.encoder_settings);
-  receive_config.codecs.push_back(codec);
+  VideoReceiveStream::Decoder decoder =
+      test::CreateMatchingDecoder(send_config.encoder_settings);
+  receive_config.decoders.push_back(decoder);
 
   VideoReceiveStream* receive_stream =
       call->CreateVideoReceiveStream(receive_config);
@@ -179,6 +204,8 @@ void Loopback() {
   call->DestroyVideoReceiveStream(receive_stream);
   call->DestroyVideoSendStream(send_stream);
 
+  delete decoder.decoder;
+
   transport.StopSending();
 }
 }  // namespace webrtc
@@ -186,7 +213,8 @@ void Loopback() {
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
   google::ParseCommandLineFlags(&argc, &argv, true);
-
+  webrtc::test::InitFieldTrialsFromString(
+      webrtc::flags::FLAGS_force_fieldtrials);
   webrtc::test::RunTest(webrtc::Loopback);
   return 0;
 }

@@ -78,14 +78,14 @@ void setArityTypeError(ExceptionState& exceptionState, const char* valid, unsign
     exceptionState.throwTypeError(ExceptionMessages::invalidArity(valid, provided));
 }
 
-v8::Local<v8::Value> createMinimumArityTypeErrorForMethod(const char* method, const char* type, unsigned expected, unsigned provided, v8::Isolate* isolate)
+v8::Local<v8::Value> createMinimumArityTypeErrorForMethod(v8::Isolate* isolate, const char* method, const char* type, unsigned expected, unsigned provided)
 {
-    return V8ThrowException::createTypeError(ExceptionMessages::failedToExecute(method, type, ExceptionMessages::notEnoughArguments(expected, provided)), isolate);
+    return V8ThrowException::createTypeError(isolate, ExceptionMessages::failedToExecute(method, type, ExceptionMessages::notEnoughArguments(expected, provided)));
 }
 
-v8::Local<v8::Value> createMinimumArityTypeErrorForConstructor(const char* type, unsigned expected, unsigned provided, v8::Isolate* isolate)
+v8::Local<v8::Value> createMinimumArityTypeErrorForConstructor(v8::Isolate* isolate, const char* type, unsigned expected, unsigned provided)
 {
-    return V8ThrowException::createTypeError(ExceptionMessages::failedToConstruct(type, ExceptionMessages::notEnoughArguments(expected, provided)), isolate);
+    return V8ThrowException::createTypeError(isolate, ExceptionMessages::failedToConstruct(type, ExceptionMessages::notEnoughArguments(expected, provided)));
 }
 
 void setMinimumArityTypeError(ExceptionState& exceptionState, unsigned expected, unsigned provided)
@@ -94,21 +94,21 @@ void setMinimumArityTypeError(ExceptionState& exceptionState, unsigned expected,
 }
 
 class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
-    virtual void* Allocate(size_t size) OVERRIDE
+    virtual void* Allocate(size_t size) override
     {
         void* data;
         WTF::ArrayBufferContents::allocateMemory(size, WTF::ArrayBufferContents::ZeroInitialize, data);
         return data;
     }
 
-    virtual void* AllocateUninitialized(size_t size) OVERRIDE
+    virtual void* AllocateUninitialized(size_t size) override
     {
         void* data;
         WTF::ArrayBufferContents::allocateMemory(size, WTF::ArrayBufferContents::DontInitialize, data);
         return data;
     }
 
-    virtual void Free(void* data, size_t size) OVERRIDE
+    virtual void Free(void* data, size_t size) override
     {
         WTF::ArrayBufferContents::freeMemory(data, size);
     }
@@ -665,10 +665,9 @@ static String replaceUnmatchedSurrogates(const String& string)
     return u.toString();
 }
 
-String toScalarValueString(v8::Handle<v8::Value> value, ExceptionState& exceptionState)
+String toUSVString(v8::Handle<v8::Value> value, ExceptionState& exceptionState)
 {
-    // From the Encoding standard (with a TODO to move to Web IDL):
-    // http://encoding.spec.whatwg.org/#type-scalarvaluestring
+    // http://heycam.github.io/webidl/#es-USVString
     if (value.IsEmpty())
         return String();
 
@@ -679,14 +678,14 @@ String toScalarValueString(v8::Handle<v8::Value> value, ExceptionState& exceptio
         return String();
     }
 
-    // ScalarValueString is identical to DOMString except that "convert a
+    // USVString is identical to DOMString except that "convert a
     // DOMString to a sequence of Unicode characters" is used subsequently
     // when converting to an IDL value
     String x = toCoreString(stringObject);
     return replaceUnmatchedSurrogates(x);
 }
 
-PassRefPtrWillBeRawPtr<XPathNSResolver> toXPathNSResolver(v8::Handle<v8::Value> value, v8::Isolate* isolate)
+PassRefPtrWillBeRawPtr<XPathNSResolver> toXPathNSResolver(v8::Isolate* isolate, v8::Handle<v8::Value> value)
 {
     RefPtrWillBeRawPtr<XPathNSResolver> resolver = nullptr;
     if (V8XPathNSResolver::hasInstance(value, isolate))
@@ -826,7 +825,7 @@ v8::Handle<v8::Function> getBoundFunction(v8::Handle<v8::Function> function)
     return boundFunction->IsFunction() ? v8::Handle<v8::Function>::Cast(boundFunction) : function;
 }
 
-void addHiddenValueToArray(v8::Handle<v8::Object> object, v8::Local<v8::Value> value, int arrayIndex, v8::Isolate* isolate)
+void addHiddenValueToArray(v8::Isolate* isolate, v8::Handle<v8::Object> object, v8::Local<v8::Value> value, int arrayIndex)
 {
     v8::Local<v8::Value> arrayValue = object->GetInternalField(arrayIndex);
     if (arrayValue->IsNull() || arrayValue->IsUndefined()) {
@@ -838,7 +837,7 @@ void addHiddenValueToArray(v8::Handle<v8::Object> object, v8::Local<v8::Value> v
     array->Set(v8::Integer::New(isolate, array->Length()), value);
 }
 
-void removeHiddenValueFromArray(v8::Handle<v8::Object> object, v8::Local<v8::Value> value, int arrayIndex, v8::Isolate* isolate)
+void removeHiddenValueFromArray(v8::Isolate* isolate, v8::Handle<v8::Object> object, v8::Local<v8::Value> value, int arrayIndex)
 {
     v8::Local<v8::Value> arrayValue = object->GetInternalField(arrayIndex);
     if (!arrayValue->IsArray())
@@ -853,19 +852,19 @@ void removeHiddenValueFromArray(v8::Handle<v8::Object> object, v8::Local<v8::Val
     }
 }
 
-void moveEventListenerToNewWrapper(v8::Handle<v8::Object> object, EventListener* oldValue, v8::Local<v8::Value> newValue, int arrayIndex, v8::Isolate* isolate)
+void moveEventListenerToNewWrapper(v8::Isolate* isolate, v8::Handle<v8::Object> object, EventListener* oldValue, v8::Local<v8::Value> newValue, int arrayIndex)
 {
     if (oldValue) {
         V8AbstractEventListener* oldListener = V8AbstractEventListener::cast(oldValue);
         if (oldListener) {
             v8::Local<v8::Object> oldListenerObject = oldListener->getExistingListenerObject();
             if (!oldListenerObject.IsEmpty())
-                removeHiddenValueFromArray(object, oldListenerObject, arrayIndex, isolate);
+                removeHiddenValueFromArray(isolate, object, oldListenerObject, arrayIndex);
         }
     }
     // Non-callable input is treated as null and ignored
     if (newValue->IsFunction())
-        addHiddenValueToArray(object, newValue, arrayIndex, isolate);
+        addHiddenValueToArray(isolate, object, newValue, arrayIndex);
 }
 
 v8::Isolate* toIsolate(ExecutionContext* context)
@@ -975,7 +974,7 @@ void GetDevToolsFunctionInfo(v8::Handle<v8::Function> function, v8::Isolate* iso
     }
 }
 
-PassRefPtr<TraceEvent::ConvertableToTraceFormat> devToolsTraceEventData(ExecutionContext* context, v8::Handle<v8::Function> function, v8::Isolate* isolate)
+PassRefPtr<TraceEvent::ConvertableToTraceFormat> devToolsTraceEventData(v8::Isolate* isolate, ExecutionContext* context, v8::Handle<v8::Function> function)
 {
     int scriptId = 0;
     String resourceName;

@@ -9,7 +9,6 @@
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
@@ -17,6 +16,7 @@
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_media_menu_model.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -184,9 +184,9 @@ class ContentSettingBubbleWebContentsObserverBridge
 
  protected:
   // WebContentsObserver:
-  virtual void DidNavigateMainFrame(
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE {
+      const content::FrameNavigateParams& params) override {
     // Content settings are based on the main frame, so if it switches then
     // close up shop.
     [controller_ closeBubble:nil];
@@ -383,12 +383,9 @@ class ContentSettingBubbleWebContentsObserverBridge
 }
 
 - (void)initializeBlockedPluginsList {
-  int delta = NSMinY([titleLabel_ frame]) -
-              NSMinY([blockedResourcesField_ frame]);
-  [blockedResourcesField_ removeFromSuperview];
-  NSRect frame = [[self window] frame];
-  frame.size.height -= delta;
-  [[self window] setFrame:frame display:NO];
+  NSString* label = base::SysUTF16ToNSString(
+      contentSettingBubbleModel_->bubble_content().plugin_names);
+  [blockedResourcesField_ setStringValue:label];
 }
 
 - (void)initializePopupList {

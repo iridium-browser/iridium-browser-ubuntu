@@ -9,15 +9,29 @@
 #include <string>
 
 #include "base/memory/scoped_vector.h"
+#include "components/gcm_driver/gcm_client.h"
+#include "components/gcm_driver/gcm_connection_observer.h"
 #include "google_apis/gaia/account_tracker.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 
+namespace base {
+class Time;
+}
+
 namespace gcm {
+
+class GCMDriver;
 
 // Class for reporting back which accounts are signed into. It is only meant to
 // be used when the user is signed into sync.
+//
+// This class makes a check for tokens periodically, to make sure the user is
+// still logged into the profile, so that in the case that the user is not, we
+// can immediately report that to the GCM and stop messages addressed to that
+// user from ever reaching Chrome.
 class GCMAccountTracker : public gaia::AccountTracker::Observer,
-                          public OAuth2TokenService::Consumer {
+                          public OAuth2TokenService::Consumer,
+                          public GCMConnectionObserver {
  public:
   // State of the account.
   // Allowed transitions:
@@ -45,24 +59,17 @@ class GCMAccountTracker : public gaia::AccountTracker::Observer,
     std::string email;
     // OAuth2 access token, when |state| is TOKEN_PRESENT.
     std::string access_token;
+    // Expiration time of the access tokens.
+    base::Time expiration_time;
     // Status of the token fetching.
     AccountState state;
   };
 
-  // Callback for the GetAccountsForCheckin call. |account_tokens| maps email
-  // addresses to OAuth2 access tokens.
-  typedef base::Callback<void(const std::map<std::string, std::string>&
-                                  account_tokens)> UpdateAccountsCallback;
-
-  // Creates an instance of GCMAccountTracker. |account_tracker| is used to
-  // deliver information about the account, while |callback| will be called
-  // once all of the accounts have been fetched a necessary OAuth2 token, as
-  // many times as the list of accounts is stable, meaning that all accounts
-  // are known and there is no related activity in progress for them, like
-  // fetching OAuth2 tokens.
+  // |account_tracker| is used to deliver information about the accounts present
+  // in the browser context to |driver|.
   GCMAccountTracker(scoped_ptr<gaia::AccountTracker> account_tracker,
-                    const UpdateAccountsCallback& callback);
-  virtual ~GCMAccountTracker();
+                    GCMDriver* driver);
+  ~GCMAccountTracker() override;
 
   // Shuts down the tracker ensuring a proper clean up. After Shutdown() is
   // called Start() and Stop() should no longer be used. Must be called before
@@ -71,30 +78,52 @@ class GCMAccountTracker : public gaia::AccountTracker::Observer,
 
   // Starts tracking accounts.
   void Start();
-  // Stops tracking accounts. Cancels all of the pending token requests.
-  void Stop();
+
+  // Gets the number of pending token requests. Only used for testing.
+  size_t get_pending_token_request_count() const {
+    return pending_token_requests_.size();
+  }
 
  private:
+  friend class GCMAccountTrackerTest;
+
   // Maps account keys to account states. Keyed by account_ids as used by
   // OAuth2TokenService.
   typedef std::map<std::string, AccountInfo> AccountInfos;
 
   // AccountTracker::Observer overrides.
-  virtual void OnAccountAdded(const gaia::AccountIds& ids) OVERRIDE;
-  virtual void OnAccountRemoved(const gaia::AccountIds& ids) OVERRIDE;
-  virtual void OnAccountSignInChanged(const gaia::AccountIds& ids,
-                                      bool is_signed_in) OVERRIDE;
+  void OnAccountAdded(const gaia::AccountIds& ids) override;
+  void OnAccountRemoved(const gaia::AccountIds& ids) override;
+  void OnAccountSignInChanged(const gaia::AccountIds& ids,
+                              bool is_signed_in) override;
 
   // OAuth2TokenService::Consumer overrides.
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
+  // GCMConnectionObserver overrides.
+  void OnConnected(const net::IPEndPoint& ip_endpoint) override;
+  void OnDisconnected() override;
+
+  // Schedules token reporting.
+  void ScheduleReportTokens();
   // Report the list of accounts with OAuth2 tokens back using the |callback_|
   // function. If there are token requests in progress, do nothing.
-  void CompleteCollectingTokens();
+  void ReportTokens();
+  // Verify that all of the tokens are ready to be passed down to the GCM
+  // Driver, e.g. none of them has expired or is missing. Returns true if not
+  // all tokens are valid and a fetching yet more tokens is required.
+  void SanitizeTokens();
+  // Indicates whether token reporting is required, either because it is due, or
+  // some of the accounts were removed.
+  bool IsTokenReportingRequired() const;
+  // Indicates whether there are tokens that still need fetching.
+  bool IsTokenFetchingRequired() const;
+  // Gets the time until next token reporting.
+  base::TimeDelta GetTimeToNextTokenReporting() const;
   // Deletes a token request. Should be called from OnGetTokenSuccess(..) or
   // OnGetTokenFailure(..).
   void DeleteTokenRequest(const OAuth2TokenService::Request* request);
@@ -113,9 +142,8 @@ class GCMAccountTracker : public gaia::AccountTracker::Observer,
   // Account tracker.
   scoped_ptr<gaia::AccountTracker> account_tracker_;
 
-  // Callback to be called after all of the account and OAuth2 tokens are
-  // collected.
-  UpdateAccountsCallback callback_;
+  // GCM Driver. Not owned.
+  GCMDriver* driver_;
 
   // State of the account.
   AccountInfos account_infos_;
@@ -124,6 +152,10 @@ class GCMAccountTracker : public gaia::AccountTracker::Observer,
   bool shutdown_called_;
 
   ScopedVector<OAuth2TokenService::Request> pending_token_requests_;
+
+  // Creates weak pointers used to postpone reporting tokens. See
+  // ScheduleReportTokens.
+  base::WeakPtrFactory<GCMAccountTracker> reporting_weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GCMAccountTracker);
 };

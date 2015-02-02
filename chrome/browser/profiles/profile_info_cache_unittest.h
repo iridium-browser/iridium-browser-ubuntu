@@ -24,19 +24,16 @@ class ProfileNameVerifierObserver : public ProfileInfoCacheObserver {
  public:
   explicit ProfileNameVerifierObserver(
       TestingProfileManager* testing_profile_manager);
-  virtual ~ProfileNameVerifierObserver();
+  ~ProfileNameVerifierObserver() override;
 
   // ProfileInfoCacheObserver overrides:
-  virtual void OnProfileAdded(const base::FilePath& profile_path) OVERRIDE;
-  virtual void OnProfileWillBeRemoved(
-      const base::FilePath& profile_path) OVERRIDE;
-  virtual void OnProfileWasRemoved(
-      const base::FilePath& profile_path,
-      const base::string16& profile_name) OVERRIDE;
-  virtual void OnProfileNameChanged(
-      const base::FilePath& profile_path,
-      const base::string16& old_profile_name) OVERRIDE;
-  virtual void OnProfileAvatarChanged(const base::FilePath& profile_path) OVERRIDE;
+  void OnProfileAdded(const base::FilePath& profile_path) override;
+  void OnProfileWillBeRemoved(const base::FilePath& profile_path) override;
+  void OnProfileWasRemoved(const base::FilePath& profile_path,
+                           const base::string16& profile_name) override;
+  void OnProfileNameChanged(const base::FilePath& profile_path,
+                            const base::string16& old_profile_name) override;
+  void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
 
  private:
   ProfileInfoCache* GetCache();
@@ -48,10 +45,10 @@ class ProfileNameVerifierObserver : public ProfileInfoCacheObserver {
 class ProfileInfoCacheTest : public testing::Test {
  protected:
   ProfileInfoCacheTest();
-  virtual ~ProfileInfoCacheTest();
+  ~ProfileInfoCacheTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   ProfileInfoCache* GetCache();
   base::FilePath GetProfilePath(const std::string& base_name);

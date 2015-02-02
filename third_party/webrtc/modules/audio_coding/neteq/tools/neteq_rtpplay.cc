@@ -12,13 +12,17 @@
 // several classes.
 
 #include <assert.h>
+#include <errno.h>
+#include <limits.h>  // For ULONG_MAX returned by strtoul.
 #include <stdio.h>
+#include <stdlib.h>  // For strtoul.
 
 #include <algorithm>
 #include <iostream>
 #include <string>
 
 #include "google/gflags.h"
+#include "webrtc/base/checks.h"
 #include "webrtc/modules/audio_coding/codecs/pcm16b/include/pcm16b.h"
 #include "webrtc/modules/audio_coding/neteq/interface/neteq.h"
 #include "webrtc/modules/audio_coding/neteq/tools/input_audio_file.h"
@@ -33,12 +37,43 @@
 using webrtc::NetEq;
 using webrtc::WebRtcRTPHeader;
 
+namespace {
+// Parses the input string for a valid SSRC (at the start of the string). If a
+// valid SSRC is found, it is written to the output variable |ssrc|, and true is
+// returned. Otherwise, false is returned.
+bool ParseSsrc(const std::string& str, uint32_t* ssrc) {
+  if (str.empty())
+    return true;
+  int base = 10;
+  // Look for "0x" or "0X" at the start and change base to 16 if found.
+  if ((str.compare(0, 2, "0x") == 0) || (str.compare(0, 2, "0X") == 0))
+    base = 16;
+  errno = 0;
+  char* end_ptr;
+  unsigned long value = strtoul(str.c_str(), &end_ptr, base);
+  if (value == ULONG_MAX && errno == ERANGE)
+    return false;  // Value out of range for unsigned long.
+  if (sizeof(unsigned long) > sizeof(uint32_t) && value > 0xFFFFFFFF)
+    return false;  // Value out of range for uint32_t.
+  if (end_ptr - str.c_str() < static_cast<ptrdiff_t>(str.length()))
+    return false;  // Part of the string was not parsed.
+  *ssrc = static_cast<uint32_t>(value);
+  return true;
+}
+
+}  // namespace
+
 // Flag validators.
 static bool ValidatePayloadType(const char* flagname, int32_t value) {
   if (value >= 0 && value <= 127)  // Value is ok.
     return true;
   printf("Invalid value for --%s: %d\n", flagname, static_cast<int>(value));
   return false;
+}
+
+static bool ValidateSsrcValue(const char* flagname, const std::string& str) {
+  uint32_t dummy_ssrc;
+  return ParseSsrc(str, &dummy_ssrc);
 }
 
 // Define command line flags.
@@ -57,6 +92,9 @@ static const bool isac_dummy =
 DEFINE_int32(isac_swb, 104, "RTP payload type for iSAC-swb (32 kHz)");
 static const bool isac_swb_dummy =
     google::RegisterFlagValidator(&FLAGS_isac_swb, &ValidatePayloadType);
+DEFINE_int32(opus, 111, "RTP payload type for Opus");
+static const bool opus_dummy =
+    google::RegisterFlagValidator(&FLAGS_opus, &ValidatePayloadType);
 DEFINE_int32(pcm16b, 93, "RTP payload type for PCM16b-nb (8 kHz)");
 static const bool pcm16b_dummy =
     google::RegisterFlagValidator(&FLAGS_pcm16b, &ValidatePayloadType);
@@ -94,6 +132,12 @@ DEFINE_bool(codec_map, false, "Prints the mapping between RTP payload type and "
     "codec");
 DEFINE_string(replacement_audio_file, "",
               "A PCM file that will be used to populate ""dummy"" RTP packets");
+DEFINE_string(ssrc,
+              "",
+              "Only use packets with this SSRC (decimal or hex, the latter "
+              "starting with 0x)");
+static const bool hex_ssrc_dummy =
+    google::RegisterFlagValidator(&FLAGS_ssrc, &ValidateSsrcValue);
 
 // Declaring helper functions (defined further down in this file).
 std::string CodecName(webrtc::NetEqDecoder codec);
@@ -142,6 +186,13 @@ int main(int argc, char* argv[]) {
       webrtc::test::RtpFileSource::Create(argv[1]));
   assert(file_source.get());
 
+  // Check if an SSRC value was provided.
+  if (!FLAGS_ssrc.empty()) {
+    uint32_t ssrc;
+    CHECK(ParseSsrc(FLAGS_ssrc, &ssrc)) << "Flag verification has failed.";
+    file_source->SelectSsrc(ssrc);
+  }
+
   FILE* out_file = fopen(argv[2], "wb");
   if (!out_file) {
     std::cerr << "Cannot open output file " << argv[2] << std::endl;
@@ -172,12 +223,14 @@ int main(int argc, char* argv[]) {
   RegisterPayloadTypes(neteq);
 
   // Read first packet.
-  if (file_source->EndOfFile()) {
-    printf("Warning: RTP file is empty");
+  webrtc::scoped_ptr<webrtc::test::Packet> packet(file_source->NextPacket());
+  if (!packet) {
+    printf(
+        "Warning: input file is empty, or the filters did not match any "
+        "packets\n");
     webrtc::Trace::ReturnTrace();
     return 0;
   }
-  webrtc::scoped_ptr<webrtc::test::Packet> packet(file_source->NextPacket());
   bool packet_available = true;
 
   // Set up variables for audio replacement if needed.
@@ -195,8 +248,8 @@ int main(int argc, char* argv[]) {
     replacement_audio.reset(new int16_t[input_frame_size_timestamps]);
     payload_mem_size_bytes = 2 * input_frame_size_timestamps;
     payload.reset(new uint8_t[payload_mem_size_bytes]);
-    assert(!file_source->EndOfFile());
     next_packet.reset(file_source->NextPacket());
+    assert(next_packet);
     next_packet_available = true;
   }
 
@@ -236,13 +289,30 @@ int main(int argc, char* argv[]) {
                               static_cast<int>(payload_len),
                               packet->time_ms() * sample_rate_hz / 1000);
       if (error != NetEq::kOK) {
-        std::cerr << "InsertPacket returned error code " << neteq->LastError()
-                  << std::endl;
+        if (neteq->LastError() == NetEq::kUnknownRtpPayloadType) {
+          std::cerr << "RTP Payload type "
+                    << static_cast<int>(rtp_header.header.payloadType)
+                    << " is unknown." << std::endl;
+          std::cerr << "Use --codec_map to view default mapping." << std::endl;
+          std::cerr << "Use --helpshort for information on how to make custom "
+                       "mappings." << std::endl;
+        } else {
+          std::cerr << "InsertPacket returned error code " << neteq->LastError()
+                    << std::endl;
+          std::cerr << "Header data:" << std::endl;
+          std::cerr << "  PT = "
+                    << static_cast<int>(rtp_header.header.payloadType)
+                    << std::endl;
+          std::cerr << "  SN = " << rtp_header.header.sequenceNumber
+                    << std::endl;
+          std::cerr << "  TS = " << rtp_header.header.timestamp << std::endl;
+        }
       }
 
       // Get next packet from file.
-      if (!file_source->EndOfFile()) {
-        packet.reset(file_source->NextPacket());
+      webrtc::test::Packet* temp_packet = file_source->NextPacket();
+      if (temp_packet) {
+        packet.reset(temp_packet);
       } else {
         packet_available = false;
       }
@@ -315,6 +385,8 @@ std::string CodecName(webrtc::NetEqDecoder codec) {
       return "iSAC";
     case webrtc::kDecoderISACswb:
       return "iSAC-swb (32 kHz)";
+    case webrtc::kDecoderOpus:
+      return "Opus";
     case webrtc::kDecoderPCM16B:
       return "PCM16b-nb (8 kHz)";
     case webrtc::kDecoderPCM16Bwb:
@@ -375,6 +447,12 @@ void RegisterPayloadTypes(NetEq* neteq) {
   if (error) {
     std::cerr << "Cannot register payload type " << FLAGS_isac_swb <<
         " as " << CodecName(webrtc::kDecoderISACswb).c_str() << std::endl;
+    exit(1);
+  }
+  error = neteq->RegisterPayloadType(webrtc::kDecoderOpus, FLAGS_opus);
+  if (error) {
+    std::cerr << "Cannot register payload type " << FLAGS_opus << " as "
+              << CodecName(webrtc::kDecoderOpus).c_str() << std::endl;
     exit(1);
   }
   error = neteq->RegisterPayloadType(webrtc::kDecoderPCM16B, FLAGS_pcm16b);
@@ -463,6 +541,8 @@ void PrintCodecMapping() {
       std::endl;
   std::cout << CodecName(webrtc::kDecoderISACswb).c_str() << ": " <<
       FLAGS_isac_swb << std::endl;
+  std::cout << CodecName(webrtc::kDecoderOpus).c_str() << ": " << FLAGS_opus
+            << std::endl;
   std::cout << CodecName(webrtc::kDecoderPCM16B).c_str() << ": " <<
       FLAGS_pcm16b << std::endl;
   std::cout << CodecName(webrtc::kDecoderPCM16Bwb).c_str() << ": " <<
@@ -586,8 +666,8 @@ int CodecSampleRate(uint8_t payload_type) {
       payload_type == FLAGS_pcm16b_swb32 ||
       payload_type == FLAGS_cn_swb32) {
     return 32000;
-  } else if (payload_type == FLAGS_pcm16b_swb48 ||
-      payload_type == FLAGS_cn_swb48) {
+  } else if (payload_type == FLAGS_opus || payload_type == FLAGS_pcm16b_swb48 ||
+             payload_type == FLAGS_cn_swb48) {
     return 48000;
   } else if (payload_type == FLAGS_avt ||
       payload_type == FLAGS_red) {

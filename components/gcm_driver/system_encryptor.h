@@ -13,13 +13,13 @@ namespace gcm {
 // Encryptor that uses the Chrome password manager's encryptor.
 class SystemEncryptor : public Encryptor {
  public:
-  virtual ~SystemEncryptor();
+  ~SystemEncryptor() override;
 
-  virtual bool EncryptString(const std::string& plaintext,
-                             std::string* ciphertext) OVERRIDE;
+  bool EncryptString(const std::string& plaintext,
+                     std::string* ciphertext) override;
 
-  virtual bool DecryptString(const std::string& ciphertext,
-                             std::string* plaintext) OVERRIDE;
+  bool DecryptString(const std::string& ciphertext,
+                     std::string* plaintext) override;
 };
 
 }  // namespace gcm

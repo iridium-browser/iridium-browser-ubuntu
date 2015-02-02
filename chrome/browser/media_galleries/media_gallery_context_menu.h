@@ -17,19 +17,19 @@ class MediaGalleryContextMenu : public ui::SimpleMenuModel,
       ForgetGalleryCallback;
 
   explicit MediaGalleryContextMenu(const ForgetGalleryCallback& callback);
-  virtual ~MediaGalleryContextMenu();
+  ~MediaGalleryContextMenu() override;
 
   void set_pref_id(MediaGalleryPrefId pref_id) {
     pref_id_ = pref_id;
   }
 
   // ui::SimpleMenuModel::Delegate overrides:
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdVisible(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id, ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool IsCommandIdVisible(int command_id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  void ExecuteCommand(int command_id, int event_flags) override;
 
  private:
   MediaGalleryPrefId pref_id_;

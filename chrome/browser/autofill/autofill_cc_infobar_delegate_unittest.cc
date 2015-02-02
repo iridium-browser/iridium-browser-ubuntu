@@ -38,8 +38,8 @@ class TestPersonalDataManager : public PersonalDataManager {
   using PersonalDataManager::SetPrefService;
 
   // Overridden to avoid a trip to the database.
-  virtual void LoadProfiles() OVERRIDE {}
-  virtual void LoadCreditCards() OVERRIDE {}
+  virtual void LoadProfiles() override {}
+  virtual void LoadCreditCards() override {}
 
   MOCK_METHOD1(SaveImportedCreditCard,
                std::string(const CreditCard& imported_credit_card));
@@ -52,10 +52,10 @@ class TestPersonalDataManager : public PersonalDataManager {
 
 class AutofillCCInfobarDelegateTest : public ChromeRenderViewHostTestHarness {
  public:
-  virtual ~AutofillCCInfobarDelegateTest();
+  ~AutofillCCInfobarDelegateTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   scoped_ptr<ConfirmInfoBarDelegate> CreateDelegate(

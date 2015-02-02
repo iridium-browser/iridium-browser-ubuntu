@@ -14,21 +14,21 @@ namespace syncable {
 // DirectoryChangeDelegate that does nothing in all delegate methods.
 class NullDirectoryChangeDelegate : public DirectoryChangeDelegate {
  public:
-  virtual ~NullDirectoryChangeDelegate();
+  ~NullDirectoryChangeDelegate() override;
 
-  virtual void HandleCalculateChangesChangeEventFromSyncApi(
+  void HandleCalculateChangesChangeEventFromSyncApi(
       const ImmutableWriteTransactionInfo& write_transaction_info,
       BaseTransaction* trans,
-      std::vector<int64>* entries_changed) OVERRIDE;
-  virtual void HandleCalculateChangesChangeEventFromSyncer(
+      std::vector<int64>* entries_changed) override;
+  void HandleCalculateChangesChangeEventFromSyncer(
       const ImmutableWriteTransactionInfo& write_transaction_info,
       BaseTransaction* trans,
-      std::vector<int64>* entries_changed) OVERRIDE;
-  virtual ModelTypeSet HandleTransactionEndingChangeEvent(
+      std::vector<int64>* entries_changed) override;
+  ModelTypeSet HandleTransactionEndingChangeEvent(
       const ImmutableWriteTransactionInfo& write_transaction_info,
-      BaseTransaction* trans) OVERRIDE;
-  virtual void HandleTransactionCompleteChangeEvent(
-      ModelTypeSet models_with_changes) OVERRIDE;
+      BaseTransaction* trans) override;
+  void HandleTransactionCompleteChangeEvent(
+      ModelTypeSet models_with_changes) override;
 };
 
 }  // namespace syncable

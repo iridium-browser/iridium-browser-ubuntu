@@ -27,14 +27,14 @@ class AutocompleteClassifierFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<AutocompleteClassifierFactory>;
 
   AutocompleteClassifierFactory();
-  virtual ~AutocompleteClassifierFactory();
+  ~AutocompleteClassifierFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsNULLWhileTesting() const override;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteClassifierFactory);
 };

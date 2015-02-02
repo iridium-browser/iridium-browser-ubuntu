@@ -74,7 +74,7 @@ BluetoothRemoteGattCharacteristicChromeOS::
   while (!pending_start_notify_calls_.empty()) {
     PendingStartNotifyCall callbacks = pending_start_notify_calls_.front();
     pending_start_notify_calls_.pop();
-    callbacks.second.Run();
+    callbacks.second.Run(device::BluetoothGattService::GATT_ERROR_FAILED);
   }
 }
 
@@ -112,31 +112,31 @@ BluetoothRemoteGattCharacteristicChromeOS::GetProperties() const {
           GetProperties(object_path_);
   DCHECK(properties);
 
-  Properties props = kPropertyNone;
+  Properties props = PROPERTY_NONE;
   const std::vector<std::string>& flags = properties->flags.value();
   for (std::vector<std::string>::const_iterator iter = flags.begin();
        iter != flags.end();
        ++iter) {
     if (*iter == bluetooth_gatt_characteristic::kFlagBroadcast)
-      props |= kPropertyBroadcast;
+      props |= PROPERTY_BROADCAST;
     if (*iter == bluetooth_gatt_characteristic::kFlagRead)
-      props |= kPropertyRead;
+      props |= PROPERTY_READ;
     if (*iter == bluetooth_gatt_characteristic::kFlagWriteWithoutResponse)
-      props |= kPropertyWriteWithoutResponse;
+      props |= PROPERTY_WRITE_WITHOUT_RESPONSE;
     if (*iter == bluetooth_gatt_characteristic::kFlagWrite)
-      props |= kPropertyWrite;
+      props |= PROPERTY_WRITE;
     if (*iter == bluetooth_gatt_characteristic::kFlagNotify)
-      props |= kPropertyNotify;
+      props |= PROPERTY_NOTIFY;
     if (*iter == bluetooth_gatt_characteristic::kFlagIndicate)
-      props |= kPropertyIndicate;
+      props |= PROPERTY_INDICATE;
     if (*iter == bluetooth_gatt_characteristic::kFlagAuthenticatedSignedWrites)
-      props |= kPropertyAuthenticatedSignedWrites;
+      props |= PROPERTY_AUTHENTICATED_SIGNED_WRITES;
     if (*iter == bluetooth_gatt_characteristic::kFlagExtendedProperties)
-      props |= kPropertyExtendedProperties;
+      props |= PROPERTY_EXTENDED_PROPERTIES;
     if (*iter == bluetooth_gatt_characteristic::kFlagReliableWrite)
-      props |= kPropertyReliableWrite;
+      props |= PROPERTY_RELIABLE_WRITE;
     if (*iter == bluetooth_gatt_characteristic::kFlagWritableAuxiliaries)
-      props |= kPropertyWritableAuxiliaries;
+      props |= PROPERTY_WRITABLE_AUXILIARIES;
   }
 
   return props;
@@ -146,7 +146,7 @@ device::BluetoothGattCharacteristic::Permissions
 BluetoothRemoteGattCharacteristicChromeOS::GetPermissions() const {
   // TODO(armansito): Once BlueZ defines the permissions, return the correct
   // values here.
-  return kPermissionNone;
+  return PERMISSION_NONE;
 }
 
 bool BluetoothRemoteGattCharacteristicChromeOS::IsNotifying() const {
@@ -238,7 +238,7 @@ void BluetoothRemoteGattCharacteristicChromeOS::StartNotifySession(
     if (IsNotifying()) {
       // Check for overflows, though unlikely.
       if (num_notify_sessions_ == std::numeric_limits<size_t>::max()) {
-        error_callback.Run();
+        error_callback.Run(device::BluetoothGattService::GATT_ERROR_FAILED);
         return;
       }
 
@@ -398,7 +398,8 @@ void BluetoothRemoteGattCharacteristicChromeOS::OnError(
     const std::string& error_message) {
   VLOG(1) << "Operation failed: " << error_name << ", message: "
           << error_message;
-  error_callback.Run();
+  error_callback.Run(
+      BluetoothRemoteGattServiceChromeOS::DBusErrorToServiceError(error_name));
 }
 
 void BluetoothRemoteGattCharacteristicChromeOS::OnStartNotifySuccess(
@@ -437,7 +438,9 @@ void BluetoothRemoteGattCharacteristicChromeOS::OnStartNotifyError(
   DCHECK(notify_call_pending_);
 
   notify_call_pending_ = false;
-  error_callback.Run();
+
+  error_callback.Run(
+      BluetoothRemoteGattServiceChromeOS::DBusErrorToServiceError(error_name));
 
   ProcessStartNotifyQueue();
 }

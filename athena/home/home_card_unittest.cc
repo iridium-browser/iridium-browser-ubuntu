@@ -7,8 +7,10 @@
 #include "athena/activity/public/activity_factory.h"
 #include "athena/home/home_card_constants.h"
 #include "athena/home/home_card_impl.h"
-#include "athena/test/athena_test_base.h"
+#include "athena/test/base/athena_test_base.h"
+#include "athena/test/base/test_windows.h"
 #include "athena/wm/public/window_manager.h"
+#include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
@@ -26,12 +28,6 @@ aura::Window* GetHomeCardWindow() {
       GetHomeCardWindowForTest();
 }
 
-// Returns true if the keyboard focus is on the search box.
-bool IsSearchBoxFocused(aura::Window* home_card) {
-  return views::Widget::GetWidgetForNativeWindow(home_card)->
-      GetContentsView()->GetViewByID(kHomeCardSearchBoxId)->HasFocus();
-}
-
 typedef test::AthenaTestBase HomeCardTest;
 
 TEST_F(HomeCardTest, BasicTransition) {
@@ -46,18 +42,14 @@ TEST_F(HomeCardTest, BasicTransition) {
   EXPECT_EQ(screen_height - kHomeCardMinimizedHeight,
             home_card->GetTargetBounds().y());
   EXPECT_EQ(work_area_height, home_card->GetTargetBounds().y());
-  EXPECT_EQ(wm::ShadowType::SHADOW_TYPE_NONE, wm::GetShadowType(home_card));
 
-  WindowManager::Get()->ToggleOverview();
+  WindowManager::Get()->EnterOverview();
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
   EXPECT_EQ(screen_height - kHomeCardHeight, home_card->GetTargetBounds().y());
-  EXPECT_EQ(wm::ShadowType::SHADOW_TYPE_RECTANGULAR,
-            wm::GetShadowType(home_card));
 
-  WindowManager::Get()->ToggleOverview();
+  WindowManager::Get()->ExitOverview();
   EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
   EXPECT_EQ(work_area_height, home_card->GetTargetBounds().y());
-  EXPECT_EQ(wm::ShadowType::SHADOW_TYPE_NONE, wm::GetShadowType(home_card));
 }
 
 TEST_F(HomeCardTest, VirtualKeyboardTransition) {
@@ -70,15 +62,13 @@ TEST_F(HomeCardTest, VirtualKeyboardTransition) {
   EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
 
   // bottom -> centered for virtual keyboard.
-  WindowManager::Get()->ToggleOverview();
+  WindowManager::Get()->EnterOverview();
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
   HomeCard::Get()->UpdateVirtualKeyboardBounds(vk_bounds);
   EXPECT_EQ(HomeCard::VISIBLE_CENTERED, HomeCard::Get()->GetState());
 
   aura::Window* home_card = GetHomeCardWindow();
   EXPECT_EQ(0, home_card->GetTargetBounds().y());
-  EXPECT_EQ(wm::ShadowType::SHADOW_TYPE_RECTANGULAR,
-            wm::GetShadowType(home_card));
 
   HomeCard::Get()->UpdateVirtualKeyboardBounds(gfx::Rect());
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
@@ -91,9 +81,9 @@ TEST_F(HomeCardTest, ToggleOverviewWithVirtualKeyboard) {
   HomeCard::Get()->UpdateVirtualKeyboardBounds(vk_bounds);
   EXPECT_EQ(HomeCard::HIDDEN, HomeCard::Get()->GetState());
 
-  // Toogle overview revives the bottom home card. Home card also gets
+  // EnterOverview() revives the bottom home card. Home card also gets
   /// activated which will close the virtual keyboard.
-  WindowManager::Get()->ToggleOverview();
+  WindowManager::Get()->EnterOverview();
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
   aura::Window* home_card = GetHomeCardWindow();
   EXPECT_TRUE(wm::IsActiveWindow(home_card));
@@ -103,11 +93,11 @@ TEST_F(HomeCardTest, ToggleOverviewWithVirtualKeyboard) {
 TEST_F(HomeCardTest, AppSelection) {
   EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
 
-  WindowManager::Get()->ToggleOverview();
+  WindowManager::Get()->EnterOverview();
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
 
   athena::ActivityFactory::Get()->CreateWebActivity(
-      NULL, base::string16(), GURL("http://www.google.com/"));
+      nullptr, base::string16(), GURL("http://www.google.com/"));
   EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
 }
 
@@ -115,23 +105,44 @@ TEST_F(HomeCardTest, Accelerators) {
   EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
 
   ui::test::EventGenerator generator(root_window());
+
+  // CTRL+L toggles centered home card, check that overview mode follows
   generator.PressKey(ui::VKEY_L, ui::EF_CONTROL_DOWN);
   EXPECT_EQ(HomeCard::VISIBLE_CENTERED, HomeCard::Get()->GetState());
-
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
   generator.PressKey(ui::VKEY_L, ui::EF_CONTROL_DOWN);
   EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
+  EXPECT_FALSE(WindowManager::Get()->IsOverviewModeActive());
 
-  // Do nothing for BOTTOM.
-  WindowManager::Get()->ToggleOverview();
+  // ESC key hides centered home card
+  generator.PressKey(ui::VKEY_L, ui::EF_CONTROL_DOWN);
+  EXPECT_EQ(HomeCard::VISIBLE_CENTERED, HomeCard::Get()->GetState());
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
+  generator.PressKey(ui::VKEY_ESCAPE, ui::EF_NONE);
+  EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
+  EXPECT_FALSE(WindowManager::Get()->IsOverviewModeActive());
+
+  // Do nothing with bottom home card with CTRL+L, hide with ESC key
+  WindowManager::Get()->EnterOverview();
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
   generator.PressKey(ui::VKEY_L, ui::EF_CONTROL_DOWN);
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
+  generator.PressKey(ui::VKEY_ESCAPE, ui::EF_NONE);
+  EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
+  EXPECT_FALSE(WindowManager::Get()->IsOverviewModeActive());
 
   // Do nothing if the centered state is a temporary state.
+  WindowManager::Get()->EnterOverview();
+  EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
   HomeCard::Get()->UpdateVirtualKeyboardBounds(gfx::Rect(0, 0, 100, 100));
   EXPECT_EQ(HomeCard::VISIBLE_CENTERED, HomeCard::Get()->GetState());
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
   generator.PressKey(ui::VKEY_L, ui::EF_CONTROL_DOWN);
   EXPECT_EQ(HomeCard::VISIBLE_CENTERED, HomeCard::Get()->GetState());
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
 }
 
 TEST_F(HomeCardTest, MouseClick) {
@@ -210,7 +221,7 @@ TEST_F(HomeCardTest, Gestures) {
 
   // Swipe down to the bottom state.
   generator.GestureScrollSequence(gfx::Point(x, 10),
-                                  gfx::Point(x, bottom - 90),
+                                  gfx::Point(x, bottom - 120),
                                   base::TimeDelta::FromSeconds(1),
                                   10);
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
@@ -248,33 +259,26 @@ TEST_F(HomeCardTest, GesturesToFullDirectly) {
   EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
 }
 
-TEST_F(HomeCardTest, KeyboardFocus) {
-  ASSERT_EQ(HomeCard::VISIBLE_MINIMIZED, HomeCard::Get()->GetState());
+TEST_F(HomeCardTest, DontMinimizeWithModalWindow) {
   aura::Window* home_card = GetHomeCardWindow();
-  ASSERT_FALSE(IsSearchBoxFocused(home_card));
 
-  WindowManager::Get()->ToggleOverview();
-  ASSERT_FALSE(IsSearchBoxFocused(home_card));
-
-  ui::test::EventGenerator generator(root_window());
-  gfx::Rect screen_rect(root_window()->bounds());
-
-  const int bottom = screen_rect.bottom();
-  const int x = screen_rect.x() + 1;
-
-  generator.GestureScrollSequence(gfx::Point(x, bottom - 40),
-                                  gfx::Point(x, 10),
-                                  base::TimeDelta::FromSeconds(1),
-                                  10);
-  EXPECT_EQ(HomeCard::VISIBLE_CENTERED, HomeCard::Get()->GetState());
-  EXPECT_TRUE(IsSearchBoxFocused(home_card));
-
-  generator.GestureScrollSequence(gfx::Point(x, 10),
-                                  gfx::Point(x, bottom - 100),
-                                  base::TimeDelta::FromSeconds(1),
-                                  10);
+  WindowManager::Get()->EnterOverview();
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
-  EXPECT_FALSE(IsSearchBoxFocused(home_card));
+  EXPECT_TRUE(wm::IsActiveWindow(home_card));
+
+  aura::test::TestWindowDelegate delegate;
+  scoped_ptr<aura::Window> modal(test::CreateTransientWindow(
+      &delegate, nullptr, ui::MODAL_TYPE_SYSTEM, false));
+  modal->Show();
+  wm::ActivateWindow(modal.get());
+  EXPECT_TRUE(wm::IsActiveWindow(modal.get()));
+  EXPECT_FALSE(wm::IsActiveWindow(home_card));
+  EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
+
+  modal.reset();
+
+  EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, HomeCard::Get()->GetState());
+  EXPECT_TRUE(wm::IsActiveWindow(home_card));
 }
 
 }  // namespace athena

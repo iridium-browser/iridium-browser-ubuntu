@@ -6,7 +6,6 @@
 
 #include "base/debug/trace_event.h"
 #include "ui/gl/android/surface_texture.h"
-#include "ui/gl/android/surface_texture_tracker.h"
 
 namespace gfx {
 
@@ -15,18 +14,14 @@ GLImageSurfaceTexture::GLImageSurfaceTexture(const gfx::Size& size)
 }
 
 GLImageSurfaceTexture::~GLImageSurfaceTexture() {
-  DCHECK(!surface_texture_);
+  DCHECK(!surface_texture_.get());
   DCHECK_EQ(0, texture_id_);
 }
 
-bool GLImageSurfaceTexture::Initialize(
-    const gfx::GpuMemoryBufferHandle& handle) {
-  DCHECK(!surface_texture_);
-  surface_texture_ =
-      SurfaceTextureTracker::GetInstance()->AcquireSurfaceTexture(
-          handle.surface_texture_id.primary_id,
-          handle.surface_texture_id.secondary_id);
-  return !!surface_texture_;
+bool GLImageSurfaceTexture::Initialize(SurfaceTexture* surface_texture) {
+  DCHECK(!surface_texture_.get());
+  surface_texture_ = surface_texture;
+  return true;
 }
 
 void GLImageSurfaceTexture::Destroy(bool have_context) {
@@ -54,7 +49,7 @@ bool GLImageSurfaceTexture::BindTexImage(unsigned target) {
     return false;
   }
 
-  DCHECK(surface_texture_);
+  DCHECK(surface_texture_.get());
   if (texture_id != texture_id_) {
     // Note: Surface textures used as gpu memory buffers are created with an
     // initial dummy texture id of 0. We need to call DetachFromGLContext() here

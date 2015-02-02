@@ -33,6 +33,7 @@ class MockDeviceSettingsObserver : public DeviceSettingsService::Observer {
 
   MOCK_METHOD0(OwnershipStatusChanged, void());
   MOCK_METHOD0(DeviceSettingsUpdated, void());
+  MOCK_METHOD0(OnDeviceSettingsServiceShutdown, void());
 };
 
 }  // namespace
@@ -60,7 +61,7 @@ class DeviceSettingsServiceTest : public DeviceSettingsTestBase {
         is_owner_set_(false),
         ownership_status_(DeviceSettingsService::OWNERSHIP_UNKNOWN) {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     device_policy_.payload().mutable_device_policy_refresh_rate()->
         set_device_policy_refresh_rate(120);
     DeviceSettingsTestBase::SetUp();
@@ -529,6 +530,42 @@ TEST_F(DeviceSettingsServiceTest, OnTPMTokenReadyForNonOwner) {
             device_settings_service_.GetOwnershipStatus());
   EXPECT_TRUE(is_owner_set_);
   EXPECT_FALSE(is_owner_);
+}
+
+TEST_F(DeviceSettingsServiceTest, OwnerPrivateKeyInTPMToken) {
+  owner_key_util_->Clear();
+
+  EXPECT_FALSE(device_settings_service_.HasPrivateOwnerKey());
+  EXPECT_FALSE(device_settings_service_.GetPublicKey().get());
+  EXPECT_EQ(DeviceSettingsService::OWNERSHIP_UNKNOWN,
+            device_settings_service_.GetOwnershipStatus());
+
+  const std::string& user_id = device_policy_.policy_data().username();
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
+  InitOwner(user_id, false);
+  OwnerSettingsServiceChromeOS* service =
+      OwnerSettingsServiceChromeOSFactory::GetForProfile(profile_.get());
+  ASSERT_TRUE(service);
+  ReloadDeviceSettings();
+
+  EXPECT_FALSE(device_settings_service_.HasPrivateOwnerKey());
+  ASSERT_TRUE(device_settings_service_.GetPublicKey().get());
+  ASSERT_TRUE(device_settings_service_.GetPublicKey()->is_loaded());
+  std::vector<uint8> key;
+  ASSERT_TRUE(device_policy_.GetSigningKey()->ExportPublicKey(&key));
+  EXPECT_EQ(device_settings_service_.GetPublicKey()->data(), key);
+  EXPECT_EQ(DeviceSettingsService::OWNERSHIP_TAKEN,
+            device_settings_service_.GetOwnershipStatus());
+
+  owner_key_util_->SetPrivateKey(device_policy_.GetSigningKey());
+  service->OnTPMTokenReady(true /* is ready */);
+  FlushDeviceSettings();
+
+  EXPECT_TRUE(device_settings_service_.HasPrivateOwnerKey());
+  ASSERT_TRUE(device_settings_service_.GetPublicKey().get());
+  ASSERT_TRUE(device_settings_service_.GetPublicKey()->is_loaded());
+  ASSERT_TRUE(device_policy_.GetSigningKey()->ExportPublicKey(&key));
+  EXPECT_EQ(device_settings_service_.GetPublicKey()->data(), key);
 }
 
 TEST_F(DeviceSettingsServiceTest, OnTPMTokenReadyForOwner) {

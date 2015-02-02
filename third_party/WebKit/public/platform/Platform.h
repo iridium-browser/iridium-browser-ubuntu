@@ -61,6 +61,7 @@ namespace blink {
 
 class WebAudioBus;
 class WebBlobRegistry;
+class WebBluetooth;
 class WebContentDecryptionModule;
 class WebClipboard;
 class WebCompositorSupport;
@@ -85,17 +86,17 @@ class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
 class WebMessagePortChannel;
 class WebMimeRegistry;
-class WebNotificationPresenter;
+class WebNotificationManager;
 class WebPluginListBuilder;
 class WebPrescientNetworking;
 class WebPublicSuffixList;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
 class WebSandboxSupport;
+class WebScheduler;
 class WebSecurityOrigin;
 class WebScrollbarBehavior;
 class WebSocketHandle;
-class WebSocketStreamHandle;
 class WebSpeechSynthesizer;
 class WebSpeechSynthesizerClient;
 class WebStorageNamespace;
@@ -307,9 +308,6 @@ public:
     // May return null.
     virtual WebPrescientNetworking* prescientNetworking() { return 0; }
 
-    // Returns a new WebSocketStreamHandle instance.
-    virtual WebSocketStreamHandle* createSocketStreamHandle() { return 0; }
-
     // Returns a new WebSocketHandle instance.
     virtual WebSocketHandle* createWebSocketHandle() { return 0; }
 
@@ -360,6 +358,8 @@ public:
     // Yield the current thread so another thread can be scheduled.
     virtual void yieldCurrentThread() { }
 
+    // May return null.
+    virtual WebScheduler* scheduler() { return 0; }
 
     // WaitableEvent -------------------------------------------------------
 
@@ -558,6 +558,7 @@ public:
     // Returns newly allocated and initialized offscreen WebGraphicsContext3D instance.
     // Passing an existing context to shareContext will create the new context in the same share group as the passed context.
     virtual WebGraphicsContext3D* createOffscreenGraphicsContext3D(const WebGraphicsContext3D::Attributes&, WebGraphicsContext3D* shareContext) { return 0; }
+    virtual WebGraphicsContext3D* createOffscreenGraphicsContext3D(const WebGraphicsContext3D::Attributes&, WebGraphicsContext3D* shareContext, WebGLInfo* glInfo) { return 0; }
     virtual WebGraphicsContext3D* createOffscreenGraphicsContext3D(const WebGraphicsContext3D::Attributes&) { return 0; }
 
     // Returns a newly allocated and initialized offscreen context provider. The provider may return a null
@@ -632,12 +633,17 @@ public:
 
     // Web Notifications --------------------------------------------------
 
-    virtual WebNotificationPresenter* notificationPresenter() { return 0; }
+    virtual WebNotificationManager* notificationManager() { return 0; }
 
 
     // Geofencing ---------------------------------------------------------
 
     virtual WebGeofencingProvider* geofencingProvider() { return 0; }
+
+    // Bluetooth ----------------------------------------------------------
+
+    // Returns pointer to client owned WebBluetooth implementation.
+    virtual WebBluetooth* bluetooth() { return 0; }
 
 protected:
     virtual ~Platform() { }

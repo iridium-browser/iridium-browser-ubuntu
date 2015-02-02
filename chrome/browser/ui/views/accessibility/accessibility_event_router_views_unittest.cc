@@ -44,11 +44,11 @@ using base::ASCIIToUTF16;
 class AccessibilityViewsDelegate : public views::TestViewsDelegate {
  public:
   AccessibilityViewsDelegate() {}
-  virtual ~AccessibilityViewsDelegate() {}
+  ~AccessibilityViewsDelegate() override {}
 
   // Overridden from views::TestViewsDelegate:
-  virtual void NotifyAccessibilityEvent(
-      views::View* view, ui::AXEvent event_type) OVERRIDE {
+  void NotifyAccessibilityEvent(views::View* view,
+                                ui::AXEvent event_type) override {
     AccessibilityEventRouterViews::GetInstance()->HandleAccessibilityEvent(
         view, event_type);
   }
@@ -63,12 +63,12 @@ class AccessibilityWindowDelegate : public views::WidgetDelegate {
       : contents_(contents) { }
 
   // Overridden from views::WidgetDelegate:
-  virtual void DeleteDelegate() OVERRIDE { delete this; }
-  virtual views::View* GetContentsView() OVERRIDE { return contents_; }
-  virtual const views::Widget* GetWidget() const OVERRIDE {
+  void DeleteDelegate() override { delete this; }
+  views::View* GetContentsView() override { return contents_; }
+  const views::Widget* GetWidget() const override {
     return contents_->GetWidget();
   }
-  virtual views::Widget* GetWidget() OVERRIDE { return contents_->GetWidget(); }
+  views::Widget* GetWidget() override { return contents_->GetWidget(); }
 
  private:
   views::View* contents_;
@@ -84,7 +84,7 @@ class ViewWithNameAndRole : public views::View {
         role_(role) {
   }
 
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE {
+  void GetAccessibleState(ui::AXViewState* state) override {
     views::View::GetAccessibleState(state);
     state->name = name_;
     state->role = role_;
@@ -104,7 +104,7 @@ class AccessibilityEventRouterViewsTest
   AccessibilityEventRouterViewsTest() : control_event_count_(0) {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
 #if defined(OS_WIN)
     ole_initializer_.reset(new ui::ScopedOleInitializer());
 #endif
@@ -122,7 +122,7 @@ class AccessibilityEventRouterViewsTest
     EnableAccessibilityAndListenToFocusNotifications();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     ClearCallback();
 #if defined(USE_AURA)
     aura_test_helper_->TearDown();
@@ -462,7 +462,7 @@ class SimpleMenuDelegate : public ui::SimpleMenuModel::Delegate {
   };
 
   SimpleMenuDelegate() {}
-  virtual ~SimpleMenuDelegate() {}
+  ~SimpleMenuDelegate() override {}
 
   views::MenuItemView* BuildMenu() {
     menu_model_.reset(new ui::SimpleMenuModel(this));
@@ -479,26 +479,20 @@ class SimpleMenuDelegate : public ui::SimpleMenuModel::Delegate {
     return menu_view;
   }
 
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
-    return false;
-  }
+  bool IsCommandIdChecked(int command_id) const override { return false; }
 
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
-    return true;
-  }
+  bool IsCommandIdEnabled(int command_id) const override { return true; }
 
-  virtual bool IsCommandIdVisible(int command_id) const OVERRIDE {
+  bool IsCommandIdVisible(int command_id) const override {
     return command_id != IDC_MENU_INVISIBLE;
   }
 
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE {
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override {
     return false;
   }
 
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {
-  }
+  void ExecuteCommand(int command_id, int event_flags) override {}
 
  private:
   scoped_ptr<ui::SimpleMenuModel> menu_model_;
@@ -526,7 +520,7 @@ TEST_F(AccessibilityEventRouterViewsTest, MenuIndexAndCountForInvisibleMenu) {
     { SimpleMenuDelegate::IDC_MENU_ITEM_3, 2, 3 },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
     int index = 0;
     int count = 0;
 

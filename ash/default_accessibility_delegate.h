@@ -15,42 +15,42 @@ namespace ash {
 class ASH_EXPORT DefaultAccessibilityDelegate : public AccessibilityDelegate {
  public:
   DefaultAccessibilityDelegate();
-  virtual ~DefaultAccessibilityDelegate();
+  ~DefaultAccessibilityDelegate() override;
 
-  virtual bool IsSpokenFeedbackEnabled() const OVERRIDE;
-  virtual void ToggleHighContrast() OVERRIDE;
-  virtual bool IsHighContrastEnabled() const OVERRIDE;
-  virtual void SetMagnifierEnabled(bool enabled) OVERRIDE;
-  virtual void SetMagnifierType(MagnifierType type) OVERRIDE;
-  virtual bool IsMagnifierEnabled() const OVERRIDE;
-  virtual MagnifierType GetMagnifierType() const OVERRIDE;
-  virtual void SetLargeCursorEnabled(bool enabled) OVERRIDE;
-  virtual bool IsLargeCursorEnabled() const OVERRIDE;
-  virtual void SetAutoclickEnabled(bool enabled) OVERRIDE;
-  virtual bool IsAutoclickEnabled() const OVERRIDE;
-  virtual void SetVirtualKeyboardEnabled(bool enabled) OVERRIDE;
-  virtual bool IsVirtualKeyboardEnabled() const OVERRIDE;
-  virtual bool ShouldShowAccessibilityMenu() const OVERRIDE;
-  virtual bool IsBrailleDisplayConnected() const OVERRIDE;
-  virtual void SilenceSpokenFeedback() const OVERRIDE;
-  virtual void ToggleSpokenFeedback(
-      AccessibilityNotificationVisibility notify) OVERRIDE;
-  virtual void SaveScreenMagnifierScale(double scale) OVERRIDE;
-  virtual double GetSavedScreenMagnifierScale() OVERRIDE;
-  virtual void TriggerAccessibilityAlert(AccessibilityAlert alert) OVERRIDE;
-  virtual AccessibilityAlert GetLastAccessibilityAlert() OVERRIDE;
-  virtual void PlayEarcon(int sound_key) OVERRIDE;
-  virtual base::TimeDelta PlayShutdownSound() const OVERRIDE;
+  bool IsSpokenFeedbackEnabled() const override;
+  void ToggleHighContrast() override;
+  bool IsHighContrastEnabled() const override;
+  void SetMagnifierEnabled(bool enabled) override;
+  void SetMagnifierType(ui::MagnifierType type) override;
+  bool IsMagnifierEnabled() const override;
+  ui::MagnifierType GetMagnifierType() const override;
+  void SetLargeCursorEnabled(bool enabled) override;
+  bool IsLargeCursorEnabled() const override;
+  void SetAutoclickEnabled(bool enabled) override;
+  bool IsAutoclickEnabled() const override;
+  void SetVirtualKeyboardEnabled(bool enabled) override;
+  bool IsVirtualKeyboardEnabled() const override;
+  bool ShouldShowAccessibilityMenu() const override;
+  bool IsBrailleDisplayConnected() const override;
+  void SilenceSpokenFeedback() const override;
+  void ToggleSpokenFeedback(
+      ui::AccessibilityNotificationVisibility notify) override;
+  void SaveScreenMagnifierScale(double scale) override;
+  double GetSavedScreenMagnifierScale() override;
+  void TriggerAccessibilityAlert(ui::AccessibilityAlert alert) override;
+  ui::AccessibilityAlert GetLastAccessibilityAlert() override;
+  void PlayEarcon(int sound_key) override;
+  base::TimeDelta PlayShutdownSound() const override;
 
  private:
   bool spoken_feedback_enabled_;
   bool high_contrast_enabled_;
   bool screen_magnifier_enabled_;
-  MagnifierType screen_magnifier_type_;
+  ui::MagnifierType screen_magnifier_type_;
   bool large_cursor_enabled_;
   bool autoclick_enabled_;
   bool virtual_keyboard_enabled_;
-  AccessibilityAlert accessibility_alert_;
+  ui::AccessibilityAlert accessibility_alert_;
   DISALLOW_COPY_AND_ASSIGN(DefaultAccessibilityDelegate);
 };
 

@@ -57,31 +57,35 @@ class WebLayerTreeViewImplForTesting
   virtual void registerViewportLayers(
       const blink::WebLayer* pageScaleLayerLayer,
       const blink::WebLayer* innerViewportScrollLayer,
-      const blink::WebLayer* outerViewportScrollLayer) OVERRIDE;
-  virtual void clearViewportLayers() OVERRIDE;
+      const blink::WebLayer* outerViewportScrollLayer) override;
+  virtual void clearViewportLayers() override;
   virtual void registerSelection(
       const blink::WebSelectionBound& start,
-      const blink::WebSelectionBound& end) OVERRIDE;
-  virtual void clearSelection() OVERRIDE;
+      const blink::WebSelectionBound& end) override;
+  virtual void clearSelection() override;
 
   // cc::LayerTreeHostClient implementation.
-  virtual void WillBeginMainFrame(int frame_id) OVERRIDE {}
-  virtual void DidBeginMainFrame() OVERRIDE {}
-  virtual void BeginMainFrame(const cc::BeginFrameArgs& args) OVERRIDE {}
-  virtual void Layout() OVERRIDE;
-  virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
-                                   float page_scale,
-                                   float top_controls_delta) OVERRIDE;
-  virtual void RequestNewOutputSurface(bool fallback) OVERRIDE;
-  virtual void DidInitializeOutputSurface() OVERRIDE {}
-  virtual void WillCommit() OVERRIDE {}
-  virtual void DidCommit() OVERRIDE {}
-  virtual void DidCommitAndDrawFrame() OVERRIDE {}
-  virtual void DidCompleteSwapBuffers() OVERRIDE {}
+  void WillBeginMainFrame(int frame_id) override {}
+  void DidBeginMainFrame() override {}
+  void BeginMainFrame(const cc::BeginFrameArgs& args) override {}
+  void Layout() override;
+  void ApplyViewportDeltas(const gfx::Vector2d& inner_delta,
+                           const gfx::Vector2d& outer_delta,
+                           float page_scale,
+                           float top_controls_delta) override;
+  void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
+                           float page_scale,
+                           float top_controls_delta) override;
+  void RequestNewOutputSurface(bool fallback) override;
+  void DidInitializeOutputSurface() override {}
+  void WillCommit() override {}
+  void DidCommit() override {}
+  void DidCommitAndDrawFrame() override {}
+  void DidCompleteSwapBuffers() override {}
 
   // cc::LayerTreeHostSingleThreadClient implementation.
-  virtual void DidPostSwapBuffers() OVERRIDE {}
-  virtual void DidAbortSwapBuffers() OVERRIDE {}
+  void DidPostSwapBuffers() override {}
+  void DidAbortSwapBuffers() override {}
 
  private:
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;

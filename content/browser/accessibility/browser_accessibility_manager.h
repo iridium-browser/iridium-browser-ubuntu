@@ -61,12 +61,15 @@ class CONTENT_EXPORT BrowserAccessibilityDelegate {
       int acc_obj_id, const gfx::Point& point) = 0;
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) = 0;
+  virtual void AccessibilitySetValue(
+      int acc_obj_id, const base::string16& value) = 0;
   virtual bool AccessibilityViewHasFocus() const = 0;
   virtual gfx::Rect AccessibilityGetViewBounds() const = 0;
   virtual gfx::Point AccessibilityOriginInScreen(
       const gfx::Rect& bounds) const = 0;
   virtual void AccessibilityHitTest(
       const gfx::Point& point) = 0;
+  virtual void AccessibilitySetAccessibilityFocus(int acc_obj_id) = 0;
   virtual void AccessibilityFatalError() = 0;
   virtual gfx::AcceleratedWidget AccessibilityGetAcceleratedWidget() = 0;
   virtual gfx::NativeViewAccessible AccessibilityGetNativeViewAccessible() = 0;
@@ -84,6 +87,26 @@ class CONTENT_EXPORT BrowserAccessibilityFactory {
   virtual BrowserAccessibility* Create();
 };
 
+// This is all of the information about the current find in page result,
+// so we can activate it if requested.
+struct BrowserAccessibilityFindInPageInfo {
+  BrowserAccessibilityFindInPageInfo();
+
+  // This data about find in text results is updated as the user types.
+  int request_id;
+  int match_index;
+  int start_id;
+  int start_offset;
+  int end_id;
+  int end_offset;
+
+  // The active request id indicates that the user committed to a find query,
+  // e.g. by pressing enter or pressing the next or previous buttons. If
+  // |active_request_id| == |request_id|, we fire an accessibility event
+  // to move screen reader focus to that event.
+  int active_request_id;
+};
+
 // Manages a tree of BrowserAccessibility objects.
 class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
  public:
@@ -94,7 +117,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
       BrowserAccessibilityDelegate* delegate,
       BrowserAccessibilityFactory* factory = new BrowserAccessibilityFactory());
 
-  virtual ~BrowserAccessibilityManager();
+  ~BrowserAccessibilityManager() override;
 
   void Initialize(const ui::AXTreeUpdate& initial_tree);
 
@@ -146,12 +169,20 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   void ScrollToPoint(
       const BrowserAccessibility& node, gfx::Point point);
 
+  // Tell the renderer to set the value of an editable text node.
+  void SetValue(
+      const BrowserAccessibility& node, const base::string16& value);
+
   // Tell the renderer to set the text selection on a node.
   void SetTextSelection(
       const BrowserAccessibility& node, int start_offset, int end_offset);
 
   // Retrieve the bounds of the parent View in screen coordinates.
   gfx::Rect GetViewBounds();
+
+  // Fire an event telling native assistive technology to move focus to the
+  // given find in page result.
+  void ActivateFindInPageResult(int request_id, int match_index);
 
   // Called when the renderer process has notified us of about tree changes.
   void OnAccessibilityEvents(
@@ -161,6 +192,20 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   // objects.
   void OnLocationChanges(
       const std::vector<AccessibilityHostMsg_LocationChangeParams>& params);
+
+  // Called when a new find in page result is received. We hold on to this
+  // information and don't activate it until the user requests it.
+  void OnFindInPageResult(
+      int request_id, int match_index, int start_id, int start_offset,
+      int end_id, int end_offset);
+
+  // This is called when the user has committed to a find in page query,
+  // e.g. by pressing enter or tapping on the next / previous result buttons.
+  // If a match has already been received for this request id,
+  // activate the result now by firing an accessibility event. If a match
+  // has not been received, we hold onto this request id and update it
+  // when OnFindInPageResult is called.
+  void ActivateFindInPageResult(int request_id);
 
 #if defined(OS_WIN)
   BrowserAccessibilityManagerWin* ToBrowserAccessibilityManagerWin();
@@ -187,12 +232,12 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
   BrowserAccessibility* PreviousInTreeOrder(BrowserAccessibility* node);
 
   // AXTreeDelegate implementation.
-  virtual void OnNodeWillBeDeleted(ui::AXNode* node) OVERRIDE;
-  virtual void OnNodeCreated(ui::AXNode* node) OVERRIDE;
-  virtual void OnNodeChanged(ui::AXNode* node) OVERRIDE;
-  virtual void OnNodeCreationFinished(ui::AXNode* node) OVERRIDE;
-  virtual void OnNodeChangeFinished(ui::AXNode* node) OVERRIDE;
-  virtual void OnRootChanged(ui::AXNode* new_root) OVERRIDE {}
+  void OnNodeWillBeDeleted(ui::AXNode* node) override;
+  void OnNodeCreated(ui::AXNode* node) override;
+  void OnNodeChanged(ui::AXNode* node) override;
+  void OnNodeCreationFinished(ui::AXNode* node) override;
+  void OnNodeChangeFinished(ui::AXNode* node) override;
+  void OnRootChanged(ui::AXNode* new_root) override {}
 
   BrowserAccessibilityDelegate* delegate() const { return delegate_; }
   void set_delegate(BrowserAccessibilityDelegate* delegate) {
@@ -256,6 +301,8 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXTreeDelegate {
 
   // The on-screen keyboard state.
   OnScreenKeyboardState osk_state_;
+
+  BrowserAccessibilityFindInPageInfo find_in_page_info_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityManager);
 };

@@ -14,13 +14,12 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "ui/aura/window.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/views/controls/glow_hover_controller.h"
 
 namespace {
@@ -168,9 +167,10 @@ void TabScrubber::OnScrollEvent(ui::ScrollEvent* event) {
     if (activate_timer_.IsRunning()) {
       activate_timer_.Reset();
     } else {
-      int delay = use_default_activation_delay_ ?
-          ui::GestureConfiguration::tab_scrub_activation_delay_in_ms() :
-          activation_delay_;
+      int delay = use_default_activation_delay_
+                      ? ui::GestureConfiguration::GetInstance()
+                            ->tab_scrub_activation_delay_in_ms()
+                      : activation_delay_;
       if (delay >= 0) {
         activate_timer_.Start(FROM_HERE,
                               base::TimeDelta::FromMilliseconds(delay),

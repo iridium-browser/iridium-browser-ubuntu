@@ -39,10 +39,12 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
                                         public SearchResultListViewDelegate {
  public:
   // Takes ownership of |delegate|.
-  explicit AppListMainView(AppListViewDelegate* delegate,
-                           int initial_apps_page,
-                           gfx::NativeView parent);
-  virtual ~AppListMainView();
+  explicit AppListMainView(AppListViewDelegate* delegate);
+  ~AppListMainView() override;
+
+  void Init(gfx::NativeView parent,
+            int initial_apps_page,
+            SearchBoxView* search_box_view);
 
   void ShowAppListWhenReady();
 
@@ -97,23 +99,24 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   void OnItemIconLoaded(IconLoader* loader);
 
   // Overridden from AppsGridViewDelegate:
-  virtual void ActivateApp(AppListItem* item, int event_flags) OVERRIDE;
-  virtual void GetShortcutPathForApp(
+  void ActivateApp(AppListItem* item, int event_flags) override;
+  void GetShortcutPathForApp(
       const std::string& app_id,
-      const base::Callback<void(const base::FilePath&)>& callback) OVERRIDE;
-  virtual void CancelDragInActiveFolder() OVERRIDE;
+      const base::Callback<void(const base::FilePath&)>& callback) override;
+  void CancelDragInActiveFolder() override;
 
   // Overridden from SearchBoxViewDelegate:
-  virtual void QueryChanged(SearchBoxView* sender) OVERRIDE;
+  void QueryChanged(SearchBoxView* sender) override;
 
   // Overridden from SearchResultListViewDelegate:
-  virtual void OnResultInstalled(SearchResult* result) OVERRIDE;
-  virtual void OnResultUninstalled(SearchResult* result) OVERRIDE;
+  void OnResultInstalled(SearchResult* result) override;
+  void OnResultUninstalled(SearchResult* result) override;
 
   AppListViewDelegate* delegate_;  // Owned by parent view (AppListView).
   AppListModel* model_;  // Unowned; ownership is handled by |delegate_|.
 
-  SearchBoxView* search_box_view_;  // Owned by views hierarchy.
+  // Created by AppListView. Owned by views hierarchy.
+  SearchBoxView* search_box_view_;
   ContentsView* contents_view_;  // Owned by views hierarchy.
 
   // Owned by views hierarchy. NULL in the non-experimental app list.

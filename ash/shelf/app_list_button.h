@@ -20,7 +20,7 @@ class AppListButton : public views::ImageButton {
   AppListButton(views::ButtonListener* listener,
                 ShelfButtonHost* host,
                 ShelfWidget* shelf_widget);
-  virtual ~AppListButton();
+  ~AppListButton() override;
 
   bool draw_background_as_active() {
     return draw_background_as_active_;
@@ -28,18 +28,18 @@ class AppListButton : public views::ImageButton {
 
  protected:
   // views::ImageButton overrides:
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnMouseCaptureLost() override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseMoved(const ui::MouseEvent& event) override;
+  void OnMouseEntered(const ui::MouseEvent& event) override;
+  void OnMouseExited(const ui::MouseEvent& event) override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void GetAccessibleState(ui::AXViewState* state) override;
 
   // ui::EventHandler overrides:
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
  private:
   // Toggles the active state for painting the background and schedules a paint.
@@ -48,10 +48,6 @@ class AppListButton : public views::ImageButton {
   // True if the background should render as active, regardless of the state of
   // the application list.
   bool draw_background_as_active_;
-
-  // True if touch view feedback command line flag has been enabled. When
-  // enabled touch gestures will toggle rendering the background as active.
-  bool touch_feedback_enabled_;
 
   ShelfButtonHost* host_;
   // Reference to the shelf widget containing this button, owned by the

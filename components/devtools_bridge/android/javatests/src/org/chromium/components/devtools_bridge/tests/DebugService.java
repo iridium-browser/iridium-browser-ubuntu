@@ -13,6 +13,9 @@ import android.os.IBinder;
 import android.os.Process;
 import android.widget.Toast;
 
+import org.chromium.components.devtools_bridge.DevToolsBridgeServerSandbox;
+import org.chromium.components.devtools_bridge.GCDClientSessionTestingHost;
+import org.chromium.components.devtools_bridge.LocalSessionBridge;
 import org.chromium.components.devtools_bridge.LocalTunnelBridge;
 
 import java.io.IOException;
@@ -21,16 +24,166 @@ import java.io.IOException;
  * Service for testing devtools bridge.
  */
 public class DebugService extends Service {
-    private static final String PACKAGE = "org.chromium.components.devtools_bridge.tests";
-    public static final String START_ACTION = PACKAGE + ".START_ACTION";
-    public static final String STOP_ACTION = PACKAGE + ".STOP_ACTION";
+    public static final String START_TUNNEL_BRIDGE_ACTION = "action.START_TUNNEL_BRIDGE";
+    public static final String START_SESSION_BRIDGE_ACTION = "action.START_SESSION_BRIDGE";
+    public static final String START_SERVER_ACTION = "action.START_SERVER";
+    public static final String START_GCD_CLIENT_ACTION = "action.START_GCD_CLIENT";
+    public static final String STOP_ACTION = "action.STOP";
+
+    public static final String EXTRA_OAUTH_TOKEN = "extra.OAUTH_TOKEN";
+    public static final String EXTRA_REMOTE_INSTANCE_ID = "extra.REMOTE_INSTANCE_ID";
+
     private static final int NOTIFICATION_ID = 1;
 
-    private LocalTunnelBridge mBridge;
+    private Controller mRunningController;
 
-    private LocalTunnelBridge createBridge() throws IOException {
-        String exposingSocketName = "webview_devtools_remote_" + Integer.valueOf(Process.myPid());
-        return new LocalTunnelBridge("chrome_shell_devtools_remote", exposingSocketName);
+    private interface Controller {
+        void create() throws IOException;
+        void start() throws Exception;
+        void stop();
+        void dispose();
+    }
+
+    private String replicatingSocketName() {
+        return "chrome_shell_devtools_remote";
+    }
+
+    private String exposingSocketName() {
+        return "webview_devtools_remote_" + Integer.valueOf(Process.myPid());
+    }
+
+    private class LocalTunnelBridgeController implements Controller {
+        private LocalTunnelBridge mBridge;
+
+        @Override
+        public void create() throws IOException {
+            mBridge = new LocalTunnelBridge(replicatingSocketName(), exposingSocketName());
+        }
+
+        @Override
+        public void start() throws Exception {
+            mBridge.start();
+        }
+
+        @Override
+        public void stop() {
+            mBridge.stop();
+        }
+
+        @Override
+        public void dispose() {
+            mBridge.dispose();
+        }
+
+        @Override
+        public String toString() {
+            return "LocalTunnelBridge";
+        }
+    }
+
+    private class LocalSessionBridgeController implements Controller {
+        private LocalSessionBridge mBridge;
+
+        @Override
+        public void create() throws IOException {
+            mBridge = new LocalSessionBridge(replicatingSocketName(), exposingSocketName());
+        }
+
+        @Override
+        public void start() {
+            mBridge.start();
+        }
+
+        @Override
+        public void stop() {
+            mBridge.stop();
+        }
+
+        @Override
+        public void dispose() {
+            mBridge.dispose();
+        }
+
+        @Override
+        public String toString() {
+            return "LocalSessionBridge";
+        }
+    }
+
+    private class DevToolsBridgeServerSandboxController implements Controller {
+        private DevToolsBridgeServerSandbox mSandbox;
+
+        @Override
+        public void create() {
+            mSandbox = new DevToolsBridgeServerSandbox();
+        }
+
+        @Override
+        public void start() throws Exception {
+            mSandbox.start(DebugService.this);
+        }
+
+        @Override
+        public void stop() {
+            mSandbox.stop();
+        }
+
+        @Override
+        public void dispose() {}
+
+        @Override
+        public String toString() {
+            return "DevToolsBridgeServerSandbox";
+        }
+    }
+
+    private class GCDClientController implements Controller {
+        private final String mOAuthToken;
+        private final String mRemoteInstanceId;
+
+        private GCDClientSessionTestingHost mHost;
+
+        public GCDClientController(String oAuthToken, String remoteInstanceId) {
+            mOAuthToken = oAuthToken;
+            mRemoteInstanceId = remoteInstanceId;
+        }
+
+        @Override
+        public void create() {
+        }
+
+        @Override
+        public void start() throws Exception {
+            final GCDClientSessionTestingHost host = new GCDClientSessionTestingHost(
+                    mOAuthToken, exposingSocketName(), mRemoteInstanceId);
+            host.start(new Runnable() {
+                        @Override
+                        public void run() {
+                            String text;
+                            if (!host.isStarted()) {
+                                text = "Session not started. See log for details";
+                            } else {
+                                text = "Session started";
+                            }
+                            Toast.makeText(DebugService.this, text, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+            mHost = host;
+        }
+
+        @Override
+        public void stop() {
+        }
+
+        @Override
+        public void dispose() {
+            mHost.dispose();
+        }
+
+        @Override
+        public String toString() {
+            return "GCDClientSessionTestingHost";
+        }
     }
 
     @Override
@@ -38,42 +191,54 @@ public class DebugService extends Service {
         if (intent == null) return START_NOT_STICKY;
 
         String action = intent.getAction();
-        if (START_ACTION.equals(action)) {
-            return start();
+        if (START_TUNNEL_BRIDGE_ACTION.equals(action)) {
+            return start(new LocalTunnelBridgeController());
+        } else if (START_SESSION_BRIDGE_ACTION.equals(action)) {
+            return start(new LocalSessionBridgeController());
+        } else if (START_SERVER_ACTION.equals(action)) {
+            return start(new DevToolsBridgeServerSandboxController());
+        } else if (START_GCD_CLIENT_ACTION.equals(action)) {
+            String oAuthToken = intent.getStringExtra(EXTRA_OAUTH_TOKEN);
+            String remoteInstanceId = intent.getStringExtra(EXTRA_REMOTE_INSTANCE_ID);
+            return start(new GCDClientController(oAuthToken, remoteInstanceId));
         } else if (STOP_ACTION.equals(action)) {
             return stop();
         }
         return START_NOT_STICKY;
     }
 
-    private int start() {
-        if (mBridge != null)
-            return START_NOT_STICKY;
-
-        try {
-            mBridge = createBridge();
-            mBridge.start();
-        } catch (Exception e) {
-            Toast.makeText(this, "Failed to start", Toast.LENGTH_SHORT).show();
-            mBridge.dispose();
-            mBridge = null;
+    private int start(Controller controller) {
+        if (mRunningController != null) {
+            Toast.makeText(this, "Already started", Toast.LENGTH_SHORT).show();
             return START_NOT_STICKY;
         }
 
+        try {
+            controller.create();
+            controller.start();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(this, "Failed to start", Toast.LENGTH_SHORT).show();
+            controller.dispose();
+            return START_NOT_STICKY;
+        }
+        mRunningController = controller;
+
         startForeground(NOTIFICATION_ID, makeForegroundServiceNotification());
-        Toast.makeText(this, "Service started", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, controller.toString() + " started", Toast.LENGTH_SHORT).show();
         return START_STICKY;
     }
 
     private int stop() {
-        if (mBridge == null)
+        if (mRunningController == null)
             return START_NOT_STICKY;
 
-        mBridge.stop();
-        mBridge.dispose();
-        mBridge = null;
+        String name = mRunningController.toString();
+        mRunningController.stop();
+        mRunningController.dispose();
+        mRunningController = null;
         stopSelf();
-        Toast.makeText(this, "Service stopped", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, name + " stopped", Toast.LENGTH_SHORT).show();
         return START_NOT_STICKY;
     }
 

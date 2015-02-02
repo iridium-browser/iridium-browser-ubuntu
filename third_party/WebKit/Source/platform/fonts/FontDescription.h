@@ -115,7 +115,19 @@ public:
         float value;
     };
 
+    struct FamilyDescription {
+        FamilyDescription(GenericFamilyType genericFamily) : genericFamily(genericFamily) { }
+        FamilyDescription(GenericFamilyType genericFamily, const FontFamily& family)
+            : genericFamily(genericFamily)
+            , family(family)
+        {
+        }
+        GenericFamilyType genericFamily;
+        FontFamily family;
+    };
+
     const FontFamily& family() const { return m_familyList; }
+    FamilyDescription familyDescription() const { return FamilyDescription(genericFamily(), family()); }
     FontFamily& firstFamily() { return m_familyList; }
     Size size() const { return Size(m_keywordSize, m_specifiedSize, m_isAbsoluteSize); }
     float specifiedSize() const { return m_specifiedSize; }
@@ -166,8 +178,8 @@ public:
     FontCacheKey cacheKey(const FontFaceCreationParams&, FontTraits desiredTraits = FontTraits(0)) const;
 
     void setFamily(const FontFamily& family) { m_familyList = family; }
-    void setComputedSize(float s) { m_computedSize = clampToFloat(s); }
-    void setSpecifiedSize(float s) { m_specifiedSize = clampToFloat(s); }
+    void setComputedSize(float s) { m_computedSize = clampTo<float>(s); }
+    void setSpecifiedSize(float s) { m_specifiedSize = clampTo<float>(s); }
     void setStyle(FontStyle i) { m_style = i; }
     void setVariant(FontVariant c) { m_variant = c; }
     void setVariantLigatures(const VariantLigatures&);

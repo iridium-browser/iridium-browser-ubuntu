@@ -394,9 +394,8 @@ class Desktop:
       self.child_env["SSH_AUTH_SOCK"] = self.ssh_auth_sockname
 
     # Wait for X to be active.
-    for _test in range(5):
-      proc = subprocess.Popen("xdpyinfo", env=self.child_env, stdout=devnull)
-      _pid, retcode = os.waitpid(proc.pid, 0)
+    for _test in range(20):
+      retcode = subprocess.call("xdpyinfo", env=self.child_env, stdout=devnull)
       if retcode == 0:
         break
       time.sleep(0.5)
@@ -411,9 +410,8 @@ class Desktop:
     # Reconfigure the X server to use "evdev" keymap rules.  The X server must
     # be started with -noreset otherwise it'll reset as soon as the command
     # completes, since there are no other X clients running yet.
-    proc = subprocess.Popen("setxkbmap -rules evdev", env=self.child_env,
-                            shell=True)
-    _pid, retcode = os.waitpid(proc.pid, 0)
+    retcode = subprocess.call("setxkbmap -rules evdev", env=self.child_env,
+                              shell=True)
     if retcode != 0:
       logging.error("Failed to set XKB to 'evdev'")
 
@@ -558,17 +556,16 @@ def choose_x_session():
   for startup_file in XSESSION_FILES:
     startup_file = os.path.expanduser(startup_file)
     if os.path.exists(startup_file):
-      # Use the same logic that a Debian system typically uses with ~/.xsession
-      # (see /etc/X11/Xsession.d/50x11-common_determine-startup), to determine
-      # exactly how to run this file.
       if os.access(startup_file, os.X_OK):
         # "/bin/sh -c" is smart about how to execute the session script and
         # works in cases where plain exec() fails (for example, if the file is
         # marked executable, but is a plain script with no shebang line).
         return ["/bin/sh", "-c", pipes.quote(startup_file)]
       else:
-        shell = os.environ.get("SHELL", "sh")
-        return [shell, startup_file]
+        # If this is a system-wide session script, it should be run using the
+        # system shell, ignoring any login shell that might be set for the
+        # current user.
+        return ["/bin/sh", startup_file]
 
   # Choose a session wrapper script to run the session. On some systems,
   # /etc/X11/Xsession fails to load the user's .profile, so look for an
@@ -781,9 +778,24 @@ def cleanup():
 
   global g_desktops
   for desktop in g_desktops:
-    if desktop.x_proc:
-      logging.info("Terminating Xvfb")
-      desktop.x_proc.terminate()
+    for proc, name in [(desktop.x_proc, "Xvfb"),
+                       (desktop.session_proc, "session"),
+                       (desktop.host_proc, "host")]:
+      if proc is not None:
+        logging.info("Terminating " + name)
+        try:
+          psutil_proc = psutil.Process(proc.pid)
+          psutil_proc.terminate()
+
+          # Use a short timeout, to avoid delaying service shutdown if the
+          # process refuses to die for some reason.
+          psutil_proc.wait(timeout=10)
+        except psutil.TimeoutExpired:
+          logging.error("Timed out - sending SIGKILL")
+          psutil_proc.kill()
+        except psutil.Error:
+          logging.error("Error terminating process")
+
   g_desktops = []
   if ParentProcessLogger.instance():
     ParentProcessLogger.instance().release_parent()

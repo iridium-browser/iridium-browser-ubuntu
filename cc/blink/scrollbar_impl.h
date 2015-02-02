@@ -22,20 +22,20 @@ class ScrollbarImpl : public cc::Scrollbar {
   ScrollbarImpl(scoped_ptr<blink::WebScrollbar> scrollbar,
                 blink::WebScrollbarThemePainter painter,
                 scoped_ptr<blink::WebScrollbarThemeGeometry> geometry);
-  virtual ~ScrollbarImpl();
+  ~ScrollbarImpl() override;
 
   // cc::Scrollbar implementation.
-  virtual cc::ScrollbarOrientation Orientation() const OVERRIDE;
-  virtual bool IsLeftSideVerticalScrollbar() const OVERRIDE;
-  virtual bool HasThumb() const OVERRIDE;
-  virtual bool IsOverlay() const OVERRIDE;
-  virtual gfx::Point Location() const OVERRIDE;
-  virtual int ThumbThickness() const OVERRIDE;
-  virtual int ThumbLength() const OVERRIDE;
-  virtual gfx::Rect TrackRect() const OVERRIDE;
-  virtual void PaintPart(SkCanvas* canvas,
-                         cc::ScrollbarPart part,
-                         const gfx::Rect& content_rect) OVERRIDE;
+  cc::ScrollbarOrientation Orientation() const override;
+  bool IsLeftSideVerticalScrollbar() const override;
+  bool HasThumb() const override;
+  bool IsOverlay() const override;
+  gfx::Point Location() const override;
+  int ThumbThickness() const override;
+  int ThumbLength() const override;
+  gfx::Rect TrackRect() const override;
+  void PaintPart(SkCanvas* canvas,
+                 cc::ScrollbarPart part,
+                 const gfx::Rect& content_rect) override;
 
  private:
   scoped_ptr<blink::WebScrollbar> scrollbar_;

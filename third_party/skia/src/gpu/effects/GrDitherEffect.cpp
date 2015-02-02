@@ -21,7 +21,7 @@ class GLDitherEffect;
 class DitherEffect : public GrFragmentProcessor {
 public:
     static GrFragmentProcessor* Create() {
-        GR_CREATE_STATIC_FRAGMENT_PROCESSOR(gDitherEffect, DitherEffect, ())
+        GR_CREATE_STATIC_PROCESSOR(gDitherEffect, DitherEffect, ())
         return SkRef(gDitherEffect);
     }
 
@@ -29,8 +29,6 @@ public:
     static const char* Name() { return "Dither"; }
 
     typedef GLDitherEffect GLProcessor;
-
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
 
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE {
         return GrTBackendFragmentProcessorFactory<DitherEffect>::getInstance();
@@ -42,15 +40,17 @@ private:
     }
 
     // All dither effects are equal
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE { return true; }
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE { return true; }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
 
     typedef GrFragmentProcessor INHERITED;
 };
 
-void DitherEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    *validFlags = 0;
+void DitherEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    inout->setToUnknown(InvariantOutput::kWill_ReadInput);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -70,7 +70,7 @@ class GLDitherEffect : public GrGLFragmentProcessor {
 public:
     GLDitherEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor& fp,
                           const GrProcessorKey& key,
                           const char* outputColor,
@@ -87,14 +87,14 @@ GLDitherEffect::GLDitherEffect(const GrBackendProcessorFactory& factory,
     : INHERITED (factory) {
 }
 
-void GLDitherEffect::emitCode(GrGLProgramBuilder* builder,
+void GLDitherEffect::emitCode(GrGLFPBuilder* builder,
                               const GrFragmentProcessor& fp,
                               const GrProcessorKey& key,
                               const char* outputColor,
                               const char* inputColor,
                               const TransformedCoordsArray&,
                               const TextureSamplerArray& samplers) {
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     // Generate a random number based on the fragment position. For this
     // random number generator, we use the "GLSL rand" function
     // that seems to be floating around on the internet. It works under

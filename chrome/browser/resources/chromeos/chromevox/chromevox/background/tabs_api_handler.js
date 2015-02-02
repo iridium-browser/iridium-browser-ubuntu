@@ -12,7 +12,6 @@ goog.provide('cvox.TabsApiHandler');
 goog.require('cvox.AbstractEarcons');
 goog.require('cvox.AbstractTts');
 goog.require('cvox.BrailleInterface');
-goog.require('cvox.BrailleUtil');
 goog.require('cvox.NavBraille');
 
 
@@ -34,6 +33,12 @@ cvox.TabsApiHandler = function(tts, braille, earcons) {
   this.earcons_ = earcons;
   /** @type {function(string)} @private */
   this.msg_ = cvox.ChromeVox.msgs.getMsg.bind(cvox.ChromeVox.msgs);
+  /**
+   * Tracks whether the active tab has finished loading.
+   * @type {boolean}
+   * @private
+   */
+  this.lastActiveTabLoaded_ = false;
 
   chrome.tabs.onCreated.addListener(this.onCreated.bind(this));
   chrome.tabs.onRemoved.addListener(this.onRemoved.bind(this));
@@ -52,7 +57,7 @@ cvox.TabsApiHandler.prototype = {
       return;
     }
     this.tts_.speak(this.msg_('chrome_tab_created'),
-                   cvox.AbstractTts.QUEUE_MODE_FLUSH,
+                   cvox.QueueMode.FLUSH,
                    cvox.AbstractTts.PERSONALITY_ANNOUNCEMENT);
     this.braille_.write(
         cvox.NavBraille.fromText(this.msg_('chrome_tab_created')));
@@ -79,13 +84,14 @@ cvox.TabsApiHandler.prototype = {
       return;
     }
     chrome.tabs.get(activeInfo.tabId, function(tab) {
+      this.lastActiveTabLoaded_ = tab.status == 'complete';
       if (tab.status == 'loading') {
         return;
       }
       var title = tab.title ? tab.title : tab.url;
       this.tts_.speak(this.msg_('chrome_tab_selected',
                          [title]),
-                     cvox.AbstractTts.QUEUE_MODE_FLUSH,
+                     cvox.QueueMode.FLUSH,
                      cvox.AbstractTts.PERSONALITY_ANNOUNCEMENT);
       this.braille_.write(
           cvox.NavBraille.fromText(this.msg_('chrome_tab_selected', [title])));
@@ -107,8 +113,10 @@ cvox.TabsApiHandler.prototype = {
         return;
       }
       if (tab.status == 'loading') {
+        this.lastActiveTabLoaded_ = false;
         this.earcons_.playEarcon(cvox.AbstractEarcons.BUSY_PROGRESS_LOOP);
-      } else {
+      } else if (!this.lastActiveTabLoaded_) {
+        this.lastActiveTabLoaded_ = true;
         this.earcons_.playEarcon(cvox.AbstractEarcons.TASK_SUCCESS);
       }
     }.bind(this));
@@ -131,7 +139,7 @@ cvox.TabsApiHandler.prototype = {
           'chrome_normal_window_selected';
         var title = tab.title ? tab.title : tab.url;
         this.tts_.speak(this.msg_(msgId, [title]),
-                       cvox.AbstractTts.QUEUE_MODE_FLUSH,
+                       cvox.QueueMode.FLUSH,
                        cvox.AbstractTts.PERSONALITY_ANNOUNCEMENT);
         this.braille_.write(
             cvox.NavBraille.fromText(this.msg_(msgId, [title])));

@@ -15,8 +15,6 @@
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/accessibility/magnification_manager.h"
-#include "chrome/browser/chromeos/background/ash_user_wallpaper_delegate.h"
 #include "chrome/browser/chromeos/display/display_configuration_observer.h"
 #include "chrome/browser/chromeos/display/display_preferences.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -32,7 +30,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/input_method_manager.h"
@@ -40,6 +37,11 @@
 #include "content/public/browser/user_metrics.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(USE_ATHENA)
+#include "chrome/browser/chromeos/accessibility/magnification_manager.h"
+#include "chrome/browser/chromeos/background/ash_user_wallpaper_delegate.h"
+#endif
 
 namespace {
 
@@ -63,105 +65,106 @@ void InitAfterSessionStart() {
 #endif
 }
 
+#if !defined(USE_ATHENA)
 class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
  public:
   AccessibilityDelegateImpl() {}
   virtual ~AccessibilityDelegateImpl() {}
 
-  virtual void ToggleHighContrast() OVERRIDE {
+  virtual void ToggleHighContrast() override {
     DCHECK(chromeos::AccessibilityManager::Get());
     chromeos::AccessibilityManager::Get()->EnableHighContrast(
         !chromeos::AccessibilityManager::Get()->IsHighContrastEnabled());
   }
 
-  virtual bool IsSpokenFeedbackEnabled() const OVERRIDE {
+  virtual bool IsSpokenFeedbackEnabled() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->IsSpokenFeedbackEnabled();
   }
 
   virtual void ToggleSpokenFeedback(
-      ash::AccessibilityNotificationVisibility notify) OVERRIDE {
+      ui::AccessibilityNotificationVisibility notify) override {
     DCHECK(chromeos::AccessibilityManager::Get());
     chromeos::AccessibilityManager::Get()->ToggleSpokenFeedback(notify);
   }
 
-  virtual bool IsHighContrastEnabled() const OVERRIDE {
+  virtual bool IsHighContrastEnabled() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->IsHighContrastEnabled();
   }
 
-  virtual void SetMagnifierEnabled(bool enabled) OVERRIDE {
+  virtual void SetMagnifierEnabled(bool enabled) override {
     DCHECK(chromeos::MagnificationManager::Get());
     return chromeos::MagnificationManager::Get()->SetMagnifierEnabled(enabled);
   }
 
-  virtual void SetMagnifierType(ash::MagnifierType type) OVERRIDE {
+  virtual void SetMagnifierType(ui::MagnifierType type) override {
     DCHECK(chromeos::MagnificationManager::Get());
     return chromeos::MagnificationManager::Get()->SetMagnifierType(type);
   }
 
-  virtual bool IsMagnifierEnabled() const OVERRIDE {
+  virtual bool IsMagnifierEnabled() const override {
     DCHECK(chromeos::MagnificationManager::Get());
     return chromeos::MagnificationManager::Get()->IsMagnifierEnabled();
   }
 
-  virtual ash::MagnifierType GetMagnifierType() const OVERRIDE {
+  virtual ui::MagnifierType GetMagnifierType() const override {
     DCHECK(chromeos::MagnificationManager::Get());
     return chromeos::MagnificationManager::Get()->GetMagnifierType();
   }
 
-  virtual void SetLargeCursorEnabled(bool enabled) OVERRIDE {
+  virtual void SetLargeCursorEnabled(bool enabled) override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->EnableLargeCursor(enabled);
   }
 
-  virtual bool IsLargeCursorEnabled() const OVERRIDE {
+  virtual bool IsLargeCursorEnabled() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->IsLargeCursorEnabled();
   }
 
-  virtual void SetAutoclickEnabled(bool enabled) OVERRIDE {
+  virtual void SetAutoclickEnabled(bool enabled) override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->EnableAutoclick(enabled);
   }
 
-  virtual bool IsAutoclickEnabled() const OVERRIDE {
+  virtual bool IsAutoclickEnabled() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->IsAutoclickEnabled();
   }
 
-  virtual void SetVirtualKeyboardEnabled(bool enabled) OVERRIDE {
+  virtual void SetVirtualKeyboardEnabled(bool enabled) override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->
         EnableVirtualKeyboard(enabled);
   }
 
-  virtual bool IsVirtualKeyboardEnabled() const OVERRIDE {
+  virtual bool IsVirtualKeyboardEnabled() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->IsVirtualKeyboardEnabled();
   }
 
-  virtual bool ShouldShowAccessibilityMenu() const OVERRIDE {
+  virtual bool ShouldShowAccessibilityMenu() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->
         ShouldShowAccessibilityMenu();
   }
 
-  virtual bool IsBrailleDisplayConnected() const OVERRIDE {
+  virtual bool IsBrailleDisplayConnected() const override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->IsBrailleDisplayConnected();
   }
 
-  virtual void SilenceSpokenFeedback() const OVERRIDE {
+  virtual void SilenceSpokenFeedback() const override {
     TtsController::GetInstance()->Stop();
   }
 
-  virtual void SaveScreenMagnifierScale(double scale) OVERRIDE {
+  virtual void SaveScreenMagnifierScale(double scale) override {
     if (chromeos::MagnificationManager::Get())
       chromeos::MagnificationManager::Get()->SaveScreenMagnifierScale(scale);
   }
 
-  virtual double GetSavedScreenMagnifierScale() OVERRIDE {
+  virtual double GetSavedScreenMagnifierScale() override {
     if (chromeos::MagnificationManager::Get()) {
       return chromeos::MagnificationManager::Get()->
           GetSavedScreenMagnifierScale();
@@ -170,18 +173,18 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
   }
 
   virtual void TriggerAccessibilityAlert(
-      ash::AccessibilityAlert alert) OVERRIDE {
+      ui::AccessibilityAlert alert) override {
     Profile* profile = ProfileManager::GetActiveUserProfile();
     if (profile) {
       switch (alert) {
-        case ash::A11Y_ALERT_WINDOW_NEEDED: {
+        case ui::A11Y_ALERT_WINDOW_NEEDED: {
           AccessibilityAlertInfo event(
               profile, l10n_util::GetStringUTF8(IDS_A11Y_ALERT_WINDOW_NEEDED));
           SendControlAccessibilityNotification(
               ui::AX_EVENT_ALERT, &event);
           break;
         }
-        case ash::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED: {
+        case ui::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED: {
           AccessibilityAlertInfo event(
               profile, l10n_util::GetStringUTF8(
                   IDS_A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED));
@@ -189,28 +192,29 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
               ui::AX_EVENT_ALERT, &event);
           break;
         }
-        case ash::A11Y_ALERT_NONE:
+        case ui::A11Y_ALERT_NONE:
           break;
       }
     }
   }
 
-  virtual ash::AccessibilityAlert GetLastAccessibilityAlert() OVERRIDE {
-    return ash::A11Y_ALERT_NONE;
+  virtual ui::AccessibilityAlert GetLastAccessibilityAlert() override {
+    return ui::A11Y_ALERT_NONE;
   }
 
-  virtual void PlayEarcon(int sound_key) OVERRIDE {
+  virtual void PlayEarcon(int sound_key) override {
     DCHECK(chromeos::AccessibilityManager::Get());
     return chromeos::AccessibilityManager::Get()->PlayEarcon(sound_key);
   }
 
-  virtual base::TimeDelta PlayShutdownSound() const OVERRIDE {
+  virtual base::TimeDelta PlayShutdownSound() const override {
     return chromeos::AccessibilityManager::Get()->PlayShutdownSound();
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AccessibilityDelegateImpl);
 };
+#endif
 
 }  // anonymous namespace
 
@@ -236,7 +240,11 @@ ash::SessionStateDelegate* ChromeShellDelegate::CreateSessionStateDelegate() {
 }
 
 ash::AccessibilityDelegate* ChromeShellDelegate::CreateAccessibilityDelegate() {
+#if defined(USE_ATHENA)
+  return nullptr;
+#else
   return new AccessibilityDelegateImpl;
+#endif
 }
 
 ash::NewWindowDelegate* ChromeShellDelegate::CreateNewWindowDelegate() {
@@ -252,7 +260,11 @@ ash::SystemTrayDelegate* ChromeShellDelegate::CreateSystemTrayDelegate() {
 }
 
 ash::UserWallpaperDelegate* ChromeShellDelegate::CreateUserWallpaperDelegate() {
+#if defined(USE_ATHENA)
+  return NULL;
+#else
   return chromeos::CreateUserWallpaperDelegate();
+#endif
 }
 
 void ChromeShellDelegate::Observe(int type,

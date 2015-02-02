@@ -7,9 +7,9 @@
 #include <algorithm>
 
 #include "ui/gfx/animation/tween.h"
-#include "ui/gfx/box_f.h"
+#include "ui/gfx/geometry/box_f.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 #include "ui/gfx/transform_util.h"
-#include "ui/gfx/vector3d_f.h"
 
 namespace cc {
 
@@ -68,8 +68,8 @@ bool TransformOperations::BlendedBoundsForBox(const gfx::BoxF& box,
   for (int i = num_operations - 1; i >= 0; --i) {
     gfx::BoxF bounds_for_operation;
     const TransformOperation* from_op =
-        from_identity ? NULL : &from.operations_[i];
-    const TransformOperation* to_op = to_identity ? NULL : &operations_[i];
+        from_identity ? nullptr : &from.operations_[i];
+    const TransformOperation* to_op = to_identity ? nullptr : &operations_[i];
     if (!TransformOperation::BlendedBoundsForBox(*bounds,
                                                  from_op,
                                                  to_op,

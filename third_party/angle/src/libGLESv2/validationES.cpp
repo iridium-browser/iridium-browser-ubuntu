@@ -24,6 +24,9 @@
 #include "common/mathutil.h"
 #include "common/utilities.h"
 
+// FIXME(jmadill): remove this when we support buffer data caching
+#include "libGLESv2/renderer/d3d/BufferD3D.h"
+
 namespace gl
 {
 
@@ -304,8 +307,8 @@ bool ValidateRenderbufferStorageParameters(gl::Context *context, GLenum target, 
         return false;
     }
 
-    const gl::InternalFormat &formatInfo = gl::GetInternalFormatInfo(internalformat);
-    if (!formatInfo.textureSupport(context->getClientVersion(), context->getExtensions()))
+    const TextureCaps &formatCaps = context->getTextureCaps().get(internalformat);
+    if (!formatCaps.renderable)
     {
         context->recordError(Error(GL_INVALID_ENUM));
         return false;
@@ -315,6 +318,7 @@ bool ValidateRenderbufferStorageParameters(gl::Context *context, GLenum target, 
     // sized but it does state that the format must be in the ES2.0 spec table 4.5 which contains
     // only sized internal formats. The ES3 spec (section 4.4.2) does, however, state that the
     // internal format must be sized and not an integer format if samples is greater than zero.
+    const gl::InternalFormat &formatInfo = gl::GetInternalFormatInfo(internalformat);
     if (formatInfo.pixelBytes == 0)
     {
         context->recordError(Error(GL_INVALID_ENUM));
@@ -324,13 +328,6 @@ bool ValidateRenderbufferStorageParameters(gl::Context *context, GLenum target, 
     if ((formatInfo.componentType == GL_UNSIGNED_INT || formatInfo.componentType == GL_INT) && samples > 0)
     {
         context->recordError(Error(GL_INVALID_OPERATION));
-        return false;
-    }
-
-    const TextureCaps &formatCaps = context->getTextureCaps().get(internalformat);
-    if (!formatCaps.renderable)
-    {
-        context->recordError(Error(GL_INVALID_ENUM));
         return false;
     }
 
@@ -594,7 +591,8 @@ bool ValidateBlitFramebufferParameters(gl::Context *context, GLint srcX0, GLint 
                             return false;
                         }
 
-                        if (attachment->getActualFormat() != readColorBuffer->getActualFormat())
+                        // Return an error if the destination formats do not match
+                        if (attachment->getInternalFormat() != readColorBuffer->getInternalFormat())
                         {
                             context->recordError(Error(GL_INVALID_OPERATION));
                             return false;
@@ -1673,11 +1671,20 @@ bool ValidateDrawElements(Context *context, GLenum mode, GLsizei count, GLenum t
     // TODO: also disable index checking on back-ends that are robust to out-of-range accesses.
     if (elementArrayBuffer)
     {
-        unsigned int offset = reinterpret_cast<unsigned int>(indices);
+        uintptr_t offset = reinterpret_cast<uintptr_t>(indices);
         if (!elementArrayBuffer->getIndexRangeCache()->findRange(type, offset, count, indexRangeOut, NULL))
         {
-            const void *dataPointer = elementArrayBuffer->getImplementation()->getData();
-            const uint8_t *offsetPointer = static_cast<const uint8_t *>(dataPointer) + offset;
+            // FIXME(jmadill): Use buffer data caching instead of the D3D back-end
+            rx::BufferD3D *bufferD3D = rx::BufferD3D::makeBufferD3D(elementArrayBuffer->getImplementation());
+            const uint8_t *dataPointer = NULL;
+            Error error = bufferD3D->getData(&dataPointer);
+            if (error.isError())
+            {
+                context->recordError(error);
+                return false;
+            }
+
+            const uint8_t *offsetPointer = dataPointer + offset;
             *indexRangeOut = rx::IndexRangeCache::ComputeRange(type, offsetPointer, count);
         }
     }

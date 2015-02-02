@@ -18,8 +18,8 @@
 #include "remoting/signaling/mock_signal_strategy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/xmpp/constants.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmpp/constants.h"
 
 using buzz::QName;
 using buzz::XmlElement;
@@ -57,7 +57,7 @@ class MockCallback {
 class RegisterSupportHostRequestTest : public testing::Test {
  public:
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     key_pair_ = RsaKeyPair::FromString(kTestRsaKeyPair);
     ASSERT_TRUE(key_pair_.get());
 

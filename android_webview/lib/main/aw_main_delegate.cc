@@ -6,7 +6,6 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/browser_view_renderer.h"
-#include "android_webview/browser/gpu_memory_buffer_factory_impl.h"
 #include "android_webview/browser/scoped_allow_wait_for_legacy_web_view_api.h"
 #include "android_webview/lib/aw_browser_dependency_factory_impl.h"
 #include "android_webview/native/aw_media_url_interceptor.h"
@@ -21,11 +20,13 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread_restrictions.h"
+#include "cc/base/switches.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/client/gl_in_process_context.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/base/media_switches.h"
 #include "webkit/common/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 
@@ -40,8 +41,7 @@ base::LazyInstance<scoped_ptr<ScopedAllowWaitForLegacyWebViewApi> >
 
 }
 
-AwMainDelegate::AwMainDelegate()
-    : gpu_memory_buffer_factory_(new GpuMemoryBufferFactoryImpl) {
+AwMainDelegate::AwMainDelegate() {
 }
 
 AwMainDelegate::~AwMainDelegate() {
@@ -50,23 +50,12 @@ AwMainDelegate::~AwMainDelegate() {
 bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   content::SetContentClient(&content_client_);
 
-  CommandLine* cl = CommandLine::ForCurrentProcess();
-  bool zero_copy_disabled_by_switch = cl->HasSwitch(switches::kDisableZeroCopy);
-  bool use_zero_copy = !zero_copy_disabled_by_switch &&
-                       cl->HasSwitch(switches::kEnableZeroCopy) &&
-                       gpu_memory_buffer_factory_.get()->Initialize();
-
-  if (use_zero_copy) {
-    cl->AppendSwitch(switches::kEnableZeroCopy);
-  } else if (!zero_copy_disabled_by_switch) {
-    cl->AppendSwitch(switches::kDisableZeroCopy);
-  }
-
   content::BrowserMediaPlayerManager::RegisterMediaUrlInterceptor(
       new AwMediaUrlInterceptor());
 
-  BrowserViewRenderer::CalculateTileMemoryPolicy(use_zero_copy);
+  BrowserViewRenderer::CalculateTileMemoryPolicy();
 
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   cl->AppendSwitch(switches::kEnableBeginFrameScheduling);
   cl->AppendSwitch(switches::kEnableImplSidePainting);
 
@@ -79,12 +68,6 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // File system API not supported (requires some new API; internal bug 6930981)
   cl->AppendSwitch(switches::kDisableFileSystem);
 
-  // For fullscreen video we create a new container view to host the
-  // WebContents, ie. the FullscreenView. As a result we cannot reuse the
-  // embedded video blocker attached to the old container view, so we create a
-  // new blocker instead attached to the ContentVideoView.
-  cl->AppendSwitch(switches::kEnableContentVideoViewPowerSaveBlocker);
-
 #if defined(VIDEO_HOLE)
   // Support EME/L1 with hole-punching.
   cl->AppendSwitch(switches::kMediaDrmEnableNonCompositing);
@@ -92,6 +75,9 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
 
   // WebRTC hardware decoding is not supported, internal bug 15075307
   cl->AppendSwitch(switches::kDisableWebRtcHWDecoding);
+
+  // This is needed for sharing textures across the different GL threads.
+  cl->AppendSwitch(switches::kEnableThreadedTextureMailboxes);
 
   return false;
 }

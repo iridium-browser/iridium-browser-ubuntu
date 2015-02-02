@@ -44,7 +44,6 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/prerender_types.h"
 #include "content/public/browser/browser_thread.h"
@@ -182,17 +181,17 @@ class PrerenderManager::OnCloseWebContentsDeleter
         base::TimeDelta::FromSeconds(kDeleteWithExtremePrejudiceSeconds));
   }
 
-  virtual void CloseContents(WebContents* source) OVERRIDE {
+  void CloseContents(WebContents* source) override {
     DCHECK_EQ(tab_, source);
     ScheduleWebContentsForDeletion(false);
   }
 
-  virtual void SwappedOut(WebContents* source) OVERRIDE {
+  void SwappedOut(WebContents* source) override {
     DCHECK_EQ(tab_, source);
     ScheduleWebContentsForDeletion(false);
   }
 
-  virtual bool ShouldSuppressDialogs() OVERRIDE {
+  bool ShouldSuppressDialogs() override {
     // Use this as a proxy for getting statistics on how often we fail to honor
     // the beforeunload event.
     suppressed_dialog_ = true;

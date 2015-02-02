@@ -5,6 +5,7 @@
 {
   'targets': [
     {
+      # GN: //components/enhanced_bookmarks:enhanced_bookmarks
       'target_name': 'enhanced_bookmarks',
       'type': 'static_library',
       'include_dirs': [
@@ -25,6 +26,8 @@
       'sources': [
         'enhanced_bookmarks/bookmark_image_service.cc',
         'enhanced_bookmarks/bookmark_image_service.h',
+        'enhanced_bookmarks/bookmark_server_cluster_service.cc',
+        'enhanced_bookmarks/bookmark_server_cluster_service.h',
         'enhanced_bookmarks/bookmark_server_search_service.cc',
         'enhanced_bookmarks/bookmark_server_search_service.h',
         'enhanced_bookmarks/bookmark_server_service.cc',
@@ -45,6 +48,8 @@
         'enhanced_bookmarks/metadata_accessor.h',
         'enhanced_bookmarks/persistent_image_store.cc',
         'enhanced_bookmarks/persistent_image_store.h',
+        'enhanced_bookmarks/pref_names.cc',
+        'enhanced_bookmarks/pref_names.h',
       ],
       'conditions': [
         ['OS=="ios"', {
@@ -55,6 +60,7 @@
       ],
     },
     {
+      # GN: //components/enhanced_bookmarks:enhanced_bookmarks_test_support
       'target_name': 'enhanced_bookmarks_test_support',
       'type': 'static_library',
       'include_dirs': [
@@ -73,6 +79,7 @@
       'target_name': 'enhanced_bookmarks_proto',
       'type': 'static_library',
       'sources': [
+        'enhanced_bookmarks/proto/cluster.proto',
         'enhanced_bookmarks/proto/metadata.proto',
         'enhanced_bookmarks/proto/search.proto',
       ],

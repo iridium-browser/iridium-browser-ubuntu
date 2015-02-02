@@ -34,13 +34,12 @@ class CC_EXPORT StreamVideoDrawQuad : public DrawQuad {
   unsigned resource_id;
   gfx::Transform matrix;
 
-  virtual void IterateResources(const ResourceIteratorCallback& callback)
-      OVERRIDE;
+  void IterateResources(const ResourceIteratorCallback& callback) override;
 
   static const StreamVideoDrawQuad* MaterialCast(const DrawQuad*);
 
  private:
-  virtual void ExtendValue(base::debug::TracedValue* value) const OVERRIDE;
+  void ExtendValue(base::debug::TracedValue* value) const override;
 };
 
 }  // namespace cc

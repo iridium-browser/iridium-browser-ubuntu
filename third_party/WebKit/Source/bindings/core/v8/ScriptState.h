@@ -74,7 +74,7 @@ public:
 
     // This can return an empty handle if the v8::Context is gone.
     v8::Handle<v8::Context> context() const { return m_context.newLocal(m_isolate); }
-    bool contextIsValid() const { return m_context.isEmpty() || m_globalObjectDetached; }
+    bool contextIsValid() const { return !m_context.isEmpty() && !m_globalObjectDetached; }
     void detachGlobalObject();
     void clearContext() { return m_context.clear(); }
 
@@ -109,8 +109,8 @@ class ScriptStateForTesting : public ScriptState {
 public:
     static PassRefPtr<ScriptStateForTesting> create(v8::Handle<v8::Context>, PassRefPtr<DOMWrapperWorld>);
 
-    virtual ExecutionContext* executionContext() const OVERRIDE;
-    virtual void setExecutionContext(ExecutionContext*) OVERRIDE;
+    virtual ExecutionContext* executionContext() const override;
+    virtual void setExecutionContext(ExecutionContext*) override;
 
 private:
     ScriptStateForTesting(v8::Handle<v8::Context>, PassRefPtr<DOMWrapperWorld>);

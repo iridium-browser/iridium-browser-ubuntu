@@ -54,10 +54,10 @@ namespace precache {
 class PrecacheDatabaseTest : public testing::Test {
  public:
   PrecacheDatabaseTest() {}
-  virtual ~PrecacheDatabaseTest() {}
+  ~PrecacheDatabaseTest() override {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     base::StatisticsRecorder::Initialize();
     precache_database_ = new PrecacheDatabase();
 

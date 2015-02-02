@@ -65,9 +65,9 @@ class ExtensionTestNotificationObserver::NotificationSet
 
  private:
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   content::NotificationRegistrar notification_registrar_;
   base::CallbackList<void()> callback_list_;
@@ -139,7 +139,7 @@ bool ExtensionTestNotificationObserver::WaitForPageActionVisibilityChangeTo(
 
 bool ExtensionTestNotificationObserver::WaitForExtensionViewsToLoad() {
   extensions::ProcessManager* manager =
-      extensions::ExtensionSystem::Get(GetProfile())->process_manager();
+      extensions::ProcessManager::Get(GetProfile());
   NotificationSet notification_set;
   notification_set.Add(content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
   notification_set.Add(content::NOTIFICATION_LOAD_STOP);

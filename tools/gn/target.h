@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
 #include "base/synchronization/lock.h"
@@ -23,6 +22,7 @@
 #include "tools/gn/source_file.h"
 #include "tools/gn/unique_vector.h"
 
+class DepsIteratorRange;
 class InputFile;
 class Settings;
 class Token;
@@ -41,19 +41,25 @@ class Target : public Item {
     ACTION,
     ACTION_FOREACH,
   };
+
+  enum DepsIterationType {
+    DEPS_ALL,  // Iterates through all public, private, and data deps.
+    DEPS_LINKED,  // Iterates through all non-data dependencies.
+  };
+
   typedef std::vector<SourceFile> FileList;
   typedef std::vector<std::string> StringVector;
 
   Target(const Settings* settings, const Label& label);
-  virtual ~Target();
+  ~Target() override;
 
   // Returns a string naming the output type.
   static const char* GetStringForOutputType(OutputType type);
 
   // Item overrides.
-  virtual Target* AsTarget() OVERRIDE;
-  virtual const Target* AsTarget() const OVERRIDE;
-  virtual bool OnResolved(Err* err) OVERRIDE;
+  Target* AsTarget() override;
+  const Target* AsTarget() const override;
+  bool OnResolved(Err* err) override;
 
   OutputType output_type() const { return output_type_; }
   void set_output_type(OutputType t) { output_type_ = t; }
@@ -124,6 +130,11 @@ class Target : public Item {
            output_type_ == ACTION_FOREACH ||
            output_type_ == COPY_FILES;
   }
+
+  // Returns the iterator range which can be used in range-based for loops
+  // to iterate over multiple types of deps in one loop:
+  //   for (const auto& pair : target->GetDeps(Target::DEPS_ALL)) ...
+  DepsIteratorRange GetDeps(DepsIterationType type) const;
 
   // Linked private dependencies.
   const LabelTargetVector& private_deps() const { return private_deps_; }
@@ -302,21 +313,5 @@ class Target : public Item {
 
   DISALLOW_COPY_AND_ASSIGN(Target);
 };
-
-namespace BASE_HASH_NAMESPACE {
-
-#if defined(COMPILER_GCC)
-template<> struct hash<const Target*> {
-  std::size_t operator()(const Target* t) const {
-    return reinterpret_cast<std::size_t>(t);
-  }
-};
-#elif defined(COMPILER_MSVC)
-inline size_t hash_value(const Target* t) {
-  return reinterpret_cast<size_t>(t);
-}
-#endif  // COMPILER...
-
-}  // namespace BASE_HASH_NAMESPACE
 
 #endif  // TOOLS_GN_TARGET_H_

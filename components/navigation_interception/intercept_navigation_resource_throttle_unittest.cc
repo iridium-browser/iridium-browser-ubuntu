@@ -86,16 +86,10 @@ class MockResourceController : public content::ResourceController {
   Status status() const { return status_; }
 
   // ResourceController:
-  virtual void Cancel() OVERRIDE {
-    NOTREACHED();
-  }
-  virtual void CancelAndIgnore() OVERRIDE {
-    status_ = CANCELLED;
-  }
-  virtual void CancelWithError(int error_code) OVERRIDE {
-    NOTREACHED();
-  }
-  virtual void Resume() OVERRIDE {
+  void Cancel() override { NOTREACHED(); }
+  void CancelAndIgnore() override { status_ = CANCELLED; }
+  void CancelWithError(int error_code) override { NOTREACHED(); }
+  void Resume() override {
     DCHECK(status_ == UNKNOWN);
     status_ = RESUMED;
   }
@@ -190,11 +184,9 @@ class InterceptNavigationResourceThrottleTest
         io_thread_state_(NULL) {
   }
 
-  virtual void SetUp() OVERRIDE {
-    RenderViewHostTestHarness::SetUp();
-  }
+  void SetUp() override { RenderViewHostTestHarness::SetUp(); }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (web_contents())
       web_contents()->SetDelegate(NULL);
 

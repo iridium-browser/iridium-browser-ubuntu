@@ -15,10 +15,10 @@ class DownloadsInternalDetermineFilenameFunction
   DECLARE_EXTENSION_FUNCTION("downloadsInternal.determineFilename",
                              DOWNLOADSINTERNAL_DETERMINEFILENAME);
   DownloadsInternalDetermineFilenameFunction();
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 
  protected:
-  virtual ~DownloadsInternalDetermineFilenameFunction();
+  ~DownloadsInternalDetermineFilenameFunction() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsInternalDetermineFilenameFunction);

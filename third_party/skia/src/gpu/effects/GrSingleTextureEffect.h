@@ -8,7 +8,7 @@
 #ifndef GrSingleTextureEffect_DEFINED
 #define GrSingleTextureEffect_DEFINED
 
-#include "GrProcessor.h"
+#include "GrFragmentProcessor.h"
 #include "SkMatrix.h"
 #include "GrCoordTransform.h"
 
@@ -34,26 +34,15 @@ protected:
                           GrCoordSet = kLocal_GrCoordSet);
 
     /**
-     * Helper for subclass onIsEqual() functions.
-     */
-    bool hasSameTextureParamsMatrixAndSourceCoords(const GrSingleTextureEffect& other) const {
-        // We don't have to check the accesses' swizzles because they are inferred from the texture.
-        return fTextureAccess == other.fTextureAccess &&
-               fCoordTransform.getMatrix().cheapEqualTo(other.fCoordTransform.getMatrix()) &&
-               fCoordTransform.sourceCoords() == other.fCoordTransform.sourceCoords();
-    }
-
-    /**
-     * Can be used as a helper to implement subclass getConstantColorComponents(). It assumes that
+     * Can be used as a helper to implement subclass onComputeInvariantOutput(). It assumes that
      * the subclass output color will be a modulation of the input color with a value read from the
      * texture.
      */
-    void updateConstantColorComponentsForModulation(GrColor* color, uint32_t* validFlags) const {
-        if ((*validFlags & kA_GrColorComponentFlag) && 0xFF == GrColorUnpackA(*color) &&
-            GrPixelConfigIsOpaque(this->texture(0)->config())) {
-            *validFlags = kA_GrColorComponentFlag;
+    void updateInvariantOutputForModulation(InvariantOutput* inout) const {
+        if (GrPixelConfigIsOpaque(this->texture(0)->config())) {
+            inout->mulByUnknownOpaqueColor();
         } else {
-            *validFlags = 0;
+            inout->mulByUnknownColor();
         }
     }
 

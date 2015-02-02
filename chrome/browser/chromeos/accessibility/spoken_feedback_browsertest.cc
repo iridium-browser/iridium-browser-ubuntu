@@ -4,6 +4,8 @@
 
 #include <queue>
 
+#include "ash/accelerators/accelerator_controller.h"
+#include "ash/accelerators/accelerator_table.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
 #include "base/command_line.h"
@@ -52,11 +54,11 @@ class LoggedInSpokenFeedbackTest : public InProcessBrowserTest {
   LoggedInSpokenFeedbackTest() {}
   virtual ~LoggedInSpokenFeedbackTest() {}
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() override {
     AccessibilityManager::SetBrailleControllerForTest(&braille_controller_);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  virtual void TearDownOnMainThread() override {
     AccessibilityManager::SetBrailleControllerForTest(NULL);
   }
 
@@ -83,9 +85,9 @@ class LoggedInSpokenFeedbackTest : public InProcessBrowserTest {
 
   void RunJavaScriptInChromeVoxBackgroundPage(const std::string& script) {
     extensions::ExtensionHost* host =
-        extensions::ExtensionSystem::Get(browser()->profile())->
-        process_manager()->GetBackgroundHostForExtension(
-            extension_misc::kChromeVoxExtensionId);
+        extensions::ProcessManager::Get(browser()->profile())
+            ->GetBackgroundHostForExtension(
+                extension_misc::kChromeVoxExtensionId);
     CHECK(content::ExecuteScript(host->host_contents(), script));
   }
 
@@ -97,6 +99,12 @@ class LoggedInSpokenFeedbackTest : public InProcessBrowserTest {
         "window.ontouchstart = function() {};");
   }
 
+ bool PerformAcceleratorAction(int action) {
+    ash::AcceleratorController* controller =
+        ash::Shell::GetInstance()->accelerator_controller();
+    return controller->PerformAction(action, ui::Accelerator());
+  }
+
   void DisableEarcons() {
     // Playing earcons from within a test is not only annoying if you're
     // running the test locally, but seems to cause crashes
@@ -104,6 +112,17 @@ class LoggedInSpokenFeedbackTest : public InProcessBrowserTest {
     // ChromeVox to not ever play earcons (prerecorded sound effects).
     RunJavaScriptInChromeVoxBackgroundPage(
         "cvox.ChromeVox.earcons.playEarcon = function() {};");
+  }
+
+  void EnableChromeVox() {
+    // Test setup.
+    // Enable ChromeVox, skip welcome message, and disable earcons.
+    ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
+
+    AccessibilityManager::Get()->EnableSpokenFeedback(
+        true, ui::A11Y_NOTIFICATION_NONE);
+    EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
+    DisableEarcons();
   }
 
   void LoadChromeVoxAndThenNavigateToURL(const GURL& url) {
@@ -125,7 +144,7 @@ class LoggedInSpokenFeedbackTest : public InProcessBrowserTest {
              "</script>"));
     EXPECT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
     AccessibilityManager::Get()->EnableSpokenFeedback(
-        true, ash::A11Y_NOTIFICATION_NONE);
+        true, ui::A11Y_NOTIFICATION_NONE);
 
     // Block until we get "ready".
     while (speech_monitor_.GetNextUtterance() != "ready") {
@@ -158,13 +177,7 @@ class LoggedInSpokenFeedbackTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(LoggedInSpokenFeedbackTest, AddBookmark) {
-  ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
-  DisableEarcons();
-
+  EnableChromeVox();
   chrome::ExecuteCommand(browser(), IDC_SHOW_BOOKMARK_BAR);
 
   // Create a bookmark with title "foo".
@@ -223,7 +236,7 @@ class SpokenFeedbackTest
   SpokenFeedbackTest() {}
   virtual ~SpokenFeedbackTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     if (GetParam() == kTestAsGuestUser) {
       command_line->AppendSwitch(chromeos::switches::kGuestSession);
       command_line->AppendSwitch(::switches::kIncognito);
@@ -242,20 +255,11 @@ INSTANTIATE_TEST_CASE_P(
                       kTestAsGuestUser));
 
 IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, EnableSpokenFeedback) {
-  ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
+  EnableChromeVox();
 }
 
 IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, FocusToolbar) {
-  ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
-  DisableEarcons();
+  EnableChromeVox();
 
   chrome::ExecuteCommand(browser(), IDC_FOCUS_TOOLBAR);
   // Might be "Google Chrome Toolbar" or "Chromium Toolbar".
@@ -265,12 +269,7 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, FocusToolbar) {
 }
 
 IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, TypeInOmnibox) {
-  ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
-  DisableEarcons();
+  EnableChromeVox();
 
   // Wait for ChromeVox to finish speaking.
   chrome::ExecuteCommand(browser(), IDC_FOCUS_LOCATION);
@@ -292,6 +291,111 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, TypeInOmnibox) {
 
   SendKeyPress(ui::VKEY_BACK);
   EXPECT_EQ("z", speech_monitor_.GetNextUtterance());
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, FocusShelf) {
+  EnableChromeVox();
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::FOCUS_SHELF));
+  EXPECT_EQ("Shelf,", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("Apps,", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("button", speech_monitor_.GetNextUtterance());
+
+  SendKeyPress(ui::VKEY_TAB);
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(), "*, button"));
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, NavigateAppLauncher) {
+  EnableChromeVox();
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::FOCUS_SHELF));
+  while (true) {
+    std::string utterance = speech_monitor_.GetNextUtterance();
+    if (utterance == "button")
+      break;
+  }
+
+  SendKeyPress(ui::VKEY_RETURN);
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(), "Chrom*,"));
+  EXPECT_EQ("text box", speech_monitor_.GetNextUtterance());
+
+  SendKeyPress(ui::VKEY_DOWN);
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(), "*, button"));
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, OpenStatusTray) {
+  EnableChromeVox();
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::SHOW_SYSTEM_TRAY_BUBBLE));
+  EXPECT_EQ("Status tray,", speech_monitor_.GetNextUtterance());
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(), "time *"));
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(),
+                           "Battery is*full."));
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(), "*, button"));
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, NavigateSystemTray) {
+  EnableChromeVox();
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::SHOW_SYSTEM_TRAY_BUBBLE));
+  while (true) {
+    std::string utterance = speech_monitor_.GetNextUtterance();
+    if (MatchPattern(utterance, "*, button"))
+      break;
+  }
+
+  // Navigate to Bluetooth sub-menu and open it.
+  while (true) {
+    SendKeyPress(ui::VKEY_TAB);
+    std::string utterance = speech_monitor_.GetNextUtterance();
+    if (MatchPattern(utterance, "*Bluetooth*, button"))
+      break;
+  }
+  SendKeyPress(ui::VKEY_RETURN);
+
+  // Navigate to return to previous menu button and press it.
+  while (true) {
+    SendKeyPress(ui::VKEY_TAB);
+    std::string utterance = speech_monitor_.GetNextUtterance();
+    if (MatchPattern(utterance, "Previous menu, button"))
+      break;
+  }
+  SendKeyPress(ui::VKEY_RETURN);
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(),
+                           "*Bluetooth*, button"));
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, ScreenBrightness) {
+  EnableChromeVox();
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::BRIGHTNESS_UP));
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(),
+                           "Brightness * percent"));
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::BRIGHTNESS_DOWN));
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(),
+                           "Brightness * percent"));
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, VolumeSlider) {
+  EnableChromeVox();
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::VOLUME_UP));
+  EXPECT_TRUE(MatchPattern(speech_monitor_.GetNextUtterance(), "*%,"));
+  EXPECT_EQ("Volume,", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("slider", speech_monitor_.GetNextUtterance());
+}
+
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, OverviewMode) {
+  EnableChromeVox();
+
+  EXPECT_TRUE(PerformAcceleratorAction(ash::TOGGLE_OVERVIEW));
+  EXPECT_EQ("Alert Entered window overview mode",
+            speech_monitor_.GetNextUtterance());
+  EXPECT_EQ(", text box", speech_monitor_.GetNextUtterance());
+
+  SendKeyPress(ui::VKEY_TAB);
+  EXPECT_EQ("about blank, button", speech_monitor_.GetNextUtterance());
 }
 
 IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, ChromeVoxShiftSearch) {
@@ -357,7 +461,8 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, ChromeVoxNavigateAndSelect) {
   EXPECT_EQ("Title", speech_monitor_.GetNextUtterance());
 }
 
-IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, ChromeVoxStickyMode) {
+// flaky: http://crbug.com/418572
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_ChromeVoxStickyMode) {
   LoadChromeVoxAndThenNavigateToURL(
       GURL("data:text/html;charset=utf-8,"
            "<label>Enter your name <input autofocus></label>"
@@ -400,13 +505,7 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, ChromeVoxStickyMode) {
 }
 
 IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, TouchExploreStatusTray) {
-  ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
-  DisableEarcons();
-
+  EnableChromeVox();
   SimulateTouchScreenInChromeVox();
 
   // Send an accessibility hover event on the system tray, which is
@@ -429,7 +528,7 @@ class GuestSpokenFeedbackTest : public LoggedInSpokenFeedbackTest {
   GuestSpokenFeedbackTest() {}
   virtual ~GuestSpokenFeedbackTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(chromeos::switches::kGuestSession);
     command_line->AppendSwitch(::switches::kIncognito);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
@@ -442,12 +541,7 @@ class GuestSpokenFeedbackTest : public LoggedInSpokenFeedbackTest {
 };
 
 IN_PROC_BROWSER_TEST_F(GuestSpokenFeedbackTest, FocusToolbar) {
-  ASSERT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
-
-  AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
-  DisableEarcons();
+  EnableChromeVox();
 
   chrome::ExecuteCommand(browser(), IDC_FOCUS_TOOLBAR);
   // Might be "Google Chrome Toolbar" or "Chromium Toolbar".
@@ -465,13 +559,13 @@ class OobeSpokenFeedbackTest : public InProcessBrowserTest {
   OobeSpokenFeedbackTest() {}
   virtual ~OobeSpokenFeedbackTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     AccessibilityManager::Get()->
         SetProfileForTest(ProfileHelper::GetSigninProfile());
   }
@@ -493,7 +587,7 @@ IN_PROC_BROWSER_TEST_F(OobeSpokenFeedbackTest, DISABLED_SpokenFeedbackInOobe) {
   gfx::NativeWindow window = widget->GetNativeWindow();
 
   AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ash::A11Y_NOTIFICATION_NONE);
+      true, ui::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());
 
   EXPECT_EQ("Select your language:", speech_monitor_.GetNextUtterance());

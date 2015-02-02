@@ -35,7 +35,7 @@
 #include "base/format_macros.h"
 #include "base/md5.h"
 #include "base/message_loop/message_loop_proxy.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -100,6 +100,9 @@ const base::FilePath::CharType* g_output_log = NULL;
 
 // The value is set by the switch "--rendering_fps".
 double g_rendering_fps = 60;
+
+// The value is set by the switch "--rendering_warm_up".
+int g_rendering_warm_up = 0;
 
 // Magic constants for differentiating the reasons for NotifyResetDone being
 // called.
@@ -235,14 +238,14 @@ class GLRenderingVDAClient
   // The heart of the Client.
   virtual void ProvidePictureBuffers(uint32 requested_num_of_buffers,
                                      const gfx::Size& dimensions,
-                                     uint32 texture_target) OVERRIDE;
-  virtual void DismissPictureBuffer(int32 picture_buffer_id) OVERRIDE;
-  virtual void PictureReady(const media::Picture& picture) OVERRIDE;
+                                     uint32 texture_target) override;
+  virtual void DismissPictureBuffer(int32 picture_buffer_id) override;
+  virtual void PictureReady(const media::Picture& picture) override;
   // Simple state changes.
-  virtual void NotifyEndOfBitstreamBuffer(int32 bitstream_buffer_id) OVERRIDE;
-  virtual void NotifyFlushDone() OVERRIDE;
-  virtual void NotifyResetDone() OVERRIDE;
-  virtual void NotifyError(VideoDecodeAccelerator::Error error) OVERRIDE;
+  virtual void NotifyEndOfBitstreamBuffer(int32 bitstream_buffer_id) override;
+  virtual void NotifyFlushDone() override;
+  virtual void NotifyResetDone() override;
+  virtual void NotifyError(VideoDecodeAccelerator::Error error) override;
 
   void OutputFrameDeliveryTimes(base::File* output);
 
@@ -775,7 +778,7 @@ void GLRenderingVDAClient::DecodeNextFragment() {
   CHECK(shm.CreateAndMapAnonymous(next_fragment_size));
   memcpy(shm.memory(), next_fragment_bytes.data(), next_fragment_size);
   base::SharedMemoryHandle dup_handle;
-  CHECK(shm.ShareToProcess(base::Process::Current().handle(), &dup_handle));
+  CHECK(shm.ShareToProcess(base::GetCurrentProcessHandle(), &dup_handle));
   media::BitstreamBuffer bitstream_buffer(
       next_bitstream_buffer_id_, dup_handle, next_fragment_size);
   decode_start_time_[next_bitstream_buffer_id_] = base::TimeTicks::Now();
@@ -1070,6 +1073,7 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
 
   RenderingHelperParams helper_params;
   helper_params.rendering_fps = g_rendering_fps;
+  helper_params.warm_up_iterations = g_rendering_warm_up;
   helper_params.render_as_thumbnails = render_as_thumbnails;
   if (render_as_thumbnails) {
     // Only one decoder is supported with thumbnail rendering
@@ -1341,6 +1345,7 @@ TEST_F(VideoDecodeAcceleratorTest, TestDecodeTimeMedian) {
 
   // Disable rendering by setting the rendering_fps = 0.
   helper_params.rendering_fps = 0;
+  helper_params.warm_up_iterations = 0;
   helper_params.render_as_thumbnails = false;
 
   ClientStateNotification<ClientState>* note =
@@ -1419,6 +1424,11 @@ int main(int argc, char **argv) {
       // it to std::string first
       std::string input(it->second.begin(), it->second.end());
       CHECK(base::StringToDouble(input, &content::g_rendering_fps));
+      continue;
+    }
+    if (it->first == "rendering_warm_up") {
+      std::string input(it->second.begin(), it->second.end());
+      CHECK(base::StringToInt(input, &content::g_rendering_warm_up));
       continue;
     }
     // TODO(owenlin): Remove this flag once it is not used in autotest.

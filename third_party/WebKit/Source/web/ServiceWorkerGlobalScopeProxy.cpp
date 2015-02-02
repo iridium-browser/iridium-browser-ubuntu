@@ -39,10 +39,13 @@
 #include "core/events/MessageEvent.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/workers/WorkerGlobalScope.h"
+#include "modules/geofencing/CircularGeofencingRegion.h"
+#include "modules/geofencing/GeofencingEvent.h"
 #include "modules/push_messaging/PushEvent.h"
 #include "modules/serviceworkers/ExtendableEvent.h"
 #include "modules/serviceworkers/FetchEvent.h"
 #include "modules/serviceworkers/InstallEvent.h"
+#include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
 #include "modules/serviceworkers/WaitUntilObserver.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/WebServiceWorkerRequest.h"
@@ -67,24 +70,22 @@ void ServiceWorkerGlobalScopeProxy::dispatchInstallEvent(int eventID)
 {
     ASSERT(m_workerGlobalScope);
     WaitUntilObserver* observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::Install, eventID);
-    observer->willDispatchEvent();
-    m_workerGlobalScope->dispatchEvent(InstallEvent::create(EventTypeNames::install, EventInit(), observer));
-    observer->didDispatchEvent();
+    RefPtrWillBeRawPtr<Event> event(InstallEvent::create(EventTypeNames::install, EventInit(), observer));
+    m_workerGlobalScope->dispatchExtendableEvent(event.release(), observer);
 }
 
 void ServiceWorkerGlobalScopeProxy::dispatchActivateEvent(int eventID)
 {
     ASSERT(m_workerGlobalScope);
     WaitUntilObserver* observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::Activate, eventID);
-    observer->willDispatchEvent();
-    m_workerGlobalScope->dispatchEvent(ExtendableEvent::create(EventTypeNames::activate, EventInit(), observer));
-    observer->didDispatchEvent();
+    RefPtrWillBeRawPtr<Event> event(ExtendableEvent::create(EventTypeNames::activate, EventInit(), observer));
+    m_workerGlobalScope->dispatchExtendableEvent(event.release(), observer);
 }
 
 void ServiceWorkerGlobalScopeProxy::dispatchFetchEvent(int eventID, const WebServiceWorkerRequest& webRequest)
 {
     ASSERT(m_workerGlobalScope);
-    RespondWithObserver* observer = RespondWithObserver::create(m_workerGlobalScope, eventID);
+    RespondWithObserver* observer = RespondWithObserver::create(m_workerGlobalScope, eventID, webRequest.mode(), webRequest.frameType());
     if (!RuntimeEnabledFeatures::serviceWorkerOnFetchEnabled()) {
         observer->didDispatchEvent();
         return;
@@ -95,6 +96,13 @@ void ServiceWorkerGlobalScopeProxy::dispatchFetchEvent(int eventID, const WebSer
     fetchEvent->setIsReload(webRequest.isReload());
     m_workerGlobalScope->dispatchEvent(fetchEvent.release());
     observer->didDispatchEvent();
+}
+
+void ServiceWorkerGlobalScopeProxy::dispatchGeofencingEvent(int eventID, WebGeofencingEventType eventType, const WebString& regionID, const WebCircularGeofencingRegion& region)
+{
+    ASSERT(m_workerGlobalScope);
+    const AtomicString& type = eventType == WebGeofencingEventTypeEnter ? EventTypeNames::geofenceenter : EventTypeNames::geofenceleave;
+    m_workerGlobalScope->dispatchEvent(GeofencingEvent::create(type, regionID, CircularGeofencingRegion::create(regionID, region)));
 }
 
 void ServiceWorkerGlobalScopeProxy::dispatchMessageEvent(const WebString& message, const WebMessagePortChannelArray& webChannels)
@@ -135,16 +143,15 @@ void ServiceWorkerGlobalScopeProxy::postMessageToPageInspector(const String& mes
     m_document.postInspectorTask(createCrossThreadTask(&WebEmbeddedWorkerImpl::postMessageToPageInspector, &m_embeddedWorker, message));
 }
 
-void ServiceWorkerGlobalScopeProxy::updateInspectorStateCookie(const String& message)
+void ServiceWorkerGlobalScopeProxy::didEvaluateWorkerScript(bool success)
 {
-    // The inspector cookie saving/restoring is controlled from the main thread.
-    // This method could be removed once shared workers are moved to the main thread inspection as well.
+    m_client.didEvaluateWorkerScript(success);
 }
 
 void ServiceWorkerGlobalScopeProxy::workerGlobalScopeStarted(WorkerGlobalScope* workerGlobalScope)
 {
     ASSERT(!m_workerGlobalScope);
-    m_workerGlobalScope = workerGlobalScope;
+    m_workerGlobalScope = static_cast<ServiceWorkerGlobalScope*>(workerGlobalScope);
     m_client.workerContextStarted(this);
 }
 

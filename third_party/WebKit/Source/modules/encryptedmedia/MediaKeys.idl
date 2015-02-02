@@ -33,11 +33,10 @@ enum SessionType {
     GarbageCollected,
     TypeChecking=Interface
 ] interface MediaKeys {
-    readonly attribute DOMString keySystem;
-
     [CallWith=ScriptState] MediaKeySession createSession(optional SessionType sessionType = "temporary");
 
-    [CallWith=ScriptState] static Promise create(DOMString keySystem);
+    [CallWith=ScriptState] Promise setServerCertificate(ArrayBuffer serverCertificate);
+    [CallWith=ScriptState] Promise setServerCertificate(ArrayBufferView serverCertificate);
 
     static boolean isTypeSupported(DOMString keySystem, optional DOMString contentType = null);
 };

@@ -16,22 +16,22 @@ class Extension;
 class BrowserExtensionWindowController : public extensions::WindowController {
  public:
   explicit BrowserExtensionWindowController(Browser* browser);
-  virtual ~BrowserExtensionWindowController();
+  ~BrowserExtensionWindowController() override;
 
   // extensions::WindowController implementation.
-  virtual int GetWindowId() const OVERRIDE;
-  virtual std::string GetWindowTypeText() const OVERRIDE;
-  virtual base::DictionaryValue* CreateWindowValue() const OVERRIDE;
-  virtual base::DictionaryValue* CreateWindowValueWithTabs(
-      const extensions::Extension* extension) const OVERRIDE;
-  virtual base::DictionaryValue* CreateTabValue(
-      const extensions::Extension* extension, int tab_index) const OVERRIDE;
-  virtual bool CanClose(Reason* reason) const OVERRIDE;
-  virtual void SetFullscreenMode(bool is_fullscreen,
-                                 const GURL& extension_url) const OVERRIDE;
-  virtual Browser* GetBrowser() const OVERRIDE;
-  virtual bool IsVisibleToExtension(
-      const extensions::Extension* extension) const OVERRIDE;
+  int GetWindowId() const override;
+  std::string GetWindowTypeText() const override;
+  base::DictionaryValue* CreateWindowValue() const override;
+  base::DictionaryValue* CreateWindowValueWithTabs(
+      const extensions::Extension* extension) const override;
+  base::DictionaryValue* CreateTabValue(const extensions::Extension* extension,
+                                        int tab_index) const override;
+  bool CanClose(Reason* reason) const override;
+  void SetFullscreenMode(bool is_fullscreen,
+                         const GURL& extension_url) const override;
+  Browser* GetBrowser() const override;
+  bool IsVisibleToExtension(
+      const extensions::Extension* extension) const override;
 
  private:
   Browser* browser_;

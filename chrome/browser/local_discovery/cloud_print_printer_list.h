@@ -17,14 +17,13 @@ namespace local_discovery {
 class CloudPrintPrinterList : public CloudPrintApiFlowRequest {
  public:
   explicit CloudPrintPrinterList(CloudDeviceListDelegate* delegate);
-  virtual ~CloudPrintPrinterList();
+  ~CloudPrintPrinterList() override;
 
-  virtual void OnGCDAPIFlowError(GCDApiFlow::Status status) OVERRIDE;
+  void OnGCDAPIFlowError(GCDApiFlow::Status status) override;
 
-  virtual void OnGCDAPIFlowComplete(
-      const base::DictionaryValue& value) OVERRIDE;
+  void OnGCDAPIFlowComplete(const base::DictionaryValue& value) override;
 
-  virtual GURL GetURL() OVERRIDE;
+  GURL GetURL() override;
 
  private:
   bool FillPrinterDetails(const base::DictionaryValue& printer_value,

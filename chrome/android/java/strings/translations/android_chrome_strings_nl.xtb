@@ -24,7 +24,7 @@
 <translation id="3358663646935160692">Dit account wordt beheerd door <ph name="DOMAIN_NAME"/>.
 
 Je logt in met een beheerd account en geeft de beheerder controle over je Chrome-profiel. Je Chrome-gegevens worden permanent gekoppeld aan dit account. Als je dit account loskoppelt, worden de lokale Chrome-gegevens verwijderd.</translation>
-<translation id="1966710179511230534">Werk je inloggegevens bij.</translation>
+<translation id="1966710179511230534">Update je inloggegevens.</translation>
 <translation id="1623104350909869708">Voorkomen dat deze pagina extra dialoogvensters weergeeft</translation>
 <translation id="1426410128494586442">Ja</translation>
 <translation id="8218346974737627104">Inloggen bevestigen</translation>
@@ -44,7 +44,7 @@ Je logt in met een beheerd account en geeft de beheerder controle over je Chrome
 <translation id="3927692899758076493">Sans Serif</translation>
 <translation id="8730621377337864115">Gereed</translation>
 <translation id="4170011742729630528">De service is niet beschikbaar. Probeer het later opnieuw.</translation>
-<translation id="473775607612524610">Bijwerken</translation>
+<translation id="473775607612524610">Updaten</translation>
 <translation id="8627706565932943526">Synchronisatiefout</translation>
 <translation id="1807246157184219062">Licht</translation>
 <translation id="7053983685419859001">Blokkeren</translation>
@@ -69,7 +69,6 @@ Je logt in met een beheerd account en geeft de beheerder controle over je Chrome
 <translation id="7267430310003164111">Melding om de app te downloaden via de Google Play Store. Appnaam: <ph name="APP_NAME"/>.  gemiddeld waarderingscijfer van app: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Installeren...</translation>
 <translation id="3992315671621218278">Link opslaan</translation>
-<translation id="8034522405403831421">Deze pagina is in het <ph name="SOURCE_LANGUAGE"/>. Vertalen naar het <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Site instellingen</translation>
 <translation id="4195643157523330669">Openen op nieuw tabblad</translation>
 <translation id="651048280540227067">Het menu sluiten</translation>
@@ -95,6 +94,7 @@ Je logt in met een beheerd account en geeft de beheerder controle over je Chrome
 <translation id="7947953824732555851">Accepteren en inloggen</translation>
 <translation id="6333140779060797560">Delen via <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Sluiten</translation>
+<translation id="5138299137310274655">Deze pagina is in het <ph name="SOURCE_LANGUAGE"/>. Vertalen naar het <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Talen wijzigen</translation>
 <translation id="5032574515228824816">Prompt</translation>
 <translation id="7961015016161918242">Nooit</translation>

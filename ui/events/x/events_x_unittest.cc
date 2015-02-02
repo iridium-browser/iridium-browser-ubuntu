@@ -16,13 +16,13 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils.h"
 #include "ui/events/test/events_test_utils_x11.h"
-#include "ui/events/x/device_data_manager_x11.h"
-#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/point.h"
 
 namespace ui {
@@ -83,9 +83,9 @@ bool HasFunctionKeyFlagSetIfSupported(Display* display, int x_keysym) {
 class EventsXTest : public testing::Test {
  public:
   EventsXTest() {}
-  virtual ~EventsXTest() {}
+  ~EventsXTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     DeviceDataManagerX11::CreateInstance();
     ui::TouchFactory::GetInstance()->ResetForTest();
   }
@@ -449,7 +449,7 @@ TEST_F(EventsXTest, NumpadKeyEvents) {
     { false, XK_A },
   };
 
-  for (size_t k = 0; k < ARRAYSIZE_UNSAFE(keys); ++k) {
+  for (size_t k = 0; k < arraysize(keys); ++k) {
     int x_keycode = XKeysymToKeycode(display, keys[k].x_keysym);
     // Exclude keysyms for which the server has no corresponding keycode.
     if (x_keycode) {
@@ -606,7 +606,7 @@ TEST_F(EventsXTest, ImeFabricatedKeyEvents) {
   unsigned int state_to_be_fabricated[] = {
     0, ShiftMask, LockMask, ShiftMask | LockMask,
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(state_to_be_fabricated); ++i) {
+  for (size_t i = 0; i < arraysize(state_to_be_fabricated); ++i) {
     unsigned int state = state_to_be_fabricated[i];
     for (int is_char = 0; is_char < 2; ++is_char) {
       XEvent x_event;
@@ -623,7 +623,7 @@ TEST_F(EventsXTest, ImeFabricatedKeyEvents) {
   unsigned int state_to_be_not_fabricated[] = {
     ControlMask, Mod1Mask, Mod2Mask, ShiftMask | ControlMask,
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(state_to_be_not_fabricated); ++i) {
+  for (size_t i = 0; i < arraysize(state_to_be_not_fabricated); ++i) {
     unsigned int state = state_to_be_not_fabricated[i];
     for (int is_char = 0; is_char < 2; ++is_char) {
       XEvent x_event;

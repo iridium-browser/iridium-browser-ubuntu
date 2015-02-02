@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -24,10 +23,10 @@ using base::TimeDelta;
 class KeywordTableTest : public testing::Test {
  public:
   KeywordTableTest() {}
-  virtual ~KeywordTableTest() {}
+  ~KeywordTableTest() override {}
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     file_ = temp_dir_.path().AppendASCII("TestWebDatabase");
 

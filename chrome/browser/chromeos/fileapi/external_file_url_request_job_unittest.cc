@@ -20,13 +20,13 @@
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/pref_registry/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_file_system_options.h"
 #include "google_apis/drive/test_util.h"
@@ -58,20 +58,33 @@ class TestURLRequestJobFactory : public net::URLRequestJobFactory {
   virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     return new ExternalFileURLRequestJob(
         profile_id_, request, network_delegate);
   }
 
-  virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE {
-    return scheme == chrome::kExternalFileScheme;
+  net::URLRequestJob* MaybeInterceptRedirect(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const GURL& location) const override {
+    return nullptr;
   }
 
-  virtual bool IsHandledURL(const GURL& url) const OVERRIDE {
+  net::URLRequestJob* MaybeInterceptResponse(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override {
+    return nullptr;
+  }
+
+  virtual bool IsHandledProtocol(const std::string& scheme) const override {
+    return scheme == content::kExternalFileScheme;
+  }
+
+  virtual bool IsHandledURL(const GURL& url) const override {
     return url.is_valid() && IsHandledProtocol(url.scheme());
   }
 
-  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE {
+  virtual bool IsSafeRedirectTarget(const GURL& location) const override {
     return true;
   }
 
@@ -89,7 +102,7 @@ class TestDelegate : public net::TestDelegate {
   // net::TestDelegate override.
   virtual void OnReceivedRedirect(net::URLRequest* request,
                                   const net::RedirectInfo& redirect_info,
-                                  bool* defer_redirect) OVERRIDE {
+                                  bool* defer_redirect) override {
     redirect_url_ = redirect_info.new_url;
     net::TestDelegate::OnReceivedRedirect(
         request, redirect_info, defer_redirect);
@@ -114,7 +127,7 @@ class ExternalFileURLRequestJobTest : public testing::Test {
 
   virtual ~ExternalFileURLRequestJobTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     // Create a testing profile.
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));

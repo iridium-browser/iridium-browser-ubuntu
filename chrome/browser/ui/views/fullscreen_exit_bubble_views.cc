@@ -45,10 +45,10 @@ const int kMiddlePaddingPx = 30;
 class ButtonView : public views::View {
  public:
   ButtonView(views::ButtonListener* listener, int between_button_spacing);
-  virtual ~ButtonView();
+  ~ButtonView() override;
 
   // Returns an empty size when the view is not visible.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
 
   views::LabelButton* accept_button() const { return accept_button_; }
   views::LabelButton* deny_button() const { return deny_button_; }
@@ -96,14 +96,13 @@ class FullscreenExitBubbleViews::FullscreenExitView
                      const base::string16& accelerator,
                      const GURL& url,
                      FullscreenExitBubbleType bubble_type);
-  virtual ~FullscreenExitView();
+  ~FullscreenExitView() override;
 
   // views::ButtonListener
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::LinkListener
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   void UpdateContent(const GURL& url, FullscreenExitBubbleType bubble_type);
 
@@ -138,7 +137,7 @@ FullscreenExitBubbleViews::FullscreenExitView::FullscreenExitView(
                               views::BubbleBorder::BIG_SHADOW,
                               SK_ColorWHITE));
   set_background(new views::BubbleBackground(bubble_border.get()));
-  SetBorder(bubble_border.PassAs<views::Border>());
+  SetBorder(bubble_border.Pass());
   SetFocusable(false);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();

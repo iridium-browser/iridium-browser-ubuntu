@@ -39,7 +39,7 @@ const GURL kOrigin("http://example.com");
 const storage::FileSystemType kFileSystemType = storage::kFileSystemTypeTest;
 
 const char kData[] = "The quick brown fox jumps over the lazy dog.\n";
-const int kDataSize = ARRAYSIZE_UNSAFE(kData) - 1;
+const int kDataSize = arraysize(kData) - 1;
 
 class Result {
  public:
@@ -84,8 +84,8 @@ class FileWriterDelegateTest : public PlatformTest {
   FileWriterDelegateTest() {}
 
  protected:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   int64 usage() {
     return file_system_context_->GetQuotaUtil(kFileSystemType)
@@ -175,15 +175,13 @@ class FileWriterDelegateTestJob : public net::URLRequestJob {
         cursor_(0) {
   }
 
-  virtual void Start() OVERRIDE {
+  void Start() override {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&FileWriterDelegateTestJob::NotifyHeadersComplete, this));
   }
 
-  virtual bool ReadRawData(net::IOBuffer* buf,
-                           int buf_size,
-                           int *bytes_read) OVERRIDE {
+  bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read) override {
     if (remaining_bytes_ < buf_size)
       buf_size = static_cast<int>(remaining_bytes_);
 
@@ -196,12 +194,10 @@ class FileWriterDelegateTestJob : public net::URLRequestJob {
     return true;
   }
 
-  virtual int GetResponseCode() const OVERRIDE {
-    return 200;
-  }
+  int GetResponseCode() const override { return 200; }
 
  protected:
-  virtual ~FileWriterDelegateTestJob() {}
+  ~FileWriterDelegateTestJob() override {}
 
  private:
   std::string content_;
@@ -215,23 +211,36 @@ class BlobURLRequestJobFactory : public net::URLRequestJobFactory {
       : content_data_(content_data) {
   }
 
-  virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
+  net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     return new FileWriterDelegateTestJob(
         request, network_delegate, *content_data_);
   }
 
-  virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE {
+  net::URLRequestJob* MaybeInterceptRedirect(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const GURL& location) const override {
+    return nullptr;
+  }
+
+  net::URLRequestJob* MaybeInterceptResponse(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override {
+    return nullptr;
+  }
+
+  bool IsHandledProtocol(const std::string& scheme) const override {
     return scheme == "blob";
   }
 
-  virtual bool IsHandledURL(const GURL& url) const OVERRIDE {
+  bool IsHandledURL(const GURL& url) const override {
     return url.SchemeIs("blob");
   }
 
-  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE {
+  bool IsSafeRedirectTarget(const GURL& location) const override {
     return true;
   }
 

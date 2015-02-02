@@ -86,27 +86,26 @@ std::string RtpPacketizerGeneric::ToString() {
   return "RtpPacketizerGeneric";
 }
 
-RtpDepacketizerGeneric::RtpDepacketizerGeneric(RtpData* const callback)
-    : callback_(callback) {
-}
-
-bool RtpDepacketizerGeneric::Parse(WebRtcRTPHeader* rtp_header,
+bool RtpDepacketizerGeneric::Parse(ParsedPayload* parsed_payload,
                                    const uint8_t* payload_data,
                                    size_t payload_data_length) {
+  assert(parsed_payload != NULL);
+
   uint8_t generic_header = *payload_data++;
   --payload_data_length;
 
-  rtp_header->frameType =
+  parsed_payload->frame_type =
       ((generic_header & RtpFormatVideoGeneric::kKeyFrameBit) != 0)
           ? kVideoFrameKey
           : kVideoFrameDelta;
-  rtp_header->type.Video.isFirstPacket =
+  parsed_payload->type.Video.isFirstPacket =
       (generic_header & RtpFormatVideoGeneric::kFirstPacketBit) != 0;
+  parsed_payload->type.Video.codec = kRtpVideoGeneric;
+  parsed_payload->type.Video.width = 0;
+  parsed_payload->type.Video.height = 0;
 
-  if (callback_->OnReceivedPayloadData(
-          payload_data, payload_data_length, rtp_header) != 0) {
-    return false;
-  }
+  parsed_payload->payload = payload_data;
+  parsed_payload->payload_length = payload_data_length;
   return true;
 }
 }  // namespace webrtc

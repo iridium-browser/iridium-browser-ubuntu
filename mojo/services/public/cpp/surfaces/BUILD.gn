@@ -2,34 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: mojo/mojo_services.gypi:mojo_surfaces_lib
-component("surfaces") {
-  output_name = "mojo_surfaces_lib"
-
+source_set("surfaces") {
   sources = [
-    "lib/surfaces_type_converters.cc",
-    "lib/surfaces_utils.cc",
-    "mojo_surfaces_export.h",
-    "surfaces_type_converters.h",
+    "surfaces_utils.cc",
     "surfaces_utils.h",
   ]
 
-  defines = [ "MOJO_SURFACES_IMPLEMENTATION" ]
-
-  public_deps = [
-    "//mojo/services/public/cpp/geometry",
-    "//ui/gfx",
-  ]
-
   deps = [
-    "//base",
-    "//cc",
-    "//cc/surfaces",
-    "//gpu",
-    "//ui/gfx/geometry",
-    "//mojo/environment:chromium",
-    "//mojo/public/c/system:for_component",
-    "//mojo/services/public/interfaces/surfaces:surface_id",
+    "//mojo/services/public/interfaces/geometry",
     "//mojo/services/public/interfaces/surfaces",
   ]
 }

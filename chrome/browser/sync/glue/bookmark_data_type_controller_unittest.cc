@@ -23,7 +23,7 @@
 #include "chrome/test/base/profile_mock.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
-#include "components/keyed_service/content/refcounted_browser_context_keyed_service.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/sync_driver/change_processor_mock.h"
 #include "components/sync_driver/data_type_controller_mock.h"
 #include "components/sync_driver/model_associator_mock.h"
@@ -97,7 +97,7 @@ class SyncBookmarkDataTypeControllerTest : public testing::Test {
       : thread_bundle_(content::TestBrowserThreadBundle::DEFAULT),
         service_(&profile_) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     model_associator_ = new ModelAssociatorMock();
     change_processor_ = new ChangeProcessorMock();
     history_service_ = static_cast<HistoryMock*>(
@@ -124,7 +124,7 @@ class SyncBookmarkDataTypeControllerTest : public testing::Test {
       bookmark_model_ = static_cast<BookmarkModel*>(
           BookmarkModelFactory::GetInstance()->SetTestingFactoryAndUse(
               &profile_, BuildBookmarkModel));
-      test::WaitForBookmarkModelToLoad(bookmark_model_);
+      bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model_);
     } else {
       bookmark_model_ = static_cast<BookmarkModel*>(
           BookmarkModelFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -205,7 +205,7 @@ TEST_F(SyncBookmarkDataTypeControllerTest, StartBookmarkModelNotReady) {
                         profile_.GetIOTaskRunner(),
                         content::BrowserThread::GetMessageLoopProxyForThread(
                             content::BrowserThread::UI));
-  test::WaitForBookmarkModelToLoad(bookmark_model_);
+  bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model_);
   EXPECT_EQ(DataTypeController::MODEL_LOADED, bookmark_dtc_->state());
 
   bookmark_dtc_->StartAssociating(

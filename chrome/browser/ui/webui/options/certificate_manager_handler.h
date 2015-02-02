@@ -28,21 +28,20 @@ class CertificateManagerHandler
       public ui::SelectFileDialog::Listener {
  public:
   explicit CertificateManagerHandler(bool show_certs_in_modal_dialog);
-  virtual ~CertificateManagerHandler();
+  ~CertificateManagerHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void RegisterMessages() override;
 
   // CertificateManagerModel::Observer implementation.
-  virtual void CertificatesRefreshed() OVERRIDE;
+  void CertificatesRefreshed() override;
 
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE;
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
+  void FileSelectionCanceled(void* params) override;
 
  private:
   // View certificate.

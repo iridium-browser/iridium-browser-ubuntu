@@ -35,14 +35,13 @@ class MockConnectionManager : public ServerConnectionManager {
 
   MockConnectionManager(syncable::Directory*,
                         CancelationSignal* signal);
-  virtual ~MockConnectionManager();
+  ~MockConnectionManager() override;
 
   // Overridden ServerConnectionManager functions.
-  virtual bool PostBufferToPath(
-      PostBufferParams*,
-      const std::string& path,
-      const std::string& auth_token,
-      ScopedServerStatusWatcher* watcher) OVERRIDE;
+  bool PostBufferToPath(PostBufferParams*,
+                        const std::string& path,
+                        const std::string& auth_token,
+                        ScopedServerStatusWatcher* watcher) override;
 
   // Control of commit response.
   // NOTE: Commit callback is invoked only once then reset.
@@ -146,7 +145,7 @@ class MockConnectionManager : public ServerConnectionManager {
   // Add a deleted item.  Deletion records typically contain no
   // additional information beyond the deletion, and no specifics.
   // The server may send the originator fields.
-  void AddUpdateTombstone(const syncable::Id& id);
+  void AddUpdateTombstone(const syncable::Id& id, ModelType type);
 
   void SetLastUpdateDeleted();
   void SetLastUpdateServerTag(const std::string& tag);

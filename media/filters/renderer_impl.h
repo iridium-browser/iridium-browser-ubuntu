@@ -31,31 +31,31 @@ class WallClockTimeSource;
 
 class MEDIA_EXPORT RendererImpl : public Renderer {
  public:
-  // Renders audio/video streams in |demuxer_stream_provider| using
-  // |audio_renderer| and |video_renderer| provided. All methods except for
-  // GetMediaTime() run on the |task_runner|. GetMediaTime() runs on the render
-  // main thread because it's part of JS sync API.
+  // Renders audio/video streams using |audio_renderer| and |video_renderer|
+  // provided. All methods except for GetMediaTime() run on the |task_runner|.
+  // GetMediaTime() runs on the render main thread because it's part of JS sync
+  // API.
   RendererImpl(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-               DemuxerStreamProvider* demuxer_stream_provider,
                scoped_ptr<AudioRenderer> audio_renderer,
                scoped_ptr<VideoRenderer> video_renderer);
 
-  virtual ~RendererImpl();
+  ~RendererImpl() override;
 
   // Renderer implementation.
-  virtual void Initialize(const base::Closure& init_cb,
-                          const StatisticsCB& statistics_cb,
-                          const base::Closure& ended_cb,
-                          const PipelineStatusCB& error_cb,
-                          const BufferingStateCB& buffering_state_cb) OVERRIDE;
-  virtual void Flush(const base::Closure& flush_cb) OVERRIDE;
-  virtual void StartPlayingFrom(base::TimeDelta time) OVERRIDE;
-  virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
-  virtual void SetVolume(float volume) OVERRIDE;
-  virtual base::TimeDelta GetMediaTime() OVERRIDE;
-  virtual bool HasAudio() OVERRIDE;
-  virtual bool HasVideo() OVERRIDE;
-  virtual void SetCdm(MediaKeys* cdm) OVERRIDE;
+  void Initialize(DemuxerStreamProvider* demuxer_stream_provider,
+                  const base::Closure& init_cb,
+                  const StatisticsCB& statistics_cb,
+                  const base::Closure& ended_cb,
+                  const PipelineStatusCB& error_cb,
+                  const BufferingStateCB& buffering_state_cb) override;
+  void Flush(const base::Closure& flush_cb) override;
+  void StartPlayingFrom(base::TimeDelta time) override;
+  void SetPlaybackRate(float playback_rate) override;
+  void SetVolume(float volume) override;
+  base::TimeDelta GetMediaTime() override;
+  bool HasAudio() override;
+  bool HasVideo() override;
+  void SetCdm(MediaKeys* cdm) override;
 
   // Helper functions for testing purposes. Must be called before Initialize().
   void DisableUnderflowForTesting();

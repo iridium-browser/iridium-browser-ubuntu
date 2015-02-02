@@ -71,19 +71,13 @@ class DefaultWidgetDelegate : public WidgetDelegate {
  public:
   explicit DefaultWidgetDelegate(Widget* widget) : widget_(widget) {
   }
-  virtual ~DefaultWidgetDelegate() {}
+  ~DefaultWidgetDelegate() override {}
 
   // Overridden from WidgetDelegate:
-  virtual void DeleteDelegate() OVERRIDE {
-    delete this;
-  }
-  virtual Widget* GetWidget() OVERRIDE {
-    return widget_;
-  }
-  virtual const Widget* GetWidget() const OVERRIDE {
-    return widget_;
-  }
-  virtual bool ShouldAdvanceFocusToTopLevelWidget() const OVERRIDE {
+  void DeleteDelegate() override { delete this; }
+  Widget* GetWidget() override { return widget_; }
+  const Widget* GetWidget() const override { return widget_; }
+  bool ShouldAdvanceFocusToTopLevelWidget() const override {
     // In most situations where a Widget is used without a delegate the Widget
     // is used as a container, so that we want focus to advance to the top-level
     // widget. A good example of this is the find bar.
@@ -114,7 +108,6 @@ Widget::InitParams::InitParams()
       remove_standard_frame(false),
       use_system_default_icon(false),
       show_state(ui::SHOW_STATE_DEFAULT),
-      double_buffer(false),
       parent(NULL),
       native_widget(NULL),
       desktop_window_tree_host(NULL),
@@ -138,7 +131,6 @@ Widget::InitParams::InitParams(Type type)
       remove_standard_frame(false),
       use_system_default_icon(false),
       show_state(ui::SHOW_STATE_DEFAULT),
-      double_buffer(false),
       parent(NULL),
       native_widget(NULL),
       desktop_window_tree_host(NULL),
@@ -530,6 +522,14 @@ void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
   native_widget_->SetVisibilityChangedAnimationsEnabled(value);
 }
 
+void Widget::SetVisibilityAnimationDuration(const base::TimeDelta& duration) {
+  native_widget_->SetVisibilityAnimationDuration(duration);
+}
+
+void Widget::SetVisibilityAnimationTransition(VisibilityTransition transition) {
+  native_widget_->SetVisibilityAnimationTransition(transition);
+}
+
 Widget::MoveLoopResult Widget::RunMoveLoop(
     const gfx::Vector2d& drag_offset,
     MoveLoopSource source,
@@ -912,11 +912,7 @@ const ui::Compositor* Widget::GetCompositor() const {
   return native_widget_->GetCompositor();
 }
 
-ui::Compositor* Widget::GetCompositor() {
-  return native_widget_->GetCompositor();
-}
-
-ui::Layer* Widget::GetLayer() {
+const ui::Layer* Widget::GetLayer() const {
   return native_widget_->GetLayer();
 }
 

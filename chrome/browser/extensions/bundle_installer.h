@@ -116,7 +116,7 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
   typedef std::map<std::string, Item> ItemMap;
   typedef std::map<std::string, linked_ptr<base::DictionaryValue> > ManifestMap;
 
-  virtual ~BundleInstaller();
+  ~BundleInstaller() override;
 
   // Displays the install bubble for |bundle| on |browser|.
   // Note: this is a platform specific implementation.
@@ -146,30 +146,28 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
   void ShowInstalledBubbleIfDone();
 
   // WebstoreInstallHelper::Delegate implementation:
-  virtual void OnWebstoreParseSuccess(
-      const std::string& id,
-      const SkBitmap& icon,
-      base::DictionaryValue* parsed_manifest) OVERRIDE;
-  virtual void OnWebstoreParseFailure(
-      const std::string& id,
-      InstallHelperResultCode result_code,
-      const std::string& error_message) OVERRIDE;
+  void OnWebstoreParseSuccess(const std::string& id,
+                              const SkBitmap& icon,
+                              base::DictionaryValue* parsed_manifest) override;
+  void OnWebstoreParseFailure(const std::string& id,
+                              InstallHelperResultCode result_code,
+                              const std::string& error_message) override;
 
   // ExtensionInstallPrompt::Delegate implementation:
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
 
   // WebstoreInstaller::Delegate implementation:
-  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
-  virtual void OnExtensionInstallFailure(
+  void OnExtensionInstallSuccess(const std::string& id) override;
+  void OnExtensionInstallFailure(
       const std::string& id,
       const std::string& error,
-      WebstoreInstaller::FailureReason reason) OVERRIDE;
+      WebstoreInstaller::FailureReason reason) override;
 
   // chrome::BrowserListObserver implementation:
-  virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
-  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
-  virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
+  void OnBrowserAdded(Browser* browser) override;
+  void OnBrowserRemoved(Browser* browser) override;
+  void OnBrowserSetLastActive(Browser* browser) override;
 
   // Holds the Extensions used to generate the permission warnings.
   ExtensionList dummy_extensions_;

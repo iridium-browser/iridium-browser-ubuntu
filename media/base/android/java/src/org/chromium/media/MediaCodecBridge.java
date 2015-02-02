@@ -62,6 +62,12 @@ class MediaCodecBridge {
     // non-decreasing for the remaining frames.
     private static final long MAX_PRESENTATION_TIMESTAMP_SHIFT_US = 100000;
 
+    // TODO(qinmin): Use MediaFormat constants when part of the public API.
+    private static final String KEY_CROP_LEFT = "crop-left";
+    private static final String KEY_CROP_RIGHT = "crop-right";
+    private static final String KEY_CROP_BOTTOM = "crop-bottom";
+    private static final String KEY_CROP_TOP = "crop-top";
+
     private ByteBuffer[] mInputBuffers;
     private ByteBuffer[] mOutputBuffers;
 
@@ -82,10 +88,14 @@ class MediaCodecBridge {
         }
 
         @CalledByNative("DequeueInputResult")
-        private int status() { return mStatus; }
+        private int status() {
+            return mStatus;
+        }
 
         @CalledByNative("DequeueInputResult")
-        private int index() { return mIndex; }
+        private int index() {
+            return mIndex;
+        }
     }
 
     /**
@@ -104,13 +114,19 @@ class MediaCodecBridge {
         }
 
         @CalledByNative("CodecInfo")
-        private String codecType() { return mCodecType; }
+        private String codecType() {
+            return mCodecType;
+        }
 
         @CalledByNative("CodecInfo")
-        private String codecName() { return mCodecName; }
+        private String codecName() {
+            return mCodecName;
+        }
 
         @CalledByNative("CodecInfo")
-        private int direction() { return mDirection; }
+        private int direction() {
+            return mDirection;
+        }
     }
 
     private static class DequeueOutputResult {
@@ -132,22 +148,34 @@ class MediaCodecBridge {
         }
 
         @CalledByNative("DequeueOutputResult")
-        private int status() { return mStatus; }
+        private int status() {
+            return mStatus;
+        }
 
         @CalledByNative("DequeueOutputResult")
-        private int index() { return mIndex; }
+        private int index() {
+            return mIndex;
+        }
 
         @CalledByNative("DequeueOutputResult")
-        private int flags() { return mFlags; }
+        private int flags() {
+            return mFlags;
+        }
 
         @CalledByNative("DequeueOutputResult")
-        private int offset() { return mOffset; }
+        private int offset() {
+            return mOffset;
+        }
 
         @CalledByNative("DequeueOutputResult")
-        private long presentationTimeMicroseconds() { return mPresentationTimeMicroseconds; }
+        private long presentationTimeMicroseconds() {
+            return mPresentationTimeMicroseconds;
+        }
 
         @CalledByNative("DequeueOutputResult")
-        private int numBytes() { return mNumBytes; }
+        private int numBytes() {
+            return mNumBytes;
+        }
     }
 
     /**
@@ -163,19 +191,19 @@ class MediaCodecBridge {
         for (int i = 0; i < count; ++i) {
             MediaCodecInfo info = MediaCodecList.getCodecInfoAt(i);
             int direction =
-                info.isEncoder() ? MEDIA_CODEC_ENCODER : MEDIA_CODEC_DECODER;
+                    info.isEncoder() ? MEDIA_CODEC_ENCODER : MEDIA_CODEC_DECODER;
             String codecString = info.getName();
             String[] supportedTypes = info.getSupportedTypes();
             for (int j = 0; j < supportedTypes.length; ++j) {
                 Map<String, CodecInfo> map = info.isEncoder() ? encoderInfoMap : decoderInfoMap;
                 if (!map.containsKey(supportedTypes[j])) {
                     map.put(supportedTypes[j], new CodecInfo(
-                        supportedTypes[j], codecString, direction));
+                            supportedTypes[j], codecString, direction));
                 }
             }
         }
         ArrayList<CodecInfo> codecInfos = new ArrayList<CodecInfo>(
-            decoderInfoMap.size() + encoderInfoMap.size());
+                decoderInfoMap.size() + encoderInfoMap.size());
         codecInfos.addAll(encoderInfoMap.values());
         codecInfos.addAll(decoderInfoMap.values());
         return codecInfos.toArray(new CodecInfo[codecInfos.size()]);
@@ -204,6 +232,29 @@ class MediaCodecBridge {
             }
         }
         return codecName;
+    }
+
+    /**
+     * Get a list of encoder supported color formats for specified mime type.
+     */
+    @CalledByNative
+    private static int[] getEncoderColorFormatsForMime(String mime) {
+        int count = MediaCodecList.getCodecCount();
+        for (int i = 0; i < count; ++i) {
+            MediaCodecInfo info = MediaCodecList.getCodecInfoAt(i);
+            if (!info.isEncoder())
+                continue;
+
+            String[] supportedTypes = info.getSupportedTypes();
+            for (int j = 0; j < supportedTypes.length; ++j) {
+                if (!supportedTypes[j].equalsIgnoreCase(mime))
+                    continue;
+
+                MediaCodecInfo.CodecCapabilities capabilities = info.getCapabilitiesForType(mime);
+                return capabilities.colorFormats;
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("deprecation")
@@ -355,14 +406,25 @@ class MediaCodecBridge {
         }
     }
 
+    private boolean outputFormatHasCropValues(MediaFormat format) {
+        return format.containsKey(KEY_CROP_RIGHT) && format.containsKey(KEY_CROP_LEFT)
+                && format.containsKey(KEY_CROP_BOTTOM) && format.containsKey(KEY_CROP_TOP);
+    }
+
     @CalledByNative
     private int getOutputHeight() {
-        return mMediaCodec.getOutputFormat().getInteger(MediaFormat.KEY_HEIGHT);
+        MediaFormat format = mMediaCodec.getOutputFormat();
+        return outputFormatHasCropValues(format)
+                ? format.getInteger(KEY_CROP_BOTTOM) - format.getInteger(KEY_CROP_TOP) + 1
+                : format.getInteger(MediaFormat.KEY_HEIGHT);
     }
 
     @CalledByNative
     private int getOutputWidth() {
-        return mMediaCodec.getOutputFormat().getInteger(MediaFormat.KEY_WIDTH);
+        MediaFormat format = mMediaCodec.getOutputFormat();
+        return outputFormatHasCropValues(format)
+                ? format.getInteger(KEY_CROP_RIGHT) - format.getInteger(KEY_CROP_LEFT) + 1
+                : format.getInteger(MediaFormat.KEY_WIDTH);
     }
 
     @CalledByNative
@@ -558,7 +620,7 @@ class MediaCodecBridge {
             return (capabilities != null) && capabilities.isFeatureSupported(
                     MediaCodecInfo.CodecCapabilities.FEATURE_AdaptivePlayback);
         } catch (IllegalArgumentException e) {
-              Log.e(TAG, "Cannot retrieve codec information", e);
+            Log.e(TAG, "Cannot retrieve codec information", e);
         }
         return false;
     }

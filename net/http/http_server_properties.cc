@@ -23,7 +23,6 @@ const char* const kAlternateProtocolStrings[] = {
   "npn-h2-14",  // HTTP/2 draft 14. Called SPDY4 internally.
   "quic"
 };
-const char kBrokenAlternateProtocol[] = "Broken";
 
 COMPILE_ASSERT(
     arraysize(kAlternateProtocolStrings) == NUM_VALID_ALTERNATE_PROTOCOLS,
@@ -31,20 +30,9 @@ COMPILE_ASSERT(
 
 }  // namespace
 
-void HistogramAlternateProtocolUsage(
-    AlternateProtocolUsage usage,
-    AlternateProtocolExperiment alternate_protocol_experiment) {
+void HistogramAlternateProtocolUsage(AlternateProtocolUsage usage) {
   UMA_HISTOGRAM_ENUMERATION("Net.AlternateProtocolUsage", usage,
                             ALTERNATE_PROTOCOL_USAGE_MAX);
-  if (alternate_protocol_experiment ==
-      ALTERNATE_PROTOCOL_TRUNCATED_200_SERVERS) {
-    UMA_HISTOGRAM_ENUMERATION("Net.AlternateProtocolUsage.200Truncated", usage,
-                              ALTERNATE_PROTOCOL_USAGE_MAX);
-  } else if (alternate_protocol_experiment ==
-      ALTERNATE_PROTOCOL_TRUNCATED_1000_SERVERS) {
-    UMA_HISTOGRAM_ENUMERATION("Net.AlternateProtocolUsage.1000Truncated", usage,
-                              ALTERNATE_PROTOCOL_USAGE_MAX);
-  }
 }
 
 void HistogramBrokenAlternateProtocolLocation(
@@ -68,8 +56,6 @@ const char* AlternateProtocolToString(AlternateProtocol protocol) {
       DCHECK(IsAlternateProtocolValid(protocol));
       return kAlternateProtocolStrings[
           protocol - ALTERNATE_PROTOCOL_MINIMUM_VALID_VERSION];
-    case ALTERNATE_PROTOCOL_BROKEN:
-      return kBrokenAlternateProtocol;
     case UNINITIALIZED_ALTERNATE_PROTOCOL:
       return "Uninitialized";
   }
@@ -84,8 +70,6 @@ AlternateProtocol AlternateProtocolFromString(const std::string& str) {
     if (str == AlternateProtocolToString(protocol))
       return protocol;
   }
-  if (str == kBrokenAlternateProtocol)
-    return ALTERNATE_PROTOCOL_BROKEN;
   return UNINITIALIZED_ALTERNATE_PROTOCOL;
 }
 
@@ -112,9 +96,10 @@ AlternateProtocol AlternateProtocolFromNextProto(NextProto next_proto) {
 }
 
 std::string AlternateProtocolInfo::ToString() const {
-  return base::StringPrintf("%d:%s p=%f", port,
+  return base::StringPrintf("%d:%s p=%f%s", port,
                             AlternateProtocolToString(protocol),
-                            probability);
+                            probability,
+                            is_broken ? " (broken)" : "");
 }
 
 }  // namespace net

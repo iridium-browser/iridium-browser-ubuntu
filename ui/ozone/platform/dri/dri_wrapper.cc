@@ -89,11 +89,7 @@ bool DriWrapper::SetCrtc(uint32_t crtc_id,
   DCHECK(!connectors.empty());
   DCHECK(mode);
 
-  TRACE_EVENT2("dri",
-               "DriWrapper::SetCrtc",
-               "crtc",
-               crtc_id,
-               "size",
+  TRACE_EVENT2("dri", "DriWrapper::SetCrtc", "crtc", crtc_id, "size",
                gfx::Size(mode->hdisplay, mode->vdisplay).ToString());
   return !drmModeSetCrtc(fd_,
                          crtc_id,
@@ -233,6 +229,11 @@ bool DriWrapper::SetProperty(uint32_t connector_id,
   return !drmModeConnectorSetProperty(fd_, connector_id, property_id, value);
 }
 
+bool DriWrapper::GetCapability(uint64_t capability, uint64_t* value) {
+  DCHECK(fd_ >= 0);
+  return !drmGetCap(fd_, capability, value);
+}
+
 ScopedDrmPropertyBlobPtr DriWrapper::GetPropertyBlob(
     drmModeConnector* connector, const char* name) {
   DCHECK(fd_ >= 0);
@@ -300,5 +301,14 @@ void DriWrapper::DestroyDumbBuffer(const SkImageInfo& info,
   DrmDestroyDumbBuffer(fd_, handle);
 }
 
+bool DriWrapper::SetMaster() {
+  DCHECK(fd_ >= 0);
+  return (drmSetMaster(fd_) == 0);
+}
+
+bool DriWrapper::DropMaster() {
+  DCHECK(fd_ >= 0);
+  return (drmDropMaster(fd_) == 0);
+}
 
 }  // namespace ui

@@ -37,11 +37,10 @@ class CreditsWebDialog : public chromeos::LoginWebDialog {
                    const GURL& url)
       : chromeos::LoginWebDialog(profile, NULL, parent_window,
                                  l10n_util::GetStringUTF16(title_id),
-                                 url,
-                                 chromeos::LoginWebDialog::STYLE_BUBBLE) {
+                                 url) {
   }
 
-  virtual void OnLoadingStateChanged(content::WebContents* source) OVERRIDE {
+  virtual void OnLoadingStateChanged(content::WebContents* source) override {
     chromeos::LoginWebDialog::OnLoadingStateChanged(source);
     // Remove visual elements that we can handle in EULA page.
     bool is_loading = source->IsLoading();

@@ -119,6 +119,10 @@ BackgroundBridge.prototype = {
   // 'google-accounts-signin'.
   email_: null,
 
+  // Gaia Id of the newly authenticated user based on the gaia response
+  // header 'google-accounts-signin'.
+  gaiaId_: null,
+
   // Session index of the newly authenticated user based on the gaia response
   // header 'google-accounts-signin'.
   sessionIndex_: null,
@@ -133,6 +137,9 @@ BackgroundBridge.prototype = {
   // Whether auth flow has started. It is used as a signal of whether the
   // injected script should scrape passwords.
   authStarted_: false,
+
+  // Whether SAML flow is going.
+  isSAML_: false,
 
   passwordStore_: {},
 
@@ -183,6 +190,8 @@ BackgroundBridge.prototype = {
         'updatePassword', this.onUpdatePassword_.bind(this));
     this.channelInjected_.registerMessage(
         'pageLoaded', this.onPageLoaded_.bind(this));
+    this.channelInjected_.registerMessage(
+        'getSAMLFlag', this.onGetSAMLFlag_.bind(this));
   },
 
   /**
@@ -204,7 +213,7 @@ BackgroundBridge.prototype = {
   onCompleted: function(details) {
     // Only monitors requests in the gaia frame whose parent frame ID must be
     // positive.
-    if (!this.isDesktopFlow_ || details.parentFrameId <= 0)
+    if (details.parentFrameId <= 0)
       return;
 
     if (details.url.lastIndexOf(backgroundBridgeManager.CONTINUE_URL_BASE, 0) ==
@@ -213,11 +222,12 @@ BackgroundBridge.prototype = {
       if (details.url.indexOf('ntp=1') >= 0)
         skipForNow = true;
 
-      // TOOD(guohui): Show password confirmation UI.
+      // TOOD(guohui): For desktop SAML flow, show password confirmation UI.
       var passwords = this.onGetScrapedPasswords_();
       var msg = {
         'name': 'completeLogin',
         'email': this.email_,
+        'gaiaId': this.gaiaId_,
         'password': passwords[0],
         'sessionIndex': this.sessionIndex_,
         'skipForNow': skipForNow
@@ -262,11 +272,7 @@ BackgroundBridge.prototype = {
   onHeadersReceived: function(details) {
     var headers = details.responseHeaders;
 
-    if (this.isDesktopFlow_ &&
-        this.gaiaUrl_ &&
-        details.url.lastIndexOf(this.gaiaUrl_) == 0) {
-      // TODO(xiyuan, guohui): CrOS should reuse the logic below for reading the
-      // email for SAML users and cut off the /ListAccount call.
+    if (this.gaiaUrl_ && details.url.lastIndexOf(this.gaiaUrl_) == 0) {
       for (var i = 0; headers && i < headers.length; ++i) {
         if (headers[i].name.toLowerCase() == 'google-accounts-signin') {
           var headerValues = headers[i].value.toLowerCase().split(',');
@@ -277,6 +283,7 @@ BackgroundBridge.prototype = {
           });
           // Remove "" around.
           this.email_ = signinDetails['email'].slice(1, -1);
+          this.gaiaId_ = signinDetails['obfuscatedid'].slice(1, -1);
           this.sessionIndex_ = signinDetails['sessionindex'];
           break;
         }
@@ -290,6 +297,7 @@ BackgroundBridge.prototype = {
         if (headers[i].name.toLowerCase() == 'google-accounts-saml') {
           var action = headers[i].value.toLowerCase();
           if (action == 'start') {
+            this.isSAML_ = true;
             // GAIA is redirecting to a SAML IdP. Any cookies contained in the
             // current |headers| were set by GAIA. Any cookies set in future
             // requests will be coming from the IdP. Append a cookie to the
@@ -299,6 +307,7 @@ BackgroundBridge.prototype = {
                           value: 'google-accounts-saml-start=now'});
             return {responseHeaders: headers};
           } else if (action == 'end') {
+            this.isSAML_ = false;
             // The SAML IdP has redirected back to GAIA. Add a cookie that marks
             // the point at which the redirect occurred occurred. It is
             // important that this cookie be prepended to the current |headers|
@@ -417,7 +426,13 @@ BackgroundBridge.prototype = {
 
   onPageLoaded_: function(msg) {
     if (this.channelMain_)
-      this.channelMain_.send({name: 'onAuthPageLoaded', url: msg.url});
+      this.channelMain_.send({name: 'onAuthPageLoaded',
+                              url: msg.url,
+                              isSAMLPage: this.isSAML_});
+  },
+
+  onGetSAMLFlag_: function(msg) {
+    return this.isSAML_;
   }
 };
 

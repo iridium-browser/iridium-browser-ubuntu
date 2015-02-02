@@ -24,7 +24,6 @@
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/gles2_impl_export.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "gpu/command_buffer/client/gpu_memory_buffer_tracker.h"
 #include "gpu/command_buffer/client/mapped_memory.h"
 #include "gpu/command_buffer/client/query_tracker.h"
 #include "gpu/command_buffer/client/ref_counted.h"
@@ -190,9 +189,10 @@ class GLES2_IMPL_EXPORT GLES2Implementation
                       TransferBufferInterface* transfer_buffer,
                       bool bind_generates_resource,
                       bool lose_context_when_out_of_memory,
+                      bool support_client_side_arrays,
                       GpuControl* gpu_control);
 
-  virtual ~GLES2Implementation();
+  ~GLES2Implementation() override;
 
   bool Initialize(
       unsigned int starting_transfer_buffer_size,
@@ -212,26 +212,21 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   // this file instead of having to edit some template or the code generator.
   #include "gpu/command_buffer/client/gles2_implementation_autogen.h"
 
-  virtual void DisableVertexAttribArray(GLuint index) OVERRIDE;
-  virtual void EnableVertexAttribArray(GLuint index) OVERRIDE;
-  virtual void GetVertexAttribfv(
-      GLuint index, GLenum pname, GLfloat* params) OVERRIDE;
-  virtual void GetVertexAttribiv(
-      GLuint index, GLenum pname, GLint* params) OVERRIDE;
+  void DisableVertexAttribArray(GLuint index) override;
+  void EnableVertexAttribArray(GLuint index) override;
+  void GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) override;
+  void GetVertexAttribiv(GLuint index, GLenum pname, GLint* params) override;
 
   // ContextSupport implementation.
-  virtual void Swap() OVERRIDE;
-  virtual void PartialSwapBuffers(const gfx::Rect& sub_buffer) OVERRIDE;
-  virtual void SetSwapBuffersCompleteCallback(
-      const base::Closure& swap_buffers_complete_callback)
-          OVERRIDE;
-  virtual void ScheduleOverlayPlane(int plane_z_order,
-                                    gfx::OverlayTransform plane_transform,
-                                    unsigned overlay_texture_id,
-                                    const gfx::Rect& display_bounds,
-                                    const gfx::RectF& uv_rect) OVERRIDE;
-  virtual GLuint InsertFutureSyncPointCHROMIUM() OVERRIDE;
-  virtual void RetireSyncPointCHROMIUM(GLuint sync_point) OVERRIDE;
+  void Swap() override;
+  void PartialSwapBuffers(const gfx::Rect& sub_buffer) override;
+  void ScheduleOverlayPlane(int plane_z_order,
+                            gfx::OverlayTransform plane_transform,
+                            unsigned overlay_texture_id,
+                            const gfx::Rect& display_bounds,
+                            const gfx::RectF& uv_rect) override;
+  GLuint InsertFutureSyncPointCHROMIUM() override;
+  void RetireSyncPointCHROMIUM(GLuint sync_point) override;
 
   void GetProgramInfoCHROMIUMHelper(GLuint program, std::vector<int8>* result);
   GLint GetAttribLocationHelper(GLuint program, const char* name);
@@ -247,11 +242,10 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void FreeEverything();
 
   // ContextSupport implementation.
-  virtual void SignalSyncPoint(uint32 sync_point,
-                               const base::Closure& callback) OVERRIDE;
-  virtual void SignalQuery(uint32 query,
-                           const base::Closure& callback) OVERRIDE;
-  virtual void SetSurfaceVisible(bool visible) OVERRIDE;
+  void SignalSyncPoint(uint32 sync_point,
+                       const base::Closure& callback) override;
+  void SignalQuery(uint32 query, const base::Closure& callback) override;
+  void SetSurfaceVisible(bool visible) override;
 
   void SetErrorMessageCallback(
       GLES2ImplementationErrorMessageCallback* callback) {
@@ -501,17 +495,19 @@ class GLES2_IMPL_EXPORT GLES2Implementation
 
   // Returns true if id is reserved.
   bool IsBufferReservedId(GLuint id);
-  bool IsFramebufferReservedId(GLuint id) { return false;  }
+  bool IsFramebufferReservedId(GLuint id) { return false; }
   bool IsRenderbufferReservedId(GLuint id) { return false; }
   bool IsTextureReservedId(GLuint id) { return false; }
   bool IsVertexArrayReservedId(GLuint id) { return false; }
   bool IsProgramReservedId(GLuint id) { return false; }
+  bool IsValuebufferReservedId(GLuint id) { return false; }
 
   bool BindBufferHelper(GLenum target, GLuint texture);
   bool BindFramebufferHelper(GLenum target, GLuint texture);
   bool BindRenderbufferHelper(GLenum target, GLuint texture);
   bool BindTextureHelper(GLenum target, GLuint texture);
   bool BindVertexArrayOESHelper(GLuint array);
+  bool BindValuebufferCHROMIUMHelper(GLenum target, GLuint valuebuffer);
   bool UseProgramHelper(GLuint program);
 
   void GenBuffersHelper(GLsizei n, const GLuint* buffers);
@@ -520,6 +516,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void GenTexturesHelper(GLsizei n, const GLuint* textures);
   void GenVertexArraysOESHelper(GLsizei n, const GLuint* arrays);
   void GenQueriesEXTHelper(GLsizei n, const GLuint* queries);
+  void GenValuebuffersCHROMIUMHelper(GLsizei n, const GLuint* valuebuffers);
 
   void DeleteBuffersHelper(GLsizei n, const GLuint* buffers);
   void DeleteFramebuffersHelper(GLsizei n, const GLuint* framebuffers);
@@ -529,6 +526,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   bool DeleteShaderHelper(GLuint shader);
   void DeleteQueriesEXTHelper(GLsizei n, const GLuint* queries);
   void DeleteVertexArraysOESHelper(GLsizei n, const GLuint* arrays);
+  void DeleteValuebuffersCHROMIUMHelper(GLsizei n, const GLuint* valuebuffers);
 
   void DeleteBuffersStub(GLsizei n, const GLuint* buffers);
   void DeleteFramebuffersStub(GLsizei n, const GLuint* framebuffers);
@@ -537,6 +535,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void DeleteProgramStub(GLsizei n, const GLuint* programs);
   void DeleteShaderStub(GLsizei n, const GLuint* shaders);
   void DeleteVertexArraysOESStub(GLsizei n, const GLuint* arrays);
+  void DeleteValuebuffersCHROMIUMStub(GLsizei n, const GLuint* valuebuffers);
 
   void BufferDataHelper(
       GLenum target, GLsizeiptr size, const void* data, GLenum usage);
@@ -546,15 +545,15 @@ class GLES2_IMPL_EXPORT GLES2Implementation
       GLenum target, GLintptr offset, GLsizeiptr size, const void* data,
       ScopedTransferBufferPtr* buffer);
 
-  GLuint CreateImageCHROMIUMHelper(GLsizei width,
+  GLuint CreateImageCHROMIUMHelper(ClientBuffer buffer,
+                                   GLsizei width,
                                    GLsizei height,
-                                   GLenum internalformat,
-                                   GLenum usage);
+                                   GLenum internalformat);
   void DestroyImageCHROMIUMHelper(GLuint image_id);
-  void* MapImageCHROMIUMHelper(GLuint image_id);
-  void UnmapImageCHROMIUMHelper(GLuint image_id);
-  void GetImageParameterivCHROMIUMHelper(
-      GLuint image_id, GLenum pname, GLint* params);
+  GLuint CreateGpuMemoryBufferImageCHROMIUMHelper(GLsizei width,
+                                                  GLsizei height,
+                                                  GLenum internalformat,
+                                                  GLenum usage);
 
   // Helper for GetVertexAttrib
   bool GetVertexAttribHelper(GLuint index, GLenum pname, uint32* param);
@@ -598,13 +597,11 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   // IdAllocators for objects that can't be shared among contexts.
   // For now, used only for Queries. TODO(hj.r.chung) Should be added for
   // Framebuffer and Vertex array objects.
-  IdAllocatorInterface* GetIdAllocator(int id_namespace) const;
+  IdAllocator* GetIdAllocator(int id_namespace) const;
 
   void FinishHelper();
 
   void RunIfContextNotLost(const base::Closure& callback);
-
-  void OnSwapBuffersComplete();
 
   // Validate if an offset is valid, i.e., non-negative and fit into 32-bit.
   // If not, generate an approriate error, and return false.
@@ -707,6 +704,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   GLuint bound_framebuffer_;
   GLuint bound_read_framebuffer_;
   GLuint bound_renderbuffer_;
+  GLuint bound_valuebuffer_;
 
   // The program in use by glUseProgram
   GLuint current_program_;
@@ -745,6 +743,9 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   // When true, the context is lost when a GL_OUT_OF_MEMORY error occurs.
   bool lose_context_when_out_of_memory_;
 
+  // Whether or not to support client side arrays.
+  bool support_client_side_arrays_;
+
   // Used to check for single threaded access.
   int use_count_;
 
@@ -771,11 +772,9 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   scoped_ptr<QueryTracker> query_tracker_;
   typedef std::map<GLuint, QueryTracker::Query*> QueryMap;
   QueryMap current_queries_;
-  scoped_ptr<IdAllocatorInterface> query_id_allocator_;
+  scoped_ptr<IdAllocator> query_id_allocator_;
 
   scoped_ptr<BufferTracker> buffer_tracker_;
-
-  scoped_ptr<GpuMemoryBufferTracker> gpu_memory_buffer_tracker_;
 
   GLES2ImplementationErrorMessageCallback* error_message_callback_;
 
@@ -784,8 +783,6 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   GpuControl* gpu_control_;
 
   Capabilities capabilities_;
-
-  base::Closure swap_buffers_complete_callback_;
 
   base::WeakPtrFactory<GLES2Implementation> weak_ptr_factory_;
 

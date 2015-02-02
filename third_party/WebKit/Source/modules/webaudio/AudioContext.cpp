@@ -34,8 +34,6 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/inspector/ScriptCallStack.h"
-#include "platform/audio/FFTFrame.h"
-#include "platform/audio/HRTFPanner.h"
 #include "modules/mediastream/MediaStream.h"
 #include "modules/webaudio/AnalyserNode.h"
 #include "modules/webaudio/AudioBuffer.h"
@@ -63,18 +61,15 @@
 #include "modules/webaudio/PeriodicWave.h"
 #include "modules/webaudio/ScriptProcessorNode.h"
 #include "modules/webaudio/WaveShaperNode.h"
-
-#if DEBUG_AUDIONODE_REFERENCES
-#include <stdio.h>
-#endif
-
-#include "wtf/ArrayBuffer.h"
+#include "platform/audio/FFTFrame.h"
+#include "platform/audio/HRTFPanner.h"
 #include "wtf/Atomics.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
 
-// FIXME: check the proper way to reference an undefined thread ID
-const WTF::ThreadIdentifier UndefinedThreadIdentifier = 0xffffffff;
+#if DEBUG_AUDIONODE_REFERENCES
+#include <stdio.h>
+#endif
 
 namespace blink {
 
@@ -92,7 +87,7 @@ AudioContext* AudioContext::create(Document& document, ExceptionState& exception
         return 0;
     }
 
-    AudioContext* audioContext = adoptRefCountedGarbageCollectedWillBeNoop(new AudioContext(&document));
+    AudioContext* audioContext = new AudioContext(&document);
     audioContext->suspendIfNeeded();
     return audioContext;
 }
@@ -106,10 +101,11 @@ AudioContext::AudioContext(Document* document)
     , m_destinationNode(nullptr)
     , m_automaticPullNodesNeedUpdating(false)
     , m_connectionCount(0)
+    , m_didInitializeContextGraphMutex(false)
     , m_audioThread(0)
-    , m_graphOwnerThread(UndefinedThreadIdentifier)
     , m_isOfflineContext(false)
 {
+    m_didInitializeContextGraphMutex = true;
     m_destinationNode = DefaultAudioDestinationNode::create(this);
 
     initialize();
@@ -127,10 +123,11 @@ AudioContext::AudioContext(Document* document, unsigned numberOfChannels, size_t
     , m_destinationNode(nullptr)
     , m_automaticPullNodesNeedUpdating(false)
     , m_connectionCount(0)
+    , m_didInitializeContextGraphMutex(false)
     , m_audioThread(0)
-    , m_graphOwnerThread(UndefinedThreadIdentifier)
     , m_isOfflineContext(true)
 {
+    m_didInitializeContextGraphMutex = true;
     // Create a new destination for offline rendering.
     m_renderTarget = AudioBuffer::create(numberOfChannels, numberOfFrames, sampleRate);
     if (m_renderTarget.get())
@@ -206,9 +203,6 @@ void AudioContext::uninitialize()
     derefUnfinishedSourceNodes();
 
     m_isInitialized = false;
-    ASSERT(m_listener);
-    m_listener->waitForHRTFDatabaseLoaderThreadCompletion();
-
     clear();
 }
 
@@ -237,7 +231,7 @@ AudioBuffer* AudioContext::createBuffer(unsigned numberOfChannels, size_t number
     return AudioBuffer::create(numberOfChannels, numberOfFrames, sampleRate, exceptionState);
 }
 
-void AudioContext::decodeAudioData(ArrayBuffer* audioData, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, ExceptionState& exceptionState)
+void AudioContext::decodeAudioData(DOMArrayBuffer* audioData, AudioBufferCallback* successCallback, AudioBufferCallback* errorCallback, ExceptionState& exceptionState)
 {
     if (!audioData) {
         exceptionState.throwDOMException(
@@ -245,7 +239,7 @@ void AudioContext::decodeAudioData(ArrayBuffer* audioData, AudioBufferCallback* 
             "invalid ArrayBuffer for audioData.");
         return;
     }
-    m_audioDecoder.decodeAsync(audioData, sampleRate(), successCallback, errorCallback);
+    m_audioDecoder.decodeAsync(audioData->buffer(), sampleRate(), successCallback, errorCallback);
 }
 
 AudioBufferSourceNode* AudioContext::createBufferSource()
@@ -274,7 +268,7 @@ MediaElementAudioSourceNode* AudioContext::createMediaElementSource(HTMLMediaEle
     if (mediaElement->audioSourceNode()) {
         exceptionState.throwDOMException(
             InvalidStateError,
-            "invalid HTMLMediaElement.");
+            "HTMLMediaElement already connected previously to a different MediaElementSourceNode.");
         return 0;
     }
 
@@ -493,7 +487,7 @@ OscillatorNode* AudioContext::createOscillator()
     return node;
 }
 
-PeriodicWave* AudioContext::createPeriodicWave(Float32Array* real, Float32Array* imag, ExceptionState& exceptionState)
+PeriodicWave* AudioContext::createPeriodicWave(DOMFloat32Array* real, DOMFloat32Array* imag, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
 
@@ -536,7 +530,12 @@ PeriodicWave* AudioContext::createPeriodicWave(Float32Array* real, Float32Array*
         return 0;
     }
 
-    return PeriodicWave::create(sampleRate(), real, imag);
+    return PeriodicWave::create(sampleRate(), real->view(), imag->view());
+}
+
+void AudioContext::notifyNodeStartedProcessing(AudioNode* node)
+{
+    refNode(node);
 }
 
 void AudioContext::notifyNodeFinishedProcessing(AudioNode* node)
@@ -569,7 +568,7 @@ void AudioContext::derefNode(AudioNode* node)
     ASSERT(isGraphOwner());
 
     for (unsigned i = 0; i < m_referencedNodes.size(); ++i) {
-        if (node == m_referencedNodes[i].get()) {
+        if (node == m_referencedNodes.at(i).get()) {
             node->breakConnection();
             m_referencedNodes.remove(i);
             break;
@@ -581,67 +580,34 @@ void AudioContext::derefUnfinishedSourceNodes()
 {
     ASSERT(isMainThread());
     for (unsigned i = 0; i < m_referencedNodes.size(); ++i)
-        m_referencedNodes[i]->breakConnection();
+        m_referencedNodes.at(i)->breakConnection();
 
     m_referencedNodes.clear();
 }
 
-void AudioContext::lock(bool& mustReleaseLock)
+void AudioContext::lock()
 {
     // Don't allow regular lock in real-time audio thread.
     ASSERT(isMainThread());
-
-    ThreadIdentifier thisThread = currentThread();
-
-    if (thisThread == m_graphOwnerThread) {
-        // We already have the lock.
-        mustReleaseLock = false;
-    } else {
-        // Acquire the lock.
-        m_contextGraphMutex.lock();
-        m_graphOwnerThread = thisThread;
-        mustReleaseLock = true;
-    }
+    m_contextGraphMutex.lock();
 }
 
-bool AudioContext::tryLock(bool& mustReleaseLock)
+bool AudioContext::tryLock()
 {
-    ThreadIdentifier thisThread = currentThread();
-    bool isAudioThread = thisThread == audioThread();
-
-    // Try to catch cases of using try lock on main thread - it should use regular lock.
-    ASSERT(isAudioThread);
-
-    if (!isAudioThread) {
-        // In release build treat tryLock() as lock() (since above ASSERT(isAudioThread) never fires) - this is the best we can do.
-        lock(mustReleaseLock);
+    // Try to catch cases of using try lock on main thread
+    // - it should use regular lock.
+    ASSERT(isAudioThread());
+    if (!isAudioThread()) {
+        // In release build treat tryLock() as lock() (since above
+        // ASSERT(isAudioThread) never fires) - this is the best we can do.
+        lock();
         return true;
     }
-
-    bool hasLock;
-
-    if (thisThread == m_graphOwnerThread) {
-        // Thread already has the lock.
-        hasLock = true;
-        mustReleaseLock = false;
-    } else {
-        // Don't already have the lock - try to acquire it.
-        hasLock = m_contextGraphMutex.tryLock();
-
-        if (hasLock)
-            m_graphOwnerThread = thisThread;
-
-        mustReleaseLock = hasLock;
-    }
-
-    return hasLock;
+    return m_contextGraphMutex.tryLock();
 }
 
 void AudioContext::unlock()
 {
-    ASSERT(currentThread() == m_graphOwnerThread);
-
-    m_graphOwnerThread = UndefinedThreadIdentifier;
     m_contextGraphMutex.unlock();
 }
 
@@ -650,10 +616,12 @@ bool AudioContext::isAudioThread() const
     return currentThread() == m_audioThread;
 }
 
-bool AudioContext::isGraphOwner() const
+#if ENABLE(ASSERT)
+bool AudioContext::isGraphOwner()
 {
-    return currentThread() == m_graphOwnerThread;
+    return m_contextGraphMutex.locked();
 }
+#endif
 
 void AudioContext::addDeferredBreakConnection(AudioNode& node)
 {
@@ -667,8 +635,7 @@ void AudioContext::handlePreRenderTasks()
 
     // At the beginning of every render quantum, try to update the internal rendering graph state (from main thread changes).
     // It's OK if the tryLock() fails, we'll just take slightly longer to pick up the changes.
-    bool mustReleaseLock;
-    if (tryLock(mustReleaseLock)) {
+    if (tryLock()) {
         // Update the channel count mode.
         updateChangedChannelCountMode();
 
@@ -677,9 +644,7 @@ void AudioContext::handlePreRenderTasks()
         handleDirtyAudioNodeOutputs();
 
         updateAutomaticPullNodes();
-
-        if (mustReleaseLock)
-            unlock();
+        unlock();
     }
 }
 
@@ -690,8 +655,7 @@ void AudioContext::handlePostRenderTasks()
     // Must use a tryLock() here too.  Don't worry, the lock will very rarely be contended and this method is called frequently.
     // The worst that can happen is that there will be some nodes which will take slightly longer than usual to be deleted or removed
     // from the render graph (in which case they'll render silence).
-    bool mustReleaseLock;
-    if (tryLock(mustReleaseLock)) {
+    if (tryLock()) {
         // Update the channel count mode.
         updateChangedChannelCountMode();
 
@@ -706,9 +670,7 @@ void AudioContext::handlePostRenderTasks()
         handleDirtyAudioNodeOutputs();
 
         updateAutomaticPullNodes();
-
-        if (mustReleaseLock)
-            unlock();
+        unlock();
     }
 }
 
@@ -886,7 +848,14 @@ void AudioContext::trace(Visitor* visitor)
     visitor->trace(m_renderTarget);
     visitor->trace(m_destinationNode);
     visitor->trace(m_listener);
-    visitor->trace(m_referencedNodes);
+    // trace() can be called in AudioContext constructor, and
+    // m_contextGraphMutex might be unavailable.
+    if (m_didInitializeContextGraphMutex) {
+        AutoLocker lock(this);
+        visitor->trace(m_referencedNodes);
+    } else {
+        visitor->trace(m_referencedNodes);
+    }
     visitor->trace(m_liveNodes);
     visitor->trace(m_liveAudioSummingJunctions);
     EventTargetWithInlineData::trace(visitor);

@@ -56,6 +56,12 @@ void SetCommonCodecParameters(const webrtc::DesktopSize& size,
   // Start emitting packets immediately.
   config->g_lag_in_frames = 0;
 
+  // Since the transport layer is reliable, keyframes should not be necessary.
+  // However, due to crbug.com/440223, decoding fails after 30,000 non-key
+  // frames, so take the hit of an "unnecessary" key-frame every 10,000 frames.
+  config->kf_min_dist = 10000;
+  config->kf_max_dist = 10000;
+
   // Using 2 threads gives a great boost in performance for most systems with
   // adequate processing power. NB: Going to multiple threads on low end
   // windows systems can really hurt performance.
@@ -136,7 +142,7 @@ ScopedVpxCodec CreateVP9Codec(const webrtc::DesktopSize& size,
   // Request the lowest-CPU usage that VP9 supports, which depends on whether
   // we are encoding lossy or lossless.
   // Note that this is configured via the same parameter as for VP8.
-  int cpu_used = lossless_encode ? 5 : 7;
+  int cpu_used = lossless_encode ? 5 : 6;
   if (vpx_codec_control(codec.get(), VP8E_SET_CPUUSED, cpu_used))
     return ScopedVpxCodec();
 
@@ -215,12 +221,12 @@ void CreateImage(bool use_i444,
 
 // static
 scoped_ptr<VideoEncoderVpx> VideoEncoderVpx::CreateForVP8() {
-  return scoped_ptr<VideoEncoderVpx>(new VideoEncoderVpx(false));
+  return make_scoped_ptr(new VideoEncoderVpx(false));
 }
 
 // static
 scoped_ptr<VideoEncoderVpx> VideoEncoderVpx::CreateForVP9() {
-  return scoped_ptr<VideoEncoderVpx>(new VideoEncoderVpx(true));
+  return make_scoped_ptr(new VideoEncoderVpx(true));
 }
 
 VideoEncoderVpx::~VideoEncoderVpx() {}

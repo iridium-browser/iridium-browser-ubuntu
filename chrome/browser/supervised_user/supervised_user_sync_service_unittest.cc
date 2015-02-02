@@ -41,15 +41,13 @@ namespace {
 class MockChangeProcessor : public SyncChangeProcessor {
  public:
   MockChangeProcessor() {}
-  virtual ~MockChangeProcessor() {}
+  ~MockChangeProcessor() override {}
 
   // SyncChangeProcessor implementation:
-  virtual SyncError ProcessSyncChanges(
-      const tracked_objects::Location& from_here,
-      const SyncChangeList& change_list) OVERRIDE;
+  SyncError ProcessSyncChanges(const tracked_objects::Location& from_here,
+                               const SyncChangeList& change_list) override;
 
-  virtual SyncDataList GetAllSyncData(syncer::ModelType type) const
-      OVERRIDE {
+  SyncDataList GetAllSyncData(syncer::ModelType type) const override {
     return SyncDataList();
   }
 
@@ -68,10 +66,9 @@ SyncError MockChangeProcessor::ProcessSyncChanges(
 }
 
 SyncChange MockChangeProcessor::GetChange(const std::string& id) const {
-  for (SyncChangeList::const_iterator it = change_list_.begin();
-       it != change_list_.end(); ++it) {
-    if (it->sync_data().GetSpecifics().managed_user().id() == id)
-      return *it;
+  for (const SyncChange& sync_change : change_list_) {
+    if (sync_change.sync_data().GetSpecifics().managed_user().id() == id)
+      return sync_change;
   }
   return SyncChange();
 }
@@ -87,7 +84,7 @@ void GetSupervisedUsersCallback(const base::DictionaryValue** dict,
 class SupervisedUserSyncServiceTest : public ::testing::Test {
  public:
   SupervisedUserSyncServiceTest();
-  virtual ~SupervisedUserSyncServiceTest();
+  ~SupervisedUserSyncServiceTest() override;
 
  protected:
   scoped_ptr<SyncChangeProcessor> CreateChangeProcessor();

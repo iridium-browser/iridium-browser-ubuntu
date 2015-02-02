@@ -401,7 +401,7 @@ ResultCode PolicyBase::AddKernelObjectToClose(const base::char16* handle_type,
 Dispatcher* PolicyBase::OnMessageReady(IPCParams* ipc,
                                        CallbackGeneric* callback) {
   DCHECK(callback);
-  static const IPCParams ping1 = {IPC_PING1_TAG, ULONG_TYPE};
+  static const IPCParams ping1 = {IPC_PING1_TAG, UINT32_TYPE};
   static const IPCParams ping2 = {IPC_PING2_TAG, INOUTPTR_TYPE};
 
   if (ping1.Matches(ipc) || ping2.Matches(ipc)) {
@@ -498,7 +498,7 @@ ResultCode PolicyBase::MakeTokens(HANDLE* initial, HANDLE* lockdown) {
   return SBOX_ALL_OK;
 }
 
-const AppContainerAttributes* PolicyBase::GetAppContainer() {
+const AppContainerAttributes* PolicyBase::GetAppContainer() const {
   if (!appcontainer_list_.get() || !appcontainer_list_->HasAppContainer())
     return NULL;
 

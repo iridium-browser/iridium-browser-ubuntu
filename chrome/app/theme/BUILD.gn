@@ -13,12 +13,15 @@ grit("theme_resources") {
     "grit/theme_resources_map.h",
     "theme_resources_100_percent.pak",
     "theme_resources_200_percent.pak",
+    "theme_resources_300_percent.pak",
   ]
 
   deps = [
     ":chrome_unscaled_resources",
     "//ui/resources",
   ]
+
+  output_dir = "$root_gen_dir/chrome"
 }
 
 # GYP version: chrome/chrome_resources.gyp:chrome_unscaled_resources
@@ -28,4 +31,6 @@ grit("chrome_unscaled_resources") {
     "grit/chrome_unscaled_resources.h",
     "chrome_unscaled_resources.pak",
   ]
+
+  output_dir = "$root_gen_dir/chrome"
 }

@@ -20,7 +20,6 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -76,7 +75,7 @@ base::string16 GetSyncedStateStatusLabel(ProfileSyncService* service,
     }
   }
 
-  if (!service || !service->sync_initialized()) {
+  if (!service || !service->SyncActive()) {
     // User is not signed in, or sync is still initializing.
     return base::string16();
   }

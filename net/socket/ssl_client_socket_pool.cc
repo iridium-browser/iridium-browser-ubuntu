@@ -452,8 +452,10 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
   // GetNextProto will fail and and trigger a NOTREACHED if we pass in a socket
   // that hasn't had SSL_ImportFD called on it. If we get a certificate error
   // here, then we know that we called SSL_ImportFD.
-  if (result == OK || IsCertificateError(result))
+  if (result == OK || IsCertificateError(result)) {
     status = ssl_socket_->GetNextProto(&proto);
+    ssl_socket_->RecordNegotiationExtension();
+  }
 
   // If we want spdy over npn, make sure it succeeded.
   if (status == SSLClientSocket::kNextProtoNegotiated) {
@@ -550,7 +552,7 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
   }
 
   if (result == OK || IsCertificateError(result)) {
-    SetSocket(ssl_socket_.PassAs<StreamSocket>());
+    SetSocket(ssl_socket_.Pass());
   } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
     error_response_info_.cert_request_info = new SSLCertRequestInfo;
     ssl_socket_->GetSSLCertRequestInfo(

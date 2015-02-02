@@ -52,15 +52,14 @@ class AccountChooserModel : public ui::SimpleMenuModel,
                       Profile* profile,
                       bool disable_wallet,
                       const AutofillMetrics& metric_logger);
-  virtual ~AccountChooserModel();
+  ~AccountChooserModel() override;
 
   // ui::SimpleMenuModel::Delegate implementation.
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  void ExecuteCommand(int command_id, int event_flags) override;
 
   // Sets the selection to the given wallet account.
   void SelectWalletAccount(size_t user_index);

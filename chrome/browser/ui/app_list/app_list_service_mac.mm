@@ -383,29 +383,7 @@ Profile* AppListServiceMac::GetCurrentAppListProfile() {
   return profile_;
 }
 
-void AppListServiceMac::CreateForProfile(Profile* requested_profile) {
-  if (profile_ == requested_profile)
-    return;
-
-  profile_ = requested_profile;
-
-  if (!window_controller_)
-    window_controller_.reset([[AppListWindowController alloc] init]);
-
-  [[window_controller_ appListViewController] setDelegate:nil];
-  [[window_controller_ appListViewController]
-      setDelegate:GetViewDelegate(profile_)];
-}
-
 void AppListServiceMac::ShowForProfile(Profile* requested_profile) {
-  InvalidatePendingProfileLoads();
-
-  if (requested_profile == profile_) {
-    ShowWindowNearDock();
-    return;
-  }
-
-  SetProfilePath(requested_profile->GetPath());
   CreateForProfile(requested_profile);
   ShowWindowNearDock();
 }
@@ -450,6 +428,23 @@ void AppListServiceMac::EnableAppList(Profile* initial_profile,
 void AppListServiceMac::CreateShortcut() {
   CreateAppListShim(GetProfilePath(
       g_browser_process->profile_manager()->user_data_dir()));
+}
+
+void AppListServiceMac::CreateForProfile(Profile* requested_profile) {
+  DCHECK(requested_profile);
+  InvalidatePendingProfileLoads();
+  if (profile_ && requested_profile->IsSameProfile(profile_))
+    return;
+
+  profile_ = requested_profile->GetOriginalProfile();
+  SetProfilePath(profile_->GetPath());
+
+  if (!window_controller_)
+    window_controller_.reset([[AppListWindowController alloc] init]);
+
+  [[window_controller_ appListViewController] setDelegate:nil];
+  [[window_controller_ appListViewController]
+      setDelegate:GetViewDelegate(profile_)];
 }
 
 void AppListServiceMac::DestroyAppList() {
@@ -579,14 +574,12 @@ void AppListService::InitAll(Profile* initial_profile) {
     [animation_ setAnimationCurve:NSAnimationEaseOut];
     window_.reset();
   }
-  // Threaded animations are buggy on Snow Leopard. See http://crbug.com/335550.
-  // Note that in the non-threaded case, the animation won't start unless the
-  // UI runloop has spun up, so on <= Lion the animation will only animate if
-  // Chrome is already running.
-  if (base::mac::IsOSMountainLionOrLater())
-    [animation_ setAnimationBlockingMode:NSAnimationNonblockingThreaded];
-  else
-    [animation_ setAnimationBlockingMode:NSAnimationNonblocking];
+  // This once used a threaded animation, but AppKit would too often ignore
+  // -[NSView canDrawConcurrently:] and just redraw whole view hierarchies on
+  // the animation thread anyway, creating a minefield of race conditions.
+  // Non-threaded means the animation isn't as smooth and doesn't begin unless
+  // the UI runloop has spun up (after profile loading).
+  [animation_ setAnimationBlockingMode:NSAnimationNonblocking];
 
   [animation_ startAnimation];
 }

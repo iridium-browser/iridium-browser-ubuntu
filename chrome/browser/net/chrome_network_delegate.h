@@ -13,7 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_metrics.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "net/base/network_delegate.h"
 #include "net/proxy/proxy_retry_info.h"
 
@@ -72,12 +72,15 @@ class PrerenderTracker;
 class ChromeNetworkDelegate : public net::NetworkDelegate {
  public:
   // Provides an opportunity to interpose on proxy resolution. Called before
-  // ProxyService.ResolveProxy() returns. |proxy_info| contains information
-  // about the proxy being used, and may be modified by this callback.
+  // ProxyService.ResolveProxy() returns. Two proxy configurations are provided
+  // that specify the data reduction proxy's configuration and the effective
+  // configuration according to the proxy service, respectively. Retry info is
+  // presumed to be from the proxy service.
   typedef base::Callback<void(
       const GURL& url,
       int load_flags,
       const net::ProxyConfig& data_reduction_proxy_config,
+      const net::ProxyConfig& proxy_service_proxy_config,
       const net::ProxyRetryInfoMap& proxy_retry_info_map,
       const data_reduction_proxy::DataReductionProxyParams* params,
       net::ProxyInfo* result)> OnResolveProxyHandler;
@@ -91,7 +94,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   // responsible for cleaning them up at shutdown.
   ChromeNetworkDelegate(extensions::EventRouterForwarder* event_router,
                         BooleanPrefMember* enable_referrers);
-  virtual ~ChromeNetworkDelegate();
+  ~ChromeNetworkDelegate() override;
 
   // Pass through to ChromeExtensionsNetworkDelegate::set_extension_info_map().
   void set_extension_info_map(extensions::InfoMap* extension_info_map);
@@ -206,7 +209,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   // Creates a Value summary of the persistent state of the network session.
   // The caller is responsible for deleting the returned value.
   // Must be called on the UI thread.
-  static base::Value* HistoricNetworkStatsInfoToValue();
+  static base::Value* HistoricNetworkStatsInfoToValue(PrefService* prefs);
 
   // Creates a Value summary of the state of the network session. The caller is
   // responsible for deleting the returned value.
@@ -216,64 +219,56 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   friend class ChromeNetworkDelegateTest;
 
   // NetworkDelegate implementation.
-  virtual int OnBeforeURLRequest(net::URLRequest* request,
-                                 const net::CompletionCallback& callback,
-                                 GURL* new_url) OVERRIDE;
-  virtual void OnResolveProxy(
-      const GURL& url,
-      int load_flags,
-      const net::ProxyService& proxy_service,
-      net::ProxyInfo* result) OVERRIDE;
-  virtual void OnProxyFallback(const net::ProxyServer& bad_proxy,
-                               int net_error) OVERRIDE;
-  virtual int OnBeforeSendHeaders(net::URLRequest* request,
-                                  const net::CompletionCallback& callback,
-                                  net::HttpRequestHeaders* headers) OVERRIDE;
-  virtual void OnBeforeSendProxyHeaders(
-      net::URLRequest* request,
-      const net::ProxyInfo& proxy_info,
-      net::HttpRequestHeaders* headers) OVERRIDE;
-  virtual void OnSendHeaders(net::URLRequest* request,
-                             const net::HttpRequestHeaders& headers) OVERRIDE;
-  virtual int OnHeadersReceived(
+  int OnBeforeURLRequest(net::URLRequest* request,
+                         const net::CompletionCallback& callback,
+                         GURL* new_url) override;
+  void OnResolveProxy(const GURL& url,
+                      int load_flags,
+                      const net::ProxyService& proxy_service,
+                      net::ProxyInfo* result) override;
+  void OnProxyFallback(const net::ProxyServer& bad_proxy,
+                       int net_error) override;
+  int OnBeforeSendHeaders(net::URLRequest* request,
+                          const net::CompletionCallback& callback,
+                          net::HttpRequestHeaders* headers) override;
+  void OnBeforeSendProxyHeaders(net::URLRequest* request,
+                                const net::ProxyInfo& proxy_info,
+                                net::HttpRequestHeaders* headers) override;
+  void OnSendHeaders(net::URLRequest* request,
+                     const net::HttpRequestHeaders& headers) override;
+  int OnHeadersReceived(
       net::URLRequest* request,
       const net::CompletionCallback& callback,
       const net::HttpResponseHeaders* original_response_headers,
       scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
-      GURL* allowed_unsafe_redirect_url) OVERRIDE;
-  virtual void OnBeforeRedirect(net::URLRequest* request,
-                                const GURL& new_location) OVERRIDE;
-  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
-  virtual void OnRawBytesRead(const net::URLRequest& request,
-                              int bytes_read) OVERRIDE;
-  virtual void OnCompleted(net::URLRequest* request, bool started) OVERRIDE;
-  virtual void OnURLRequestDestroyed(net::URLRequest* request) OVERRIDE;
-  virtual void OnPACScriptError(int line_number,
-                                const base::string16& error) OVERRIDE;
-  virtual net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
+      GURL* allowed_unsafe_redirect_url) override;
+  void OnBeforeRedirect(net::URLRequest* request,
+                        const GURL& new_location) override;
+  void OnResponseStarted(net::URLRequest* request) override;
+  void OnRawBytesRead(const net::URLRequest& request, int bytes_read) override;
+  void OnCompleted(net::URLRequest* request, bool started) override;
+  void OnURLRequestDestroyed(net::URLRequest* request) override;
+  void OnPACScriptError(int line_number, const base::string16& error) override;
+  net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       net::URLRequest* request,
       const net::AuthChallengeInfo& auth_info,
       const AuthCallback& callback,
-      net::AuthCredentials* credentials) OVERRIDE;
-  virtual bool OnCanGetCookies(const net::URLRequest& request,
-                               const net::CookieList& cookie_list) OVERRIDE;
-  virtual bool OnCanSetCookie(const net::URLRequest& request,
-                              const std::string& cookie_line,
-                              net::CookieOptions* options) OVERRIDE;
-  virtual bool OnCanAccessFile(const net::URLRequest& request,
-                               const base::FilePath& path) const OVERRIDE;
-  virtual bool OnCanThrottleRequest(
-      const net::URLRequest& request) const OVERRIDE;
-  virtual bool OnCanEnablePrivacyMode(
+      net::AuthCredentials* credentials) override;
+  bool OnCanGetCookies(const net::URLRequest& request,
+                       const net::CookieList& cookie_list) override;
+  bool OnCanSetCookie(const net::URLRequest& request,
+                      const std::string& cookie_line,
+                      net::CookieOptions* options) override;
+  bool OnCanAccessFile(const net::URLRequest& request,
+                       const base::FilePath& path) const override;
+  bool OnCanThrottleRequest(const net::URLRequest& request) const override;
+  bool OnCanEnablePrivacyMode(
       const GURL& url,
-      const GURL& first_party_for_cookies) const OVERRIDE;
-  virtual int OnBeforeSocketStreamConnect(
-      net::SocketStream* stream,
-      const net::CompletionCallback& callback) OVERRIDE;
-  virtual bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
+      const GURL& first_party_for_cookies) const override;
+  bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       const net::URLRequest& request,
       const GURL& target_url,
-      const GURL& referrer_url) const OVERRIDE;
+      const GURL& referrer_url) const override;
 
   void AccumulateContentLength(
       int64 received_payload_byte_count,

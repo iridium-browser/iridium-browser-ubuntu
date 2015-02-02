@@ -136,13 +136,14 @@ public:
 
     Platform3DObject framebuffer() const;
 
+    bool discardFramebufferSupported() const { return m_discardFramebufferSupported; }
+
     void markContentsChanged();
     void markLayerComposited();
     bool layerComposited() const;
     void setIsHidden(bool);
 
     WebLayer* platformLayer();
-    void paintCompositedResultsToCanvas(ImageBuffer*);
 
     WebGraphicsContext3D* context();
 
@@ -151,12 +152,13 @@ public:
     WebGraphicsContext3D::Attributes getActualAttributes() const { return m_actualAttributes; }
 
     // WebExternalTextureLayerClient implementation.
-    virtual bool prepareMailbox(WebExternalTextureMailbox*, WebExternalBitmap*) OVERRIDE;
-    virtual void mailboxReleased(const WebExternalTextureMailbox&, bool lostResource = false) OVERRIDE;
+    virtual bool prepareMailbox(WebExternalTextureMailbox*, WebExternalBitmap*) override;
+    virtual void mailboxReleased(const WebExternalTextureMailbox&, bool lostResource = false) override;
 
+    enum SourceBuffer { Front, Back };
     // Destroys the TEXTURE_2D binding for the owned context
     bool copyToPlatformTexture(WebGraphicsContext3D*, Platform3DObject texture, GLenum internalFormat,
-        GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, bool fromFrontBuffer = false);
+        GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, SourceBuffer);
 
     void setPackAlignment(GLint param);
 
@@ -169,6 +171,7 @@ protected: // For unittests
         PassOwnPtr<Extensions3DUtil>,
         bool multisampleExtensionSupported,
         bool packedDepthStencilExtensionSupported,
+        bool discardFramebufferSupported,
         PreserveDrawingBuffer,
         WebGraphicsContext3D::Attributes requestedAttributes,
         PassRefPtr<ContextEvictionManager>);
@@ -239,10 +242,15 @@ private:
     WebGraphicsContext3D::Attributes m_requestedAttributes;
     bool m_multisampleExtensionSupported;
     bool m_packedDepthStencilExtensionSupported;
+    bool m_discardFramebufferSupported;
     Platform3DObject m_fbo;
     // DrawingBuffer's output is double-buffered. m_colorBuffer is the back buffer.
     TextureInfo m_colorBuffer;
-    TextureInfo m_frontColorBuffer;
+    struct FrontBufferInfo {
+        TextureInfo texInfo;
+        WebExternalTextureMailbox mailbox;
+    };
+    FrontBufferInfo m_frontColorBuffer;
 
     // This is used when we have OES_packed_depth_stencil.
     Platform3DObject m_depthStencilBuffer;

@@ -4,7 +4,6 @@
 
 #include "components/autofill/core/common/password_form_fill_data.h"
 
-#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/form_field_data.h"
 
@@ -48,6 +47,7 @@ void InitPasswordFormFillData(
   password_field.form_control_type = "password";
 
   // Fill basic form data.
+  result->basic_data.name = form_on_page.form_data.name;
   result->basic_data.origin = form_on_page.origin;
   result->basic_data.action = form_on_page.action;
   result->basic_data.fields.push_back(username_field);

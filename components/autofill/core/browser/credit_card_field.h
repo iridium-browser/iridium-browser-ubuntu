@@ -20,12 +20,12 @@ class AutofillScanner;
 
 class CreditCardField : public FormField {
  public:
-  virtual ~CreditCardField();
+  ~CreditCardField() override;
   static FormField* Parse(AutofillScanner* scanner);
 
  protected:
   // FormField:
-  virtual bool ClassifyField(ServerFieldTypeMap* map) const OVERRIDE;
+  bool ClassifyField(ServerFieldTypeMap* map) const override;
 
  private:
   friend class CreditCardFieldTest;
@@ -48,7 +48,6 @@ class CreditCardField : public FormField {
   // middle names or suffixes.)
   AutofillField* cardholder_last_;
 
-  // TODO(jhawkins): Parse the select control.
   AutofillField* type_;                  // Optional.
   std::vector<AutofillField*> numbers_;  // Required.
 

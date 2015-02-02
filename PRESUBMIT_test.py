@@ -413,6 +413,28 @@ class InvalidOSMacroNamesTest(unittest.TestCase):
     self.assertEqual(0, len(errors))
 
 
+class InvalidIfDefinedMacroNamesTest(unittest.TestCase):
+  def testInvalidIfDefinedMacroNames(self):
+    lines = ['#if defined(TARGET_IPHONE_SIMULATOR)',
+             '#if !defined(TARGET_IPHONE_SIMULATOR)',
+             '#elif defined(TARGET_IPHONE_SIMULATOR)',
+             '#ifdef TARGET_IPHONE_SIMULATOR',
+             ' # ifdef TARGET_IPHONE_SIMULATOR',
+             '# if defined(VALID) || defined(TARGET_IPHONE_SIMULATOR)',
+             '# else  // defined(TARGET_IPHONE_SIMULATOR)',
+             '#endif  // defined(TARGET_IPHONE_SIMULATOR)',]
+    errors = PRESUBMIT._CheckForInvalidIfDefinedMacrosInFile(
+        MockInputApi(), MockFile('some/path/source.mm', lines))
+    self.assertEqual(len(lines), len(errors))
+
+  def testValidIfDefinedMacroNames(self):
+    lines = ['#if defined(FOO)',
+             '#ifdef BAR',]
+    errors = PRESUBMIT._CheckForInvalidIfDefinedMacrosInFile(
+        MockInputApi(), MockFile('some/path/source.cc', lines))
+    self.assertEqual(0, len(errors))
+
+
 class CheckAddedDepsHaveTetsApprovalsTest(unittest.TestCase):
   def testFilesToCheckForIncomingDeps(self):
     changed_lines = [
@@ -669,7 +691,6 @@ class TryServerMasterTest(unittest.TestCase):
             'mac_chromium_compile_rel',
             'mac_chromium_dbg',
             'mac_chromium_rel',
-            'mac_chromium_rel_swarming',
             'mac_nacl_sdk',
             'mac_nacl_sdk_build',
             'mac_rel_naclmore',
@@ -697,24 +718,17 @@ class TryServerMasterTest(unittest.TestCase):
             'chromium_presubmit',
             'linux_arm_cross_compile',
             'linux_arm_tester',
-            'linux_asan',
-            'linux_browser_asan',
             'linux_chromeos_asan',
             'linux_chromeos_browser_asan',
             'linux_chromeos_valgrind',
-            'linux_chromium_chromeos_clang_dbg',
-            'linux_chromium_chromeos_clang_rel',
             'linux_chromium_chromeos_dbg',
             'linux_chromium_chromeos_rel',
-            'linux_chromium_clang_dbg',
-            'linux_chromium_clang_rel',
             'linux_chromium_compile_dbg',
             'linux_chromium_compile_rel',
             'linux_chromium_dbg',
             'linux_chromium_gn_dbg',
             'linux_chromium_gn_rel',
             'linux_chromium_rel',
-            'linux_chromium_rel_swarming',
             'linux_chromium_trusty32_dbg',
             'linux_chromium_trusty32_rel',
             'linux_chromium_trusty_dbg',
@@ -744,8 +758,6 @@ class TryServerMasterTest(unittest.TestCase):
             'win_chromium_dbg',
             'win_chromium_rel',
             'win_chromium_rel',
-            'win_chromium_rel_swarming',
-            'win_chromium_rel_swarming',
             'win_chromium_x64_dbg',
             'win_chromium_x64_rel',
             'win_drmemory',

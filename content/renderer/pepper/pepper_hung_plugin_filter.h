@@ -40,17 +40,17 @@ class PepperHungPluginFilter
                          int plugin_child_id);
 
   // SyncMessageStatusReceiver implementation.
-  virtual void BeginBlockOnSyncMessage() OVERRIDE;
-  virtual void EndBlockOnSyncMessage() OVERRIDE;
+  void BeginBlockOnSyncMessage() override;
+  void EndBlockOnSyncMessage() override;
 
   // MessageFilter implementation.
-  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE;
-  virtual void OnFilterRemoved() OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnFilterAdded(IPC::Sender* sender) override;
+  void OnFilterRemoved() override;
+  void OnChannelError() override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
  protected:
-  virtual ~PepperHungPluginFilter();
+  ~PepperHungPluginFilter() override;
 
  private:
   // Makes sure that the hung timer is scheduled.

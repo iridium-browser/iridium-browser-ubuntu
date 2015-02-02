@@ -25,10 +25,10 @@ class EphemeralAppTestBase : public extensions::PlatformAppBrowserTest {
   static const char kFileSystemTestApp[];
 
   EphemeralAppTestBase();
-  virtual ~EphemeralAppTestBase();
+  ~EphemeralAppTestBase() override;
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void SetUpOnMainThread() override;
 
  protected:
   base::FilePath GetTestPath(const char* test_path);

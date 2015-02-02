@@ -35,6 +35,7 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/frame/FrameConsole.h"
+#include "core/frame/FrameHost.h"
 #include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InjectedScriptManager.h"
 #include "core/inspector/InspectorDOMAgent.h"
@@ -71,13 +72,13 @@ void PageConsoleAgent::clearMessages(ErrorString* errorString)
 
 ConsoleMessageStorage* PageConsoleAgent::messageStorage()
 {
-    return m_page->deprecatedLocalMainFrame()->console().messageStorage();
+    return &m_page->frameHost().consoleMessageStorage();
 }
 
-class InspectableNode FINAL : public InjectedScriptHost::InspectableObject {
+class InspectableNode final : public InjectedScriptHost::InspectableObject {
 public:
     explicit InspectableNode(Node* node) : m_node(node) { }
-    virtual ScriptValue get(ScriptState* state) OVERRIDE
+    virtual ScriptValue get(ScriptState* state) override
     {
         return InjectedScriptHost::nodeAsScriptValue(state, m_node);
     }

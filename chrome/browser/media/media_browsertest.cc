@@ -28,7 +28,7 @@ MediaBrowserTest::~MediaBrowserTest() {
 }
 
 void MediaBrowserTest::RunMediaTestPage(const std::string& html_page,
-                                        const media::QueryParams& query_params,
+                                        const base::StringPairs& query_params,
                                         const std::string& expected_title,
                                         bool http) {
   GURL gurl;
@@ -72,7 +72,7 @@ void MediaBrowserTest::AddWaitForTitles(content::TitleWatcher* title_watcher) {
 
 void MediaBrowserTest::PluginCrashed(const base::FilePath& plugin_path,
                                      base::ProcessId plugin_pid) {
-  VLOG(0) << "Plugin crashed: " << plugin_path.value();
+  DVLOG(0) << "Plugin crashed: " << plugin_path.value();
   if (ignore_plugin_crash_)
     return;
   // Update document title to quit TitleWatcher early.

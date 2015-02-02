@@ -24,6 +24,11 @@ Disabled = decorators.Disabled
 Enabled = decorators.Enabled
 
 
+class InvalidOptionsError(Exception):
+  """Raised for invalid benchmark options."""
+  pass
+
+
 class BenchmarkMetadata(object):
   def __init__(self, name):
     self._name = name
@@ -60,6 +65,12 @@ class Benchmark(command_line.Command):
   @classmethod
   def SetArgumentDefaults(cls, parser):
     cls.PageTestClass().SetArgumentDefaults(parser)
+    default_values = parser.get_default_values()
+    invalid_options = [
+        o for o in cls.options if not hasattr(default_values, o)]
+    if invalid_options:
+      raise InvalidOptionsError('Invalid benchmark options: %s',
+                                ', '.join(invalid_options))
     parser.set_defaults(**cls.options)
 
   @classmethod
@@ -84,15 +95,15 @@ class Benchmark(command_line.Command):
     if hasattr(self, '_enabled_strings'):
       pt._enabled_strings = self._enabled_strings
 
-    ps = self.CreatePageSet(finder_options)
-    expectations = self.CreateExpectations(ps)
+    expectations = self.CreateExpectations()
+    us = self.CreateUserStorySet(finder_options)
 
     self._DownloadGeneratedProfileArchive(finder_options)
 
     benchmark_metadata = self.GetMetadata()
     results = results_options.CreateResults(benchmark_metadata, finder_options)
     try:
-      page_runner.Run(pt, ps, expectations, finder_options, results)
+      page_runner.Run(pt, us, expectations, finder_options, results)
     except page_test.TestNotSupportedOnPlatformFailure as failure:
       logging.warning(str(failure))
 
@@ -174,29 +185,23 @@ class Benchmark(command_line.Command):
       raise TypeError('"%s" is not a PageTest.' % cls.test.__name__)
     return cls.test
 
-  @classmethod
-  def PageSetClass(cls):
-    """Get the PageSet for this Benchmark.
-
-    If the Benchmark has no PageSet, raises NotImplementedError.
-    """
-    if not hasattr(cls, 'page_set'):
-      raise NotImplementedError('This test has no "page_set" attribute.')
-    if not issubclass(cls.page_set, page_set.PageSet):
-      raise TypeError('"%s" is not a PageSet.' % cls.page_set.__name__)
-    return cls.page_set
-
-  @classmethod
-  def CreatePageSet(cls, options):  # pylint: disable=W0613
+  def CreatePageSet(self, options):  # pylint: disable=W0613
     """Get the page set this test will run on.
 
-    By default, it will create a page set from the file at this test's
-    page_set attribute. Override to generate a custom page set.
+    By default, it will create a page set from the this test's page_set
+    attribute. Override to generate a custom page set.
     """
-    return cls.PageSetClass()()
+    if not hasattr(self, 'page_set'):
+      raise NotImplementedError('This test has no "page_set" attribute.')
+    if not issubclass(self.page_set, page_set.PageSet):
+      raise TypeError('"%s" is not a PageSet.' % self.page_set.__name__)
+    return self.page_set()
+
+  def CreateUserStorySet(self, options):
+    return self.CreatePageSet(options)
 
   @classmethod
-  def CreateExpectations(cls, ps):  # pylint: disable=W0613
+  def CreateExpectations(cls):
     """Get the expectations this test will run with.
 
     By default, it will create an empty expectations set. Override to generate

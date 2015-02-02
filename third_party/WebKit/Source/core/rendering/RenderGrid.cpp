@@ -31,6 +31,7 @@
 #include "core/rendering/RenderView.h"
 #include "core/rendering/TextAutosizer.h"
 #include "core/rendering/style/GridCoordinate.h"
+#include "core/rendering/style/RenderStyle.h"
 #include "platform/LengthFunctions.h"
 
 namespace blink {
@@ -171,6 +172,7 @@ private:
 
 struct RenderGrid::GridSizingData {
     WTF_MAKE_NONCOPYABLE(GridSizingData);
+    STACK_ALLOCATED();
 public:
     GridSizingData(size_t gridColumnCount, size_t gridRowCount)
         : columnTracks(gridColumnCount)
@@ -185,6 +187,8 @@ public:
     // Performance optimization: hold onto these Vectors until the end of Layout to avoid repeated malloc / free.
     Vector<LayoutUnit> distributeTrackVector;
     Vector<GridTrack*> filteredTracks;
+    WillBeHeapVector<GridItemWithSpan> itemsSortedByIncreasingSpan;
+    Vector<size_t> growAboveMaxBreadthTrackIndexes;
 };
 
 RenderGrid::RenderGrid(Element* element)
@@ -620,6 +624,8 @@ LayoutUnit RenderGrid::logicalHeightForChild(RenderBox& child, Vector<GridTrack>
     if (child.style()->logicalHeight().isPercent() || oldOverrideContainingBlockContentLogicalWidth != overrideContainingBlockContentLogicalWidth)
         layoutScope.setNeedsLayout(&child);
 
+    child.clearOverrideLogicalContentHeight();
+
     child.setOverrideContainingBlockContentLogicalWidth(overrideContainingBlockContentLogicalWidth);
     // If |child| has a percentage logical height, we shouldn't let it override its intrinsic height, which is
     // what we are interested in here. Thus we need to set the override logical height to -1 (no possible resolution).
@@ -660,65 +666,99 @@ LayoutUnit RenderGrid::maxContentForChild(RenderBox& child, GridTrackSizingDirec
     return logicalHeightForChild(child, columnTracks);
 }
 
-size_t RenderGrid::gridItemSpan(const RenderBox& child, GridTrackSizingDirection direction)
-{
-    GridCoordinate childCoordinate = cachedGridCoordinate(child);
-    GridSpan childSpan = (direction == ForRows) ? childCoordinate.rows : childCoordinate.columns;
+// We're basically using a class instead of a std::pair for two reasons. First of all, accessing gridItem() or
+// coordinate() is much more self-explanatory that using .first or .second members in the pair. Secondly the class
+// allows us to precompute the value of the span, something which is quite convenient for the sorting. Having a
+// std::pair<RenderBox*, size_t> does not work either because we still need the GridCoordinate so we'd have to add an
+// extra hash lookup for each item at the beginning of RenderGrid::resolveContentBasedTrackSizingFunctionsForItems().
+class GridItemWithSpan {
+    ALLOW_ONLY_INLINE_ALLOCATION();
+public:
+    GridItemWithSpan(RenderBox& gridItem, const GridCoordinate& coordinate, GridTrackSizingDirection direction)
+        : m_gridItem(gridItem)
+        , m_coordinate(coordinate)
+    {
+        const GridSpan& span = (direction == ForRows) ? coordinate.rows : coordinate.columns;
+        m_span = span.resolvedFinalPosition.toInt() - span.resolvedInitialPosition.toInt() + 1;
+    }
 
-    return childSpan.resolvedFinalPosition.toInt() - childSpan.resolvedInitialPosition.toInt() + 1;
+    RenderBox& gridItem() const { return *m_gridItem; }
+    GridCoordinate coordinate() const { return m_coordinate; }
+
+    bool operator<(const GridItemWithSpan other) const { return m_span < other.m_span; }
+
+    void trace(Visitor* visitor)
+    {
+        visitor->trace(m_gridItem);
+    }
+
+private:
+    RawPtrWillBeMember<RenderBox> m_gridItem;
+    GridCoordinate m_coordinate;
+    size_t m_span;
+};
+
+bool RenderGrid::spanningItemCrossesFlexibleSizedTracks(const GridCoordinate& coordinate, GridTrackSizingDirection direction) const
+{
+    const GridResolvedPosition initialTrackPosition = (direction == ForColumns) ? coordinate.columns.resolvedInitialPosition : coordinate.rows.resolvedInitialPosition;
+    const GridResolvedPosition finalTrackPosition = (direction == ForColumns) ? coordinate.columns.resolvedFinalPosition : coordinate.rows.resolvedFinalPosition;
+
+    for (GridResolvedPosition trackPosition = initialTrackPosition; trackPosition <= finalTrackPosition; ++trackPosition) {
+        const GridTrackSize& trackSize = gridTrackSize(direction, trackPosition.toInt());
+        if (trackSize.minTrackBreadth().isFlex() || trackSize.maxTrackBreadth().isFlex())
+            return true;
+    }
+
+    return false;
 }
 
-typedef std::pair<RenderBox*, size_t> GridItemWithSpan;
-
-// This function sorts by span (.second in the pair) but also places pointers (.first in the pair) to the same object in
-// consecutive positions so duplicates could be easily removed with std::unique() for example.
-static bool gridItemWithSpanSorter(const GridItemWithSpan& item1, const GridItemWithSpan& item2)
+static inline size_t integerSpanForDirection(const GridCoordinate& coordinate, GridTrackSizingDirection direction)
 {
-    if (item1.second != item2.second)
-        return item1.second < item2.second;
-
-    return item1.first < item2.first;
-}
-
-static bool uniquePointerInPair(const GridItemWithSpan& item1, const GridItemWithSpan& item2)
-{
-    return item1.first == item2.first;
+    return (direction == ForRows) ? coordinate.rows.integerSpan() : coordinate.columns.integerSpan();
 }
 
 void RenderGrid::resolveContentBasedTrackSizingFunctions(GridTrackSizingDirection direction, GridSizingData& sizingData, LayoutUnit& availableLogicalSpace)
 {
-    // FIXME: Split the grid tracks into groups that doesn't overlap a <flex> grid track (crbug.com/235258).
-
-    for (size_t i = 0; i < sizingData.contentSizedTracksIndex.size(); ++i) {
-        size_t trackIndex = sizingData.contentSizedTracksIndex[i];
-        GridIterator iterator(m_grid, direction, trackIndex);
-        Vector<GridItemWithSpan> itemsSortedByIncreasingSpan;
-
-        while (RenderBox* gridItem = iterator.nextGridItem())
-            itemsSortedByIncreasingSpan.append(std::make_pair(gridItem, gridItemSpan(*gridItem, direction)));
-        std::stable_sort(itemsSortedByIncreasingSpan.begin(), itemsSortedByIncreasingSpan.end(), gridItemWithSpanSorter);
-        Vector<GridItemWithSpan>::iterator end = std::unique(itemsSortedByIncreasingSpan.begin(), itemsSortedByIncreasingSpan.end(), uniquePointerInPair);
-
-        for (Vector<GridItemWithSpan>::iterator it = itemsSortedByIncreasingSpan.begin(); it != end; ++it) {
-            RenderBox* gridItem = it->first;
-            resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, *gridItem, &GridTrackSize::hasMinOrMaxContentMinTrackBreadth, &RenderGrid::minContentForChild, &GridTrack::usedBreadth, &GridTrack::growUsedBreadth);
-            resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, *gridItem, &GridTrackSize::hasMaxContentMinTrackBreadth, &RenderGrid::maxContentForChild, &GridTrack::usedBreadth, &GridTrack::growUsedBreadth);
-            resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, *gridItem, &GridTrackSize::hasMinOrMaxContentMaxTrackBreadth, &RenderGrid::minContentForChild, &GridTrack::maxBreadthIfNotInfinite, &GridTrack::growMaxBreadth);
-            resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, *gridItem, &GridTrackSize::hasMaxContentMaxTrackBreadth, &RenderGrid::maxContentForChild, &GridTrack::maxBreadthIfNotInfinite, &GridTrack::growMaxBreadth);
+    sizingData.itemsSortedByIncreasingSpan.shrink(0);
+    HashSet<RenderBox*> itemsSet;
+    size_t contentSizedTracksCount = sizingData.contentSizedTracksIndex.size();
+    for (size_t i = 0; i < contentSizedTracksCount; ++i) {
+        GridIterator iterator(m_grid, direction, sizingData.contentSizedTracksIndex[i]);
+        while (RenderBox* gridItem = iterator.nextGridItem()) {
+            if (itemsSet.add(gridItem).isNewEntry) {
+                const GridCoordinate& coordinate = cachedGridCoordinate(*gridItem);
+                // We should not include items spanning more than one track that span tracks with flexible sizing functions.
+                if (integerSpanForDirection(coordinate, direction) == 1 || !spanningItemCrossesFlexibleSizedTracks(coordinate, direction))
+                    sizingData.itemsSortedByIncreasingSpan.append(GridItemWithSpan(*gridItem, coordinate, direction));
+            }
         }
+    }
+    std::sort(sizingData.itemsSortedByIncreasingSpan.begin(), sizingData.itemsSortedByIncreasingSpan.end());
 
+    Vector<GridItemWithSpan>::iterator end = sizingData.itemsSortedByIncreasingSpan.end();
+    for (Vector<GridItemWithSpan>::iterator it = sizingData.itemsSortedByIncreasingSpan.begin(); it != end; ++it) {
+        GridItemWithSpan itemWithSpan = *it;
+        resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, itemWithSpan, &GridTrackSize::hasMinOrMaxContentMinTrackBreadth, &RenderGrid::minContentForChild, &GridTrack::usedBreadth, &GridTrack::growUsedBreadth, &GridTrackSize::hasMinContentMinTrackBreadthAndMinOrMaxContentMaxTrackBreadth);
+        resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, itemWithSpan, &GridTrackSize::hasMaxContentMinTrackBreadth, &RenderGrid::maxContentForChild, &GridTrack::usedBreadth, &GridTrack::growUsedBreadth, &GridTrackSize::hasMaxContentMinTrackBreadthAndMaxContentMaxTrackBreadth);
+        resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, itemWithSpan, &GridTrackSize::hasMinOrMaxContentMaxTrackBreadth, &RenderGrid::minContentForChild, &GridTrack::maxBreadthIfNotInfinite, &GridTrack::growMaxBreadth);
+        resolveContentBasedTrackSizingFunctionsForItems(direction, sizingData, itemWithSpan, &GridTrackSize::hasMaxContentMaxTrackBreadth, &RenderGrid::maxContentForChild, &GridTrack::maxBreadthIfNotInfinite, &GridTrack::growMaxBreadth);
+    }
+
+    for (size_t i = 0; i < contentSizedTracksCount; ++i) {
+        size_t trackIndex = sizingData.contentSizedTracksIndex[i];
         GridTrack& track = (direction == ForColumns) ? sizingData.columnTracks[trackIndex] : sizingData.rowTracks[trackIndex];
         if (track.m_maxBreadth == infinity)
             track.m_maxBreadth = track.m_usedBreadth;
     }
 }
 
-void RenderGrid::resolveContentBasedTrackSizingFunctionsForItems(GridTrackSizingDirection direction, GridSizingData& sizingData, RenderBox& gridItem, FilterFunction filterFunction, SizingFunction sizingFunction, AccumulatorGetter trackGetter, AccumulatorGrowFunction trackGrowthFunction)
+void RenderGrid::resolveContentBasedTrackSizingFunctionsForItems(GridTrackSizingDirection direction, GridSizingData& sizingData, GridItemWithSpan& gridItemWithSpan, FilterFunction filterFunction, SizingFunction sizingFunction, AccumulatorGetter trackGetter, AccumulatorGrowFunction trackGrowthFunction, FilterFunction growAboveMaxBreadthFilterFunction)
 {
-    const GridCoordinate coordinate = cachedGridCoordinate(gridItem);
+    const GridCoordinate coordinate = gridItemWithSpan.coordinate();
     const GridResolvedPosition initialTrackPosition = (direction == ForColumns) ? coordinate.columns.resolvedInitialPosition : coordinate.rows.resolvedInitialPosition;
     const GridResolvedPosition finalTrackPosition = (direction == ForColumns) ? coordinate.columns.resolvedFinalPosition : coordinate.rows.resolvedFinalPosition;
 
+    sizingData.growAboveMaxBreadthTrackIndexes.shrink(0);
     sizingData.filteredTracks.shrink(0);
     for (GridResolvedPosition trackPosition = initialTrackPosition; trackPosition <= finalTrackPosition; ++trackPosition) {
         GridTrackSize trackSize = gridTrackSize(direction, trackPosition.toInt());
@@ -727,23 +767,24 @@ void RenderGrid::resolveContentBasedTrackSizingFunctionsForItems(GridTrackSizing
 
         GridTrack& track = (direction == ForColumns) ? sizingData.columnTracks[trackPosition.toInt()] : sizingData.rowTracks[trackPosition.toInt()];
         sizingData.filteredTracks.append(&track);
+
+        if (growAboveMaxBreadthFilterFunction && (trackSize.*growAboveMaxBreadthFilterFunction)())
+            sizingData.growAboveMaxBreadthTrackIndexes.append(sizingData.filteredTracks.size() - 1);
     }
 
     if (sizingData.filteredTracks.isEmpty())
         return;
 
-    LayoutUnit additionalBreadthSpace = (this->*sizingFunction)(gridItem, direction, sizingData.columnTracks);
+    LayoutUnit additionalBreadthSpace = (this->*sizingFunction)(gridItemWithSpan.gridItem(), direction, sizingData.columnTracks);
     for (GridResolvedPosition trackIndexForSpace = initialTrackPosition; trackIndexForSpace <= finalTrackPosition; ++trackIndexForSpace) {
         GridTrack& track = (direction == ForColumns) ? sizingData.columnTracks[trackIndexForSpace.toInt()] : sizingData.rowTracks[trackIndexForSpace.toInt()];
         additionalBreadthSpace -= (track.*trackGetter)();
     }
 
-    // FIXME: We should pass different values for |tracksForGrowthAboveMaxBreadth|.
-
     // Specs mandate to floor additionalBreadthSpace (extra-space in specs) to 0. Instead we directly avoid the function
     // call in those cases as it will be a noop in terms of track sizing.
     if (additionalBreadthSpace > 0)
-        distributeSpaceToTracks(sizingData.filteredTracks, &sizingData.filteredTracks, trackGetter, trackGrowthFunction, sizingData, additionalBreadthSpace);
+        distributeSpaceToTracks(sizingData.filteredTracks, &sizingData.growAboveMaxBreadthTrackIndexes, trackGetter, trackGrowthFunction, sizingData, additionalBreadthSpace);
 }
 
 static bool sortByGridTrackGrowthPotential(const GridTrack* track1, const GridTrack* track2)
@@ -759,7 +800,7 @@ static bool sortByGridTrackGrowthPotential(const GridTrack* track1, const GridTr
     return (track1->m_maxBreadth - track1->m_usedBreadth) < (track2->m_maxBreadth - track2->m_usedBreadth);
 }
 
-void RenderGrid::distributeSpaceToTracks(Vector<GridTrack*>& tracks, Vector<GridTrack*>* tracksForGrowthAboveMaxBreadth, AccumulatorGetter trackGetter, AccumulatorGrowFunction trackGrowthFunction, GridSizingData& sizingData, LayoutUnit& availableLogicalSpace)
+void RenderGrid::distributeSpaceToTracks(Vector<GridTrack*>& tracks, Vector<size_t>* growAboveMaxBreadthTrackIndexes, AccumulatorGetter trackGetter, AccumulatorGrowFunction trackGrowthFunction, GridSizingData& sizingData, LayoutUnit& availableLogicalSpace)
 {
     ASSERT(availableLogicalSpace > 0);
     std::sort(tracks.begin(), tracks.end(), sortByGridTrackGrowthPotential);
@@ -772,7 +813,6 @@ void RenderGrid::distributeSpaceToTracks(Vector<GridTrack*>& tracks, Vector<Grid
         LayoutUnit availableLogicalSpaceShare = availableLogicalSpace / (tracksSize - i);
         LayoutUnit trackBreadth = (tracks[i]->*trackGetter)();
         LayoutUnit growthShare = track.m_maxBreadth == infinity ? availableLogicalSpaceShare : std::min(availableLogicalSpaceShare, track.m_maxBreadth - trackBreadth);
-        ASSERT(growthShare != infinity);
         sizingData.distributeTrackVector[i] = trackBreadth;
         // We should never shrink any grid track or else we can't guarantee we abide by our min-sizing function.
         if (growthShare > 0) {
@@ -781,11 +821,15 @@ void RenderGrid::distributeSpaceToTracks(Vector<GridTrack*>& tracks, Vector<Grid
         }
     }
 
-    if (availableLogicalSpace > 0 && tracksForGrowthAboveMaxBreadth) {
-        tracksSize = tracksForGrowthAboveMaxBreadth->size();
-        for (size_t i = 0; i < tracksSize; ++i) {
-            LayoutUnit growthShare = availableLogicalSpace / (tracksSize - i);
-            sizingData.distributeTrackVector[i] += growthShare;
+    if (availableLogicalSpace > 0 && growAboveMaxBreadthTrackIndexes) {
+        size_t indexesSize = growAboveMaxBreadthTrackIndexes->size();
+        size_t tracksGrowingAboveMaxBreadthSize = indexesSize ? indexesSize : tracksSize;
+        // If we have a non-null empty vector of track indexes to grow above max breadth means that we should grow all
+        // affected tracks.
+        for (size_t i = 0; i < tracksGrowingAboveMaxBreadthSize; ++i) {
+            LayoutUnit growthShare = availableLogicalSpace / (tracksGrowingAboveMaxBreadthSize - i);
+            size_t distributeTrackIndex = indexesSize ? growAboveMaxBreadthTrackIndexes->at(i) : i;
+            sizingData.distributeTrackVector[distributeTrackIndex] += growthShare;
             availableLogicalSpace -= growthShare;
         }
     }
@@ -869,8 +913,8 @@ void RenderGrid::placeItemsOnGrid()
         insertItemIntoGrid(*child, GridCoordinate(*rowPositions, *columnPositions));
     }
 
-    ASSERT(gridRowCount() >= style()->gridTemplateRows().size());
-    ASSERT(gridColumnCount() >= style()->gridTemplateColumns().size());
+    ASSERT(gridRowCount() >= GridResolvedPosition::explicitGridRowCount(*style()));
+    ASSERT(gridColumnCount() >= GridResolvedPosition::explicitGridColumnCount(*style()));
 
     // FIXME: Implement properly "stack" value in auto-placement algorithm.
     if (style()->isGridAutoFlowAlgorithmStack()) {
@@ -1053,6 +1097,13 @@ void RenderGrid::layoutGridItems()
     m_gridItemsOverflowingGridArea.resize(0);
 
     for (RenderBox* child = firstChildBox(); child; child = child->nextSiblingBox()) {
+        if (child->isOutOfFlowPositioned()) {
+            // FIXME: Absolute positioned grid items should have a special
+            // behavior as described in the spec (crbug.com/273898):
+            // http://www.w3.org/TR/css-grid-1/#abspos-items
+            child->containingBlock()->insertPositionedObject(child);
+        }
+
         // Because the grid area cannot be styled, we don't need to adjust
         // the grid breadth to account for 'box-sizing'.
         LayoutUnit oldOverrideContainingBlockContentLogicalWidth = child->hasOverrideContainingBlockLogicalWidth() ? child->overrideContainingBlockContentLogicalWidth() : LayoutUnit();
@@ -1068,9 +1119,8 @@ void RenderGrid::layoutGridItems()
         child->setOverrideContainingBlockContentLogicalWidth(overrideContainingBlockContentLogicalWidth);
         child->setOverrideContainingBlockContentLogicalHeight(overrideContainingBlockContentLogicalHeight);
 
-        // FIXME: Grid items should stretch to fill their cells. Once we
-        // implement grid-{column,row}-align, we can also shrink to fit. For
-        // now, just size as if we were a regular child.
+        applyStretchAlignmentToChildIfNeeded(*child, overrideContainingBlockContentLogicalHeight);
+
         child->layoutIfNeeded();
 
 #if ENABLE(ASSERT)
@@ -1124,12 +1174,27 @@ void RenderGrid::populateGridPositions(const GridSizingData& sizingData)
         m_rowPositions[i + 1] = m_rowPositions[i] + sizingData.rowTracks[i].m_usedBreadth;
 }
 
+static LayoutUnit computeOverflowAlignmentOffset(OverflowAlignment overflow, LayoutUnit startOfTrack, LayoutUnit endOfTrack, LayoutUnit childBreadth)
+{
+    LayoutUnit trackBreadth = endOfTrack - startOfTrack;
+    LayoutUnit offset = trackBreadth - childBreadth;
+
+    // If overflow is 'safe', we have to make sure we don't overflow the 'start'
+    // edge (potentially cause some data loss as the overflow is unreachable).
+    if (overflow == OverflowAlignmentSafe)
+        offset = std::max<LayoutUnit>(0, offset);
+
+    // If we overflow our alignment container and overflow is 'true' (default), we
+    // ignore the overflow and just return the value regardless (which may cause data
+    // loss as we overflow the 'start' edge).
+    return offset;
+}
+
 LayoutUnit RenderGrid::startOfColumnForChild(const RenderBox& child) const
 {
     const GridCoordinate& coordinate = cachedGridCoordinate(child);
     LayoutUnit startOfColumn = m_columnPositions[coordinate.columns.resolvedInitialPosition.toInt()];
     // The grid items should be inside the grid container's border box, that's why they need to be shifted.
-    // FIXME: This should account for the grid item's <overflow-position>.
     return startOfColumn + marginStartForChild(&child);
 }
 
@@ -1141,8 +1206,9 @@ LayoutUnit RenderGrid::endOfColumnForChild(const RenderBox& child) const
     LayoutUnit columnPosition = startOfColumn + marginStartForChild(&child);
 
     LayoutUnit endOfColumn = m_columnPositions[coordinate.columns.resolvedFinalPosition.next().toInt()];
-    // FIXME: This should account for the grid item's <overflow-position>.
-    return columnPosition + std::max<LayoutUnit>(0, endOfColumn - m_columnPositions[coordinate.columns.resolvedInitialPosition.toInt()] - child.logicalWidth());
+    LayoutUnit offsetFromColumnPosition = computeOverflowAlignmentOffset(child.style()->justifySelfOverflowAlignment(), startOfColumn, endOfColumn, child.logicalWidth());
+
+    return columnPosition + offsetFromColumnPosition;
 }
 
 LayoutUnit RenderGrid::columnPositionAlignedWithGridContainerStart(const RenderBox& child) const
@@ -1167,24 +1233,16 @@ LayoutUnit RenderGrid::centeredColumnPositionForChild(const RenderBox& child) co
     LayoutUnit startOfColumn = m_columnPositions[coordinate.columns.resolvedInitialPosition.toInt()];
     LayoutUnit endOfColumn = m_columnPositions[coordinate.columns.resolvedFinalPosition.next().toInt()];
     LayoutUnit columnPosition = startOfColumn + marginStartForChild(&child);
-    // FIXME: This should account for the grid item's <overflow-position>.
-    return columnPosition + std::max<LayoutUnit>(0, endOfColumn - startOfColumn - child.logicalWidth()) / 2;
-}
+    LayoutUnit offsetFromColumnPosition = computeOverflowAlignmentOffset(child.style()->justifySelfOverflowAlignment(), startOfColumn, endOfColumn, child.logicalWidth());
 
-static ItemPosition resolveJustification(const RenderStyle* parentStyle, const RenderStyle* childStyle)
-{
-    ItemPosition justify = childStyle->justifySelf();
-    if (justify == ItemPositionAuto)
-        justify = (parentStyle->justifyItems() == ItemPositionAuto) ? ItemPositionStretch : parentStyle->justifyItems();
-
-    return justify;
+    return columnPosition + offsetFromColumnPosition / 2;
 }
 
 LayoutUnit RenderGrid::columnPositionForChild(const RenderBox& child) const
 {
     bool hasOrthogonalWritingMode = child.isHorizontalWritingMode() != isHorizontalWritingMode();
 
-    switch (resolveJustification(style(), child.style())) {
+    switch (RenderStyle::resolveJustification(style(), child.style(), ItemPositionStretch)) {
     case ItemPositionSelfStart:
         // For orthogonal writing-modes, this computes to 'start'
         // FIXME: grid track sizing and positioning do not support orthogonal modes yet.
@@ -1244,6 +1302,7 @@ LayoutUnit RenderGrid::columnPositionForChild(const RenderBox& child) const
     case ItemPositionAuto:
         break;
     case ItemPositionStretch:
+        return startOfColumnForChild(child);
     case ItemPositionBaseline:
     case ItemPositionLastBaseline:
         // FIXME: Implement the previous values. For now, we always start align the child.
@@ -1263,8 +1322,9 @@ LayoutUnit RenderGrid::endOfRowForChild(const RenderBox& child) const
     LayoutUnit rowPosition = startOfRow + marginBeforeForChild(&child);
 
     LayoutUnit endOfRow = m_rowPositions[coordinate.rows.resolvedFinalPosition.next().toInt()];
-    // FIXME: This should account for the grid item's <overflow-position>.
-    return rowPosition + std::max<LayoutUnit>(0, endOfRow - startOfRow - child.logicalHeight());
+    LayoutUnit offsetFromRowPosition = computeOverflowAlignmentOffset(child.style()->alignSelfOverflowAlignment(), startOfRow, endOfRow, child.logicalHeight());
+
+    return rowPosition + offsetFromRowPosition;
 }
 
 LayoutUnit RenderGrid::startOfRowForChild(const RenderBox& child) const
@@ -1273,7 +1333,6 @@ LayoutUnit RenderGrid::startOfRowForChild(const RenderBox& child) const
 
     LayoutUnit startOfRow = m_rowPositions[coordinate.rows.resolvedInitialPosition.toInt()];
     // The grid items should be inside the grid container's border box, that's why they need to be shifted.
-    // FIXME: This should account for the grid item's <overflow-position>.
     LayoutUnit rowPosition = startOfRow + marginBeforeForChild(&child);
 
     return rowPosition;
@@ -1286,27 +1345,92 @@ LayoutUnit RenderGrid::centeredRowPositionForChild(const RenderBox& child) const
     // The grid items should be inside the grid container's border box, that's why they need to be shifted.
     LayoutUnit startOfRow = m_rowPositions[coordinate.rows.resolvedInitialPosition.toInt()] + marginBeforeForChild(&child);
     LayoutUnit endOfRow = m_rowPositions[coordinate.rows.resolvedFinalPosition.next().toInt()];
+    LayoutUnit rowPosition = startOfRow + marginBeforeForChild(&child);
+    LayoutUnit offsetFromRowPosition = computeOverflowAlignmentOffset(child.style()->alignSelfOverflowAlignment(), startOfRow, endOfRow, child.logicalHeight());
 
-    // FIXME: This should account for the grid item's <overflow-position>.
-    return startOfRow + std::max<LayoutUnit>(0, endOfRow - startOfRow - child.logicalHeight()) / 2;
+    return rowPosition + offsetFromRowPosition / 2;
 }
 
-// FIXME: We should move this logic to the StyleAdjuster or the StyleBuilder.
-static ItemPosition resolveAlignment(const RenderStyle* parentStyle, const RenderStyle* childStyle)
+static inline LayoutUnit constrainedChildIntrinsicContentLogicalHeight(const RenderBox& child)
 {
-    ItemPosition align = childStyle->alignSelf();
-    // The auto keyword computes to the parent's align-items computed value, or to "stretch", if not set or "auto".
-    if (align == ItemPositionAuto)
-        align = (parentStyle->alignItems() == ItemPositionAuto) ? ItemPositionStretch : parentStyle->alignItems();
-    return align;
+    LayoutUnit childIntrinsicContentLogicalHeight = child.intrinsicContentLogicalHeight();
+    return child.constrainLogicalHeightByMinMax(childIntrinsicContentLogicalHeight + child.borderAndPaddingLogicalHeight(), childIntrinsicContentLogicalHeight);
+}
+
+// FIXME: This logic is shared by RenderFlexibleBox, so it should be moved to RenderBox.
+bool RenderGrid::needToStretchChildLogicalHeight(const RenderBox& child) const
+{
+    if (RenderStyle::resolveAlignment(style(), child.style(), ItemPositionStretch) != ItemPositionStretch)
+        return false;
+
+    return isHorizontalWritingMode() && child.style()->height().isAuto();
+}
+
+// FIXME: This logic is shared by RenderFlexibleBox, so it should be moved to RenderBox.
+LayoutUnit RenderGrid::childIntrinsicHeight(const RenderBox& child) const
+{
+    if (child.isHorizontalWritingMode() && needToStretchChildLogicalHeight(child))
+        return constrainedChildIntrinsicContentLogicalHeight(child);
+    return child.height();
+}
+
+// FIXME: This logic is shared by RenderFlexibleBox, so it should be moved to RenderBox.
+LayoutUnit RenderGrid::childIntrinsicWidth(const RenderBox& child) const
+{
+    if (!child.isHorizontalWritingMode() && needToStretchChildLogicalHeight(child))
+        return constrainedChildIntrinsicContentLogicalHeight(child);
+    return child.width();
+}
+
+// FIXME: This logic is shared by RenderFlexibleBox, so it should be moved to RenderBox.
+LayoutUnit RenderGrid::intrinsicLogicalHeightForChild(const RenderBox& child) const
+{
+    return isHorizontalWritingMode() ? childIntrinsicHeight(child) : childIntrinsicWidth(child);
+}
+
+// FIXME: This logic is shared by RenderFlexibleBox, so it should be moved to RenderBox.
+LayoutUnit RenderGrid::marginLogicalHeightForChild(const RenderBox& child) const
+{
+    return isHorizontalWritingMode() ? child.marginHeight() : child.marginWidth();
+}
+
+// FIXME: This logic is shared by RenderFlexibleBox, so it should be moved to RenderBox.
+LayoutUnit RenderGrid::availableAlignmentSpaceForChildBeforeStretching(LayoutUnit gridAreaBreadthForChild, const RenderBox& child) const
+{
+    LayoutUnit childLogicalHeight = marginLogicalHeightForChild(child) + intrinsicLogicalHeightForChild(child);
+    return gridAreaBreadthForChild - childLogicalHeight;
+}
+
+// FIXME: This logic is shared by RenderFlexibleBox, so it should be moved to RenderBox.
+void RenderGrid::applyStretchAlignmentToChildIfNeeded(RenderBox& child, LayoutUnit gridAreaBreadthForChild)
+{
+    if (RenderStyle::resolveAlignment(style(), child.style(), ItemPositionStretch) != ItemPositionStretch)
+        return;
+
+    bool hasOrthogonalWritingMode = child.isHorizontalWritingMode() != isHorizontalWritingMode();
+    if (child.style()->logicalHeight().isAuto()) {
+        // FIXME: If the child has orthogonal flow, then it already has an override height set, so use it.
+        // FIXME: grid track sizing and positioning do not support orthogonal modes yet.
+        if (!hasOrthogonalWritingMode) {
+            LayoutUnit heightBeforeStretching = needToStretchChildLogicalHeight(child) ? constrainedChildIntrinsicContentLogicalHeight(child) : child.logicalHeight();
+            LayoutUnit stretchedLogicalHeight = heightBeforeStretching + availableAlignmentSpaceForChildBeforeStretching(gridAreaBreadthForChild, child);
+            LayoutUnit desiredLogicalHeight = child.constrainLogicalHeightByMinMax(stretchedLogicalHeight, heightBeforeStretching - child.borderAndPaddingLogicalHeight());
+            LayoutUnit desiredLogicalContentHeight = desiredLogicalHeight - child.borderAndPaddingLogicalHeight();
+
+            // FIXME: Can avoid laying out here in some cases. See https://webkit.org/b/87905.
+            if (desiredLogicalHeight != child.logicalHeight() || !child.hasOverrideHeight() || desiredLogicalContentHeight != child.overrideLogicalContentHeight()) {
+                child.setOverrideLogicalContentHeight(desiredLogicalContentHeight);
+                child.setLogicalHeight(0);
+                child.forceChildLayout();
+            }
+        }
+    }
 }
 
 LayoutUnit RenderGrid::rowPositionForChild(const RenderBox& child) const
 {
     bool hasOrthogonalWritingMode = child.isHorizontalWritingMode() != isHorizontalWritingMode();
-    ItemPosition alignSelf = resolveAlignment(style(), child.style());
-
-    switch (alignSelf) {
+    switch (RenderStyle::resolveAlignment(style(), child.style(), ItemPositionStretch)) {
     case ItemPositionSelfStart:
         // If orthogonal writing-modes, this computes to 'Start'.
         // FIXME: grid track sizing and positioning does not support orthogonal modes yet.
@@ -1359,7 +1483,6 @@ LayoutUnit RenderGrid::rowPositionForChild(const RenderBox& child) const
     case ItemPositionEnd:
         return endOfRowForChild(child);
     case ItemPositionStretch:
-        // FIXME: Implement the Stretch value. For now, we always start align the child.
         return startOfRowForChild(child);
     case ItemPositionBaseline:
     case ItemPositionLastBaseline:

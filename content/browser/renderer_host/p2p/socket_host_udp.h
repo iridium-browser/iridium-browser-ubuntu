@@ -29,18 +29,19 @@ class CONTENT_EXPORT P2PSocketHostUdp : public P2PSocketHost {
   P2PSocketHostUdp(IPC::Sender* message_sender,
                    int socket_id,
                    P2PMessageThrottler* throttler);
-  virtual ~P2PSocketHostUdp();
+  ~P2PSocketHostUdp() override;
 
   // P2PSocketHost overrides.
-  virtual bool Init(const net::IPEndPoint& local_address,
-                    const P2PHostAndIPEndPoint& remote_address) OVERRIDE;
-  virtual void Send(const net::IPEndPoint& to,
-                    const std::vector<char>& data,
-                    const rtc::PacketOptions& options,
-                    uint64 packet_id) OVERRIDE;
-  virtual P2PSocketHost* AcceptIncomingTcpConnection(
-      const net::IPEndPoint& remote_address, int id) OVERRIDE;
-  virtual bool SetOption(P2PSocketOption option, int value) OVERRIDE;
+  bool Init(const net::IPEndPoint& local_address,
+            const P2PHostAndIPEndPoint& remote_address) override;
+  void Send(const net::IPEndPoint& to,
+            const std::vector<char>& data,
+            const rtc::PacketOptions& options,
+            uint64 packet_id) override;
+  P2PSocketHost* AcceptIncomingTcpConnection(
+      const net::IPEndPoint& remote_address,
+      int id) override;
+  bool SetOption(P2PSocketOption option, int value) override;
 
  private:
   friend class P2PSocketHostUdpTest;
@@ -62,13 +63,15 @@ class CONTENT_EXPORT P2PSocketHostUdp : public P2PSocketHost {
 
   void OnError();
 
+  void SetSendBufferSize();
+
   void DoRead();
   void OnRecv(int result);
   void HandleReadResult(int result);
 
   void DoSend(const PendingPacket& packet);
-  void OnSend(uint64 packet_id, int result);
-  void HandleSendResult(uint64 packet_id, int result);
+  void OnSend(uint64 packet_id, uint64 tick_received, int result);
+  void HandleSendResult(uint64 packet_id, uint64 tick_received, int result);
 
   scoped_ptr<net::DatagramServerSocket> socket_;
   scoped_refptr<net::IOBuffer> recv_buffer_;

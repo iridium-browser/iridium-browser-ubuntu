@@ -55,7 +55,7 @@ void SSLClientAuthHandler::SelectCertificate() {
 void SSLClientAuthHandler::CertificateSelected(net::X509Certificate* cert) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  VLOG(1) << this << " CertificateSelected " << cert;
+  DVLOG(1) << this << " CertificateSelected " << cert;
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(

@@ -12,6 +12,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
@@ -29,12 +30,24 @@ namespace {
 float device_scale_factor_for_internal_display = 1.0f;
 #endif
 
+// Number of recent GetFontRenderParams() results to cache.
+const size_t kCacheSize = 64;
+
+// Cached result from a call to GetFontRenderParams().
+struct QueryResult {
+  QueryResult(const FontRenderParams& params, const std::string& family)
+      : params(params),
+        family(family) {
+  }
+  ~QueryResult() {}
+
+  FontRenderParams params;
+  std::string family;
+};
+
 // Keyed by hashes of FontRenderParamQuery structs from
 // HashFontRenderParamsQuery().
-typedef base::MRUCache<uint32, FontRenderParams> Cache;
-
-// Number of recent GetFontRenderParams() results to cache.
-const size_t kCacheSize = 20;
+typedef base::MRUCache<uint32, QueryResult> Cache;
 
 // A cache and the lock that must be held while accessing it.
 // GetFontRenderParams() is called by both the UI thread and the sandbox IPC
@@ -83,75 +96,97 @@ FontRenderParams::SubpixelRendering ConvertFontconfigRgba(int rgba) {
 bool QueryFontconfig(const FontRenderParamsQuery& query,
                      FontRenderParams* params_out,
                      std::string* family_out) {
-  FcPattern* pattern = FcPatternCreate();
-  CHECK(pattern);
+  struct FcPatternDeleter {
+    void operator()(FcPattern* ptr) const { FcPatternDestroy(ptr); }
+  };
+  typedef scoped_ptr<FcPattern, FcPatternDeleter> ScopedFcPattern;
 
-  FcPatternAddBool(pattern, FC_SCALABLE, FcTrue);
+  ScopedFcPattern query_pattern(FcPatternCreate());
+  CHECK(query_pattern);
+
+  FcPatternAddBool(query_pattern.get(), FC_SCALABLE, FcTrue);
 
   for (std::vector<std::string>::const_iterator it = query.families.begin();
        it != query.families.end(); ++it) {
-    FcPatternAddString(
-        pattern, FC_FAMILY, reinterpret_cast<const FcChar8*>(it->c_str()));
+    FcPatternAddString(query_pattern.get(),
+        FC_FAMILY, reinterpret_cast<const FcChar8*>(it->c_str()));
   }
   if (query.pixel_size > 0)
-    FcPatternAddDouble(pattern, FC_PIXEL_SIZE, query.pixel_size);
+    FcPatternAddDouble(query_pattern.get(), FC_PIXEL_SIZE, query.pixel_size);
   if (query.point_size > 0)
-    FcPatternAddInteger(pattern, FC_SIZE, query.point_size);
+    FcPatternAddInteger(query_pattern.get(), FC_SIZE, query.point_size);
   if (query.style >= 0) {
-    FcPatternAddInteger(pattern, FC_SLANT,
+    FcPatternAddInteger(query_pattern.get(), FC_SLANT,
         (query.style & Font::ITALIC) ? FC_SLANT_ITALIC : FC_SLANT_ROMAN);
-    FcPatternAddInteger(pattern, FC_WEIGHT,
+    FcPatternAddInteger(query_pattern.get(), FC_WEIGHT,
         (query.style & Font::BOLD) ? FC_WEIGHT_BOLD : FC_WEIGHT_NORMAL);
   }
 
-  FcConfigSubstitute(NULL, pattern, FcMatchPattern);
-  FcDefaultSubstitute(pattern);
-  FcResult result;
-  FcPattern* match = FcFontMatch(NULL, pattern, &result);
-  FcPatternDestroy(pattern);
-  if (!match)
-    return false;
+  FcConfigSubstitute(NULL, query_pattern.get(), FcMatchPattern);
+  FcDefaultSubstitute(query_pattern.get());
+
+  ScopedFcPattern result_pattern;
+  if (query.is_empty()) {
+    // If the query was empty, call FcConfigSubstituteWithPat() to get
+    // non-family-specific configuration so it can be used as the default.
+    result_pattern.reset(FcPatternDuplicate(query_pattern.get()));
+    if (!result_pattern)
+      return false;
+    FcPatternDel(result_pattern.get(), FC_FAMILY);
+    FcConfigSubstituteWithPat(NULL, result_pattern.get(), query_pattern.get(),
+                              FcMatchFont);
+  } else {
+    FcResult result;
+    result_pattern.reset(FcFontMatch(NULL, query_pattern.get(), &result));
+    if (!result_pattern)
+      return false;
+  }
+  DCHECK(result_pattern);
 
   if (family_out) {
     FcChar8* family = NULL;
-    FcPatternGetString(match, FC_FAMILY, 0, &family);
+    FcPatternGetString(result_pattern.get(), FC_FAMILY, 0, &family);
     if (family)
       family_out->assign(reinterpret_cast<const char*>(family));
   }
 
   if (params_out) {
     FcBool fc_antialias = 0;
-    if (FcPatternGetBool(match, FC_ANTIALIAS, 0, &fc_antialias) ==
-        FcResultMatch) {
+    if (FcPatternGetBool(result_pattern.get(), FC_ANTIALIAS, 0,
+                         &fc_antialias) == FcResultMatch) {
       params_out->antialiasing = fc_antialias;
     }
 
     FcBool fc_autohint = 0;
-    if (FcPatternGetBool(match, FC_AUTOHINT, 0, &fc_autohint) ==
+    if (FcPatternGetBool(result_pattern.get(), FC_AUTOHINT, 0, &fc_autohint) ==
         FcResultMatch) {
       params_out->autohinter = fc_autohint;
     }
 
     FcBool fc_bitmap = 0;
-    if (FcPatternGetBool(match, FC_EMBEDDED_BITMAP, 0, &fc_bitmap) ==
+    if (FcPatternGetBool(result_pattern.get(), FC_EMBEDDED_BITMAP, 0,
+                         &fc_bitmap) ==
         FcResultMatch) {
       params_out->use_bitmaps = fc_bitmap;
     }
 
     FcBool fc_hinting = 0;
-    if (FcPatternGetBool(match, FC_HINTING, 0, &fc_hinting) == FcResultMatch) {
+    if (FcPatternGetBool(result_pattern.get(), FC_HINTING, 0, &fc_hinting) ==
+        FcResultMatch) {
       int fc_hint_style = FC_HINT_NONE;
-      if (fc_hinting)
-        FcPatternGetInteger(match, FC_HINT_STYLE, 0, &fc_hint_style);
+      if (fc_hinting) {
+        FcPatternGetInteger(
+            result_pattern.get(), FC_HINT_STYLE, 0, &fc_hint_style);
+      }
       params_out->hinting = ConvertFontconfigHintStyle(fc_hint_style);
     }
 
     int fc_rgba = FC_RGBA_NONE;
-    if (FcPatternGetInteger(match, FC_RGBA, 0, &fc_rgba) == FcResultMatch)
+    if (FcPatternGetInteger(result_pattern.get(), FC_RGBA, 0, &fc_rgba) ==
+        FcResultMatch)
       params_out->subpixel_rendering = ConvertFontconfigRgba(fc_rgba);
   }
 
-  FcPatternDestroy(match);
   return true;
 }
 
@@ -168,21 +203,24 @@ uint32 HashFontRenderParamsQuery(const FontRenderParamsQuery& query) {
 FontRenderParams GetFontRenderParams(const FontRenderParamsQuery& query,
                                      std::string* family_out) {
   const uint32 hash = HashFontRenderParamsQuery(query);
-  if (!family_out) {
-    // The family returned by Fontconfig isn't part of FontRenderParams, so we
-    // can only return a value from the cache if it wasn't requested.
-    SynchronizedCache* synchronized_cache = g_synchronized_cache.Pointer();
+  SynchronizedCache* synchronized_cache = g_synchronized_cache.Pointer();
+
+  {
+    // Try to find a cached result so Fontconfig doesn't need to be queried.
     base::AutoLock lock(synchronized_cache->lock);
     Cache::const_iterator it = synchronized_cache->cache.Get(hash);
     if (it != synchronized_cache->cache.end()) {
       DVLOG(1) << "Returning cached params for " << hash;
-      return it->second;
+      const QueryResult& result = it->second;
+      if (family_out)
+        *family_out = result.family;
+      return result.params;
     }
-  } else {
-    family_out->clear();
   }
-  DVLOG(1) << "Computing params for " << hash
-           << (family_out ? " (family requested)" : "");
+
+  DVLOG(1) << "Computing params for " << hash;
+  if (family_out)
+    family_out->clear();
 
   // Start with the delegate's settings, but let Fontconfig have the final say.
   FontRenderParams params;
@@ -215,12 +253,13 @@ FontRenderParams GetFontRenderParams(const FontRenderParamsQuery& query,
   if (family_out && family_out->empty() && !query.families.empty())
     *family_out = query.families[0];
 
-  // Store the computed struct. It's fine if this overwrites a struct that was
-  // cached by a different thread in the meantime; the values should be
-  // identical.
-  SynchronizedCache* synchronized_cache = g_synchronized_cache.Pointer();
-  base::AutoLock lock(synchronized_cache->lock);
-  synchronized_cache->cache.Put(hash, params);
+  {
+    // Store the result. It's fine if this overwrites a result that was cached
+    // by a different thread in the meantime; the values should be identical.
+    base::AutoLock lock(synchronized_cache->lock);
+    synchronized_cache->cache.Put(hash,
+        QueryResult(params, family_out ? *family_out : std::string()));
+  }
 
   return params;
 }

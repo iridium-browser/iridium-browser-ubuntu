@@ -66,7 +66,7 @@ class SpdyProxyClientSocketTest
  public:
   SpdyProxyClientSocketTest();
 
-  virtual void TearDown();
+  void TearDown() override;
 
  protected:
   void Initialize(MockRead* reads, size_t reads_count, MockWrite* writes,
@@ -1317,8 +1317,7 @@ class DeleteSockCallback : public TestCompletionCallbackBase {
                              base::Unretained(this))) {
   }
 
-  virtual ~DeleteSockCallback() {
-  }
+  ~DeleteSockCallback() override {}
 
   const CompletionCallback& callback() const { return callback_; }
 

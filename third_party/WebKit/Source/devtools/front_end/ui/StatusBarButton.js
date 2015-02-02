@@ -35,7 +35,7 @@
  */
 WebInspector.StatusBarItem = function(elementType)
 {
-    this.element = document.createElement(elementType);
+    this.element = createElement(elementType);
     this._enabled = true;
     this._visible = true;
 }
@@ -236,7 +236,7 @@ WebInspector.StatusBarInput.prototype = {
  * @param {string} className
  * @param {number=} states
  */
-WebInspector.StatusBarButton = function(title, className, states)
+WebInspector.StatusBarButtonBase = function(title, className, states)
 {
     WebInspector.StatusBarItem.call(this, "button");
     this.element.className = className + " status-bar-item";
@@ -244,9 +244,6 @@ WebInspector.StatusBarButton = function(title, className, states)
     this._longClickController = new WebInspector.LongClickController(this.element);
     this._longClickController.addEventListener(WebInspector.LongClickController.Events.LongClick, this._onLongClick.bind(this));
     this._longClickController.addEventListener(WebInspector.LongClickController.Events.LongPress, this._onLongPress.bind(this));
-
-    this.glyph = this.element.createChild("div", "glyph");
-    this.glyphShadow = this.element.createChild("div", "glyph shadow");
 
     this.states = states;
     if (!states)
@@ -261,7 +258,7 @@ WebInspector.StatusBarButton = function(title, className, states)
     this.className = className;
 }
 
-WebInspector.StatusBarButton.prototype = {
+WebInspector.StatusBarButtonBase.prototype = {
     /**
      * @param {!WebInspector.Event} event
      */
@@ -401,9 +398,10 @@ WebInspector.StatusBarButton.prototype = {
         mainButtonClone.state = this.state;
         buttons.push(mainButtonClone);
 
+        var document = this.element.ownerDocument;
         document.documentElement.addEventListener("mouseup", mouseUp, false);
 
-        var optionsGlassPane = new WebInspector.GlassPane();
+        var optionsGlassPane = new WebInspector.GlassPane(document);
         var optionsBarElement = optionsGlassPane.element.createChild("div", "alternate-status-bar-buttons-bar");
         const buttonHeight = 23;
 
@@ -463,6 +461,44 @@ WebInspector.StatusBarButton.prototype = {
     },
 
     __proto__: WebInspector.StatusBarItem.prototype
+}
+
+/**
+ * @constructor
+ * @extends {WebInspector.StatusBarButtonBase}
+ * @param {string} title
+ * @param {string} className
+ * @param {number=} states
+ */
+WebInspector.StatusBarButton = function(title, className, states)
+{
+    WebInspector.StatusBarButtonBase.call(this, title, className, states);
+
+    this.element.createChild("div", "glyph");
+}
+
+WebInspector.StatusBarButton.prototype = {
+    __proto__: WebInspector.StatusBarButtonBase.prototype
+}
+
+/**
+ * @constructor
+ * @extends {WebInspector.StatusBarButtonBase}
+ * @param {string} title
+ * @param {string} className
+ * @param {string} text
+ * @param {number=} states
+ */
+WebInspector.StatusBarTextButton = function(title, className, text, states)
+{
+    WebInspector.StatusBarButtonBase.call(this, title, className, states);
+
+    this._textElement = this.element.createChild("div", "status-bar-button-text");
+    this._textElement.textContent = text;
+}
+
+WebInspector.StatusBarTextButton.prototype = {
+    __proto__: WebInspector.StatusBarButtonBase.prototype
 }
 
 /**

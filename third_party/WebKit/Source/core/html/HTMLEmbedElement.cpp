@@ -34,7 +34,7 @@
 #include "core/html/PluginDocument.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/rendering/RenderEmbeddedObject.h"
-#include "core/rendering/RenderWidget.h"
+#include "core/rendering/RenderPart.h"
 
 namespace blink {
 
@@ -52,20 +52,20 @@ PassRefPtrWillBeRawPtr<HTMLEmbedElement> HTMLEmbedElement::create(Document& docu
     return element.release();
 }
 
-static inline RenderWidget* findWidgetRenderer(const Node* n)
+static inline RenderPart* findPartRenderer(const Node* n)
 {
     if (!n->renderer())
         n = Traversal<HTMLObjectElement>::firstAncestor(*n);
 
-    if (n && n->renderer() && n->renderer()->isWidget())
-        return toRenderWidget(n->renderer());
+    if (n && n->renderer() && n->renderer()->isRenderPart())
+        return toRenderPart(n->renderer());
 
-    return 0;
+    return nullptr;
 }
 
-RenderWidget* HTMLEmbedElement::existingRenderWidget() const
+RenderPart* HTMLEmbedElement::existingRenderPart() const
 {
-    return findWidgetRenderer(this);
+    return findPartRenderer(this);
 }
 
 bool HTMLEmbedElement::isPresentationAttribute(const QualifiedName& name) const
@@ -113,10 +113,9 @@ void HTMLEmbedElement::parseAttribute(const QualifiedName& name, const AtomicStr
 void HTMLEmbedElement::parametersForPlugin(Vector<String>& paramNames, Vector<String>& paramValues)
 {
     AttributeCollection attributes = this->attributes();
-    AttributeCollection::iterator end = attributes.end();
-    for (AttributeCollection::iterator it = attributes.begin(); it != end; ++it) {
-        paramNames.append(it->localName().string());
-        paramValues.append(it->value().string());
+    for (const Attribute& attribute : attributes) {
+        paramNames.append(attribute.localName().string());
+        paramValues.append(attribute.value().string());
     }
 }
 

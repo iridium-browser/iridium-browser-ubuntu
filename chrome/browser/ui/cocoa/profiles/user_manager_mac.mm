@@ -8,6 +8,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/grit/chromium_strings.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -33,9 +35,9 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
 
   // WebContentsDelegate implementation. Forwards all unhandled keyboard events
   // to the current window.
-  virtual void HandleKeyboardEvent(
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE {
+      const content::NativeWebKeyboardEvent& event) override {
     if (![BrowserWindowUtils shouldHandleKeyboardEvent:event])
       return;
 
@@ -128,6 +130,9 @@ class UserManagerWebContentsDelegate : public content::WebContentsDelegate {
   webContents_->GetController().LoadURL(url, content::Referrer(),
                                         ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
                                         std::string());
+  content::RenderWidgetHostView* rwhv = webContents_->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetBackgroundColor(profiles::kUserManagerBackgroundColor);
   [self show];
 }
 
@@ -166,6 +171,8 @@ void UserManager::Show(
     const base::FilePath& profile_path_to_focus,
     profiles::UserManagerTutorialMode tutorial_mode,
     profiles::UserManagerProfileSelected profile_open_action) {
+  DCHECK(profile_path_to_focus != ProfileManager::GetGuestProfilePath());
+
   ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::OPEN_USER_MANAGER);
   if (instance_) {
     // If there's a user manager window open already, just activate it.

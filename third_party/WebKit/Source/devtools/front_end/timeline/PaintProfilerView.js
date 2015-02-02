@@ -40,7 +40,7 @@ WebInspector.PaintProfilerView = function(showImageCallback)
     this._canvasContainer = this.element.createChild("div", "paint-profiler-canvas-container");
     this._progressBanner = this.element.createChild("div", "fill progress-banner hidden");
     this._progressBanner.textContent = WebInspector.UIString("Profiling\u2026");
-    this._pieChart = new WebInspector.PieChart(55, this._formatPieChartTime.bind(this));
+    this._pieChart = new WebInspector.PieChart(55, this._formatPieChartTime.bind(this), true);
     this.element.createChild("div", "paint-profiler-pie-chart").appendChild(this._pieChart.element);
 
     this._showImageCallback = showImageCallback;
@@ -178,7 +178,7 @@ WebInspector.PaintProfilerView.prototype = {
         var window = this.windowBoundaries();
         var totalTime = 0;
         var timeByCategory = {};
-        for (var i = window.left; i <= window.right; ++i) {
+        for (var i = window.left; i < window.right; ++i) {
             var logEntry = this._log[i];
             var category = WebInspector.PaintProfilerView._categoryForLogItem(logEntry);
             timeByCategory[category.color] = timeByCategory[category.color] || 0;
@@ -213,10 +213,10 @@ WebInspector.PaintProfilerView.prototype = {
     {
         var screenLeft = this._selectionWindow.windowLeft * this._canvas.width;
         var screenRight = this._selectionWindow.windowRight * this._canvas.width;
-        var barLeft = Math.floor((screenLeft - this._barPaddingWidth) / this._outerBarWidth);
-        var barRight = Math.floor((screenRight - this._barPaddingWidth + this._innerBarWidth)/ this._outerBarWidth);
+        var barLeft = Math.floor(screenLeft / this._outerBarWidth);
+        var barRight = Math.floor((screenRight + this._innerBarWidth - this._barPaddingWidth / 2) / this._outerBarWidth);
         var stepLeft = Number.constrain(barLeft * this._samplesPerBar, 0, this._log.length - 1);
-        var stepRight = Number.constrain(barRight * this._samplesPerBar, 0, this._log.length - 1);
+        var stepRight = Number.constrain(barRight * this._samplesPerBar, 0, this._log.length);
 
         return { left: stepLeft, right: stepRight };
     },
@@ -228,7 +228,7 @@ WebInspector.PaintProfilerView.prototype = {
             return;
 
         var window = this.windowBoundaries();
-        this._snapshot.requestImage(this._log[window.left].commandIndex, this._log[window.right].commandIndex, 1, this._showImageCallback);
+        this._snapshot.requestImage(this._log[window.left].commandIndex, this._log[window.right - 1].commandIndex, 1, this._showImageCallback);
     },
 
     _reset: function()
@@ -291,8 +291,8 @@ WebInspector.PaintProfilerCommandLogView.prototype = {
         if (!this._log)
             return;
         stepLeft = stepLeft || 0;
-        stepRight = stepRight || this._log.length - 1;
-        for (var i = stepLeft; i <= stepRight; ++i)
+        stepRight = stepRight || this._log.length;
+        for (var i = stepLeft; i < stepRight; ++i)
             this._appendLogItem(this.sidebarTree, this._log[i]);
     },
 
@@ -306,7 +306,7 @@ WebInspector.PaintProfilerCommandLogView.prototype = {
      */
     _onMouseMove: function(event)
     {
-        var node = this.sidebarTree.treeElementFromPoint(event.pageX, event.pageY);
+        var node = this.sidebarTree.treeElementFromEvent(event);
         if (node === this._lastHoveredNode || !(node instanceof WebInspector.LogTreeElement))
             return;
         if (this._lastHoveredNode)
@@ -317,13 +317,13 @@ WebInspector.PaintProfilerCommandLogView.prototype = {
     },
 
     /**
-     * @param {?Event} event
+     * @param {!Event} event
      */
     _onContextMenu: function(event)
     {
         if (!this._target)
             return;
-        var node = this.sidebarTree.treeElementFromPoint(event.pageX, event.pageY);
+        var node = this.sidebarTree.treeElementFromEvent(event);
         if (!node || !node.representedObject || !(node instanceof WebInspector.LogTreeElement))
             return;
         var logItem = /** @type {!WebInspector.PaintProfilerLogItem} */ (node.representedObject);
@@ -406,7 +406,7 @@ WebInspector.LogTreeElement.prototype = {
     _update: function()
     {
         var logItem = this.representedObject;
-        var title = document.createDocumentFragment();
+        var title = createDocumentFragment();
         title.createChild("div", "selection");
         title.createTextChild(logItem.method + "(" + this._paramsToString(logItem.params) + ")");
         this.title = title;
@@ -474,7 +474,7 @@ WebInspector.LogPropertyTreeElement.prototype = {
     onattach: function()
     {
         var property = this.representedObject;
-        var title = document.createDocumentFragment();
+        var title = createDocumentFragment();
         title.createChild("div", "selection");
         var nameElement = title.createChild("span", "name");
         nameElement.textContent = property.name;

@@ -16,6 +16,7 @@
 #include "net/base/request_priority.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_request_headers.h"
+#include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
 
@@ -60,7 +61,7 @@ class HttpCache::Transaction : public HttpTransaction {
 
   Transaction(RequestPriority priority,
               HttpCache* cache);
-  virtual ~Transaction();
+  ~Transaction() override;
 
   Mode mode() const { return mode_; }
 
@@ -109,39 +110,35 @@ class HttpCache::Transaction : public HttpTransaction {
   }
 
   // HttpTransaction methods:
-  virtual int Start(const HttpRequestInfo* request_info,
-                    const CompletionCallback& callback,
-                    const BoundNetLog& net_log) OVERRIDE;
-  virtual int RestartIgnoringLastError(
-      const CompletionCallback& callback) OVERRIDE;
-  virtual int RestartWithCertificate(
-      X509Certificate* client_cert,
-      const CompletionCallback& callback) OVERRIDE;
-  virtual int RestartWithAuth(const AuthCredentials& credentials,
-                              const CompletionCallback& callback) OVERRIDE;
-  virtual bool IsReadyToRestartForAuth() OVERRIDE;
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
-  virtual void StopCaching() OVERRIDE;
-  virtual bool GetFullRequestHeaders(
-      HttpRequestHeaders* headers) const OVERRIDE;
-  virtual int64 GetTotalReceivedBytes() const OVERRIDE;
-  virtual void DoneReading() OVERRIDE;
-  virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
-  virtual LoadState GetLoadState() const OVERRIDE;
-  virtual UploadProgress GetUploadProgress(void) const OVERRIDE;
-  virtual void SetQuicServerInfo(QuicServerInfo* quic_server_info) OVERRIDE;
-  virtual bool GetLoadTimingInfo(
-      LoadTimingInfo* load_timing_info) const OVERRIDE;
-  virtual void SetPriority(RequestPriority priority) OVERRIDE;
-  virtual void SetWebSocketHandshakeStreamCreateHelper(
-      net::WebSocketHandshakeStreamBase::CreateHelper* create_helper) OVERRIDE;
-  virtual void SetBeforeNetworkStartCallback(
-      const BeforeNetworkStartCallback& callback) OVERRIDE;
-  virtual void SetBeforeProxyHeadersSentCallback(
-      const BeforeProxyHeadersSentCallback& callback) OVERRIDE;
-  virtual int ResumeNetworkStart() OVERRIDE;
+  int Start(const HttpRequestInfo* request_info,
+            const CompletionCallback& callback,
+            const BoundNetLog& net_log) override;
+  int RestartIgnoringLastError(const CompletionCallback& callback) override;
+  int RestartWithCertificate(X509Certificate* client_cert,
+                             const CompletionCallback& callback) override;
+  int RestartWithAuth(const AuthCredentials& credentials,
+                      const CompletionCallback& callback) override;
+  bool IsReadyToRestartForAuth() override;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
+  void StopCaching() override;
+  bool GetFullRequestHeaders(HttpRequestHeaders* headers) const override;
+  int64 GetTotalReceivedBytes() const override;
+  void DoneReading() override;
+  const HttpResponseInfo* GetResponseInfo() const override;
+  LoadState GetLoadState() const override;
+  UploadProgress GetUploadProgress(void) const override;
+  void SetQuicServerInfo(QuicServerInfo* quic_server_info) override;
+  bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
+  void SetPriority(RequestPriority priority) override;
+  void SetWebSocketHandshakeStreamCreateHelper(
+      net::WebSocketHandshakeStreamBase::CreateHelper* create_helper) override;
+  void SetBeforeNetworkStartCallback(
+      const BeforeNetworkStartCallback& callback) override;
+  void SetBeforeProxyHeadersSentCallback(
+      const BeforeProxyHeadersSentCallback& callback) override;
+  int ResumeNetworkStart() override;
 
  private:
   static const size_t kNumValidationHeaders = 2;
@@ -311,8 +308,9 @@ class HttpCache::Transaction : public HttpTransaction {
   // Returns network error code.
   int RestartNetworkRequestWithAuth(const AuthCredentials& credentials);
 
-  // Called to determine if we need to validate the cache entry before using it.
-  bool RequiresValidation();
+  // Called to determine if we need to validate the cache entry before using it,
+  // and whether the validation should be synchronous or asynchronous.
+  ValidationType RequiresValidation();
 
   // Called to make the request conditional (to ask the server if the cached
   // copy is valid).  Returns true if able to make the request conditional.
@@ -328,6 +326,9 @@ class HttpCache::Transaction : public HttpTransaction {
 
   // Removes content-length and byte range related info if needed.
   void FixHeadersForHead();
+
+  // Launches an asynchronous revalidation based on this transaction.
+  void TriggerAsyncValidation();
 
   // Changes the response code of a range request to be 416 (Requested range not
   // satisfiable).

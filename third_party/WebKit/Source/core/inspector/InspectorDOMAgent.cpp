@@ -180,7 +180,7 @@ static Node* hoveredNodeForEvent(LocalFrame* frame, const PlatformTouchEvent& ev
     return hoveredNodeForPoint(frame, roundedIntPoint(points[0].pos()), ignorePointerEventsNone);
 }
 
-class RevalidateStyleAttributeTask FINAL : public NoBaseWillBeGarbageCollectedFinalized<RevalidateStyleAttributeTask> {
+class RevalidateStyleAttributeTask final : public NoBaseWillBeGarbageCollectedFinalized<RevalidateStyleAttributeTask> {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     explicit RevalidateStyleAttributeTask(InspectorDOMAgent*);
@@ -290,7 +290,6 @@ void InspectorDOMAgent::restore()
     if (!enabled())
         return;
     innerEnable();
-    notifyDocumentUpdated();
 }
 
 WillBeHeapVector<RawPtrWillBeMember<Document> > InspectorDOMAgent::documents()
@@ -513,6 +512,8 @@ Element* InspectorDOMAgent::assertEditableElement(ErrorString* errorString, int 
 void InspectorDOMAgent::innerEnable()
 {
     m_state->setBoolean(DOMAgentState::domAgentEnabled, true);
+    m_document = nullptr;
+    setDocument(m_pageAgent->mainFrame()->document());
     if (m_listener)
         m_listener->domAgentWasEnabled();
 }
@@ -522,13 +523,6 @@ void InspectorDOMAgent::enable(ErrorString*)
     if (enabled())
         return;
     innerEnable();
-    notifyDocumentUpdated();
-}
-
-void InspectorDOMAgent::notifyDocumentUpdated()
-{
-    m_document = nullptr;
-    setDocument(m_pageAgent->mainFrame()->document());
 }
 
 bool InspectorDOMAgent::enabled() const
@@ -1463,7 +1457,7 @@ void InspectorDOMAgent::setFileInputFiles(ErrorString* errorString, int nodeId, 
         return;
     }
 
-    RefPtrWillBeRawPtr<FileList> fileList = FileList::create();
+    FileList* fileList = FileList::create();
     for (JSONArray::const_iterator iter = files->begin(); iter != files->end(); ++iter) {
         String path;
         if (!(*iter)->asString(&path)) {
@@ -1567,7 +1561,6 @@ static TypeBuilder::DOM::ShadowRootType::Enum shadowRootType(ShadowRoot* shadowR
 PassRefPtr<TypeBuilder::DOM::Node> InspectorDOMAgent::buildObjectForNode(Node* node, int depth, NodeToIdMap* nodesMap)
 {
     int id = bind(node, nodesMap);
-    String nodeName;
     String localName;
     String nodeValue;
 
@@ -1580,13 +1573,10 @@ PassRefPtr<TypeBuilder::DOM::Node> InspectorDOMAgent::buildObjectForNode(Node* n
             nodeValue = nodeValue.left(maxTextSize) + ellipsisUChar;
         break;
     case Node::ATTRIBUTE_NODE:
-        localName = node->localName();
-        break;
     case Node::DOCUMENT_FRAGMENT_NODE:
     case Node::DOCUMENT_NODE:
     case Node::ELEMENT_NODE:
     default:
-        nodeName = node->nodeName();
         localName = node->localName();
         break;
     }
@@ -1594,7 +1584,7 @@ PassRefPtr<TypeBuilder::DOM::Node> InspectorDOMAgent::buildObjectForNode(Node* n
     RefPtr<TypeBuilder::DOM::Node> value = TypeBuilder::DOM::Node::create()
         .setNodeId(id)
         .setNodeType(static_cast<int>(node->nodeType()))
-        .setNodeName(nodeName)
+        .setNodeName(node->nodeName())
         .setLocalName(localName)
         .setNodeValue(nodeValue);
 
@@ -1934,7 +1924,7 @@ void InspectorDOMAgent::willModifyDOMAttr(Element*, const AtomicString& oldValue
     m_suppressAttributeModifiedEvent = (oldValue == newValue);
 }
 
-void InspectorDOMAgent::didModifyDOMAttr(Element* element, const AtomicString& name, const AtomicString& value)
+void InspectorDOMAgent::didModifyDOMAttr(Element* element, const String& name, const AtomicString& value)
 {
     bool shouldSuppressEvent = m_suppressAttributeModifiedEvent;
     m_suppressAttributeModifiedEvent = false;
@@ -1952,7 +1942,7 @@ void InspectorDOMAgent::didModifyDOMAttr(Element* element, const AtomicString& n
     m_frontend->attributeModified(id, name, value);
 }
 
-void InspectorDOMAgent::didRemoveDOMAttr(Element* element, const AtomicString& name)
+void InspectorDOMAgent::didRemoveDOMAttr(Element* element, const String& name)
 {
     int id = boundNodeId(element);
     // If node is not mapped yet -> ignore the event.

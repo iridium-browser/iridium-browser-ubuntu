@@ -142,11 +142,11 @@ class WebNotificationButton : public views::CustomButton {
 
  protected:
   // Overridden from views::ImageButton:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE {
+  gfx::Size GetPreferredSize() const override {
     return gfx::Size(kShelfItemHeight, kShelfItemHeight);
   }
 
-  virtual int GetHeightForWidth(int width) const OVERRIDE {
+  int GetHeightForWidth(int width) const override {
     return GetPreferredSize().height();
   }
 

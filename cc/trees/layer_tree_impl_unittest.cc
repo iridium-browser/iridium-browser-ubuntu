@@ -13,7 +13,7 @@
 #include "cc/test/layer_tree_host_common_test.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/trees/layer_tree_host_impl.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 
 namespace cc {
 namespace {
@@ -25,8 +25,7 @@ class LayerTreeImplTest : public LayerTreeHostCommonTest {
     settings.layer_transforms_should_scale_layer_contents = true;
     host_impl_.reset(
         new FakeLayerTreeHostImpl(settings, &proxy_, &shared_bitmap_manager_));
-    EXPECT_TRUE(host_impl_->InitializeRenderer(
-        FakeOutputSurface::Create3d().PassAs<OutputSurface>()));
+    EXPECT_TRUE(host_impl_->InitializeRenderer(FakeOutputSurface::Create3d()));
   }
 
   FakeLayerTreeHostImpl& host_impl() { return *host_impl_; }
@@ -124,7 +123,7 @@ TEST_F(LayerTreeImplTest, HitTestingForSingleLayerAndHud) {
   hud->SetDrawsContent(true);
 
   host_impl().active_tree()->set_hud_layer(hud.get());
-  root->AddChild(hud.PassAs<LayerImpl>());
+  root->AddChild(hud.Pass());
 
   host_impl().SetViewportSize(hud_bounds);
   host_impl().active_tree()->SetRootLayer(root.Pass());

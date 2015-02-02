@@ -104,73 +104,63 @@ class ChannelMultiplexer::MuxSocket : public net::StreamSocket,
                                       public base::SupportsWeakPtr<MuxSocket> {
  public:
   MuxSocket(MuxChannel* channel);
-  virtual ~MuxSocket();
+  ~MuxSocket() override;
 
   void OnWriteComplete();
   void OnWriteFailed();
   void OnPacketReceived();
 
   // net::StreamSocket interface.
-  virtual int Read(net::IOBuffer* buffer, int buffer_len,
-                   const net::CompletionCallback& callback) OVERRIDE;
-  virtual int Write(net::IOBuffer* buffer, int buffer_len,
-                    const net::CompletionCallback& callback) OVERRIDE;
+  int Read(net::IOBuffer* buffer,
+           int buffer_len,
+           const net::CompletionCallback& callback) override;
+  int Write(net::IOBuffer* buffer,
+            int buffer_len,
+            const net::CompletionCallback& callback) override;
 
-  virtual int SetReceiveBufferSize(int32 size) OVERRIDE {
+  int SetReceiveBufferSize(int32 size) override {
     NOTIMPLEMENTED();
     return net::ERR_NOT_IMPLEMENTED;
   }
-  virtual int SetSendBufferSize(int32 size) OVERRIDE {
+  int SetSendBufferSize(int32 size) override {
     NOTIMPLEMENTED();
     return net::ERR_NOT_IMPLEMENTED;
   }
 
-  virtual int Connect(const net::CompletionCallback& callback) OVERRIDE {
+  int Connect(const net::CompletionCallback& callback) override {
     NOTIMPLEMENTED();
     return net::ERR_NOT_IMPLEMENTED;
   }
-  virtual void Disconnect() OVERRIDE {
-    NOTIMPLEMENTED();
-  }
-  virtual bool IsConnected() const OVERRIDE {
+  void Disconnect() override { NOTIMPLEMENTED(); }
+  bool IsConnected() const override {
     NOTIMPLEMENTED();
     return true;
   }
-  virtual bool IsConnectedAndIdle() const OVERRIDE {
+  bool IsConnectedAndIdle() const override {
     NOTIMPLEMENTED();
     return false;
   }
-  virtual int GetPeerAddress(net::IPEndPoint* address) const OVERRIDE {
+  int GetPeerAddress(net::IPEndPoint* address) const override {
     NOTIMPLEMENTED();
     return net::ERR_NOT_IMPLEMENTED;
   }
-  virtual int GetLocalAddress(net::IPEndPoint* address) const OVERRIDE {
+  int GetLocalAddress(net::IPEndPoint* address) const override {
     NOTIMPLEMENTED();
     return net::ERR_NOT_IMPLEMENTED;
   }
-  virtual const net::BoundNetLog& NetLog() const OVERRIDE {
+  const net::BoundNetLog& NetLog() const override {
     NOTIMPLEMENTED();
     return net_log_;
   }
-  virtual void SetSubresourceSpeculation() OVERRIDE {
-    NOTIMPLEMENTED();
-  }
-  virtual void SetOmniboxSpeculation() OVERRIDE {
-    NOTIMPLEMENTED();
-  }
-  virtual bool WasEverUsed() const OVERRIDE {
-    return true;
-  }
-  virtual bool UsingTCPFastOpen() const OVERRIDE {
-    return false;
-  }
-  virtual bool WasNpnNegotiated() const OVERRIDE {
-    return false;
-  }
-  virtual net::NextProto GetNegotiatedProtocol() const OVERRIDE {
+  void SetSubresourceSpeculation() override { NOTIMPLEMENTED(); }
+  void SetOmniboxSpeculation() override { NOTIMPLEMENTED(); }
+  bool WasEverUsed() const override { return true; }
+  bool UsingTCPFastOpen() const override { return false; }
+  bool WasNpnNegotiated() const override { return false; }
+  net::NextProto GetNegotiatedProtocol() const override {
     return net::kProtoUnknown;
   }
-  virtual bool GetSSLInfo(net::SSLInfo* ssl_info) OVERRIDE {
+  bool GetSSLInfo(net::SSLInfo* ssl_info) override {
     NOTIMPLEMENTED();
     return false;
   }
@@ -214,7 +204,7 @@ scoped_ptr<net::StreamSocket> ChannelMultiplexer::MuxChannel::CreateSocket() {
   DCHECK(!socket_);  // Can't create more than one socket per channel.
   scoped_ptr<MuxSocket> result(new MuxSocket(this));
   socket_ = result.get();
-  return result.PassAs<net::StreamSocket>();
+  return result.Pass();
 }
 
 void ChannelMultiplexer::MuxChannel::OnIncomingPacket(
@@ -378,7 +368,7 @@ void ChannelMultiplexer::CreateChannel(const std::string& name,
     callback.Run(GetOrCreateChannel(name)->CreateSocket());
   } else if (!base_channel_.get() && !base_channel_factory_) {
     // Fail synchronously if we failed to create |base_channel_|.
-    callback.Run(scoped_ptr<net::StreamSocket>());
+    callback.Run(nullptr);
   } else {
     // Still waiting for the |base_channel_|.
     pending_channels_.push_back(PendingChannel(name, callback));

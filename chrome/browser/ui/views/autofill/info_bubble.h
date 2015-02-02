@@ -19,7 +19,7 @@ class InfoBubbleFrame;
 class InfoBubble : public views::BubbleDelegateView {
  public:
   InfoBubble(views::View* anchor, const base::string16& message);
-  virtual ~InfoBubble();
+  ~InfoBubble() override;
 
   // Shows the bubble. |widget_| will be NULL until this is called.
   void Show();
@@ -31,12 +31,12 @@ class InfoBubble : public views::BubbleDelegateView {
   void UpdatePosition();
 
   // views::BubbleDelegateView:
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void OnWidgetDestroyed(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetBoundsChanged(views::Widget* widget,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
+  views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) override;
+  gfx::Size GetPreferredSize() const override;
+  void OnWidgetDestroyed(views::Widget* widget) override;
+  void OnWidgetBoundsChanged(views::Widget* widget,
+                             const gfx::Rect& new_bounds) override;
 
   views::View* anchor() { return anchor_; }
   const views::View* anchor() const { return anchor_; }

@@ -28,15 +28,14 @@ const char kVideoRecorderType[] = "video-recorder";
 class VideoFrameRecorderHostExtensionSession : public HostExtensionSession {
  public:
   explicit VideoFrameRecorderHostExtensionSession(int64_t max_content_bytes);
-  virtual ~VideoFrameRecorderHostExtensionSession();
+  ~VideoFrameRecorderHostExtensionSession() override;
 
   // remoting::HostExtensionSession interface.
-  virtual void OnCreateVideoEncoder(scoped_ptr<VideoEncoder>* encoder) OVERRIDE;
-  virtual bool ModifiesVideoPipeline() const OVERRIDE;
-  virtual bool OnExtensionMessage(
-      ClientSessionControl* client_session_control,
-      protocol::ClientStub* client_stub,
-      const protocol::ExtensionMessage& message) OVERRIDE;
+  void OnCreateVideoEncoder(scoped_ptr<VideoEncoder>* encoder) override;
+  bool ModifiesVideoPipeline() const override;
+  bool OnExtensionMessage(ClientSessionControl* client_session_control,
+                          protocol::ClientStub* client_stub,
+                          const protocol::ExtensionMessage& message) override;
 
  private:
   // Handlers for the different frame recorder extension message types.
@@ -191,7 +190,7 @@ scoped_ptr<HostExtensionSession>
 VideoFrameRecorderHostExtension::CreateExtensionSession(
     ClientSessionControl* client_session_control,
     protocol::ClientStub* client_stub) {
-  return scoped_ptr<HostExtensionSession>(
+  return make_scoped_ptr(
       new VideoFrameRecorderHostExtensionSession(max_content_bytes_));
 }
 

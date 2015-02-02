@@ -89,8 +89,8 @@ class ListAttributeTargetObserver : public IdTargetObserver {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     static PassOwnPtrWillBeRawPtr<ListAttributeTargetObserver> create(const AtomicString& id, HTMLInputElement*);
-    virtual void trace(Visitor*) OVERRIDE;
-    virtual void idTargetChanged() OVERRIDE;
+    virtual void trace(Visitor*) override;
+    virtual void idTargetChanged() override;
 
 private:
     ListAttributeTargetObserver(const AtomicString& id, HTMLInputElement*);
@@ -110,6 +110,7 @@ HTMLInputElement::HTMLInputElement(Document& document, HTMLFormElement* form, bo
     : HTMLTextFormControlElement(inputTag, document, form)
     , m_size(defaultSize)
     , m_maxLength(maximumLength)
+    , m_minLength(0)
     , m_maxResults(-1)
     , m_isChecked(false)
     , m_reflectsCheckedAttribute(true)
@@ -210,6 +211,7 @@ bool HTMLInputElement::isValidValue(const String& value) const
         && !m_inputType->rangeUnderflow(value)
         && !m_inputType->rangeOverflow(value)
         && !tooLong(value, IgnoreDirtyFlag)
+        && !tooShort(value, IgnoreDirtyFlag)
         && !m_inputType->patternMismatch(value)
         && !m_inputType->valueMissing(value);
 }
@@ -217,6 +219,11 @@ bool HTMLInputElement::isValidValue(const String& value) const
 bool HTMLInputElement::tooLong() const
 {
     return willValidate() && tooLong(value(), CheckDirtyFlag);
+}
+
+bool HTMLInputElement::tooShort() const
+{
+    return willValidate() && tooShort(value(), CheckDirtyFlag);
 }
 
 bool HTMLInputElement::typeMismatch() const
@@ -242,6 +249,11 @@ bool HTMLInputElement::patternMismatch() const
 bool HTMLInputElement::tooLong(const String& value, NeedsToCheckDirtyFlag check) const
 {
     return m_inputType->tooLong(value, check);
+}
+
+bool HTMLInputElement::tooShort(const String& value, NeedsToCheckDirtyFlag check) const
+{
+    return m_inputType->tooShort(value, check);
 }
 
 bool HTMLInputElement::rangeUnderflow() const
@@ -655,7 +667,7 @@ void HTMLInputElement::parseAttribute(const QualifiedName& name, const AtomicStr
         // We only need to setChanged if the form is looking at the default value right now.
         if (!hasDirtyValue()) {
             updatePlaceholderVisibility(false);
-            setNeedsStyleRecalc(SubtreeStyleChange);
+            setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::fromAttribute(valueAttr));
         }
         m_needsToUpdateViewValue = true;
         setNeedsValidityCheck();
@@ -671,9 +683,11 @@ void HTMLInputElement::parseAttribute(const QualifiedName& name, const AtomicStr
             setChecked(!value.isNull());
             m_reflectsCheckedAttribute = true;
         }
-    } else if (name == maxlengthAttr)
+    } else if (name == maxlengthAttr) {
         parseMaxLengthAttribute(value);
-    else if (name == sizeAttr) {
+    } else if (name == minlengthAttr) {
+        parseMinLengthAttribute(value);
+    } else if (name == sizeAttr) {
         int oldSize = m_size;
         int valueAsInteger = value.toInt();
         m_size = valueAsInteger > 0 ? valueAsInteger : defaultSize;
@@ -695,10 +709,10 @@ void HTMLInputElement::parseAttribute(const QualifiedName& name, const AtomicStr
         // time to relayout for this change.
         if (m_maxResults != oldResults && (m_maxResults <= 0 || oldResults <= 0))
             lazyReattachIfAttached();
-        setNeedsStyleRecalc(SubtreeStyleChange);
+        setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::fromAttribute(resultsAttr));
         UseCounter::count(document(), UseCounter::ResultsAttribute);
     } else if (name == incrementalAttr) {
-        setNeedsStyleRecalc(SubtreeStyleChange);
+        setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::fromAttribute(incrementalAttr));
         UseCounter::count(document(), UseCounter::IncrementalAttribute);
     } else if (name == minAttr) {
         m_inputTypeView->minOrMaxAttributeChanged();
@@ -959,7 +973,7 @@ void HTMLInputElement::setSuggestedValue(const String& value)
         return;
     m_needsToUpdateViewValue = true;
     m_suggestedValue = sanitizeValue(value);
-    setNeedsStyleRecalc(SubtreeStyleChange);
+    setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::ControlValue));
     m_inputTypeView->updateView();
 }
 
@@ -1090,12 +1104,12 @@ void* HTMLInputElement::preDispatchEventHandler(Event* event)
 {
     if (event->type() == EventTypeNames::textInput && m_inputTypeView->shouldSubmitImplicitly(event)) {
         event->stopPropagation();
-        return 0;
+        return nullptr;
     }
     if (event->type() != EventTypeNames::click)
-        return 0;
+        return nullptr;
     if (!event->isMouseEvent() || toMouseEvent(event)->button() != LeftButton)
-        return 0;
+        return nullptr;
 #if ENABLE(OILPAN)
     return m_inputTypeView->willDispatchClick();
 #else
@@ -1259,8 +1273,8 @@ static Vector<String> parseAcceptAttribute(const String& acceptString, bool (*pr
 
     Vector<String> splitTypes;
     acceptString.split(',', false, splitTypes);
-    for (size_t i = 0; i < splitTypes.size(); ++i) {
-        String trimmedType = stripLeadingAndTrailingHTMLSpaces(splitTypes[i]);
+    for (const String& splitType : splitTypes) {
+        String trimmedType = stripLeadingAndTrailingHTMLSpaces(splitType);
         if (trimmedType.isEmpty())
             continue;
         if (!predicate(trimmedType))
@@ -1291,12 +1305,29 @@ int HTMLInputElement::maxLength() const
     return m_maxLength;
 }
 
+int HTMLInputElement::minLength() const
+{
+    return m_minLength;
+}
+
 void HTMLInputElement::setMaxLength(int maxLength, ExceptionState& exceptionState)
 {
     if (maxLength < 0)
         exceptionState.throwDOMException(IndexSizeError, "The value provided (" + String::number(maxLength) + ") is negative.");
+    else if (maxLength < m_minLength)
+        exceptionState.throwDOMException(IndexSizeError, ExceptionMessages::indexExceedsMinimumBound("maxLength", maxLength, m_minLength));
     else
         setIntegralAttribute(maxlengthAttr, maxLength);
+}
+
+void HTMLInputElement::setMinLength(int minLength, ExceptionState& exceptionState)
+{
+    if (minLength < 0)
+        exceptionState.throwDOMException(IndexSizeError, "The value provided (" + String::number(minLength) + ") is negative.");
+    else if (minLength > m_maxLength)
+        exceptionState.throwDOMException(IndexSizeError, ExceptionMessages::indexExceedsMaximumBound("minLength", minLength, m_maxLength));
+    else
+        setIntegralAttribute(minlengthAttr, minLength);
 }
 
 bool HTMLInputElement::multiple() const
@@ -1327,7 +1358,7 @@ FileList* HTMLInputElement::files()
     return m_inputType->files();
 }
 
-void HTMLInputElement::setFiles(PassRefPtrWillBeRawPtr<FileList> files)
+void HTMLInputElement::setFiles(FileList* files)
 {
     m_inputType->setFiles(files);
 }
@@ -1500,16 +1531,16 @@ HTMLElement* HTMLInputElement::list() const
 HTMLDataListElement* HTMLInputElement::dataList() const
 {
     if (!m_hasNonEmptyList)
-        return 0;
+        return nullptr;
 
     if (!m_inputType->shouldRespectListAttribute())
-        return 0;
+        return nullptr;
 
     Element* element = treeScope().getElementById(fastGetAttribute(listAttr));
     if (!element)
-        return 0;
+        return nullptr;
     if (!isHTMLDataListElement(*element))
-        return 0;
+        return nullptr;
 
     return toHTMLDataListElement(element);
 }
@@ -1593,7 +1624,19 @@ void HTMLInputElement::parseMaxLengthAttribute(const AtomicString& value)
     m_maxLength = maxLength;
     if (oldMaxLength != maxLength)
         updateValueIfNeeded();
-    setNeedsStyleRecalc(SubtreeStyleChange);
+    setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::fromAttribute(maxlengthAttr));
+    setNeedsValidityCheck();
+}
+
+void HTMLInputElement::parseMinLengthAttribute(const AtomicString& value)
+{
+    int minLength;
+    if (!parseHTMLInteger(value, minLength))
+        minLength = 0;
+    if (minLength < 0)
+        minLength = 0;
+    m_minLength = minLength;
+    setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::fromAttribute(minlengthAttr));
     setNeedsValidityCheck();
 }
 
@@ -1630,19 +1673,19 @@ HTMLInputElement* HTMLInputElement::checkedRadioButtonForGroup()
         return this;
     if (RadioButtonGroupScope* scope = radioButtonGroupScope())
         return scope->checkedButtonForGroup(name());
-    return 0;
+    return nullptr;
 }
 
 RadioButtonGroupScope* HTMLInputElement::radioButtonGroupScope() const
 {
     // FIXME: Remove type check.
     if (type() != InputTypeNames::radio)
-        return 0;
+        return nullptr;
     if (HTMLFormElement* formElement = form())
         return &formElement->radioButtonGroupScope();
     if (inDocument())
         return &document().formController().radioButtonGroupScope();
-    return 0;
+    return nullptr;
 }
 
 inline void HTMLInputElement::addToRadioButtonGroup()

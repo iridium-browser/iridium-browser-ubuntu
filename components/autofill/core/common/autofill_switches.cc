@@ -7,10 +7,6 @@
 namespace autofill {
 namespace switches {
 
-// Forces the password manager to not ignore autocomplete='off' for password
-// forms.
-const char kDisableIgnoreAutocompleteOff[]  = "do-not-ignore-autocomplete-off";
-
 // Disables password generation when we detect that the user is going through
 // account creation.
 const char kDisablePasswordGeneration[]     = "disable-password-generation";
@@ -18,6 +14,10 @@ const char kDisablePasswordGeneration[]     = "disable-password-generation";
 // Enables password generation when we detect that the user is going through
 // account creation.
 const char kEnablePasswordGeneration[]      = "enable-password-generation";
+
+// Ignores autocomplete="off" for Autofill data (profiles + credit cards).
+const char kIgnoreAutocompleteOffForAutofill[] =
+    "ignore-autocomplete-off-autofill";
 
 // Removes the requirement that we recieved a ping from the autofill servers
 // and that the user doesn't have the given form blacklisted. Used in testing.

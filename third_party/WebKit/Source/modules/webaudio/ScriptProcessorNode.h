@@ -36,7 +36,6 @@ namespace blink {
 
 class AudioBuffer;
 class AudioContext;
-class AudioProcessingEvent;
 
 // ScriptProcessorNode is an AudioNode which allows for arbitrary synthesis or processing directly using JavaScript.
 // The API allows for a variable number of inputs and outputs, although it must have at least one input or output.
@@ -44,7 +43,7 @@ class AudioProcessingEvent;
 // The "onaudioprocess" attribute is an event listener which will get called periodically with an AudioProcessingEvent which has
 // AudioBuffers for each input and output.
 
-class ScriptProcessorNode FINAL : public AudioNode {
+class ScriptProcessorNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
     // bufferSize must be one of the following values: 256, 512, 1024, 2048, 4096, 8192, 16384.
@@ -56,20 +55,23 @@ public:
     virtual ~ScriptProcessorNode();
 
     // AudioNode
-    virtual void dispose() OVERRIDE;
-    virtual void process(size_t framesToProcess) OVERRIDE;
-    virtual void initialize() OVERRIDE;
-    virtual void uninitialize() OVERRIDE;
+    virtual void dispose() override;
+    virtual void process(size_t framesToProcess) override;
+    virtual void initialize() override;
+    virtual void uninitialize() override;
 
     size_t bufferSize() const { return m_bufferSize; }
+
+    virtual void setChannelCount(unsigned long, ExceptionState&) override;
+    virtual void setChannelCountMode(const String&, ExceptionState&) override;
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(audioprocess);
 
     void trace(Visitor*);
 
 private:
-    virtual double tailTime() const OVERRIDE;
-    virtual double latencyTime() const OVERRIDE;
+    virtual double tailTime() const override;
+    virtual double latencyTime() const override;
 
     ScriptProcessorNode(AudioContext*, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
 

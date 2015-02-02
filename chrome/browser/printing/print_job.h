@@ -49,16 +49,16 @@ class PrintJob : public PrintJobWorkerOwner,
                   int page_count);
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // PrintJobWorkerOwner implementation.
-  virtual void GetSettingsDone(const PrintSettings& new_settings,
-                               PrintingContext::Result result) OVERRIDE;
-  virtual PrintJobWorker* DetachWorker(PrintJobWorkerOwner* new_owner) OVERRIDE;
-  virtual const PrintSettings& settings() const OVERRIDE;
-  virtual int cookie() const OVERRIDE;
+  void GetSettingsDone(const PrintSettings& new_settings,
+                       PrintingContext::Result result) override;
+  PrintJobWorker* DetachWorker(PrintJobWorkerOwner* new_owner) override;
+  const PrintSettings& settings() const override;
+  int cookie() const override;
 
   // Starts the actual printing. Signals the worker that it should begin to
   // spool as soon as data is available.
@@ -98,7 +98,7 @@ class PrintJob : public PrintJobWorkerOwner,
 #endif  // OS_WIN
 
  protected:
-  virtual ~PrintJob();
+  ~PrintJob() override;
 
  private:
   // Updates document_ to a new instance.
@@ -123,7 +123,7 @@ class PrintJob : public PrintJobWorkerOwner,
 #if defined(OS_WIN)
   void OnPdfToEmfStarted(int page_count);
   void OnPdfToEmfPageConverted(int page_number,
-                               double scale_factor,
+                               float scale_factor,
                                scoped_ptr<MetafilePlayer> emf);
 #endif  // OS_WIN
 

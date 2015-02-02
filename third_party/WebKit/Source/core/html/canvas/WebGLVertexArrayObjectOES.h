@@ -34,7 +34,7 @@
 
 namespace blink {
 
-class WebGLVertexArrayObjectOES FINAL : public WebGLContextObject, public ScriptWrappable {
+class WebGLVertexArrayObjectOES final : public WebGLContextObject, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum VaoType {
@@ -47,7 +47,7 @@ public:
     static PassRefPtrWillBeRawPtr<WebGLVertexArrayObjectOES> create(WebGLRenderingContextBase*, VaoType);
 
     // Cached values for vertex attrib range checks
-    class VertexAttribState FINAL {
+    class VertexAttribState final {
         ALLOW_ONLY_INLINE_ALLOCATION();
     public:
         VertexAttribState()
@@ -90,13 +90,13 @@ public:
     void unbindBuffer(PassRefPtrWillBeRawPtr<WebGLBuffer>);
     void setVertexAttribDivisor(GLuint index, GLuint divisor);
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     WebGLVertexArrayObjectOES(WebGLRenderingContextBase*, VaoType);
 
     void dispatchDetached(blink::WebGraphicsContext3D*);
-    virtual void deleteObjectImpl(blink::WebGraphicsContext3D*, Platform3DObject) OVERRIDE;
+    virtual void deleteObjectImpl(blink::WebGraphicsContext3D*, Platform3DObject) override;
 
     VaoType m_type;
     bool m_hasEverBeenBound;
@@ -113,11 +113,6 @@ namespace WTF {
 
 template<>
 struct VectorTraits<blink::WebGLVertexArrayObjectOES::VertexAttribState> : SimpleClassVectorTraits<blink::WebGLVertexArrayObjectOES::VertexAttribState> {
-    // Specialization needed as the VertexAttribState's struct fields
-    // aren't handled as desired by the IsPod() trait.
-#if ENABLE(OILPAN)
-    static const bool needsDestruction = false;
-#endif
     // Must use the constructor.
     static const bool canInitializeWithMemset = false;
     static const bool canCopyWithMemcpy = true;

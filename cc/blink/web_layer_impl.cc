@@ -27,6 +27,8 @@
 #include "third_party/WebKit/public/platform/WebLayerScrollClient.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/skia/include/utils/SkMatrix44.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/vector2d_conversions.h"
 
 using cc::Animation;
 using cc::Layer;
@@ -46,19 +48,19 @@ bool g_impl_side_painting_enabled = false;
 }  // namespace
 
 WebLayerImpl::WebLayerImpl() : layer_(Layer::Create()) {
-  web_layer_client_ = NULL;
+  web_layer_client_ = nullptr;
   layer_->SetLayerClient(this);
 }
 
 WebLayerImpl::WebLayerImpl(scoped_refptr<Layer> layer) : layer_(layer) {
-  web_layer_client_ = NULL;
+  web_layer_client_ = nullptr;
   layer_->SetLayerClient(this);
 }
 
 WebLayerImpl::~WebLayerImpl() {
   layer_->ClearRenderSurface();
-  layer_->set_layer_animation_delegate(NULL);
-  web_layer_client_ = NULL;
+  layer_->set_layer_animation_delegate(nullptr);
+  web_layer_client_ = nullptr;
 }
 
 // static
@@ -75,7 +77,7 @@ int WebLayerImpl::id() const {
   return layer_->id();
 }
 
-void WebLayerImpl::invalidateRect(const blink::WebFloatRect& rect) {
+void WebLayerImpl::invalidateRect(const blink::WebRect& rect) {
   layer_->SetNeedsDisplayRect(rect);
 }
 
@@ -267,12 +269,13 @@ void WebLayerImpl::setForceRenderSurface(bool force_render_surface) {
   layer_->SetForceRenderSurface(force_render_surface);
 }
 
-void WebLayerImpl::setScrollPosition(blink::WebPoint position) {
-  layer_->SetScrollOffset(gfx::Point(position).OffsetFromOrigin());
+void WebLayerImpl::setScrollPositionDouble(blink::WebDoublePoint position) {
+  layer_->SetScrollOffset(gfx::ScrollOffset(position.x, position.y));
 }
 
-blink::WebPoint WebLayerImpl::scrollPosition() const {
-  return gfx::PointAtOffsetFromOrigin(layer_->scroll_offset());
+blink::WebDoublePoint WebLayerImpl::scrollPositionDouble() const {
+  return blink::WebDoublePoint(layer_->scroll_offset().x(),
+                               layer_->scroll_offset().y());
 }
 
 void WebLayerImpl::setScrollClipLayer(WebLayer* clip_layer) {
@@ -432,7 +435,7 @@ class TracedDebugInfo : public base::debug::ConvertableToTraceFormat {
   // This object takes ownership of the debug_info object.
   explicit TracedDebugInfo(blink::WebGraphicsLayerDebugInfo* debug_info)
       : debug_info_(debug_info) {}
-  virtual void AppendAsTraceFormat(std::string* out) const OVERRIDE {
+  void AppendAsTraceFormat(std::string* out) const override {
     DCHECK(thread_checker_.CalledOnValidThread());
     blink::WebString web_string;
     debug_info_->appendAsTraceFormat(&web_string);
@@ -440,7 +443,7 @@ class TracedDebugInfo : public base::debug::ConvertableToTraceFormat {
   }
 
  private:
-  virtual ~TracedDebugInfo() {}
+  ~TracedDebugInfo() override {}
   scoped_ptr<blink::WebGraphicsLayerDebugInfo> debug_info_;
   base::ThreadChecker thread_checker_;
 };
@@ -448,25 +451,25 @@ class TracedDebugInfo : public base::debug::ConvertableToTraceFormat {
 scoped_refptr<base::debug::ConvertableToTraceFormat>
 WebLayerImpl::TakeDebugInfo() {
   if (!web_layer_client_)
-    return NULL;
+    return nullptr;
   blink::WebGraphicsLayerDebugInfo* debug_info =
       web_layer_client_->takeDebugInfoFor(this);
 
   if (debug_info)
     return new TracedDebugInfo(debug_info);
   else
-    return NULL;
+    return nullptr;
 }
 
 void WebLayerImpl::setScrollParent(blink::WebLayer* parent) {
-  cc::Layer* scroll_parent = NULL;
+  cc::Layer* scroll_parent = nullptr;
   if (parent)
     scroll_parent = static_cast<WebLayerImpl*>(parent)->layer();
   layer_->SetScrollParent(scroll_parent);
 }
 
 void WebLayerImpl::setClipParent(blink::WebLayer* parent) {
-  cc::Layer* clip_parent = NULL;
+  cc::Layer* clip_parent = nullptr;
   if (parent)
     clip_parent = static_cast<WebLayerImpl*>(parent)->layer();
   layer_->SetClipParent(clip_parent);

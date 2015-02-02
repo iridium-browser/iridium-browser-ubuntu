@@ -526,14 +526,18 @@ NSRect GetFirstButtonFrameForHeight(CGFloat height) {
     newWindowTopLeft = NSMakePoint(
         buttonBottomLeftInScreen.x + bookmarks::kBookmarkBarButtonOffset,
         bookmarkBarBottomLeftInScreen.y + bookmarks::kBookmarkBarMenuOffset);
-    // Make sure the window is on-screen; if not, push left.  It is
-    // intentional that top level folders "push left" slightly
+    // Make sure the window is on-screen; if not, push left or right. It is
+    // intentional that top level folders "push left" or "push right" slightly
     // different than subfolders.
     NSRect screenFrame = [screen_ visibleFrame];
+    // Test if window goes off-screen on the right side.
     CGFloat spillOff = (newWindowTopLeft.x + windowWidth) - NSMaxX(screenFrame);
     if (spillOff > 0.0) {
       newWindowTopLeft.x = std::max(newWindowTopLeft.x - spillOff,
                                     NSMinX(screenFrame));
+    } else if (newWindowTopLeft.x < NSMinX(screenFrame)) {
+      // For left side.
+      newWindowTopLeft.x = NSMinX(screenFrame);
     }
     // The menu looks bad when it is squeezed up against the bottom of the
     // screen and ends up being only a few pixels tall. If it meets the
@@ -1935,11 +1939,16 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   NSInteger buttonCount = [buttons_ count];
   if (buttonCount) {
     BookmarkButton* subButton = [folderController_ parentButton];
+    NSInteger targetIndex = 0;
     for (NSButton* aButton in buttons_.get()) {
-      // If this button is showing its menu then we need to move the menu, too.
-      if (aButton == subButton)
-        [folderController_
-            offsetFolderMenuWindow:NSMakeSize(0.0, chrome::kBookmarkBarHeight)];
+      targetIndex++;
+      // If this button is showing its menu and is below the removed button,
+      // i.e its index is greater, then we need to move the menu too.
+      if (aButton == subButton && targetIndex > buttonIndex) {
+          [folderController_ offsetFolderMenuWindow:NSMakeSize(0.0,
+                                 bookmarks::kBookmarkFolderButtonHeight)];
+          break;
+      }
     }
   } else if (parentButton_ != [barController_ otherBookmarksButton]) {
     // If all nodes have been removed from this folder then add in the

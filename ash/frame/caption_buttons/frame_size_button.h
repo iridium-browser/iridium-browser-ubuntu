@@ -33,15 +33,15 @@ class ASH_EXPORT FrameSizeButton : public FrameCaptionButton {
                   views::Widget* frame,
                   FrameSizeButtonDelegate* delegate);
 
-  virtual ~FrameSizeButton();
+  ~FrameSizeButton() override;
 
   // views::CustomButton overrides:
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnMouseCaptureLost() override;
+  void OnMouseMoved(const ui::MouseEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   void set_delay_to_set_buttons_to_snap_mode(int delay_ms) {
     set_buttons_to_snap_mode_delay_ms_ = delay_ms;

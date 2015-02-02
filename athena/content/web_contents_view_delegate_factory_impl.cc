@@ -5,6 +5,7 @@
 #include "athena/content/public/web_contents_view_delegate_creator.h"
 
 #include "athena/content/render_view_context_menu_impl.h"
+#include "components/renderer_context_menu/context_menu_delegate.h"
 #include "components/web_modal/popup_manager.h"
 #include "components/web_modal/single_web_contents_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
@@ -20,18 +21,20 @@
 namespace athena {
 namespace {
 
-class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate {
+class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate,
+                                    public ContextMenuDelegate {
  public:
   explicit WebContentsViewDelegateImpl(content::WebContents* web_contents)
-      : web_contents_(web_contents) {}
-  virtual ~WebContentsViewDelegateImpl() {}
+      : ContextMenuDelegate(web_contents), web_contents_(web_contents) {}
+  ~WebContentsViewDelegateImpl() override {}
 
-  virtual content::WebDragDestDelegate* GetDragDestDelegate() OVERRIDE {
+  content::WebDragDestDelegate* GetDragDestDelegate() override {
     // TODO(oshima): crbug.com/401610
-    return NULL;
+    NOTIMPLEMENTED();
+    return nullptr;
   }
 
-  virtual bool Focus() OVERRIDE {
+  bool Focus() override {
     web_modal::PopupManager* popup_manager =
         web_modal::PopupManager::FromWebContents(web_contents_);
     if (popup_manager)
@@ -39,33 +42,33 @@ class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate {
     return false;
   }
 
-  virtual void ShowContextMenu(
-      content::RenderFrameHost* render_frame_host,
-      const content::ContextMenuParams& params) OVERRIDE {
+  void ShowContextMenu(content::RenderFrameHost* render_frame_host,
+                       const content::ContextMenuParams& params) override {
     ShowMenu(BuildMenu(
         content::WebContents::FromRenderFrameHost(render_frame_host), params));
   }
 
-  virtual void SizeChanged(const gfx::Size& size) OVERRIDE {
+  void SizeChanged(const gfx::Size& size) override {
     // TODO(oshima|sadrul): Implement this when sad_tab is componentized.
     // See c/b/ui/views/tab_contents/chrome_web_contents_view_delegate_views.cc
   }
 
-  virtual void ShowDisambiguationPopup(
+  void ShowDisambiguationPopup(
       const gfx::Rect& target_rect,
       const SkBitmap& zoomed_bitmap,
       const gfx::NativeView content,
       const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
-      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) OVERRIDE {
+      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) override {
+    NOTIMPLEMENTED();
   }
 
-  virtual void HideDisambiguationPopup() OVERRIDE {
-  }
+  void HideDisambiguationPopup() override { NOTIMPLEMENTED(); }
 
-  scoped_ptr<RenderViewContextMenuImpl> BuildMenu(
+  // ContextMenuDelegate:
+  scoped_ptr<RenderViewContextMenuBase> BuildMenu(
       content::WebContents* web_contents,
-      const content::ContextMenuParams& params) {
-    scoped_ptr<RenderViewContextMenuImpl> menu;
+      const content::ContextMenuParams& params) override {
+    scoped_ptr<RenderViewContextMenuBase> menu;
     content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame();
     // If the frame tree does not have a focused frame at this point, do not
     // bother creating RenderViewContextMenuViews.
@@ -77,41 +80,13 @@ class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate {
     }
     return menu.Pass();
   }
-
-  void ShowMenu(scoped_ptr<RenderViewContextMenuImpl> menu) {
+  void ShowMenu(scoped_ptr<RenderViewContextMenuBase> menu) override {
     context_menu_.reset(menu.release());
 
-    if (!context_menu_.get())
+    if (!context_menu_)
       return;
 
-    // Menus need a Widget to work. If we're not the active tab we won't
-    // necessarily be in a widget.
-    views::Widget* top_level_widget = GetTopLevelWidget();
-    if (!top_level_widget)
-      return;
-
-    const content::ContextMenuParams& params = context_menu_->params();
-    // Don't show empty menus.
-    if (context_menu_->menu_model().GetItemCount() == 0)
-      return;
-
-    gfx::Point screen_point(params.x, params.y);
-
-    // Convert from target window coordinates to root window coordinates.
-    aura::Window* target_window = GetActiveNativeView();
-    aura::Window* root_window = target_window->GetRootWindow();
-    aura::client::ScreenPositionClient* screen_position_client =
-        aura::client::GetScreenPositionClient(root_window);
-    if (screen_position_client) {
-      screen_position_client->ConvertPointToScreen(target_window,
-                                                   &screen_point);
-    }
-    // Enable recursive tasks on the message loop so we can get updates while
-    // the context menu is being displayed.
-    base::MessageLoop::ScopedNestableTaskAllower allow(
-        base::MessageLoop::current());
-    context_menu_->RunMenuAt(
-        top_level_widget, screen_point, params.source_type);
+    context_menu_->Show();
   }
 
   aura::Window* GetActiveNativeView() {
@@ -127,7 +102,7 @@ class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate {
 
   views::FocusManager* GetFocusManager() {
     views::Widget* toplevel_widget = GetTopLevelWidget();
-    return toplevel_widget ? toplevel_widget->GetFocusManager() : NULL;
+    return toplevel_widget ? toplevel_widget->GetFocusManager() : nullptr;
   }
 
   void SetInitialFocus() {
@@ -138,7 +113,7 @@ class WebContentsViewDelegateImpl : public content::WebContentsViewDelegate {
       web_contents_->Focus();
     }
   }
-  scoped_ptr<RenderViewContextMenuImpl> context_menu_;
+  scoped_ptr<RenderViewContextMenuBase> context_menu_;
   content::WebContents* web_contents_;
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewDelegateImpl);
 };

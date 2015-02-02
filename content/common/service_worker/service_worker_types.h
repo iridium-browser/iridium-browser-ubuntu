@@ -11,6 +11,9 @@
 #include "base/basictypes.h"
 #include "base/strings/string_util.h"
 #include "content/common/content_export.h"
+#include "content/public/common/request_context_frame_type.h"
+#include "content/public/common/request_context_type.h"
+#include "third_party/WebKit/public/platform/WebServiceWorkerResponseType.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerState.h"
 #include "url/gurl.h"
 
@@ -33,6 +36,21 @@ static const int64 kInvalidServiceWorkerVersionId = -1;
 static const int64 kInvalidServiceWorkerResourceId = -1;
 static const int64 kInvalidServiceWorkerResponseId = -1;
 static const int kInvalidEmbeddedWorkerThreadId = -1;
+
+enum FetchRequestMode {
+  FETCH_REQUEST_MODE_SAME_ORIGIN,
+  FETCH_REQUEST_MODE_NO_CORS,
+  FETCH_REQUEST_MODE_CORS,
+  FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT,
+  FETCH_REQUEST_MODE_LAST = FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT
+};
+
+enum FetchCredentialsMode {
+  FETCH_CREDENTIALS_MODE_OMIT,
+  FETCH_CREDENTIALS_MODE_SAME_ORIGIN,
+  FETCH_CREDENTIALS_MODE_INCLUDE,
+  FETCH_CREDENTIALS_MODE_LAST = FETCH_CREDENTIALS_MODE_INCLUDE
+};
 
 // Indicates how the service worker handled a fetch event.
 enum ServiceWorkerFetchEventResult {
@@ -62,12 +80,16 @@ struct CONTENT_EXPORT ServiceWorkerFetchRequest {
                             bool is_reload);
   ~ServiceWorkerFetchRequest();
 
+  FetchRequestMode mode;
+  RequestContextType request_context_type;
+  RequestContextFrameType frame_type;
   GURL url;
   std::string method;
   ServiceWorkerHeaderMap headers;
   std::string blob_uuid;
   uint64 blob_size;
   GURL referrer;
+  FetchCredentialsMode credentials_mode;
   bool is_reload;
 };
 
@@ -77,15 +99,19 @@ struct CONTENT_EXPORT ServiceWorkerResponse {
   ServiceWorkerResponse(const GURL& url,
                         int status_code,
                         const std::string& status_text,
+                        blink::WebServiceWorkerResponseType response_type,
                         const ServiceWorkerHeaderMap& headers,
-                        const std::string& blob_uuid);
+                        const std::string& blob_uuid,
+                        uint64 blob_size);
   ~ServiceWorkerResponse();
 
   GURL url;
   int status_code;
   std::string status_text;
+  blink::WebServiceWorkerResponseType response_type;
   ServiceWorkerHeaderMap headers;
   std::string blob_uuid;
+  uint64 blob_size;
 };
 
 // Controls how requests are matched in the Cache API.
@@ -124,12 +150,14 @@ struct CONTENT_EXPORT ServiceWorkerObjectInfo {
   GURL scope;
   GURL url;
   blink::WebServiceWorkerState state;
+  int64 version_id;
 };
 
 struct ServiceWorkerRegistrationObjectInfo {
   ServiceWorkerRegistrationObjectInfo();
   int handle_id;
   GURL scope;
+  int64 registration_id;
 };
 
 struct ServiceWorkerVersionAttributes {

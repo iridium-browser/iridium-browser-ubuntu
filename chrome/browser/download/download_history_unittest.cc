@@ -70,10 +70,10 @@ class FakeHistoryAdapter : public DownloadHistory::HistoryAdapter {
       fail_create_download_(false) {
   }
 
-  virtual ~FakeHistoryAdapter() {}
+  ~FakeHistoryAdapter() override {}
 
-  virtual void QueryDownloads(
-      const HistoryService::DownloadQueryCallback& callback) OVERRIDE {
+  void QueryDownloads(
+      const HistoryService::DownloadQueryCallback& callback) override {
     DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
     content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
         base::Bind(&FakeHistoryAdapter::QueryDownloadsDone,
@@ -89,9 +89,9 @@ class FakeHistoryAdapter : public DownloadHistory::HistoryAdapter {
 
   void set_slow_create_download(bool slow) { slow_create_download_ = slow; }
 
-  virtual void CreateDownload(
+  void CreateDownload(
       const history::DownloadRow& info,
-      const HistoryService::DownloadCreateCallback& callback) OVERRIDE {
+      const HistoryService::DownloadCreateCallback& callback) override {
     DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
     create_download_info_ = info;
     // Must not call CreateDownload() again before FinishCreateDownload()!
@@ -108,13 +108,12 @@ class FakeHistoryAdapter : public DownloadHistory::HistoryAdapter {
     create_download_callback_.Reset();
   }
 
-  virtual void UpdateDownload(
-      const history::DownloadRow& info) OVERRIDE {
+  void UpdateDownload(const history::DownloadRow& info) override {
     DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
     update_download_ = info;
   }
 
-  virtual void RemoveDownloads(const IdSet& ids) OVERRIDE {
+  void RemoveDownloads(const IdSet& ids) override {
     DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
     for (IdSet::const_iterator it = ids.begin();
          it != ids.end(); ++it) {
@@ -204,14 +203,10 @@ class DownloadHistoryTest : public testing::Test {
         history_(NULL),
         manager_observer_(NULL),
         download_created_index_(0) {}
-  virtual ~DownloadHistoryTest() {
-    STLDeleteElements(&items_);
-  }
+  ~DownloadHistoryTest() override { STLDeleteElements(&items_); }
 
  protected:
-  virtual void TearDown() OVERRIDE {
-    download_history_.reset();
-  }
+  void TearDown() override { download_history_.reset(); }
 
   content::MockDownloadManager& manager() { return *manager_.get(); }
   content::MockDownloadItem& item(size_t index) { return *items_[index]; }

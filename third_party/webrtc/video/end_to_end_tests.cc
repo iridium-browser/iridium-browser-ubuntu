@@ -19,6 +19,9 @@
 #include "webrtc/call.h"
 #include "webrtc/frame_callback.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_utility.h"
+#include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
+#include "webrtc/modules/video_coding/codecs/vp9/include/vp9.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
@@ -222,6 +225,56 @@ TEST_F(EndToEndTest, TransmitsFirstFrame) {
   DestroyStreams();
 }
 
+TEST_F(EndToEndTest, SendsAndReceivesVP9) {
+  class VP9Observer : public test::EndToEndTest, public VideoRenderer {
+   public:
+    VP9Observer()
+        : EndToEndTest(2 * kDefaultTimeoutMs),
+          encoder_(VideoEncoder::Create(VideoEncoder::kVp9)),
+          decoder_(VP9Decoder::Create()),
+          frame_counter_(0) {}
+
+    virtual void PerformTest() OVERRIDE {
+      EXPECT_EQ(kEventSignaled, Wait())
+          << "Timed out while waiting for enough frames to be decoded.";
+    }
+
+    virtual void ModifyConfigs(
+        VideoSendStream::Config* send_config,
+        std::vector<VideoReceiveStream::Config>* receive_configs,
+        VideoEncoderConfig* encoder_config) OVERRIDE {
+      send_config->encoder_settings.encoder = encoder_.get();
+      send_config->encoder_settings.payload_name = "VP9";
+      send_config->encoder_settings.payload_type = VCM_VP9_PAYLOAD_TYPE;
+      encoder_config->streams[0].min_bitrate_bps = 50000;
+      encoder_config->streams[0].target_bitrate_bps =
+          encoder_config->streams[0].max_bitrate_bps = 2000000;
+
+      (*receive_configs)[0].renderer = this;
+      (*receive_configs)[0].decoders.resize(1);
+      (*receive_configs)[0].decoders[0].payload_type =
+          send_config->encoder_settings.payload_type;
+      (*receive_configs)[0].decoders[0].payload_name =
+          send_config->encoder_settings.payload_name;
+      (*receive_configs)[0].decoders[0].decoder = decoder_.get();
+    }
+
+    virtual void RenderFrame(const I420VideoFrame& video_frame,
+                             int time_to_render_ms) OVERRIDE {
+      const int kRequiredFrames = 500;
+      if (++frame_counter_ == kRequiredFrames)
+        observation_complete_->Set();
+    }
+
+   private:
+    scoped_ptr<webrtc::VideoEncoder> encoder_;
+    scoped_ptr<webrtc::VideoDecoder> decoder_;
+    int frame_counter_;
+  } test;
+
+  RunBaseTest(&test);
+}
+
 TEST_F(EndToEndTest, SendsAndReceivesH264) {
   class H264Observer : public test::EndToEndTest, public VideoRenderer {
    public:
@@ -247,14 +300,12 @@ TEST_F(EndToEndTest, SendsAndReceivesH264) {
           encoder_config->streams[0].max_bitrate_bps = 2000000;
 
       (*receive_configs)[0].renderer = this;
-      VideoCodec codec =
-          test::CreateDecoderVideoCodec(send_config->encoder_settings);
-      (*receive_configs)[0].codecs.resize(1);
-      (*receive_configs)[0].codecs[0] = codec;
-      (*receive_configs)[0].external_decoders.resize(1);
-      (*receive_configs)[0].external_decoders[0].payload_type =
+      (*receive_configs)[0].decoders.resize(1);
+      (*receive_configs)[0].decoders[0].payload_type =
           send_config->encoder_settings.payload_type;
-      (*receive_configs)[0].external_decoders[0].decoder = &fake_decoder_;
+      (*receive_configs)[0].decoders[0].payload_name =
+          send_config->encoder_settings.payload_name;
+      (*receive_configs)[0].decoders[0].decoder = &fake_decoder_;
     }
 
     virtual void RenderFrame(const I420VideoFrame& video_frame,
@@ -977,6 +1028,7 @@ TEST_F(EndToEndTest, SendsAndReceivesMultipleStreams) {
   for (size_t i = 0; i < kNumStreams; ++i)
     encoders[i].reset(VideoEncoder::Create(VideoEncoder::kVp8));
 
+  ScopedVector<VideoDecoder> allocated_decoders;
   for (size_t i = 0; i < kNumStreams; ++i) {
     uint32_t ssrc = codec_settings[i].ssrc;
     int width = codec_settings[i].width;
@@ -1004,9 +1056,10 @@ TEST_F(EndToEndTest, SendsAndReceivesMultipleStreams) {
     receive_config.renderer = observers[i];
     receive_config.rtp.remote_ssrc = ssrc;
     receive_config.rtp.local_ssrc = kReceiverLocalSsrc;
-    VideoCodec codec =
-        test::CreateDecoderVideoCodec(send_config.encoder_settings);
-    receive_config.codecs.push_back(codec);
+    VideoReceiveStream::Decoder decoder =
+        test::CreateMatchingDecoder(send_config.encoder_settings);
+    allocated_decoders.push_back(decoder.decoder);
+    receive_config.decoders.push_back(decoder);
     receive_streams[i] =
         receiver_call->CreateVideoReceiveStream(receive_config);
     receive_streams[i]->Start();
@@ -1143,6 +1196,53 @@ TEST_F(EndToEndTest, ReceiveStreamSendsRemb) {
                                            "receiver RTCP REMB packet to be "
                                            "sent.";
     }
+  } test;
+
+  RunBaseTest(&test);
+}
+
+TEST_F(EndToEndTest, VerifyBandwidthStats) {
+  class RtcpObserver : public test::EndToEndTest, public PacketReceiver {
+   public:
+    RtcpObserver()
+        : EndToEndTest(kDefaultTimeoutMs),
+          sender_call_(NULL),
+          receiver_call_(NULL),
+          has_seen_pacer_delay_(false) {}
+
+    virtual DeliveryStatus DeliverPacket(const uint8_t* packet,
+                                         size_t length) OVERRIDE {
+      Call::Stats sender_stats = sender_call_->GetStats();
+      Call::Stats receiver_stats = receiver_call_->GetStats();
+      if (!has_seen_pacer_delay_)
+        has_seen_pacer_delay_ = sender_stats.pacer_delay_ms > 0;
+      if (sender_stats.send_bandwidth_bps > 0 &&
+          receiver_stats.recv_bandwidth_bps > 0 && has_seen_pacer_delay_)
+        observation_complete_->Set();
+      return receiver_call_->Receiver()->DeliverPacket(packet, length);
+    }
+
+    virtual void OnCallsCreated(Call* sender_call,
+                                Call* receiver_call) OVERRIDE {
+      sender_call_ = sender_call;
+      receiver_call_ = receiver_call;
+    }
+
+    virtual void PerformTest() OVERRIDE {
+      EXPECT_EQ(kEventSignaled, Wait()) << "Timed out while waiting for "
+                                           "non-zero bandwidth stats.";
+    }
+
+    virtual void SetReceivers(
+        PacketReceiver* send_transport_receiver,
+        PacketReceiver* receive_transport_receiver) OVERRIDE {
+      test::RtpRtcpObserver::SetReceivers(this, receive_transport_receiver);
+    }
+
+   private:
+    Call* sender_call_;
+    Call* receiver_call_;
+    bool has_seen_pacer_delay_;
   } test;
 
   RunBaseTest(&test);
@@ -1380,7 +1480,7 @@ TEST_F(EndToEndTest, GetStats) {
       // Make sure all fields have been populated.
 
       receive_stats_filled_["IncomingRate"] |=
-          stats.network_frame_rate != 0 || stats.bitrate_bps != 0;
+          stats.network_frame_rate != 0 || stats.total_bitrate_bps != 0;
 
       receive_stats_filled_["FrameCallback"] |= stats.decode_frame_rate != 0;
 
@@ -1411,7 +1511,7 @@ TEST_F(EndToEndTest, GetStats) {
       send_stats_filled_["NumStreams"] |=
           stats.substreams.size() == expected_send_ssrcs_.size();
 
-      for (std::map<uint32_t, StreamStats>::const_iterator it =
+      for (std::map<uint32_t, SsrcStats>::const_iterator it =
                stats.substreams.begin();
            it != stats.substreams.end();
            ++it) {
@@ -1421,7 +1521,7 @@ TEST_F(EndToEndTest, GetStats) {
         send_stats_filled_[CompoundKey("IncomingRate", it->first)] |=
             stats.input_frame_rate != 0;
 
-        const StreamStats& stream_stats = it->second;
+        const SsrcStats& stream_stats = it->second;
 
         send_stats_filled_[CompoundKey("StatisticsUpdated", it->first)] |=
             stream_stats.rtcp_stats.cumulative_lost != 0 ||
@@ -1436,7 +1536,7 @@ TEST_F(EndToEndTest, GetStats) {
 
         send_stats_filled_[CompoundKey("BitrateStatisticsObserver",
                                        it->first)] |=
-            stream_stats.bitrate_bps != 0;
+            stream_stats.total_bitrate_bps != 0;
 
         send_stats_filled_[CompoundKey("FrameCountObserver", it->first)] |=
             stream_stats.delta_frames != 0 || stream_stats.key_frames != 0;
@@ -1653,15 +1753,16 @@ TEST_F(EndToEndTest, DISABLED_RedundantPayloadsTransmittedOnAllSsrcs) {
         encoder_config->streams[i].target_bitrate_bps = 15000;
         encoder_config->streams[i].max_bitrate_bps = 20000;
       }
-      // Significantly higher than max bitrates for all video streams -> forcing
-      // padding to trigger redundant padding on all RTX SSRCs.
-      send_config->rtp.min_transmit_bitrate_bps = 100000;
 
       send_config->rtp.rtx.payload_type = kSendRtxPayloadType;
       send_config->rtp.rtx.pad_with_redundant_payloads = true;
 
       for (size_t i = 0; i < kNumSsrcs; ++i)
         send_config->rtp.rtx.ssrcs.push_back(kSendRtxSsrcs[i]);
+
+      // Significantly higher than max bitrates for all video streams -> forcing
+      // padding to trigger redundant padding on all RTX SSRCs.
+      encoder_config->min_transmit_bitrate_bps = 100000;
     }
 
     virtual void PerformTest() OVERRIDE {
@@ -1791,6 +1892,19 @@ void EndToEndTest::TestRtpStatePreservation(bool use_rtx) {
     encoder_config_.streams[i].max_bitrate_bps = 20000;
   }
 
+  // Use the same total bitrates when sending a single stream to avoid lowering
+  // the bitrate estimate and requiring a subsequent rampup.
+  VideoEncoderConfig one_stream = encoder_config_;
+  one_stream.streams.resize(1);
+  for (size_t i = 1; i < encoder_config_.streams.size(); ++i) {
+    one_stream.streams.front().min_bitrate_bps +=
+        encoder_config_.streams[i].min_bitrate_bps;
+    one_stream.streams.front().target_bitrate_bps +=
+        encoder_config_.streams[i].target_bitrate_bps;
+    one_stream.streams.front().max_bitrate_bps +=
+        encoder_config_.streams[i].max_bitrate_bps;
+  }
+
   CreateMatchingReceiveConfigs();
 
   CreateStreams();
@@ -1807,8 +1921,6 @@ void EndToEndTest::TestRtpStatePreservation(bool use_rtx) {
     sender_call_->DestroyVideoSendStream(send_stream_);
 
     // Re-create VideoSendStream with only one stream.
-    VideoEncoderConfig one_stream = encoder_config_;
-    one_stream.streams.resize(1);
     send_stream_ =
         sender_call_->CreateVideoSendStream(send_config_, one_stream);
     send_stream_->Start();
@@ -2074,4 +2186,39 @@ TEST_F(EndToEndTest, NewReceiveStreamsRespectNetworkDown) {
 
   DestroyStreams();
 }
+
+// TODO(pbos): Remove this regression test when VideoEngine is no longer used as
+// a backend. This is to test that we hand channels back properly.
+TEST_F(EndToEndTest, CanCreateAndDestroyManyVideoStreams) {
+  test::NullTransport transport;
+  scoped_ptr<Call> call(Call::Create(Call::Config(&transport)));
+  test::FakeDecoder fake_decoder;
+  test::FakeEncoder fake_encoder(Clock::GetRealTimeClock());
+  for (size_t i = 0; i < 100; ++i) {
+    VideoSendStream::Config send_config;
+    send_config.encoder_settings.encoder = &fake_encoder;
+    send_config.encoder_settings.payload_name = "FAKE";
+    send_config.encoder_settings.payload_type = 123;
+
+    VideoEncoderConfig encoder_config;
+    encoder_config.streams = test::CreateVideoStreams(1);
+    send_config.rtp.ssrcs.push_back(1);
+    VideoSendStream* send_stream =
+        call->CreateVideoSendStream(send_config, encoder_config);
+    call->DestroyVideoSendStream(send_stream);
+
+    VideoReceiveStream::Config receive_config;
+    receive_config.rtp.remote_ssrc = 1;
+    receive_config.rtp.local_ssrc = kReceiverLocalSsrc;
+    VideoReceiveStream::Decoder decoder;
+    decoder.decoder = &fake_decoder;
+    decoder.payload_type = 123;
+    decoder.payload_name = "FAKE";
+    receive_config.decoders.push_back(decoder);
+    VideoReceiveStream* receive_stream =
+        call->CreateVideoReceiveStream(receive_config);
+    call->DestroyVideoReceiveStream(receive_stream);
+  }
+}
+
 }  // namespace webrtc

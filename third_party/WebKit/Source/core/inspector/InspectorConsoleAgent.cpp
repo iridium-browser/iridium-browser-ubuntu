@@ -46,7 +46,7 @@
 #include "core/inspector/ScriptCallStack.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/page/Page.h"
-#include "core/xml/XMLHttpRequest.h"
+#include "core/xmlhttprequest/XMLHttpRequest.h"
 #include "platform/network/ResourceError.h"
 #include "platform/network/ResourceResponse.h"
 #include "wtf/CurrentTime.h"
@@ -88,15 +88,11 @@ void InspectorConsoleAgent::trace(Visitor* visitor)
     InspectorBaseAgent::trace(visitor);
 }
 
-void InspectorConsoleAgent::init()
-{
-    m_instrumentingAgents->setInspectorConsoleAgent(this);
-}
-
 void InspectorConsoleAgent::enable(ErrorString*)
 {
     if (m_enabled)
         return;
+    m_instrumentingAgents->setInspectorConsoleAgent(this);
     m_enabled = true;
     if (!s_enabledAgentCount)
         ScriptController::setCaptureCallStackForUncaughtExceptions(true);
@@ -120,6 +116,7 @@ void InspectorConsoleAgent::disable(ErrorString*)
 {
     if (!m_enabled)
         return;
+    m_instrumentingAgents->setInspectorConsoleAgent(0);
     m_enabled = false;
     if (!(--s_enabledAgentCount))
         ScriptController::setCaptureCallStackForUncaughtExceptions(false);
@@ -155,14 +152,14 @@ void InspectorConsoleAgent::clearFrontend()
 
 void InspectorConsoleAgent::addMessageToConsole(ConsoleMessage* consoleMessage)
 {
-    if (m_frontend && m_enabled)
+    if (m_frontend)
         sendConsoleMessageToFrontend(consoleMessage, true);
 }
 
 void InspectorConsoleAgent::consoleMessagesCleared()
 {
     m_injectedScriptManager->releaseObjectGroup("console");
-    if (m_frontend && m_enabled)
+    if (m_frontend)
         m_frontend->messagesCleared();
 }
 
@@ -184,34 +181,14 @@ void InspectorConsoleAgent::consoleTimelineEnd(ExecutionContext* context, const 
         m_timelineAgent->consoleTimelineEnd(context, title, scriptState);
 }
 
-void InspectorConsoleAgent::frameWindowDiscarded(LocalDOMWindow* window)
-{
-    m_injectedScriptManager->discardInjectedScriptsFor(window);
-}
-
-void InspectorConsoleAgent::didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long requestIdentifier, ScriptString, const AtomicString& method, const String& url, const String& sendURL, unsigned sendLineNumber)
+void InspectorConsoleAgent::didFinishXHRLoading(XMLHttpRequest*, ThreadableLoaderClient*, unsigned long requestIdentifier, ScriptString, const AtomicString& method, const String& url)
 {
     if (m_frontend && m_state->getBoolean(ConsoleAgentState::monitoringXHR)) {
         String message = "XHR finished loading: " + method + " \"" + url + "\".";
-        RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(NetworkMessageSource, DebugMessageLevel, message, sendURL, sendLineNumber);
+        RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(NetworkMessageSource, DebugMessageLevel, message);
         consoleMessage->setRequestIdentifier(requestIdentifier);
         messageStorage()->reportMessage(consoleMessage.release());
     }
-}
-
-void InspectorConsoleAgent::didFailLoading(unsigned long requestIdentifier, const ResourceError& error)
-{
-    if (error.isCancellation()) // Report failures only.
-        return;
-    StringBuilder message;
-    message.appendLiteral("Failed to load resource");
-    if (!error.localizedDescription().isEmpty()) {
-        message.appendLiteral(": ");
-        message.append(error.localizedDescription());
-    }
-    RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(NetworkMessageSource, ErrorMessageLevel, message.toString(), error.failingURL());
-    consoleMessage->setRequestIdentifier(requestIdentifier);
-    messageStorage()->reportMessage(consoleMessage.release());
 }
 
 void InspectorConsoleAgent::setMonitoringXHREnabled(ErrorString*, bool enabled)
@@ -328,10 +305,10 @@ void InspectorConsoleAgent::sendConsoleMessageToFrontend(ConsoleMessage* console
     m_frontend->flush();
 }
 
-class InspectableHeapObject FINAL : public InjectedScriptHost::InspectableObject {
+class InspectableHeapObject final : public InjectedScriptHost::InspectableObject {
 public:
     explicit InspectableHeapObject(int heapObjectId) : m_heapObjectId(heapObjectId) { }
-    virtual ScriptValue get(ScriptState*) OVERRIDE
+    virtual ScriptValue get(ScriptState*) override
     {
         return ScriptProfiler::objectByHeapObjectId(m_heapObjectId);
     }
@@ -342,6 +319,16 @@ private:
 void InspectorConsoleAgent::addInspectedHeapObject(ErrorString*, int inspectedHeapObjectId)
 {
     m_injectedScriptManager->injectedScriptHost()->addInspectedObject(adoptPtr(new InspectableHeapObject(inspectedHeapObjectId)));
+}
+
+void InspectorConsoleAgent::setLastEvaluationResult(ErrorString* errorString, const String& objectId)
+{
+    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(objectId);
+    if (injectedScript.isEmpty()) {
+        *errorString = "Inspected frame has gone";
+        return;
+    }
+    injectedScript.setLastEvaluationResult(objectId);
 }
 
 } // namespace blink

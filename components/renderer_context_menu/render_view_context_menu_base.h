@@ -67,7 +67,11 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   RenderViewContextMenuBase(content::RenderFrameHost* render_frame_host,
                             const content::ContextMenuParams& params);
 
-  virtual ~RenderViewContextMenuBase();
+  ~RenderViewContextMenuBase() override;
+
+  // Displays the menu.
+  // Different platform will have their own implementation.
+  virtual void Show() = 0;
 
   // Initializes the context menu.
   void Init();
@@ -84,27 +88,25 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   bool IsCommandIdKnown(int command_id, bool* enabled) const;
 
   // SimpleMenuModel::Delegate implementation.
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
-  virtual void MenuWillShow(ui::SimpleMenuModel* source) OVERRIDE;
-  virtual void MenuClosed(ui::SimpleMenuModel* source) OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  void ExecuteCommand(int command_id, int event_flags) override;
+  void MenuWillShow(ui::SimpleMenuModel* source) override;
+  void MenuClosed(ui::SimpleMenuModel* source) override;
 
   // RenderViewContextMenuProxy implementation.
-  virtual void AddMenuItem(int command_id,
-                           const base::string16& title) OVERRIDE;
-  virtual void AddCheckItem(int command_id,
-                            const base::string16& title) OVERRIDE;
-  virtual void AddSeparator() OVERRIDE;
-  virtual void AddSubMenu(int command_id,
-                          const base::string16& label,
-                          ui::MenuModel* model) OVERRIDE;
-  virtual void UpdateMenuItem(int command_id,
-                              bool enabled,
-                              bool hidden,
-                              const base::string16& title) OVERRIDE;
-  virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE;
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
+  void AddMenuItem(int command_id, const base::string16& title) override;
+  void AddCheckItem(int command_id, const base::string16& title) override;
+  void AddSeparator() override;
+  void AddSubMenu(int command_id,
+                  const base::string16& label,
+                  ui::MenuModel* model) override;
+  void UpdateMenuItem(int command_id,
+                      bool enabled,
+                      bool hidden,
+                      const base::string16& title) override;
+  content::RenderViewHost* GetRenderViewHost() const override;
+  content::WebContents* GetWebContents() const override;
+  content::BrowserContext* GetBrowserContext() const override;
 
  protected:
   friend class RenderViewContextMenuTest;

@@ -70,15 +70,14 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
   """A launchable android browser instance."""
   def __init__(self, browser_type, finder_options, android_platform,
                backend_settings, apk_name):
-    super(PossibleAndroidBrowser, self).__init__(browser_type, 'android',
-        finder_options, backend_settings.supports_tab_control)
-    assert browser_type in FindAllBrowserTypes(finder_options), \
-        ('Please add %s to android_browser_finder.FindAllBrowserTypes' %
+    super(PossibleAndroidBrowser, self).__init__(
+        browser_type, 'android', backend_settings.supports_tab_control)
+    assert browser_type in FindAllBrowserTypes(finder_options), (
+        'Please add %s to android_browser_finder.FindAllBrowserTypes' %
          browser_type)
     self._platform = android_platform
     self._platform_backend = (
-        android_platform._platform_backend  # pylint: disable=W0212
-        )
+        android_platform._platform_backend)  # pylint: disable=W0212
     self._backend_settings = backend_settings
     self._local_apk = None
 
@@ -103,26 +102,21 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
   def _InitPlatformIfNeeded(self):
     pass
 
-  def Create(self):
+  def Create(self, finder_options):
     self._InitPlatformIfNeeded()
 
-    use_rndis_forwarder = (self.finder_options.android_rndis or
-                           self.finder_options.browser_options.netsim or
+    use_rndis_forwarder = (finder_options.android_rndis or
+                           finder_options.browser_options.netsim or
                            platform.GetHostPlatform().GetOSName() != 'linux')
-    backend = android_browser_backend.AndroidBrowserBackend(
-        self.finder_options.browser_options, self._backend_settings,
+    browser_backend = android_browser_backend.AndroidBrowserBackend(
+        self._platform_backend,
+        finder_options.browser_options, self._backend_settings,
         use_rndis_forwarder,
-        output_profile_path=self.finder_options.output_profile_path,
-        extensions_to_load=self.finder_options.extensions_to_load,
-        target_arch=self.finder_options.target_arch,
-        android_platform_backend=self._platform_backend)
-    b = browser.Browser(backend,
-                        self._platform_backend,
-                        self._archive_path,
-                        self._append_to_existing_wpr,
-                        self._make_javascript_deterministic,
-                        self._credentials_path)
-    return b
+        output_profile_path=finder_options.output_profile_path,
+        extensions_to_load=finder_options.extensions_to_load,
+        target_arch=finder_options.target_arch)
+    return browser.Browser(
+        browser_backend, self._platform_backend, self._credentials_path)
 
   def SupportsOptions(self, finder_options):
     if len(finder_options.extensions_to_load) != 0:
@@ -145,13 +139,10 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
 
 
 def SelectDefaultBrowser(possible_browsers):
-  local_builds_by_date = sorted(possible_browsers,
-                                key=lambda b: b.last_modification_time())
-
-  if local_builds_by_date:
-    newest_browser = local_builds_by_date[-1]
-    return newest_browser
-  return None
+  """Return the newest possible browser."""
+  if not possible_browsers:
+    return None
+  return max(possible_browsers, key=lambda b: b.last_modification_time())
 
 
 def CanFindAvailableBrowsers():
@@ -194,8 +185,9 @@ def FindAllAvailableBrowsers(finder_options):
                  'Will not try searching for Android browsers.')
     return []
   if finder_options.android_device:
-    devices = [android_device.AndroidDevice(finder_options.android_device,
-                                            finder_options.no_performance_mode)]
+    devices = [android_device.AndroidDevice(
+        finder_options.android_device,
+        enable_performance_mode=not finder_options.no_performance_mode)]
   else:
     devices = android_device.AndroidDevice.GetAllConnectedDevices()
 

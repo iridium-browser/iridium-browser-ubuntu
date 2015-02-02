@@ -27,11 +27,11 @@ namespace invalidation {
 class TiclProfileSettingsProviderTest : public testing::Test {
  protected:
   TiclProfileSettingsProviderTest();
-  virtual ~TiclProfileSettingsProviderTest();
+  ~TiclProfileSettingsProviderTest() override;
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   TiclInvalidationService::InvalidationNetworkChannel GetNetworkChannel();
 

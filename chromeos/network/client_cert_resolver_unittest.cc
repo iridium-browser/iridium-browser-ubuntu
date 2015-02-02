@@ -6,9 +6,12 @@
 #include <cert.h>
 #include <pk11pub.h>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -21,11 +24,9 @@
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_profile_handler.h"
 #include "chromeos/network/network_state_handler.h"
-#include "chromeos/tpm_token_loader.h"
 #include "components/onc/onc_constants.h"
-#include "crypto/nss_util_internal.h"
-#include "crypto/scoped_test_nss_chromeos_user.h"
-#include "net/base/crypto_module.h"
+#include "crypto/scoped_nss_types.h"
+#include "crypto/scoped_test_nss_db.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/nss_cert_database_chromeos.h"
@@ -45,61 +46,55 @@ const char* kUserHash = "user_hash";
 
 }  // namespace
 
-class ClientCertResolverTest : public testing::Test {
+class ClientCertResolverTest : public testing::Test,
+                               public ClientCertResolver::Observer {
  public:
-  ClientCertResolverTest() : service_test_(NULL),
-                             profile_test_(NULL),
-                             cert_loader_(NULL),
-                             user_(kUserHash) {
-  }
-  virtual ~ClientCertResolverTest() {}
+  ClientCertResolverTest()
+      : network_properties_changed_count_(0),
+        service_test_(NULL),
+        profile_test_(NULL),
+        cert_loader_(NULL) {}
+  ~ClientCertResolverTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    // Initialize NSS db for the user.
-    ASSERT_TRUE(user_.constructed_successfully());
-    user_.FinishInit();
-    private_slot_ = crypto::GetPrivateSlotForChromeOSUser(
-        user_.username_hash(),
-        base::Callback<void(crypto::ScopedPK11Slot)>());
-    ASSERT_TRUE(private_slot_.get());
-    test_nssdb_.reset(new net::NSSCertDatabaseChromeOS(
-        crypto::GetPublicSlotForChromeOSUser(user_.username_hash()),
-        crypto::GetPrivateSlotForChromeOSUser(
-            user_.username_hash(),
-            base::Callback<void(crypto::ScopedPK11Slot)>())));
-    test_nssdb_->SetSlowTaskRunnerForTest(message_loop_.message_loop_proxy());
+  void SetUp() override {
+    ASSERT_TRUE(test_nssdb_.is_open());
+
+    // Use the same DB for public and private slot.
+    test_nsscertdb_.reset(new net::NSSCertDatabaseChromeOS(
+        crypto::ScopedPK11Slot(PK11_ReferenceSlot(test_nssdb_.slot())),
+        crypto::ScopedPK11Slot(PK11_ReferenceSlot(test_nssdb_.slot()))));
+    test_nsscertdb_->SetSlowTaskRunnerForTest(
+        message_loop_.message_loop_proxy());
 
     DBusThreadManager::Initialize();
     service_test_ =
         DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
     profile_test_ =
         DBusThreadManager::Get()->GetShillProfileClient()->GetTestInterface();
+    profile_test_->AddProfile(kUserProfilePath, kUserHash);
     base::RunLoop().RunUntilIdle();
     service_test_->ClearServices();
     base::RunLoop().RunUntilIdle();
 
-    TPMTokenLoader::InitializeForTest();
-
     CertLoader::Initialize();
     cert_loader_ = CertLoader::Get();
-    cert_loader_->force_hardware_backed_for_test();
+    CertLoader::ForceHardwareBackedForTesting();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
+    client_cert_resolver_->RemoveObserver(this);
     client_cert_resolver_.reset();
     managed_config_handler_.reset();
     network_config_handler_.reset();
     network_profile_handler_.reset();
     network_state_handler_.reset();
     CertLoader::Shutdown();
-    TPMTokenLoader::Shutdown();
     DBusThreadManager::Shutdown();
-    CleanupSlotContents();
   }
 
  protected:
   void StartCertLoader() {
-    cert_loader_->StartWithNSSDB(test_nssdb_.get());
+    cert_loader_->StartWithNSSDB(test_nsscertdb_.get());
     if (test_client_cert_.get()) {
       int slot_id = 0;
       const std::string pkcs11_id =
@@ -115,11 +110,11 @@ class ClientCertResolverTest : public testing::Test {
     // Import a CA cert.
     net::CertificateList ca_cert_list =
         net::CreateCertificateListFromFile(net::GetTestCertsDirectory(),
-                                           "websocket_cacert.pem",
+                                           "client_1_ca.pem",
                                            net::X509Certificate::FORMAT_AUTO);
     ASSERT_TRUE(!ca_cert_list.empty());
     net::NSSCertDatabase::ImportCertFailureList failures;
-    EXPECT_TRUE(test_nssdb_->ImportCACerts(
+    EXPECT_TRUE(test_nsscertdb_->ImportCACerts(
         ca_cert_list, net::NSSCertDatabase::TRUST_DEFAULT, &failures));
     ASSERT_TRUE(failures.empty()) << net::ErrorToString(failures[0].net_error);
 
@@ -128,22 +123,12 @@ class ClientCertResolverTest : public testing::Test {
     ASSERT_TRUE(!test_ca_cert_pem_.empty());
 
     // Import a client cert signed by that CA.
-    std::string pkcs12_data;
-    ASSERT_TRUE(base::ReadFileToString(
-        net::GetTestCertsDirectory().Append("websocket_client_cert.p12"),
-        &pkcs12_data));
-
-    net::CertificateList client_cert_list;
-    scoped_refptr<net::CryptoModule> module(
-        net::CryptoModule::CreateFromHandle(private_slot_.get()));
-    ASSERT_EQ(net::OK,
-              test_nssdb_->ImportFromPKCS12(module.get(),
-                                            pkcs12_data,
-                                            base::string16(),
-                                            false,
-                                            &client_cert_list));
-    ASSERT_TRUE(!client_cert_list.empty());
-    test_client_cert_ = client_cert_list[0];
+    test_client_cert_ =
+        net::ImportClientCertAndKeyFromFile(net::GetTestCertsDirectory(),
+                                            "client_1.pem",
+                                            "client_1.pk8",
+                                            test_nssdb_.slot());
+    ASSERT_TRUE(test_client_cert_.get());
   }
 
   void SetupNetworkHandlers() {
@@ -159,12 +144,14 @@ class ClientCertResolverTest : public testing::Test {
                                   network_profile_handler_.get(),
                                   network_config_handler_.get(),
                                   NULL /* network_device_handler */);
+    // Run all notifications before starting the cert loader to reduce run time.
+    base::RunLoop().RunUntilIdle();
+
     client_cert_resolver_->Init(network_state_handler_.get(),
                                 managed_config_handler_.get());
+    client_cert_resolver_->AddObserver(this);
     client_cert_resolver_->SetSlowTaskRunnerForTest(
         message_loop_.message_loop_proxy());
-
-    profile_test_->AddProfile(kUserProfilePath, kUserHash);
   }
 
   void SetupWifi() {
@@ -234,45 +221,39 @@ class ClientCertResolverTest : public testing::Test {
                                               pkcs11_id);
   }
 
-  ShillServiceClient::TestInterface* service_test_;
-  ShillProfileClient::TestInterface* profile_test_;
+  int network_properties_changed_count_;
   std::string test_cert_id_;
-  scoped_refptr<net::X509Certificate> test_ca_cert_;
-  std::string test_ca_cert_pem_;
-  base::MessageLoop message_loop_;
+  scoped_ptr<ClientCertResolver> client_cert_resolver_;
 
  private:
-  void CleanupSlotContents() {
-    CERTCertList* cert_list = PK11_ListCertsInSlot(private_slot_.get());
-    for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
-         !CERT_LIST_END(node, cert_list);
-         node = CERT_LIST_NEXT(node)) {
-      scoped_refptr<net::X509Certificate> cert(
-          net::X509Certificate::CreateFromHandle(
-              node->cert, net::X509Certificate::OSCertHandles()));
-      test_nssdb_->DeleteCertAndKey(cert.get());
-    }
-    CERT_DestroyCertList(cert_list);
+  // ClientCertResolver::Observer:
+  void ResolveRequestCompleted(bool network_properties_changed) override {
+    if (network_properties_changed)
+      ++network_properties_changed_count_;
   }
 
+  ShillServiceClient::TestInterface* service_test_;
+  ShillProfileClient::TestInterface* profile_test_;
   CertLoader* cert_loader_;
-  scoped_refptr<net::X509Certificate> test_client_cert_;
   scoped_ptr<NetworkStateHandler> network_state_handler_;
   scoped_ptr<NetworkProfileHandler> network_profile_handler_;
   scoped_ptr<NetworkConfigurationHandler> network_config_handler_;
   scoped_ptr<ManagedNetworkConfigurationHandlerImpl> managed_config_handler_;
-  scoped_ptr<ClientCertResolver> client_cert_resolver_;
-  crypto::ScopedTestNSSChromeOSUser user_;
-  scoped_ptr<net::NSSCertDatabaseChromeOS> test_nssdb_;
-  crypto::ScopedPK11Slot private_slot_;
+  base::MessageLoop message_loop_;
+  scoped_refptr<net::X509Certificate> test_client_cert_;
+  std::string test_ca_cert_pem_;
+  crypto::ScopedTestNSSDB test_nssdb_;
+  scoped_ptr<net::NSSCertDatabaseChromeOS> test_nsscertdb_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientCertResolverTest);
 };
 
 TEST_F(ClientCertResolverTest, NoMatchingCertificates) {
-  SetupNetworkHandlers();
-  SetupWifi();
   StartCertLoader();
+  SetupWifi();
+  base::RunLoop().RunUntilIdle();
+  network_properties_changed_count_ = 0;
+  SetupNetworkHandlers();
   SetupPolicy();
   base::RunLoop().RunUntilIdle();
 
@@ -280,15 +261,20 @@ TEST_F(ClientCertResolverTest, NoMatchingCertificates) {
   std::string pkcs11_id;
   GetClientCertProperties(&pkcs11_id);
   EXPECT_EQ(std::string(), pkcs11_id);
+  EXPECT_EQ(1, network_properties_changed_count_);
+  EXPECT_FALSE(client_cert_resolver_->IsAnyResolveTaskRunning());
 }
 
 TEST_F(ClientCertResolverTest, ResolveOnCertificatesLoaded) {
-  SetupNetworkHandlers();
-  SetupWifi();
   SetupTestCerts();
+  SetupWifi();
+  base::RunLoop().RunUntilIdle();
+
+  SetupNetworkHandlers();
   SetupPolicy();
   base::RunLoop().RunUntilIdle();
 
+  network_properties_changed_count_ = 0;
   StartCertLoader();
   base::RunLoop().RunUntilIdle();
 
@@ -297,16 +283,19 @@ TEST_F(ClientCertResolverTest, ResolveOnCertificatesLoaded) {
   std::string pkcs11_id;
   GetClientCertProperties(&pkcs11_id);
   EXPECT_EQ(test_cert_id_, pkcs11_id);
+  EXPECT_EQ(1, network_properties_changed_count_);
 }
 
 TEST_F(ClientCertResolverTest, ResolveAfterPolicyApplication) {
   SetupTestCerts();
+  SetupWifi();
+  base::RunLoop().RunUntilIdle();
   StartCertLoader();
   SetupNetworkHandlers();
-  SetupWifi();
   base::RunLoop().RunUntilIdle();
 
   // Policy application will trigger the ClientCertResolver.
+  network_properties_changed_count_ = 0;
   SetupPolicy();
   base::RunLoop().RunUntilIdle();
 
@@ -315,6 +304,7 @@ TEST_F(ClientCertResolverTest, ResolveAfterPolicyApplication) {
   std::string pkcs11_id;
   GetClientCertProperties(&pkcs11_id);
   EXPECT_EQ(test_cert_id_, pkcs11_id);
+  EXPECT_EQ(1, network_properties_changed_count_);
 }
 
 }  // namespace chromeos

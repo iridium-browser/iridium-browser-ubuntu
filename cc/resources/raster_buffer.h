@@ -6,19 +6,19 @@
 #define CC_RESOURCES_RASTER_BUFFER_H_
 
 #include "cc/base/cc_export.h"
-#include "skia/ext/refptr.h"
-
-class SkCanvas;
+#include "ui/gfx/geometry/rect.h"
 
 namespace cc {
+class RasterSource;
 
 class CC_EXPORT RasterBuffer {
  public:
   RasterBuffer();
   virtual ~RasterBuffer();
 
-  virtual skia::RefPtr<SkCanvas> AcquireSkCanvas() = 0;
-  virtual void ReleaseSkCanvas(const skia::RefPtr<SkCanvas>& canvas) = 0;
+  virtual void Playback(const RasterSource* raster_source,
+                        const gfx::Rect& rect,
+                        float scale) = 0;
 };
 
 }  // namespace cc

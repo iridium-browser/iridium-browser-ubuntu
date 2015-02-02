@@ -25,7 +25,8 @@
 #    dependencies and testing.
 #  generated_idl_files - All generated .idl files for the component.
 #    (Must be separate from static because build dir not know at gyp time.)
-#  output_file - Pickle file containing output.
+#  interfaces_info_file - Output pickle file containing interfaces info.
+#  component_info_file - Output pickle file containing component-wide info.
 #
 # Design document: http://www.chromium.org/developers/design-documents/idl-build
 
@@ -46,16 +47,21 @@
       '<@(generated_idl_files)',
     ],
     'outputs': [
-      '<(output_file)',
+      '<(interfaces_info_file)',
+      '<(component_info_file)',
     ],
 
     'action': [
       'python',
       '<(bindings_scripts_dir)/compute_interfaces_info_individual.py',
+      '--cache-directory',
+      '<(cache_directory)',
       '--idl-files-list',
       '<(static_idl_files_list)',
       '--interfaces-info-file',
-      '<(output_file)',
+      '<(interfaces_info_file)',
+      '--component-info-file',
+      '<(component_info_file)',
       '--write-file-only-if-changed',
       '<(write_file_only_if_changed)',
       '--',

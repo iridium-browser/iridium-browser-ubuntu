@@ -27,13 +27,13 @@ namespace {
 class RecorderDevToolsClient : public StubDevToolsClient {
  public:
   RecorderDevToolsClient() {}
-  virtual ~RecorderDevToolsClient() {}
+  ~RecorderDevToolsClient() override {}
 
   // Overridden from StubDevToolsClient:
-  virtual Status SendCommandAndGetResult(
+  Status SendCommandAndGetResult(
       const std::string& method,
       const base::DictionaryValue& params,
-      scoped_ptr<base::DictionaryValue>* result) OVERRIDE {
+      scoped_ptr<base::DictionaryValue>* result) override {
     method_ = method;
     params_.Clear();
     params_.MergeDictionary(&params);
@@ -99,17 +99,17 @@ namespace {
 class FakeDevToolsClient : public StubDevToolsClient {
  public:
   FakeDevToolsClient() : listener_(NULL), closing_count_(0) {}
-  virtual ~FakeDevToolsClient() {}
+  ~FakeDevToolsClient() override {}
 
   void set_closing_count(int closing_count) {
     closing_count_ = closing_count;
   }
 
   // Overridden from StubDevToolsClient:
-  virtual Status SendCommandAndGetResult(
+  Status SendCommandAndGetResult(
       const std::string& method,
       const base::DictionaryValue& params,
-      scoped_ptr<base::DictionaryValue>* result) OVERRIDE {
+      scoped_ptr<base::DictionaryValue>* result) override {
     while (closing_count_ > 0) {
       base::DictionaryValue empty;
       Status status =
@@ -120,7 +120,7 @@ class FakeDevToolsClient : public StubDevToolsClient {
     }
     return Status(kOk);
   }
-  virtual void AddListener(DevToolsEventListener* listener) OVERRIDE {
+  void AddListener(DevToolsEventListener* listener) override {
     listener_ = listener;
   }
 

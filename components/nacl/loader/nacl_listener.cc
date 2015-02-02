@@ -146,7 +146,7 @@ scoped_refptr<NaClIPCAdapter> SetUpIPCAdapter(
   ipc_adapter->ConnectChannel();
 #if defined(OS_POSIX)
   handle->socket =
-      base::FileDescriptor(ipc_adapter->TakeClientFileDescriptor(), true);
+      base::FileDescriptor(ipc_adapter->TakeClientFileDescriptor());
 #endif
 
   // Pass a NaClDesc to the untrusted side. This will hold a ref to the
@@ -163,7 +163,7 @@ class BrowserValidationDBProxy : public NaClValidationDB {
       : listener_(listener) {
   }
 
-  virtual bool QueryKnownToValidate(const std::string& signature) OVERRIDE {
+  bool QueryKnownToValidate(const std::string& signature) override {
     // Initialize to false so that if the Send fails to write to the return
     // value we're safe.  For example if the message is (for some reason)
     // dispatched as an async message the return parameter will not be written.
@@ -176,7 +176,7 @@ class BrowserValidationDBProxy : public NaClValidationDB {
     return result;
   }
 
-  virtual void SetKnownToValidate(const std::string& signature) OVERRIDE {
+  void SetKnownToValidate(const std::string& signature) override {
     // Caching is optional: NaCl will still work correctly if the IPC fails.
     if (!listener_->Send(new NaClProcessMsg_SetKnownToValidate(signature))) {
       LOG(ERROR) << "Failed to update NaCl validation cache.";
@@ -186,8 +186,9 @@ class BrowserValidationDBProxy : public NaClValidationDB {
   // This is the "old" code path for resolving file tokens. It's only
   // used for resolving the main nexe.
   // TODO(teravest): Remove this.
-  virtual bool ResolveFileToken(struct NaClFileToken* file_token,
-                                int32* fd, std::string* path) OVERRIDE {
+  bool ResolveFileToken(struct NaClFileToken* file_token,
+                        int32* fd,
+                        std::string* path) override {
     *fd = -1;
     *path = "";
     if (!NaClFileTokenIsValid(file_token)) {
@@ -208,7 +209,7 @@ class BrowserValidationDBProxy : public NaClValidationDB {
         IPC::PlatformFileForTransitToPlatformFile(ipc_fd);
 #if defined(OS_WIN)
     // On Windows, valid handles are 32 bit unsigned integers so this is safe.
-    *fd = reinterpret_cast<uintptr_t>(handle);
+    *fd = reinterpret_cast<int32>(handle);
 #else
     *fd = handle;
 #endif
@@ -262,7 +263,7 @@ bool NaClListener::Send(IPC::Message* msg) {
 // NaClChromeMainAppStart(), so it can't be used for servicing messages.
 class FileTokenMessageFilter : public IPC::MessageFilter {
  public:
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& msg) override {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(FileTokenMessageFilter, msg)
       IPC_MESSAGE_HANDLER(NaClProcessMsg_ResolveFileTokenAsyncReply,
@@ -281,7 +282,7 @@ class FileTokenMessageFilter : public IPC::MessageFilter {
     g_listener->OnFileTokenResolved(token_lo, token_hi, ipc_fd, file_path);
   }
  private:
-  virtual ~FileTokenMessageFilter() { }
+  ~FileTokenMessageFilter() override {}
 };
 
 void NaClListener::Listen() {
@@ -384,25 +385,21 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
 # endif
 #endif
 
-  if (params.uses_irt) {
-    CHECK(handles.size() >= 1);
-    NaClHandle irt_handle = nacl::ToNativeHandle(handles[handles.size() - 1]);
-    handles.pop_back();
+  DCHECK(params.process_type != nacl::kUnknownNaClProcessType);
+  CHECK(handles.size() >= 1);
+  NaClHandle irt_handle = nacl::ToNativeHandle(handles[handles.size() - 1]);
+  handles.pop_back();
 
 #if defined(OS_WIN)
-    args->irt_fd = _open_osfhandle(reinterpret_cast<intptr_t>(irt_handle),
-                                   _O_RDONLY | _O_BINARY);
-    if (args->irt_fd < 0) {
-      LOG(ERROR) << "_open_osfhandle() failed";
-      return;
-    }
-#else
-    args->irt_fd = irt_handle;
-#endif
-  } else {
-    // Otherwise, the IRT handle is not even sent.
-    args->irt_fd = -1;
+  args->irt_fd = _open_osfhandle(reinterpret_cast<intptr_t>(irt_handle),
+                                 _O_RDONLY | _O_BINARY);
+  if (args->irt_fd < 0) {
+    LOG(ERROR) << "_open_osfhandle() failed";
+    return;
   }
+#else
+  args->irt_fd = irt_handle;
+#endif
 
   if (params.validation_cache_enabled) {
     // SHA256 block size.
@@ -415,24 +412,34 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
 
   CHECK(handles.size() == 1);
   args->imc_bootstrap_handle = nacl::ToNativeHandle(handles[0]);
-  args->enable_exception_handling = params.enable_exception_handling;
   args->enable_debug_stub = params.enable_debug_stub;
-  args->enable_dyncode_syscalls = params.enable_dyncode_syscalls;
-  if (!params.enable_dyncode_syscalls) {
-    // Bound the initial nexe's code segment size under PNaCl to
-    // reduce the chance of a code spraying attack succeeding (see
-    // https://code.google.com/p/nativeclient/issues/detail?id=3572).
-    // We assume that !params.enable_dyncode_syscalls is synonymous
-    // with PNaCl.  We can't apply this arbitrary limit outside of
-    // PNaCl because it might break existing NaCl apps, and this limit
-    // is only useful if the dyncode syscalls are disabled.
-    args->initial_nexe_max_code_bytes = 64 << 20;  // 64 MB
 
-    // Indicate that this is a PNaCl module.
-    // TODO(jvoung): Plumb through something indicating that this is PNaCl
-    // instead of relying on enable_dyncode_syscalls.
-    args->pnacl_mode = 1;
+  // Now configure parts that depend on process type.
+  // Start with stricter settings.
+  args->enable_exception_handling = 0;
+  args->enable_dyncode_syscalls = 0;
+  // pnacl_mode=1 mostly disables things (IRT interfaces and syscalls).
+  args->pnacl_mode = 1;
+  // Bound the initial nexe's code segment size under PNaCl to reduce the
+  // chance of a code spraying attack succeeding (see
+  // https://code.google.com/p/nativeclient/issues/detail?id=3572).
+  // We can't apply this arbitrary limit outside of PNaCl because it might
+  // break existing NaCl apps, and this limit is only useful if the dyncode
+  // syscalls are disabled.
+  args->initial_nexe_max_code_bytes = 64 << 20;  // 64 MB.
+
+  if (params.process_type == nacl::kNativeNaClProcessType) {
+    args->enable_exception_handling = 1;
+    args->enable_dyncode_syscalls = 1;
+    args->pnacl_mode = 0;
+    args->initial_nexe_max_code_bytes = 0;
+  } else if (params.process_type == nacl::kPNaClTranslatorProcessType) {
+    // Transitioning the PNaCl translators to use the IRT again:
+    // https://code.google.com/p/nativeclient/issues/detail?id=3914.
+    // Once done, this can be removed.
+    args->irt_load_optional = 1;
   }
+
 #if defined(OS_LINUX) || defined(OS_MACOSX)
   args->debug_stub_server_bound_socket_fd = nacl::ToNativeHandle(
       params.debug_stub_server_bound_socket);

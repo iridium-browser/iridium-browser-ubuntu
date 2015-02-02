@@ -9,7 +9,9 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.Build;
 import android.test.FlakyTest;
+import android.test.suitebuilder.annotation.MediumTest;
 import android.view.ContextMenu;
+import android.view.KeyEvent;
 
 import junit.framework.Assert;
 
@@ -41,7 +43,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser", "Main"})
     public void testCopyLinkURL() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActiveTab();
@@ -53,7 +55,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testCopyImageLinkCopiesLinkURL() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActiveTab();
@@ -65,7 +67,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testCopyLinkTextSimple() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActiveTab();
@@ -78,7 +80,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testCopyLinkTextComplex() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActiveTab();
@@ -91,7 +93,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testCopyImageToClipboard() throws InterruptedException, TimeoutException {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) return;
@@ -108,7 +110,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testLongPressOnImage() throws InterruptedException, TimeoutException {
         final Tab tab = getActivity().getActiveTab();
@@ -140,7 +142,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testLongPressOnImageLink() throws InterruptedException, TimeoutException {
         final Tab tab = getActivity().getActiveTab();
@@ -169,7 +171,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testDismissContextMenuOnBack() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActiveTab();
@@ -177,8 +179,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
         assertNotNull("Context menu was not properly created", menu);
         assertFalse("Context menu did not have window focus", getActivity().hasWindowFocus());
 
-        KeyUtils.pressBack(getInstrumentation());
-
+        KeyUtils.singleKeyEventView(getInstrumentation(), tab.getView(), KeyEvent.KEYCODE_BACK);
         Assert.assertTrue("Activity did not regain focus.",
                 CriteriaHelper.pollForCriteria(new Criteria() {
                     @Override
@@ -190,7 +191,7 @@ public class ContextMenuTest extends ChromeShellTestBase {
 
     // http://crbug.com/326769
     @FlakyTest
-    // @LargeTest
+    // @MediumTest
     @Feature({"Browser"})
     public void testDismissContextMenuOnClick() throws InterruptedException, TimeoutException {
         Tab tab = getActivity().getActiveTab();
@@ -207,6 +208,30 @@ public class ContextMenuTest extends ChromeShellTestBase {
                         return getActivity().hasWindowFocus();
                     }
                 }));
+    }
+
+    @MediumTest
+    @Feature({"Browser"})
+    public void testCopyImageURL() throws InterruptedException, TimeoutException {
+        Tab tab = getActivity().getActiveTab();
+        ContextMenuUtils.selectContextMenuItem(this, tab, "testImage",
+                R.id.contextmenu_copy_image_url);
+
+        String expectedUrl = TestHttpServerClient.getUrl(
+                "chrome/test/data/android/contextmenu/test_image.png");
+
+        assertEquals("Copied image URL is not correct", expectedUrl, getClipboardText());
+    }
+
+    @MediumTest
+    @Feature({"Browser"})
+    public void testCopyEmailAddress() throws InterruptedException, TimeoutException {
+        Tab tab = getActivity().getActiveTab();
+        ContextMenuUtils.selectContextMenuItem(this, tab, "testEmail",
+                R.id.contextmenu_copy_email_address);
+
+        assertEquals("Copied email address is not correct", "someone@example.com",
+                getClipboardText());
     }
 
     private String getClipboardText() {

@@ -4,8 +4,6 @@
 
 #include "athena/content/content_proxy.h"
 
-#include "athena/activity/public/activity.h"
-#include "athena/activity/public/activity_view_model.h"
 #include "base/bind.h"
 #include "base/threading/worker_pool.h"
 #include "content/public/browser/render_view_host.h"
@@ -44,8 +42,7 @@ class ProxyImageData : public base::RefCountedThreadSafe<ProxyImageData> {
 
  private:
   friend class base::RefCountedThreadSafe<ProxyImageData>;
-  virtual ~ProxyImageData() {
-  }
+  ~ProxyImageData() {}
 
   void EncodeOnWorker(const SkBitmap& bitmap) {
     DCHECK_EQ(bitmap.colorType(), kAlpha_8_SkColorType);
@@ -60,7 +57,7 @@ class ProxyImageData : public base::RefCountedThreadSafe<ProxyImageData> {
   DISALLOW_COPY_AND_ASSIGN(ProxyImageData);
 };
 
-ContentProxy::ContentProxy(views::WebView* web_view, Activity* activity)
+ContentProxy::ContentProxy(views::WebView* web_view)
     : web_view_(web_view),
       content_visible_(true),
       content_loaded_(true),
@@ -71,8 +68,8 @@ ContentProxy::ContentProxy(views::WebView* web_view, Activity* activity)
 }
 
 ContentProxy::~ContentProxy() {
-  // If we still have a connection to the original Activity, we make it visible
-  // again.
+  // If we still have a connection to the original web contents, we make it
+  // visible again.
   ShowOriginalContent();
 }
 
@@ -82,12 +79,12 @@ void ContentProxy::ContentWillUnload() {
 
 gfx::ImageSkia ContentProxy::GetContentImage() {
   // While we compress to PNG, we use the original read back.
-  if (!raw_image_.isNull() || !png_data_.get())
+  if (!png_data_.get())
     return raw_image_;
 
   // Otherwise we convert the PNG.
   std::vector<gfx::ImagePNGRep> image_reps;
-  image_reps.push_back(gfx::ImagePNGRep(png_data_, 0.0f));
+  image_reps.push_back(gfx::ImagePNGRep(png_data_, 1.0f));
   return *(gfx::Image(image_reps).ToImageSkia());
 }
 
@@ -103,7 +100,7 @@ void ContentProxy::OnPreContentDestroyed() {
   // make the web content visible if the window gets destroyed shortly after.
   ShowOriginalContent();
 
-  web_view_ = NULL;
+  web_view_ = nullptr;
 }
 
 void ContentProxy::ShowOriginalContent() {
@@ -146,7 +143,10 @@ void ContentProxy::CreateProxyContent() {
 
   content::RenderViewHost* host =
       web_view_->GetWebContents()->GetRenderViewHost();
-  DCHECK(host && host->GetView());
+  DCHECK(host);
+  // A never fully initialized content can come here with no view.
+  if (!host->GetView())
+    return;
   gfx::Size source = host->GetView()->GetViewBounds().size();
   gfx::Size target = gfx::Size(source.width() / 2, source.height() / 2);
   host->CopyFromBackingStore(

@@ -5,7 +5,6 @@
 #include <map>
 
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/launch_util.h"
@@ -18,6 +17,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api/management/management_api.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/test_management_policy.h"
 #include "extensions/common/manifest.h"
@@ -43,7 +43,7 @@ Browser* FindOtherBrowser(Browser* browser) {
 
 class ExtensionManagementApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
   }
@@ -335,7 +335,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementApiTest, LaunchType) {
 class ExtensionManagementApiStreamlinedAppsTest
     : public ExtensionManagementApiTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionManagementApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableStreamlinedHostedApps);
   }

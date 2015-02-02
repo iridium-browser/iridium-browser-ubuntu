@@ -79,9 +79,8 @@ const char* RetainedDOMInfo::GetLabel()
 intptr_t RetainedDOMInfo::GetElementCount()
 {
     intptr_t count = 1;
-    Node* current = m_root;
-    while (current) {
-        current = NodeTraversal::next(*current, m_root);
+    for (Node& current : NodeTraversal::descendantsOf(*m_root)) {
+        ALLOW_UNUSED_LOCAL(current);
         ++count;
     }
     return count;
@@ -90,6 +89,50 @@ intptr_t RetainedDOMInfo::GetElementCount()
 intptr_t RetainedDOMInfo::GetEquivalenceClass()
 {
     return reinterpret_cast<intptr_t>(m_root);
+}
+
+ActiveDOMObjectsInfo::ActiveDOMObjectsInfo(int numberOfObjectsWithPendingActivity)
+    : m_numberOfObjectsWithPendingActivity(numberOfObjectsWithPendingActivity)
+{
+}
+
+ActiveDOMObjectsInfo::~ActiveDOMObjectsInfo()
+{
+}
+
+void ActiveDOMObjectsInfo::Dispose()
+{
+    delete this;
+}
+
+bool ActiveDOMObjectsInfo::IsEquivalent(v8::RetainedObjectInfo* other)
+{
+    return this == other;
+}
+
+intptr_t ActiveDOMObjectsInfo::GetHash()
+{
+    return PtrHash<void*>::hash(this);
+}
+
+const char* ActiveDOMObjectsInfo::GetGroupLabel()
+{
+    return "(Pending activities group)";
+}
+
+const char* ActiveDOMObjectsInfo::GetLabel()
+{
+    return "Pending activities";
+}
+
+intptr_t ActiveDOMObjectsInfo::GetElementCount()
+{
+    return m_numberOfObjectsWithPendingActivity;
+}
+
+intptr_t ActiveDOMObjectsInfo::GetEquivalenceClass()
+{
+    return reinterpret_cast<intptr_t>(this);
 }
 
 } // namespace blink

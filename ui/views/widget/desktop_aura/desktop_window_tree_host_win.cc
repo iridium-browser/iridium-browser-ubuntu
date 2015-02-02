@@ -286,7 +286,7 @@ void DesktopWindowTreeHostWin::SetShape(gfx::NativeRegion native_region) {
     // See crbug.com/410593.
     gfx::NativeRegion shape = native_region;
     SkRegion device_region;
-    if (gfx::IsInHighDPIMode()) {
+    if (gfx::GetDPIScale() > 1.0) {
       shape = &device_region;
       const float& scale = gfx::GetDPIScale();
       std::vector<SkIRect> rects;
@@ -530,10 +530,6 @@ void DesktopWindowTreeHostWin::SetCapture() {
 
 void DesktopWindowTreeHostWin::ReleaseCapture() {
   message_handler_->ReleaseCapture();
-}
-
-void DesktopWindowTreeHostWin::PostNativeEvent(
-    const base::NativeEvent& native_event) {
 }
 
 void DesktopWindowTreeHostWin::SetCursorNative(gfx::NativeCursor cursor) {

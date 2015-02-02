@@ -23,19 +23,19 @@ class CONTENT_EXPORT DeviceMotionEventPump
     : public DeviceSensorEventPump<blink::WebDeviceMotionListener> {
  public:
   explicit DeviceMotionEventPump(RenderThread* thread);
-  virtual ~DeviceMotionEventPump();
+  ~DeviceMotionEventPump() override;
 
   // // PlatformEventObserver.
-  virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void SendFakeDataForTesting(void* fake_data) OVERRIDE;
+  bool OnControlMessageReceived(const IPC::Message& message) override;
+  void SendFakeDataForTesting(void* fake_data) override;
 
  protected:
-  virtual void FireEvent() OVERRIDE;
-  virtual bool InitializeReader(base::SharedMemoryHandle handle) OVERRIDE;
+  void FireEvent() override;
+  bool InitializeReader(base::SharedMemoryHandle handle) override;
 
   // PlatformEventObserver.
-  virtual void SendStartMessage() OVERRIDE;
-  virtual void SendStopMessage() OVERRIDE;
+  void SendStartMessage() override;
+  void SendStopMessage() override;
 
   scoped_ptr<DeviceMotionSharedMemoryReader> reader_;
 

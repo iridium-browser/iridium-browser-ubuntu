@@ -37,7 +37,7 @@ scoped_ptr<views::Border> CreateBorder(const int normal_image_set[],
   border->set_insets(gfx::Insets(kTopInset, kLeftRightInset,
                                  kBottomInset, kLeftRightInset));
 
-  return border.PassAs<views::Border>();
+  return border.Pass();
 }
 
 }  // namespace
@@ -53,8 +53,6 @@ NewAvatarButton::NewAvatarButton(views::ButtonListener* listener,
   SetTextColor(views::Button::STATE_NORMAL, SK_ColorWHITE);
   SetTextColor(views::Button::STATE_HOVERED, SK_ColorWHITE);
   SetTextColor(views::Button::STATE_PRESSED, SK_ColorWHITE);
-  SetTextShadows(gfx::ShadowValues(10,
-      gfx::ShadowValue(gfx::Point(), 1.0f, SK_ColorDKGRAY)));
   SetTextSubpixelRenderingEnabled(false);
   SetHorizontalAlignment(gfx::ALIGN_CENTER);
 
@@ -74,7 +72,8 @@ NewAvatarButton::NewAvatarButton(views::ButtonListener* listener,
     generic_avatar_ =
         *rb->GetImageNamed(IDR_AVATAR_THEMED_BUTTON_AVATAR).ToImageSkia();
 #if defined(OS_WIN)
-  } else if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+  } else if (base::win::GetVersion() >= base::win::VERSION_WIN8 ||
+             browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH) {
     const int kNormalImageSet[] = IMAGE_GRID(IDR_AVATAR_METRO_BUTTON_NORMAL);
     const int kHotImageSet[] = IMAGE_GRID(IDR_AVATAR_METRO_BUTTON_HOVER);
     const int kPushedImageSet[] = IMAGE_GRID(IDR_AVATAR_METRO_BUTTON_PRESSED);
@@ -138,23 +137,29 @@ void NewAvatarButton::OnProfileAdded(const base::FilePath& profile_path) {
 void NewAvatarButton::OnProfileWasRemoved(
       const base::FilePath& profile_path,
       const base::string16& profile_name) {
-  UpdateAvatarButtonAndRelayoutParent();
+  // If deleting the active profile, don't bother updating the avatar
+  // button, as the browser window is being closed anyway.
+  if (browser_->profile()->GetPath() != profile_path)
+    UpdateAvatarButtonAndRelayoutParent();
 }
 
 void NewAvatarButton::OnProfileNameChanged(
       const base::FilePath& profile_path,
       const base::string16& old_profile_name) {
-  UpdateAvatarButtonAndRelayoutParent();
+  if (browser_->profile()->GetPath() == profile_path)
+    UpdateAvatarButtonAndRelayoutParent();
 }
 
 void NewAvatarButton::OnProfileAvatarChanged(
       const base::FilePath& profile_path) {
-  UpdateAvatarButtonAndRelayoutParent();
+  if (browser_->profile()->GetPath() == profile_path)
+    UpdateAvatarButtonAndRelayoutParent();
 }
 
 void NewAvatarButton::OnProfileSupervisedUserIdChanged(
       const base::FilePath& profile_path) {
-  UpdateAvatarButtonAndRelayoutParent();
+  if (browser_->profile()->GetPath() == profile_path)
+    UpdateAvatarButtonAndRelayoutParent();
 }
 
 void NewAvatarButton::OnErrorChanged() {
@@ -179,6 +184,12 @@ void NewAvatarButton::UpdateAvatarButtonAndRelayoutParent() {
 
   SetText(use_generic_button ? base::string16() :
       profiles::GetAvatarButtonTextForProfile(browser_->profile()));
+
+  // If the button has no text, clear the text shadows to make sure the
+  // image is centered correctly.
+  SetTextShadows(use_generic_button ? gfx::ShadowValues() : gfx::ShadowValues(
+      10, gfx::ShadowValue(gfx::Point(), 1.0f, SK_ColorDKGRAY)));
+
   // We want the button to resize if the new text is shorter.
   SetMinSize(gfx::Size());
 

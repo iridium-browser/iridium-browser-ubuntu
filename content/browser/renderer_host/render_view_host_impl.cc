@@ -34,7 +34,6 @@
 #include "content/browser/host_zoom_map_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/renderer_host/dip_util.h"
-#include "content/browser/renderer_host/input/timeout_monitor.h"
 #include "content/browser/renderer_host/media/audio_renderer_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -67,7 +66,10 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/drop_data.h"
+#include "content/public/common/file_chooser_file_info.h"
+#include "content/public/common/file_chooser_params.h"
 #include "content/public/common/result_codes.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/common/url_utils.h"
 #include "net/base/filename_util.h"
 #include "net/base/net_util.h"
@@ -81,7 +83,6 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/native_theme/native_theme_switches.h"
-#include "ui/shell_dialogs/selected_file_info.h"
 #include "url/url_constants.h"
 
 #if defined(OS_WIN)
@@ -130,18 +131,10 @@ void DismissVirtualKeyboardTask() {
 }  // namespace
 
 // static
-const int RenderViewHostImpl::kUnloadTimeoutMS = 1000;
+const int64 RenderViewHostImpl::kUnloadTimeoutMS = 1000;
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderViewHost, public:
-
-// static
-bool RenderViewHostImpl::IsRVHStateActive(RenderViewHostImplState rvh_state) {
-  if (rvh_state == STATE_DEFAULT ||
-      rvh_state == STATE_WAITING_FOR_CLOSE)
-    return true;
-  return false;
-}
 
 // static
 RenderViewHost* RenderViewHost::FromID(int render_process_id,
@@ -175,7 +168,8 @@ RenderViewHostImpl::RenderViewHostImpl(
     int routing_id,
     int main_frame_routing_id,
     bool swapped_out,
-    bool hidden)
+    bool hidden,
+    bool has_initialized_audio_host)
     : RenderWidgetHostImpl(widget_delegate,
                            instance->GetProcess(),
                            routing_id,
@@ -186,11 +180,12 @@ RenderViewHostImpl::RenderViewHostImpl(
       waiting_for_drag_context_response_(false),
       enabled_bindings_(0),
       page_id_(-1),
+      is_active_(!swapped_out),
+      is_swapped_out_(swapped_out),
       main_frame_routing_id_(main_frame_routing_id),
       run_modal_reply_msg_(NULL),
       run_modal_opener_id_(MSG_ROUTING_NONE),
-      is_waiting_for_beforeunload_ack_(false),
-      unload_ack_is_for_cross_site_transition_(false),
+      is_waiting_for_close_ack_(false),
       sudden_termination_allowed_(false),
       render_view_termination_status_(base::TERMINATION_STATUS_STILL_RUNNING),
       virtual_keyboard_requested_(false),
@@ -202,27 +197,28 @@ RenderViewHostImpl::RenderViewHostImpl(
 
   GetProcess()->EnableSendQueue();
 
-  if (swapped_out) {
-    rvh_state_ = STATE_SWAPPED_OUT;
-  } else {
-    rvh_state_ = STATE_DEFAULT;
-    instance_->increment_active_view_count();
-  }
-
   if (ResourceDispatcherHostImpl::Get()) {
+    bool has_active_audio = false;
+    if (has_initialized_audio_host) {
+      scoped_refptr<AudioRendererHost> arh =
+          static_cast<RenderProcessHostImpl*>(GetProcess())
+              ->audio_renderer_host();
+      if (arh.get())
+        has_active_audio = arh->RenderViewHasActiveAudio(GetRoutingID());
+    }
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+        BrowserThread::IO,
+        FROM_HERE,
         base::Bind(&ResourceDispatcherHostImpl::OnRenderViewHostCreated,
                    base::Unretained(ResourceDispatcherHostImpl::Get()),
-                   GetProcess()->GetID(), GetRoutingID(), !is_hidden()));
+                   GetProcess()->GetID(),
+                   GetRoutingID(),
+                   !is_hidden(),
+                   has_active_audio));
   }
-
 #if defined(ENABLE_BROWSER_CDMS)
   media_web_contents_observer_.reset(new MediaWebContentsObserver(this));
 #endif
-
-  unload_event_monitor_timeout_.reset(new TimeoutMonitor(base::Bind(
-      &RenderViewHostImpl::OnSwappedOut, weak_factory_.GetWeakPtr(), true)));
 }
 
 RenderViewHostImpl::~RenderViewHostImpl() {
@@ -235,18 +231,13 @@ RenderViewHostImpl::~RenderViewHostImpl() {
   }
 
   delegate_->RenderViewDeleted(this);
-
-  // If this was swapped out, it already decremented the active view
-  // count of the SiteInstance it belongs to.
-  if (IsRVHStateActive(rvh_state_))
-    instance_->decrement_active_view_count();
 }
 
 RenderViewHostDelegate* RenderViewHostImpl::GetDelegate() const {
   return delegate_;
 }
 
-SiteInstance* RenderViewHostImpl::GetSiteInstance() const {
+SiteInstanceImpl* RenderViewHostImpl::GetSiteInstance() const {
   return instance_.get();
 }
 
@@ -292,15 +283,20 @@ bool RenderViewHostImpl::CreateRenderView(
   params.frame_name = frame_name;
   // Ensure the RenderView sets its opener correctly.
   params.opener_route_id = opener_route_id;
-  params.swapped_out = !IsRVHStateActive(rvh_state_);
+  params.swapped_out = !is_active_;
   params.proxy_routing_id = proxy_route_id;
   params.hidden = is_hidden();
   params.never_visible = delegate_->IsNeverVisible();
   params.window_was_created_with_opener = window_was_created_with_opener;
   params.next_page_id = next_page_id;
-  GetWebScreenInfo(&params.screen_info);
+  params.enable_auto_resize = auto_resize_enabled();
+  params.min_size = min_size_for_auto_resize();
+  params.max_size = max_size_for_auto_resize();
+  GetResizeParams(&params.initial_size);
 
-  Send(new ViewMsg_New(params));
+  if (!Send(new ViewMsg_New(params)))
+    return false;
+  SetInitialRenderSizeParams(params.initial_size);
 
   // If it's enabled, tell the renderer to set up the Javascript bindings for
   // sending messages back to the browser.
@@ -390,13 +386,15 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
       !command_line.HasSwitch(switches::kDisableAccelerated2dCanvas);
   prefs.antialiased_2d_canvas_disabled =
       command_line.HasSwitch(switches::kDisable2dCanvasAntialiasing);
+  prefs.antialiased_clips_2d_canvas_enabled =
+      command_line.HasSwitch(switches::kEnable2dCanvasClipAntialiasing);
   prefs.accelerated_2d_canvas_msaa_sample_count =
       atoi(command_line.GetSwitchValueASCII(
       switches::kAcceleratedCanvas2dMSAASampleCount).c_str());
-  prefs.deferred_filters_enabled =
-      !command_line.HasSwitch(switches::kDisableDeferredFilters);
   prefs.container_culling_enabled =
       command_line.HasSwitch(switches::kEnableContainerCulling);
+  prefs.text_blobs_enabled =
+      command_line.HasSwitch(switches::kEnableTextBlobs);
   prefs.region_based_columns_enabled =
       command_line.HasSwitch(switches::kEnableRegionBasedColumns);
 
@@ -407,8 +405,14 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
   prefs.use_solid_color_scrollbars = ui::IsOverlayScrollbarEnabled();
 
 #if defined(OS_ANDROID)
+  // On Android, user gestures are normally required, unless that requirement
+  // is disabled with a command-line switch or the equivalent field trial is
+  // is set to "Enabled".
+  const std::string autoplay_group_name = base::FieldTrialList::FindFullName(
+      "MediaElementAutoplay");
   prefs.user_gesture_required_for_media_playback = !command_line.HasSwitch(
-      switches::kDisableGestureRequirementForMediaPlayback);
+      switches::kDisableGestureRequirementForMediaPlayback) &&
+          (autoplay_group_name.empty() || autoplay_group_name != "Enabled");
 #endif
 
   prefs.touch_enabled = ui::AreTouchEventsEnabled();
@@ -422,6 +426,9 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
 
   prefs.touch_adjustment_enabled =
       !command_line.HasSwitch(switches::kDisableTouchAdjustment);
+
+  prefs.slimming_paint_enabled =
+      command_line.HasSwitch(switches::kEnableSlimmingPaint);
 
 #if defined(OS_MACOSX) || defined(OS_CHROMEOS)
   bool default_enable_scroll_animator = true;
@@ -463,6 +470,9 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
       command_line.HasSwitch(switches::kEnableDeferredImageDecoding) ||
       content::IsImplSidePaintingEnabled();
 
+  prefs.image_color_profiles_enabled =
+      command_line.HasSwitch(switches::kEnableImageColorProfiles);
+
   prefs.spatial_navigation_enabled = command_line.HasSwitch(
       switches::kEnableSpatialNavigation);
 
@@ -478,9 +488,22 @@ WebPreferences RenderViewHostImpl::ComputeWebkitPrefs(const GURL& url) {
     }
   }
 
+  std::string streaming_experiment_group =
+      base::FieldTrialList::FindFullName("V8ScriptStreaming");
   prefs.v8_script_streaming_enabled =
-      command_line.HasSwitch(switches::kEnableV8ScriptStreaming) ||
-      base::FieldTrialList::FindFullName("V8ScriptStreaming") == "Enabled";
+      command_line.HasSwitch(switches::kEnableV8ScriptStreaming);
+  if (streaming_experiment_group == "Enabled") {
+    prefs.v8_script_streaming_enabled = true;
+    prefs.v8_script_streaming_mode = V8_SCRIPT_STREAMING_MODE_ALL;
+  } else if (streaming_experiment_group == "OnlyAsyncAndDefer") {
+    prefs.v8_script_streaming_enabled = true;
+    prefs.v8_script_streaming_mode =
+        V8_SCRIPT_STREAMING_MODE_ONLY_ASYNC_AND_DEFER;
+  } else if (streaming_experiment_group == "AllPlusBlockParserBlocking") {
+    prefs.v8_script_streaming_enabled = true;
+    prefs.v8_script_streaming_mode =
+        V8_SCRIPT_STREAMING_MODE_ALL_PLUS_BLOCK_PARSER_BLOCKING;
+  }
 
   GetContentClient()->browser()->OverrideWebkitPrefs(this, url, &prefs);
   return prefs;
@@ -490,73 +513,8 @@ void RenderViewHostImpl::SuppressDialogsUntilSwapOut() {
   Send(new ViewMsg_SuppressDialogsUntilSwapOut(GetRoutingID()));
 }
 
-void RenderViewHostImpl::OnSwappedOut(bool timed_out) {
-  // Ignore spurious swap out ack.
-  if (!IsWaitingForUnloadACK())
-    return;
-
-  TRACE_EVENT0("navigation", "RenderViewHostImpl::OnSwappedOut");
-  unload_event_monitor_timeout_->Stop();
-  if (timed_out) {
-    base::ProcessHandle process_handle = GetProcess()->GetHandle();
-    int views = 0;
-
-    // Count the number of active widget hosts for the process, which
-    // is equivalent to views using the process as of this writing.
-    scoped_ptr<RenderWidgetHostIterator> widgets(
-      RenderWidgetHost::GetRenderWidgetHosts());
-    while (RenderWidgetHost* widget = widgets->GetNextHost()) {
-      if (widget->GetProcess()->GetID() == GetProcess()->GetID())
-        ++views;
-    }
-
-    if (!RenderProcessHost::run_renderer_in_process() &&
-        process_handle && views <= 1) {
-      // The process can safely be terminated, only if WebContents sets
-      // SuddenTerminationAllowed, which indicates that the timer has expired.
-      // This is not the case if we load data URLs or about:blank. The reason
-      // is that those have no network requests and this code is hit without
-      // setting the unresponsiveness timer. This allows a corner case where a
-      // navigation to a data URL will leave a process running, if the
-      // beforeunload handler completes fine, but the unload handler hangs.
-      // At this time, the complexity to solve this edge case is not worthwhile.
-      if (SuddenTerminationAllowed()) {
-        // We should kill the process, but for now, just log the data so we can
-        // diagnose the kill rate and investigate if separate timer is needed.
-        // http://crbug.com/104346.
-
-        // Log a histogram point to help us diagnose how many of those kills
-        // we have performed. 1 is the enum value for RendererType Normal for
-        // the histogram.
-        UMA_HISTOGRAM_PERCENTAGE(
-            "BrowserRenderProcessHost.ChildKillsUnresponsive", 1);
-      }
-    }
-    // This is going to be incorrect for subframes and will only hit if
-    // --site-per-process is specified.
-    TRACE_EVENT_ASYNC_END0("navigation", "RenderFrameHostImpl::SwapOut", this);
-  }
-
-  switch (rvh_state_) {
-    case STATE_PENDING_SWAP_OUT:
-      SetState(STATE_SWAPPED_OUT);
-      break;
-    case STATE_PENDING_SHUTDOWN:
-      DCHECK(!pending_shutdown_on_swap_out_.is_null());
-      pending_shutdown_on_swap_out_.Run();
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
-void RenderViewHostImpl::SetPendingShutdown(const base::Closure& on_swap_out) {
-  pending_shutdown_on_swap_out_ = on_swap_out;
-  SetState(STATE_PENDING_SHUTDOWN);
-}
-
 void RenderViewHostImpl::ClosePage() {
-  SetState(STATE_WAITING_FOR_CLOSE);
+  is_waiting_for_close_ack_ = true;
   StartHangMonitorTimeout(TimeDelta::FromMilliseconds(kUnloadTimeoutMS));
 
   if (IsRenderViewLive()) {
@@ -582,7 +540,7 @@ void RenderViewHostImpl::ClosePage() {
 
 void RenderViewHostImpl::ClosePageIgnoringUnloadEvents() {
   StopHangMonitorTimeout();
-  is_waiting_for_beforeunload_ack_ = false;
+  is_waiting_for_close_ack_ = false;
 
   sudden_termination_allowed_ = true;
   delegate_->Close(this);
@@ -610,6 +568,13 @@ void RenderViewHostImpl::DragTargetDragEnter(
   const int renderer_id = GetProcess()->GetID();
   ChildProcessSecurityPolicyImpl* policy =
       ChildProcessSecurityPolicyImpl::GetInstance();
+
+#if defined(OS_CHROMEOS)
+  // The externalfile:// scheme is used in Chrome OS to open external files in a
+  // browser tab.
+  if (drop_data.url.SchemeIs(content::kExternalFileScheme))
+    policy->GrantRequestURL(renderer_id, drop_data.url);
+#endif
 
   // The URL could have been cobbled together from any highlighted text string,
   // and can't be interpreted as a capability.
@@ -807,17 +772,27 @@ void RenderViewHostImpl::SetInitialFocus(bool reverse) {
 }
 
 void RenderViewHostImpl::FilesSelectedInChooser(
-    const std::vector<ui::SelectedFileInfo>& files,
+    const std::vector<content::FileChooserFileInfo>& files,
     FileChooserParams::Mode permissions) {
+  storage::FileSystemContext* const file_system_context =
+      BrowserContext::GetStoragePartition(GetProcess()->GetBrowserContext(),
+                                          GetSiteInstance())
+          ->GetFileSystemContext();
   // Grant the security access requested to the given files.
   for (size_t i = 0; i < files.size(); ++i) {
-    const ui::SelectedFileInfo& file = files[i];
+    const content::FileChooserFileInfo& file = files[i];
     if (permissions == FileChooserParams::Save) {
       ChildProcessSecurityPolicyImpl::GetInstance()->GrantCreateReadWriteFile(
-          GetProcess()->GetID(), file.local_path);
+          GetProcess()->GetID(), file.file_path);
     } else {
       ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadFile(
-          GetProcess()->GetID(), file.local_path);
+          GetProcess()->GetID(), file.file_path);
+    }
+    if (file.file_system_url.is_valid()) {
+      ChildProcessSecurityPolicyImpl::GetInstance()->GrantReadFileSystem(
+          GetProcess()->GetID(),
+          file_system_context->CrackURL(file.file_system_url)
+          .mount_filesystem_id());
     }
   }
   Send(new ViewMsg_RunFileChooserResponse(GetRoutingID(), files));
@@ -873,7 +848,7 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
 
   // Filter out most IPC messages if this renderer is swapped out.
   // We still want to handle certain ACKs to keep our state consistent.
-  if (IsSwappedOut()) {
+  if (is_swapped_out_) {
     if (!SwappedOutMessages::CanHandleWhileSwappedOut(msg)) {
       // If this is a synchronous message and we decided not to handle it,
       // we must send an error reply, or else the renderer will be stuck
@@ -1017,7 +992,7 @@ void RenderViewHostImpl::OnShowView(int route_id,
                                     WindowOpenDisposition disposition,
                                     const gfx::Rect& initial_pos,
                                     bool user_gesture) {
-  if (IsRVHStateActive(rvh_state_)) {
+  if (is_active_) {
     delegate_->ShowCreatedWindow(
         route_id, disposition, initial_pos, user_gesture);
   }
@@ -1026,13 +1001,13 @@ void RenderViewHostImpl::OnShowView(int route_id,
 
 void RenderViewHostImpl::OnShowWidget(int route_id,
                                       const gfx::Rect& initial_pos) {
-  if (IsRVHStateActive(rvh_state_))
+  if (is_active_)
     delegate_->ShowCreatedWidget(route_id, initial_pos);
   Send(new ViewMsg_Move_ACK(route_id));
 }
 
 void RenderViewHostImpl::OnShowFullscreenWidget(int route_id) {
-  if (IsRVHStateActive(rvh_state_))
+  if (is_active_)
     delegate_->ShowCreatedFullscreenWidget(route_id);
   Send(new ViewMsg_Move_ACK(route_id));
 }
@@ -1084,6 +1059,12 @@ void RenderViewHostImpl::OnRenderProcessGone(int status, int exit_code) {
 }
 
 void RenderViewHostImpl::OnUpdateState(int32 page_id, const PageState& state) {
+  // If the following DCHECK fails, you have encountered a tricky edge-case that
+  // has evaded reproduction for a very long time. Please report what you were
+  // doing on http://crbug.com/407376, whether or not you can reproduce the
+  // failure.
+  DCHECK_EQ(page_id, page_id_);
+
   // Without this check, the renderer can trick the browser into using
   // filenames it can't access in a future session restore.
   if (!CanAccessFilesOfPageState(state)) {
@@ -1095,7 +1076,7 @@ void RenderViewHostImpl::OnUpdateState(int32 page_id, const PageState& state) {
 }
 
 void RenderViewHostImpl::OnUpdateTargetURL(const GURL& url) {
-  if (IsRVHStateActive(rvh_state_))
+  if (is_active_)
     delegate_->UpdateTargetURL(url);
 
   // Send a notification back to the renderer that we are ready to
@@ -1110,7 +1091,7 @@ void RenderViewHostImpl::OnClose() {
 }
 
 void RenderViewHostImpl::OnRequestMove(const gfx::Rect& pos) {
-  if (IsRVHStateActive(rvh_state_))
+  if (is_active_)
     delegate_->RequestMove(pos);
   Send(new ViewMsg_Move_ACK(GetRoutingID()));
 }
@@ -1238,7 +1219,6 @@ void RenderViewHostImpl::OnFocusedNodeChanged(bool is_editable_node) {
 #if defined(OS_WIN)
   if (!is_editable_node && virtual_keyboard_requested_) {
     virtual_keyboard_requested_ = false;
-    delegate_->SetIsVirtualKeyboardRequested(false);
     BrowserThread::PostDelayedTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(base::IgnoreResult(&DismissVirtualKeyboardTask)),
@@ -1261,8 +1241,7 @@ void RenderViewHostImpl::OnClosePageACK() {
 }
 
 void RenderViewHostImpl::NotifyRendererUnresponsive() {
-  delegate_->RendererUnresponsive(
-      this, is_waiting_for_beforeunload_ack_, IsWaitingForUnloadACK());
+  delegate_->RendererUnresponsive(this);
 }
 
 void RenderViewHostImpl::NotifyRendererResponsive() {
@@ -1336,12 +1315,6 @@ void RenderViewHostImpl::ForwardKeyboardEvent(
   RenderWidgetHostImpl::ForwardKeyboardEvent(key_event);
 }
 
-bool RenderViewHostImpl::IsWaitingForUnloadACK() const {
-  return rvh_state_ == STATE_WAITING_FOR_CLOSE ||
-         rvh_state_ == STATE_PENDING_SHUTDOWN ||
-         rvh_state_ == STATE_PENDING_SWAP_OUT;
-}
-
 void RenderViewHostImpl::OnTextSurroundingSelectionResponse(
     const base::string16& content,
     size_t start_offset,
@@ -1410,12 +1383,12 @@ void RenderViewHostImpl::EnablePreferredSizeMode() {
 
 void RenderViewHostImpl::EnableAutoResize(const gfx::Size& min_size,
                                           const gfx::Size& max_size) {
-  SetShouldAutoResize(true);
+  SetAutoResize(true, min_size, max_size);
   Send(new ViewMsg_EnableAutoResize(GetRoutingID(), min_size, max_size));
 }
 
 void RenderViewHostImpl::DisableAutoResize(const gfx::Size& new_size) {
-  SetShouldAutoResize(false);
+  SetAutoResize(false, gfx::Size(), gfx::Size());
   Send(new ViewMsg_DisableAutoResize(GetRoutingID(), new_size));
   if (!new_size.IsEmpty())
     GetView()->SetSize(new_size);
@@ -1463,34 +1436,11 @@ void RenderViewHostImpl::OnFocusedNodeTouched(bool editable) {
 #if defined(OS_WIN)
   if (editable) {
     virtual_keyboard_requested_ = base::win::DisplayVirtualKeyboard();
-    delegate_->SetIsVirtualKeyboardRequested(true);
   } else {
     virtual_keyboard_requested_ = false;
-    delegate_->SetIsVirtualKeyboardRequested(false);
     base::win::DismissVirtualKeyboard();
   }
 #endif
-}
-
-void RenderViewHostImpl::SetState(RenderViewHostImplState rvh_state) {
-  // We update the number of RenderViews in a SiteInstance when the
-  // swapped out status of this RenderView gets flipped to/from live.
-  if (!IsRVHStateActive(rvh_state_) && IsRVHStateActive(rvh_state))
-    instance_->increment_active_view_count();
-  else if (IsRVHStateActive(rvh_state_) && !IsRVHStateActive(rvh_state))
-    instance_->decrement_active_view_count();
-
-  // Whenever we change the RVH state to and from live or swapped out state, we
-  // should not be waiting for beforeunload or unload acks.  We clear them here
-  // to be safe, since they can cause navigations to be ignored in OnNavigate.
-  if (rvh_state == STATE_DEFAULT ||
-      rvh_state == STATE_SWAPPED_OUT ||
-      rvh_state_ == STATE_DEFAULT ||
-      rvh_state_ == STATE_SWAPPED_OUT) {
-    is_waiting_for_beforeunload_ack_ = false;
-  }
-  rvh_state_ = rvh_state;
-
 }
 
 bool RenderViewHostImpl::CanAccessFilesOfPageState(

@@ -85,11 +85,7 @@ class NotificationsApiDelegate : public NotificationDelegate {
     DCHECK(api_function_.get());
   }
 
-  virtual void Display() OVERRIDE { }
-
-  virtual void Error() OVERRIDE {}
-
-  virtual void Close(bool by_user) OVERRIDE {
+  void Close(bool by_user) override {
     EventRouter::UserGestureState gesture =
         by_user ? EventRouter::USER_GESTURE_ENABLED
                 : EventRouter::USER_GESTURE_NOT_ENABLED;
@@ -98,19 +94,19 @@ class NotificationsApiDelegate : public NotificationDelegate {
     SendEvent(notifications::OnClosed::kEventName, gesture, args.Pass());
   }
 
-  virtual void Click() OVERRIDE {
+  void Click() override {
     scoped_ptr<base::ListValue> args(CreateBaseEventArgs());
     SendEvent(notifications::OnClicked::kEventName,
               EventRouter::USER_GESTURE_ENABLED,
               args.Pass());
   }
 
-  virtual bool HasClickedListener() OVERRIDE {
+  bool HasClickedListener() override {
     return EventRouter::Get(profile_)->HasEventListener(
         notifications::OnClicked::kEventName);
   }
 
-  virtual void ButtonClick(int index) OVERRIDE {
+  void ButtonClick(int index) override {
     scoped_ptr<base::ListValue> args(CreateBaseEventArgs());
     args->Append(new base::FundamentalValue(index));
     SendEvent(notifications::OnButtonClicked::kEventName,
@@ -118,29 +114,10 @@ class NotificationsApiDelegate : public NotificationDelegate {
               args.Pass());
   }
 
-  virtual std::string id() const OVERRIDE {
-    return scoped_id_;
-  }
-
-  virtual content::WebContents* GetWebContents() const OVERRIDE {
-    // We're holding a reference to api_function_, so we know it'll be valid
-    // until ReleaseRVH is called, and api_function_ (as a
-    // AsyncExtensionFunction) will zero out its copy of render_view_host
-    // when the RVH goes away.
-    if (!api_function_.get())
-      return NULL;
-    content::RenderViewHost* rvh = api_function_->render_view_host();
-    if (!rvh)
-      return NULL;
-    return content::WebContents::FromRenderViewHost(rvh);
-  }
-
-  virtual void ReleaseRenderViewHost() OVERRIDE {
-    api_function_ = NULL;
-  }
+  std::string id() const override { return scoped_id_; }
 
  private:
-  virtual ~NotificationsApiDelegate() {}
+  ~NotificationsApiDelegate() override {}
 
   void SendEvent(const std::string& name,
                  EventRouter::UserGestureState user_gesture,
@@ -536,7 +513,8 @@ bool NotificationsUpdateFunction::RunNotificationsApi() {
   // with "false".
   const Notification* matched_notification =
       g_browser_process->notification_ui_manager()->FindById(
-          CreateScopedIdentifier(extension_->id(), params_->notification_id));
+          CreateScopedIdentifier(extension_->id(), params_->notification_id),
+          NotificationUIManager::GetProfileID(GetProfile()));
   if (!matched_notification) {
     SetResult(new base::FundamentalValue(false));
     SendResponse(true);
@@ -573,7 +551,8 @@ bool NotificationsClearFunction::RunNotificationsApi() {
   EXTENSION_FUNCTION_VALIDATE(params_.get());
 
   bool cancel_result = g_browser_process->notification_ui_manager()->CancelById(
-      CreateScopedIdentifier(extension_->id(), params_->notification_id));
+      CreateScopedIdentifier(extension_->id(), params_->notification_id),
+      NotificationUIManager::GetProfileID(GetProfile()));
 
   SetResult(new base::FundamentalValue(cancel_result));
   SendResponse(true);

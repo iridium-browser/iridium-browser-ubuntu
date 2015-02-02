@@ -30,14 +30,14 @@ class ExtensionGarbageCollectorFactory
   friend struct DefaultSingletonTraits<ExtensionGarbageCollectorFactory>;
 
   ExtensionGarbageCollectorFactory();
-  virtual ~ExtensionGarbageCollectorFactory();
+  ~ExtensionGarbageCollectorFactory() override;
 
   // BrowserContextKeyedServiceFactory overrides:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  bool ServiceIsNULLWhileTesting() const override;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionGarbageCollectorFactory);
 };

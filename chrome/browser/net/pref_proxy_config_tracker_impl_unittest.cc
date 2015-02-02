@@ -43,18 +43,16 @@ class TestProxyConfigService : public net::ProxyConfigService {
   }
 
  private:
-  virtual void AddObserver(
-      net::ProxyConfigService::Observer* observer) OVERRIDE {
+  void AddObserver(net::ProxyConfigService::Observer* observer) override {
     observers_.AddObserver(observer);
   }
 
-  virtual void RemoveObserver(
-      net::ProxyConfigService::Observer* observer) OVERRIDE {
+  void RemoveObserver(net::ProxyConfigService::Observer* observer) override {
     observers_.RemoveObserver(observer);
   }
 
-  virtual net::ProxyConfigService::ConfigAvailability GetLatestProxyConfig(
-      net::ProxyConfig* config) OVERRIDE {
+  net::ProxyConfigService::ConfigAvailability GetLatestProxyConfig(
+      net::ProxyConfig* config) override {
     *config = config_;
     return availability_;
   }
@@ -117,7 +115,7 @@ class PrefProxyConfigTrackerImplTestBase : public TESTBASE {
 class PrefProxyConfigTrackerImplTest
     : public PrefProxyConfigTrackerImplTestBase<testing::Test> {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     pref_service_.reset(new TestingPrefServiceSimple());
     Init(pref_service_.get(), pref_service_->registry());
   }
@@ -330,7 +328,7 @@ class PrefProxyConfigTrackerImplCommandLineTest
   PrefProxyConfigTrackerImplCommandLineTest()
       : command_line_(CommandLine::NO_PROGRAM) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     for (size_t i = 0; i < arraysize(GetParam().switches); i++) {
       const char* name = GetParam().switches[i].name;
       const char* value = GetParam().switches[i].value;

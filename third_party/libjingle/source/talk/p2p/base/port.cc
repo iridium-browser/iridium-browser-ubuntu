@@ -25,12 +25,13 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "talk/p2p/base/port.h"
+#include "webrtc/p2p/base/port.h"
 
 #include <algorithm>
 #include <vector>
 
-#include "talk/p2p/base/common.h"
+#include "webrtc/p2p/base/common.h"
+#include "webrtc/p2p/base/portallocator.h"
 #include "webrtc/base/base64.h"
 #include "webrtc/base/crc32.h"
 #include "webrtc/base/helpers.h"
@@ -187,7 +188,8 @@ Port::Port(rtc::Thread* thread, rtc::PacketSocketFactory* factory,
       ice_protocol_(ICEPROTO_HYBRID),
       ice_role_(ICEROLE_UNKNOWN),
       tiebreaker_(0),
-      shared_socket_(true) {
+      shared_socket_(true),
+      candidate_filter_(CF_ALL) {
   Construct();
 }
 
@@ -213,7 +215,8 @@ Port::Port(rtc::Thread* thread, const std::string& type,
       ice_protocol_(ICEPROTO_HYBRID),
       ice_role_(ICEROLE_UNKNOWN),
       tiebreaker_(0),
-      shared_socket_(false) {
+      shared_socket_(false),
+      candidate_filter_(CF_ALL) {
   ASSERT(factory_ != NULL);
   Construct();
 }
@@ -1334,7 +1337,7 @@ void Connection::HandleRoleConflictFromPeer() {
 void Connection::OnMessage(rtc::Message *pmsg) {
   ASSERT(pmsg->message_id == MSG_DELETE);
 
-  LOG_J(LS_INFO, this) << "Connection deleted";
+  LOG_J(LS_INFO, this) << "Connection deleted due to read or write timeout";
   SignalDestroyed(this);
   delete this;
 }

@@ -49,7 +49,7 @@ const double MaxRate = 1024;
 
 AudioBufferSourceNode* AudioBufferSourceNode::create(AudioContext* context, float sampleRate)
 {
-    return adoptRefCountedGarbageCollectedWillBeNoop(new AudioBufferSourceNode(context, sampleRate));
+    return new AudioBufferSourceNode(context, sampleRate);
 }
 
 AudioBufferSourceNode::AudioBufferSourceNode(AudioContext* context, float sampleRate)
@@ -215,8 +215,6 @@ bool AudioBufferSourceNode::renderFromBuffer(AudioBus* bus, unsigned destination
     // Do some sanity checking.
     if (endFrame > bufferLength)
         endFrame = bufferLength;
-    if (m_virtualReadIndex >= endFrame)
-        m_virtualReadIndex = 0; // reset to start
 
     // If the .loop attribute is true, then values of m_loopStart == 0 && m_loopEnd == 0 implies
     // that we should use the entire buffer as the loop, otherwise use the loop values in m_loopStart and m_loopEnd.
@@ -232,11 +230,15 @@ bool AudioBufferSourceNode::renderFromBuffer(AudioBus* bus, unsigned destination
         virtualDeltaFrames = virtualEndFrame - loopStartFrame;
     }
 
+    // If we're looping and the offset (virtualReadIndex) is past the end of the loop, wrap back to
+    // the beginning of the loop. For other cases, nothing needs to be done.
+    if (loop() && m_virtualReadIndex >= virtualEndFrame)
+        m_virtualReadIndex = (m_loopStart < 0) ? 0 : (m_loopStart * buffer()->sampleRate());
 
     double pitchRate = totalPitchRate();
 
     // Sanity check that our playback rate isn't larger than the loop size.
-    if (pitchRate >= virtualDeltaFrames)
+    if (pitchRate > virtualDeltaFrames)
         return false;
 
     // Get local copy.
@@ -247,6 +249,10 @@ bool AudioBufferSourceNode::renderFromBuffer(AudioBus* bus, unsigned destination
 
     const float** sourceChannels = m_sourceChannels.get();
     float** destinationChannels = m_destinationChannels.get();
+
+    ASSERT(virtualReadIndex >= 0);
+    ASSERT(virtualDeltaFrames >= 0);
+    ASSERT(virtualEndFrame >= 0);
 
     // Optimize for the very common case of playing back with pitchRate == 1.
     // We can avoid the linear interpolation.
@@ -267,6 +273,10 @@ bool AudioBufferSourceNode::renderFromBuffer(AudioBus* bus, unsigned destination
             writeIndex += framesThisTime;
             readIndex += framesThisTime;
             framesToProcess -= framesThisTime;
+
+            // It can happen that framesThisTime is 0. Assert that we will actually exit the loop in
+            // this case.  framesThisTime is 0 only if readIndex >= endFrame;
+            ASSERT(framesThisTime ? true : readIndex >= endFrame);
 
             // Wrap-around.
             if (readIndex >= endFrame) {

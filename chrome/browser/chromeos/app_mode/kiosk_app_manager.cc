@@ -21,7 +21,6 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_data.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_external_loader.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager_observer.h"
-#include "chrome/browser/chromeos/app_mode/kiosk_external_updater.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -35,6 +34,11 @@
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/ownership/owner_key_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/common/extension_urls.h"
+
+#if !defined(USE_ATHENA)
+#include "chrome/browser/chromeos/app_mode/kiosk_external_updater.h"
+#endif
 
 namespace chromeos {
 
@@ -275,7 +279,8 @@ void KioskAppManager::AddApp(const std::string& app_id) {
   device_local_accounts.push_back(policy::DeviceLocalAccount(
       policy::DeviceLocalAccount::TYPE_KIOSK_APP,
       GenerateKioskAppAccountId(app_id),
-      app_id));
+      app_id,
+      std::string()));
 
   policy::SetDeviceLocalAccounts(CrosSettings::Get(), device_local_accounts);
 }
@@ -462,19 +467,23 @@ KioskAppManager::KioskAppManager()
 KioskAppManager::~KioskAppManager() {}
 
 void KioskAppManager::MonitorKioskExternalUpdate() {
+#if !defined(USE_ATHENA)
   base::FilePath cache_dir;
   GetCrxCacheDir(&cache_dir);
   base::FilePath unpack_dir;
   GetCrxUnpackDir(&unpack_dir);
   usb_stick_updater_.reset(new KioskExternalUpdater(
       GetBackgroundTaskRunner(), cache_dir, unpack_dir));
+#endif
 }
 
 void KioskAppManager::CleanUp() {
   local_accounts_subscription_.reset();
   local_account_auto_login_id_subscription_.reset();
   apps_.clear();
+#if !defined(USE_ATHENA)
   usb_stick_updater_.reset();
+#endif
   external_cache_.reset();
 }
 
@@ -517,16 +526,14 @@ void KioskAppManager::UpdateAppData() {
     if (it->account_id == auto_login_account_id)
       auto_launch_app_id_ = it->kiosk_app_id;
 
-    // TODO(mnissler): Support non-CWS update URLs.
-
     std::map<std::string, KioskAppData*>::iterator old_it =
         old_apps.find(it->kiosk_app_id);
     if (old_it != old_apps.end()) {
       apps_.push_back(old_it->second);
       old_apps.erase(old_it);
     } else {
-      KioskAppData* new_app =
-          new KioskAppData(this, it->kiosk_app_id, it->user_id);
+      KioskAppData* new_app = new KioskAppData(
+          this, it->kiosk_app_id, it->user_id, GURL(it->kiosk_app_update_url));
       apps_.push_back(new_app);  // Takes ownership of |new_app|.
       new_app->Load();
     }
@@ -550,7 +557,15 @@ void KioskAppManager::UpdateAppData() {
   scoped_ptr<base::DictionaryValue> prefs(new base::DictionaryValue);
   for (size_t i = 0; i < apps_.size(); ++i) {
     scoped_ptr<base::DictionaryValue> entry(new base::DictionaryValue);
-    entry->SetBoolean(extensions::ExternalProviderImpl::kIsFromWebstore, true);
+
+    if (apps_[i]->update_url().is_valid()) {
+      entry->SetString(extensions::ExternalProviderImpl::kExternalUpdateUrl,
+                       apps_[i]->update_url().spec());
+    } else {
+      entry->SetString(extensions::ExternalProviderImpl::kExternalUpdateUrl,
+                       extension_urls::GetWebstoreUpdateUrl().spec());
+    }
+
     prefs->Set(apps_[i]->app_id(), entry.release());
   }
   external_cache_->UpdateExtensionsList(prefs.Pass());

@@ -33,16 +33,20 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/V8ANGLEInstancedArrays.h"
+#include "bindings/core/v8/V8ArrayBufferView.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8EXTBlendMinMax.h"
 #include "bindings/core/v8/V8EXTFragDepth.h"
 #include "bindings/core/v8/V8EXTShaderTextureLOD.h"
 #include "bindings/core/v8/V8EXTTextureFilterAnisotropic.h"
+#include "bindings/core/v8/V8EXTsRGB.h"
+#include "bindings/core/v8/V8Float32Array.h"
 #include "bindings/core/v8/V8HTMLCanvasElement.h"
 #include "bindings/core/v8/V8HTMLImageElement.h"
 #include "bindings/core/v8/V8HTMLVideoElement.h"
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8ImageData.h"
+#include "bindings/core/v8/V8Int32Array.h"
 #include "bindings/core/v8/V8OESElementIndexUint.h"
 #include "bindings/core/v8/V8OESStandardDerivatives.h"
 #include "bindings/core/v8/V8OESTextureFloat.h"
@@ -50,6 +54,8 @@
 #include "bindings/core/v8/V8OESTextureHalfFloat.h"
 #include "bindings/core/v8/V8OESTextureHalfFloatLinear.h"
 #include "bindings/core/v8/V8OESVertexArrayObject.h"
+#include "bindings/core/v8/V8Uint32Array.h"
+#include "bindings/core/v8/V8Uint8Array.h"
 #include "bindings/core/v8/V8WebGLBuffer.h"
 #include "bindings/core/v8/V8WebGLCompressedTextureATC.h"
 #include "bindings/core/v8/V8WebGLCompressedTextureETC1.h"
@@ -67,19 +73,9 @@
 #include "bindings/core/v8/V8WebGLTexture.h"
 #include "bindings/core/v8/V8WebGLUniformLocation.h"
 #include "bindings/core/v8/V8WebGLVertexArrayObjectOES.h"
-#include "bindings/core/v8/custom/V8ArrayBufferViewCustom.h"
-#include "bindings/core/v8/custom/V8Float32ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Int16ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Int32ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Int8ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Uint16ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Uint32ArrayCustom.h"
-#include "bindings/core/v8/custom/V8Uint8ArrayCustom.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/html/canvas/WebGLRenderingContext.h"
 #include "platform/NotImplemented.h"
-#include "wtf/FastMalloc.h"
-#include <limits>
 
 namespace blink {
 
@@ -155,6 +151,10 @@ static v8::Handle<v8::Value> toV8Object(WebGLExtension* extension, v8::Handle<v8
     case EXTShaderTextureLODName:
         extensionObject = toV8(static_cast<EXTShaderTextureLOD*>(extension), contextObject, isolate);
         referenceName = "extShaderTextureLODName";
+        break;
+    case EXTsRGBName:
+        extensionObject = toV8(static_cast<EXTsRGB*>(extension), contextObject, isolate);
+        referenceName = "extsRGBName";
         break;
     case EXTTextureFilterAnisotropicName:
         extensionObject = toV8(static_cast<EXTTextureFilterAnisotropic*>(extension), contextObject, isolate);
@@ -427,12 +427,12 @@ void V8WebGLRenderingContext::getUniformMethodCustom(const v8::FunctionCallbackI
         v8::TryCatch block;
         V8RethrowTryCatchScope rethrow(block);
         if (info.Length() > 0 && !isUndefinedOrNull(info[0]) && !V8WebGLProgram::hasInstance(info[0], info.GetIsolate())) {
-            V8ThrowException::throwTypeError(ExceptionMessages::failedToExecute("getUniform", "WebGLRenderingContext", "parameter 1 is not of type 'WebGLProgram'."), info.GetIsolate());
+            V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("getUniform", "WebGLRenderingContext", "parameter 1 is not of type 'WebGLProgram'."));
             return;
         }
         TONATIVE_VOID_INTERNAL(program, V8WebGLProgram::toImplWithTypeCheck(info.GetIsolate(), info[0]));
         if (info.Length() > 1 && !isUndefinedOrNull(info[1]) && !V8WebGLUniformLocation::hasInstance(info[1], info.GetIsolate())) {
-            V8ThrowException::throwTypeError(ExceptionMessages::failedToExecute("getUniform", "WebGLRenderingContext", "parameter 2 is not of type 'WebGLUniformLocation'."), info.GetIsolate());
+            V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("getUniform", "WebGLRenderingContext", "parameter 2 is not of type 'WebGLUniformLocation'."));
             return;
         }
         TONATIVE_VOID_INTERNAL(location, V8WebGLUniformLocation::toImplWithTypeCheck(info.GetIsolate(), info[1]));
@@ -513,7 +513,7 @@ static void vertexAttribAndUniformHelperf(const v8::FunctionCallbackInfo<v8::Val
 
     const int indexArrayArgument = 1;
     if (V8Float32Array::hasInstance(info[indexArrayArgument], info.GetIsolate())) {
-        Float32Array* array = V8Float32Array::toImpl(info[indexArrayArgument]->ToObject());
+        DOMFloat32Array* array = V8Float32Array::toImpl(info[indexArrayArgument]->ToObject());
         ASSERT(array);
         switch (functionToCall) {
         case kUniform1v: context->uniform1fv(location, array); break;
@@ -584,7 +584,7 @@ static void uniformHelperi(const v8::FunctionCallbackInfo<v8::Value>& info, Func
 
     const int indexArrayArgumentIndex = 1;
     if (V8Int32Array::hasInstance(info[indexArrayArgumentIndex], info.GetIsolate())) {
-        Int32Array* array = V8Int32Array::toImpl(info[indexArrayArgumentIndex]->ToObject());
+        DOMInt32Array* array = V8Int32Array::toImpl(info[indexArrayArgumentIndex]->ToObject());
         ASSERT(array);
         switch (functionToCall) {
         case kUniform1v: context->uniform1iv(location, array); break;
@@ -696,7 +696,7 @@ static void uniformMatrixHelper(const v8::FunctionCallbackInfo<v8::Value>& info,
     bool transpose = info[1]->BooleanValue();
     const int arrayArgumentIndex = 2;
     if (V8Float32Array::hasInstance(info[arrayArgumentIndex], info.GetIsolate())) {
-        Float32Array* array = V8Float32Array::toImpl(info[arrayArgumentIndex]->ToObject());
+        DOMFloat32Array* array = V8Float32Array::toImpl(info[arrayArgumentIndex]->ToObject());
         ASSERT(array);
         switch (matrixSize) {
         case 2: context->uniformMatrix2fv(location, transpose, array); break;

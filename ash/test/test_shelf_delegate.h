@@ -23,7 +23,7 @@ namespace test {
 class TestShelfDelegate : public ShelfDelegate, public aura::WindowObserver {
  public:
   explicit TestShelfDelegate(ShelfModel* model);
-  virtual ~TestShelfDelegate();
+  ~TestShelfDelegate() override;
 
   void AddShelfItem(aura::Window* window);
   void AddShelfItem(aura::Window* window, ShelfItemStatus status);
@@ -32,19 +32,18 @@ class TestShelfDelegate : public ShelfDelegate, public aura::WindowObserver {
   static TestShelfDelegate* instance() { return instance_; }
 
   // WindowObserver implementation
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
-  virtual void OnWindowHierarchyChanging(
-      const HierarchyChangeParams& params) OVERRIDE;
+  void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowHierarchyChanging(const HierarchyChangeParams& params) override;
 
   // ShelfDelegate implementation.
-  virtual void OnShelfCreated(Shelf* shelf) OVERRIDE;
-  virtual void OnShelfDestroyed(Shelf* shelf) OVERRIDE;
-  virtual ShelfID GetShelfIDForAppID(const std::string& app_id) OVERRIDE;
-  virtual const std::string& GetAppIDForShelfID(ShelfID id) OVERRIDE;
-  virtual void PinAppWithID(const std::string& app_id) OVERRIDE;
-  virtual bool CanPin() const OVERRIDE;
-  virtual bool IsAppPinned(const std::string& app_id) OVERRIDE;
-  virtual void UnpinAppWithID(const std::string& app_id) OVERRIDE;
+  void OnShelfCreated(Shelf* shelf) override;
+  void OnShelfDestroyed(Shelf* shelf) override;
+  ShelfID GetShelfIDForAppID(const std::string& app_id) override;
+  const std::string& GetAppIDForShelfID(ShelfID id) override;
+  void PinAppWithID(const std::string& app_id) override;
+  bool CanPin() const override;
+  bool IsAppPinned(const std::string& app_id) override;
+  void UnpinAppWithID(const std::string& app_id) override;
 
  private:
   static TestShelfDelegate* instance_;

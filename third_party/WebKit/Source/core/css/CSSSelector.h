@@ -48,9 +48,6 @@ namespace blink {
     //   --> (relation == SubSelector)
     //     selectorText(): .b
     //
-    // Note that currently a bare selector such as ".a" has a relation() of Descendant. This is a bug - instead the relation should be
-    // "None".
-    //
     // The order of tagHistory() varies depending on the situation.
     // * Relations using combinators (http://www.w3.org/TR/css3-selectors/#combinators), such as descendant, sibling, etc., are parsed
     //   right-to-left (in the example above, this is why .c is earlier in the tagHistory() chain than .a.b).
@@ -106,35 +103,35 @@ namespace blink {
 
         /* how the attribute value has to match.... Default is Exact */
         enum Match {
-            Unknown = 0,
+            Unknown,
             Tag, // Example: div
             Id, // Example: #id
             Class, // example: .class
             PseudoClass, // Example:  :nth-child(2)
             PseudoElement, // Example: ::first-line
             PagePseudoClass, // ??
-            Exact, // Example: E[foo="bar"]
-            Set, // Example: E[foo]
-            Hyphen, // Example: E[foo|="bar"]
-            List, // Example: E[foo~="bar"]
-            Contain, // css3: E[foo*="bar"]
-            Begin, // css3: E[foo^="bar"]
-            End, // css3: E[foo$="bar"]
-            FirstAttributeSelectorMatch = Exact,
+            AttributeExact, // Example: E[foo="bar"]
+            AttributeSet, // Example: E[foo]
+            AttributeHyphen, // Example: E[foo|="bar"]
+            AttributeList, // Example: E[foo~="bar"]
+            AttributeContain, // css3: E[foo*="bar"]
+            AttributeBegin, // css3: E[foo^="bar"]
+            AttributeEnd, // css3: E[foo$="bar"]
+            FirstAttributeSelectorMatch = AttributeExact,
         };
 
         enum Relation {
-            Descendant = 0, // "Space" combinator
+            SubSelector, // No combinator
+            Descendant, // "Space" combinator
             Child, // > combinator
             DirectAdjacent, // + combinator
             IndirectAdjacent, // ~ combinator
-            SubSelector, // "No space" combinator
             ShadowPseudo, // Special case of shadow DOM pseudo elements / shadow pseudo element
             ShadowDeep // /deep/ combinator
         };
 
         enum PseudoType {
-            PseudoNotParsed = 0,
+            PseudoNotParsed,
             PseudoUnknown,
             PseudoEmpty,
             PseudoFirstChild,
@@ -180,10 +177,8 @@ namespace blink {
             PseudoRoot,
             PseudoScope,
             PseudoScrollbar,
-            PseudoScrollbarBack,
             PseudoScrollbarButton,
             PseudoScrollbarCorner,
-            PseudoScrollbarForward,
             PseudoScrollbarThumb,
             PseudoScrollbarTrack,
             PseudoScrollbarTrackPiece,
@@ -207,7 +202,6 @@ namespace blink {
             PseudoFullScreenAncestor,
             PseudoInRange,
             PseudoOutOfRange,
-            PseudoUserAgentCustomElement,
             PseudoWebKitCustomElement,
             PseudoCue,
             PseudoFutureCue,
@@ -290,14 +284,15 @@ namespace blink {
         bool matchesPseudoElement() const;
         bool isCustomPseudoElement() const;
         bool isDirectAdjacentSelector() const { return m_relation == DirectAdjacent; }
+        bool isAdjacentSelector() const { return m_relation == DirectAdjacent || m_relation == IndirectAdjacent; }
+        bool isShadowSelector() const { return m_relation == ShadowPseudo || m_relation == ShadowDeep; }
         bool isSiblingSelector() const;
         bool isAttributeSelector() const;
         bool isContentPseudoElement() const;
         bool isShadowPseudoElement() const;
         bool isHostPseudoClass() const;
-
-        // FIXME: selectors with no tagHistory() get a relation() of Descendant (and sometimes even SubSelector). It should instead be
-        // None.
+        bool isTreeBoundaryCrossing() const;
+        bool isInsertionPointCrossing() const;
         Relation relation() const { return static_cast<Relation>(m_relation); }
         void setRelation(Relation relation)
         {
@@ -404,7 +399,7 @@ inline bool CSSSelector::matchesPseudoElement() const
 
 inline bool CSSSelector::isCustomPseudoElement() const
 {
-    return m_match == PseudoElement && (m_pseudoType == PseudoUserAgentCustomElement || m_pseudoType == PseudoWebKitCustomElement);
+    return m_match == PseudoElement && m_pseudoType == PseudoWebKitCustomElement;
 }
 
 inline bool CSSSelector::isHostPseudoClass() const
@@ -445,6 +440,17 @@ inline bool CSSSelector::isShadowPseudoElement() const
     return m_match == PseudoElement && pseudoType() == PseudoShadow;
 }
 
+inline bool CSSSelector::isTreeBoundaryCrossing() const
+{
+    return m_match == PseudoClass && (pseudoType() == PseudoHost || pseudoType() == PseudoHostContext);
+}
+
+inline bool CSSSelector::isInsertionPointCrossing() const
+{
+    return (m_match == PseudoClass && pseudoType() == PseudoHostContext)
+        || (m_match == PseudoElement && pseudoType() == PseudoContent);
+}
+
 inline void CSSSelector::setValue(const AtomicString& value)
 {
     ASSERT(m_match != Tag);
@@ -461,7 +467,7 @@ inline void CSSSelector::setValue(const AtomicString& value)
 }
 
 inline CSSSelector::CSSSelector()
-    : m_relation(Descendant)
+    : m_relation(SubSelector)
     , m_match(Unknown)
     , m_pseudoType(PseudoNotParsed)
     , m_parsedNth(false)
@@ -475,7 +481,7 @@ inline CSSSelector::CSSSelector()
 }
 
 inline CSSSelector::CSSSelector(const QualifiedName& tagQName, bool tagIsForNamespaceRule)
-    : m_relation(Descendant)
+    : m_relation(SubSelector)
     , m_match(Tag)
     , m_pseudoType(PseudoNotParsed)
     , m_parsedNth(false)

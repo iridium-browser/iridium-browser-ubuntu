@@ -7,7 +7,7 @@
 #include "content/common/mojo/mojo_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_sender.h"
-#include "mojo/embedder/platform_channel_pair.h"
+#include "mojo/edk/embedder/platform_channel_pair.h"
 
 namespace content {
 namespace {
@@ -24,6 +24,10 @@ base::PlatformFile PlatformFileFromScopedPlatformHandle(
 }  // namespace
 
 MojoApplicationHost::MojoApplicationHost() : did_activate_(false) {
+#if defined(OS_ANDROID)
+  service_registry_android_.reset(
+      new ServiceRegistryAndroid(&service_registry_));
+#endif
 }
 
 MojoApplicationHost::~MojoApplicationHost() {
@@ -47,7 +51,7 @@ bool MojoApplicationHost::Init() {
   return true;
 }
 
-bool MojoApplicationHost::Activate(IPC::Sender* sender,
+void MojoApplicationHost::Activate(IPC::Sender* sender,
                                    base::ProcessHandle process_handle) {
   DCHECK(!did_activate_);
   DCHECK(client_handle_.is_valid());
@@ -56,7 +60,6 @@ bool MojoApplicationHost::Activate(IPC::Sender* sender,
       PlatformFileFromScopedPlatformHandle(client_handle_.Pass());
   did_activate_ = sender->Send(new MojoMsg_Activate(
       IPC::GetFileHandleForProcess(client_file, process_handle, true)));
-  return did_activate_;
 }
 
 void MojoApplicationHost::WillDestroySoon() {

@@ -20,19 +20,13 @@
  */
 
 #include "config.h"
-
 #include "core/rendering/svg/RenderSVGResourceMarker.h"
 
-#include "core/rendering/PaintInfo.h"
 #include "core/rendering/svg/RenderSVGContainer.h"
 #include "core/rendering/svg/SVGRenderSupport.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
-
 #include "wtf/TemporaryChange.h"
 
 namespace blink {
-
-const RenderSVGResourceType RenderSVGResourceMarker::s_resourceType = MarkerResourceType;
 
 RenderSVGResourceMarker::RenderSVGResourceMarker(SVGMarkerElement* node)
     : RenderSVGResourceContainer(node)
@@ -68,12 +62,6 @@ void RenderSVGResourceMarker::removeClientFromCache(RenderObject* client, bool m
 {
     ASSERT(client);
     markClientForInvalidation(client, markForInvalidation ? BoundariesInvalidation : ParentOnlyInvalidation);
-}
-
-void RenderSVGResourceMarker::applyViewportClip(PaintInfo& paintInfo)
-{
-    if (SVGRenderSupport::isOverflowHidden(this))
-        paintInfo.context->clip(m_viewport);
 }
 
 FloatRect RenderSVGResourceMarker::markerBoundaries(const AffineTransform& markerTransformation) const
@@ -128,22 +116,6 @@ AffineTransform RenderSVGResourceMarker::markerTransformation(const FloatPoint& 
     transform.rotate(markerAngle == -1 ? autoAngle : markerAngle);
     transform = markerContentTransformation(transform, referencePoint(), useStrokeWidth ? strokeWidth : -1);
     return transform;
-}
-
-void RenderSVGResourceMarker::draw(PaintInfo& paintInfo, const AffineTransform& transform)
-{
-    clearInvalidationMask();
-
-    // An empty viewBox disables rendering.
-    SVGMarkerElement* marker = toSVGMarkerElement(element());
-    ASSERT(marker);
-    if (marker->hasAttribute(SVGNames::viewBoxAttr) && marker->viewBox()->currentValue()->isValid() && marker->viewBox()->currentValue()->value().isEmpty())
-        return;
-
-    PaintInfo info(paintInfo);
-    GraphicsContextStateSaver stateSaver(*info.context, false);
-    info.applyTransform(transform, &stateSaver);
-    RenderSVGContainer::paint(info, IntPoint());
 }
 
 AffineTransform RenderSVGResourceMarker::markerContentTransformation(const AffineTransform& contentTransformation, const FloatPoint& origin, float strokeWidth) const

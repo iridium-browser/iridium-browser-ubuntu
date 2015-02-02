@@ -93,8 +93,7 @@ class ScopedHandleBase {
 
   template <class CompatibleHandleType>
   explicit ScopedHandleBase(ScopedHandleBase<CompatibleHandleType> other)
-      : handle_(other.release()) {
-  }
+      : handle_(other.release()) {}
 
   // Move-only constructor and operator=.
   ScopedHandleBase(RValue other) : handle_(other.object->release()) {}
@@ -111,16 +110,14 @@ class ScopedHandleBase {
   template <typename PassedHandleType>
   static ScopedHandleBase<HandleType> From(
       ScopedHandleBase<PassedHandleType> other) {
-    MOJO_COMPILE_ASSERT(
+    static_assert(
         sizeof(static_cast<PassedHandleType*>(static_cast<HandleType*>(0))),
-        HandleType_is_not_a_subtype_of_PassedHandleType);
+        "HandleType is not a subtype of PassedHandleType");
     return ScopedHandleBase<HandleType>(
         static_cast<HandleType>(other.release().value()));
   }
 
-  void swap(ScopedHandleBase& other) {
-    handle_.swap(other.handle_);
-  }
+  void swap(ScopedHandleBase& other) { handle_.swap(other.handle_); }
 
   HandleType release() MOJO_WARN_UNUSED_RESULT {
     HandleType rv;
@@ -133,15 +130,14 @@ class ScopedHandleBase {
     handle_ = handle;
   }
 
-  bool is_valid() const {
-    return handle_.is_valid();
-  }
+  bool is_valid() const { return handle_.is_valid(); }
 
  private:
   void CloseIfNecessary() {
     if (!handle_.is_valid())
       return;
-    MojoResult result MOJO_ALLOW_UNUSED = MojoClose(handle_.value());
+    MojoResult result = MojoClose(handle_.value());
+    MOJO_ALLOW_UNUSED_LOCAL(result);
     assert(result == MOJO_RESULT_OK);
   }
 
@@ -170,9 +166,7 @@ class Handle {
     other.value_ = temp;
   }
 
-  bool is_valid() const {
-    return value_ != kInvalidHandleValue;
-  }
+  bool is_valid() const { return value_ != kInvalidHandleValue; }
 
   const MojoHandle& value() const { return value_; }
   MojoHandle* mutable_value() { return &value_; }
@@ -185,13 +179,12 @@ class Handle {
 };
 
 // Should have zero overhead.
-MOJO_COMPILE_ASSERT(sizeof(Handle) == sizeof(MojoHandle),
-                    bad_size_for_cpp_Handle);
+static_assert(sizeof(Handle) == sizeof(MojoHandle), "Bad size for C++ Handle");
 
 // The scoper should also impose no more overhead.
 typedef ScopedHandleBase<Handle> ScopedHandle;
-MOJO_COMPILE_ASSERT(sizeof(ScopedHandle) == sizeof(Handle),
-                    bad_size_for_cpp_ScopedHandle);
+static_assert(sizeof(ScopedHandle) == sizeof(Handle),
+              "Bad size for C++ ScopedHandle");
 
 inline MojoResult Wait(Handle handle,
                        MojoHandleSignals signals,
@@ -214,7 +207,7 @@ inline MojoResult WaitMany(const HandleVectorType& handles,
     return MOJO_RESULT_OUT_OF_RANGE;
 
   if (handles.size() == 0)
-    return MojoWaitMany(NULL, NULL, 0, deadline);
+    return MojoWaitMany(nullptr, nullptr, 0, deadline);
 
   const Handle& first_handle = handles[0];
   const MojoHandleSignals& first_signals = signals[0];
@@ -229,7 +222,8 @@ inline MojoResult WaitMany(const HandleVectorType& handles,
 // Note: There's nothing to do, since the argument will be destroyed when it
 // goes out of scope.
 template <class HandleType>
-inline void Close(ScopedHandleBase<HandleType> /*handle*/) {}
+inline void Close(ScopedHandleBase<HandleType> /*handle*/) {
+}
 
 // Most users should typically use |Close()| (above) instead.
 inline MojoResult CloseRaw(Handle handle) {

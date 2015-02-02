@@ -14,6 +14,7 @@
 
 #include "test_config.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include <memory>
@@ -56,6 +57,9 @@ const BoolFlag kBoolFlags[] = {
   { "-shim-writes-first", &TestConfig::shim_writes_first },
   { "-tls-d5-bug", &TestConfig::tls_d5_bug },
   { "-expect-session-miss", &TestConfig::expect_session_miss },
+  { "-expect-extended-master-secret",
+    &TestConfig::expect_extended_master_secret },
+  { "-renegotiate", &TestConfig::renegotiate },
 };
 
 const size_t kNumBoolFlags = sizeof(kBoolFlags) / sizeof(kBoolFlags[0]);
@@ -73,6 +77,8 @@ const StringFlag kStringFlags[] = {
   { "-expect-alpn", &TestConfig::expected_alpn },
   { "-expect-advertised-alpn", &TestConfig::expected_advertised_alpn },
   { "-select-alpn", &TestConfig::select_alpn },
+  { "-psk", &TestConfig::psk },
+  { "-psk-identity", &TestConfig::psk_identity },
 };
 
 const size_t kNumStringFlags = sizeof(kStringFlags) / sizeof(kStringFlags[0]);
@@ -104,7 +110,9 @@ TestConfig::TestConfig()
       cookie_exchange(false),
       shim_writes_first(false),
       tls_d5_bug(false),
-      expect_session_miss(false) {
+      expect_session_miss(false),
+      expect_extended_master_secret(false),
+      renegotiate(false) {
 }
 
 bool ParseConfig(int argc, char **argv, TestConfig *out_config) {

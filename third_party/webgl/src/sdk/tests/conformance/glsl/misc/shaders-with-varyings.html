@@ -53,6 +53,14 @@ void main()
     gl_Position = vec4(0,0,0,0);
 }
 </script>
+<script id="vertexShaderUsedVarying" type="text/something-not-javascript">
+varying vec4 v_varying;
+
+void main()
+{
+    gl_Position = v_varying;
+}
+</script>
 <script id="fragmentShaderUnusedVarying" type="text/something-not-javascript">
 precision mediump float;
 

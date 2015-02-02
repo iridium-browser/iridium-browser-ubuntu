@@ -44,25 +44,23 @@ class DomDistillerViewerSource::RequestViewerHandle
       const std::string& expected_request_path,
       const content::URLDataSource::GotDataCallback& callback,
       DistilledPagePrefs* distilled_page_prefs);
-  virtual ~RequestViewerHandle();
+  ~RequestViewerHandle() override;
 
   // ViewRequestDelegate implementation:
-  virtual void OnArticleReady(
-      const DistilledArticleProto* article_proto) OVERRIDE;
+  void OnArticleReady(const DistilledArticleProto* article_proto) override;
 
-  virtual void OnArticleUpdated(
-      ArticleDistillationUpdate article_update) OVERRIDE;
+  void OnArticleUpdated(ArticleDistillationUpdate article_update) override;
 
   void TakeViewerHandle(scoped_ptr<ViewerHandle> viewer_handle);
 
   // content::WebContentsObserver implementation:
-  virtual void DidNavigateMainFrame(
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-  virtual void WebContentsDestroyed() OVERRIDE;
-  virtual void DidFinishLoad(content::RenderFrameHost* render_frame_host,
-                             const GURL& validated_url) OVERRIDE;
+      const content::FrameNavigateParams& params) override;
+  void RenderProcessGone(base::TerminationStatus status) override;
+  void WebContentsDestroyed() override;
+  void DidFinishLoad(content::RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override;
 
  private:
   // Sends JavaScript to the attached Viewer, buffering data if the viewer isn't
@@ -75,9 +73,9 @@ class DomDistillerViewerSource::RequestViewerHandle
   void Cancel();
 
   // DistilledPagePrefs::Observer implementation:
-  virtual void OnChangeFontFamily(
-      DistilledPagePrefs::FontFamily new_font_family) OVERRIDE;
-  virtual void OnChangeTheme(DistilledPagePrefs::Theme new_theme) OVERRIDE;
+  void OnChangeFontFamily(
+      DistilledPagePrefs::FontFamily new_font_family) override;
+  void OnChangeTheme(DistilledPagePrefs::Theme new_theme) override;
 
   // The handle to the view request towards the DomDistillerService. It
   // needs to be kept around to ensure the distillation request finishes.

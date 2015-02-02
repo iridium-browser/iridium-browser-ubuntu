@@ -52,7 +52,7 @@ class SystemInfoEventRouter : public gfx::DisplayObserver,
   static SystemInfoEventRouter* GetInstance();
 
   SystemInfoEventRouter();
-  virtual ~SystemInfoEventRouter();
+  ~SystemInfoEventRouter() override;
 
   // Add/remove event listener for the |event_name| event.
   void AddEventListener(const std::string& event_name);
@@ -60,16 +60,16 @@ class SystemInfoEventRouter : public gfx::DisplayObserver,
 
  private:
   // gfx::DisplayObserver:
-  virtual void OnDisplayAdded(const gfx::Display& new_display) OVERRIDE;
-  virtual void OnDisplayRemoved(const gfx::Display& old_display) OVERRIDE;
-  virtual void OnDisplayMetricsChanged(const gfx::Display& display,
-                                       uint32_t metrics) OVERRIDE;
+  void OnDisplayAdded(const gfx::Display& new_display) override;
+  void OnDisplayRemoved(const gfx::Display& old_display) override;
+  void OnDisplayMetricsChanged(const gfx::Display& display,
+                               uint32_t metrics) override;
 
   // RemovableStorageObserver implementation.
-  virtual void OnRemovableStorageAttached(
-      const storage_monitor::StorageInfo& info) OVERRIDE;
-  virtual void OnRemovableStorageDetached(
-      const storage_monitor::StorageInfo& info) OVERRIDE;
+  void OnRemovableStorageAttached(
+      const storage_monitor::StorageInfo& info) override;
+  void OnRemovableStorageDetached(
+      const storage_monitor::StorageInfo& info) override;
 
   // Called from any thread to dispatch the systemInfo event to all extension
   // processes cross multiple profiles.

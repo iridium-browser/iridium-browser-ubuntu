@@ -4,6 +4,7 @@
 
 import logging
 import os
+import platform
 import subprocess
 import sys
 
@@ -43,6 +44,10 @@ class LinuxPlatformBackend(
 
   def HasBeenThermallyThrottled(self):
     raise NotImplementedError()
+
+  @decorators.Cache
+  def GetArchName(self):
+    return platform.machine()
 
   def GetOSName(self):
     return 'linux'
@@ -104,7 +109,7 @@ class LinuxPlatformBackend(
     return self._power_monitor.StopMonitoringPower()
 
   def ReadMsr(self, msr_number, start=0, length=64):
-    cmd = ['/usr/sbin/rdmsr', '-d', str(msr_number)]
+    cmd = ['rdmsr', '-d', str(msr_number)]
     (out, err) = subprocess.Popen(cmd,
                                   stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE).communicate()
@@ -121,8 +126,10 @@ class LinuxPlatformBackend(
         ['lsmod'], stdout=subprocess.PIPE).communicate()[0]
 
   def _InstallIpfw(self):
-    ipfw_bin = support_binaries.FindPath('ipfw', self.GetOSName())
-    ipfw_mod = support_binaries.FindPath('ipfw_mod.ko', self.GetOSName())
+    ipfw_bin = support_binaries.FindPath(
+        'ipfw', self.GetArchName(), self.GetOSName())
+    ipfw_mod = support_binaries.FindPath(
+        'ipfw_mod.ko', self.GetArchName(), self.GetOSName())
 
     try:
       changed = cloud_storage.GetIfChanged(
@@ -138,9 +145,10 @@ class LinuxPlatformBackend(
 
     if changed or not self.CanLaunchApplication('ipfw'):
       if not self._IsIpfwKernelModuleInstalled():
-        subprocess.check_call(['sudo', 'insmod', ipfw_mod])
+        subprocess.check_call(['/usr/bin/sudo', 'insmod', ipfw_mod])
       os.chmod(ipfw_bin, 0755)
-      subprocess.check_call(['sudo', 'cp', ipfw_bin, '/usr/local/sbin'])
+      subprocess.check_call(
+          ['/usr/bin/sudo', 'cp', ipfw_bin, '/usr/local/sbin'])
 
     assert self.CanLaunchApplication('ipfw'), 'Failed to install ipfw. ' \
         'ipfw provided binaries are not supported for linux kernel < 3.13. ' \
@@ -148,7 +156,8 @@ class LinuxPlatformBackend(
         'your kernel. See: http://info.iet.unipi.it/~luigi/dummynet/'
 
   def _InstallBinary(self, bin_name, fallback_package=None):
-    bin_path = support_binaries.FindPath(bin_name, self.GetOSName())
+    bin_path = support_binaries.FindPath(
+        bin_name, self.GetArchName(), self.GetOSName())
     if not bin_path:
       raise Exception('Could not find the binary package %s' % bin_name)
     os.environ['PATH'] += os.pathsep + os.path.dirname(bin_path)

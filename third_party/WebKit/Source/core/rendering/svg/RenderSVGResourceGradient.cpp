@@ -21,17 +21,12 @@
  */
 
 #include "config.h"
-
 #include "core/rendering/svg/RenderSVGResourceGradient.h"
-
-#include "core/rendering/svg/RenderSVGShape.h"
-#include "core/rendering/svg/SVGRenderSupport.h"
-#include "platform/graphics/GraphicsContext.h"
 
 namespace blink {
 
 RenderSVGResourceGradient::RenderSVGResourceGradient(SVGGradientElement* node)
-    : RenderSVGResourceContainer(node)
+    : RenderSVGResourcePaintServer(node)
     , m_shouldCollectGradientAttributes(true)
 {
 }
@@ -50,13 +45,8 @@ void RenderSVGResourceGradient::removeClientFromCache(RenderObject* client, bool
     markClientForInvalidation(client, markForInvalidation ? PaintInvalidation : ParentOnlyInvalidation);
 }
 
-bool RenderSVGResourceGradient::applyResource(RenderObject* object, RenderStyle* style, GraphicsContext*& context, unsigned short resourceMode)
+SVGPaintServer RenderSVGResourceGradient::preparePaintServer(const RenderObject& object)
 {
-    ASSERT(object);
-    ASSERT(style);
-    ASSERT(context);
-    ASSERT(resourceMode != ApplyToDefaultMode);
-
     clearInvalidationMask();
 
     // Be sure to synchronize all SVG properties on the gradientElement _before_ processing any further.
@@ -65,23 +55,23 @@ bool RenderSVGResourceGradient::applyResource(RenderObject* object, RenderStyle*
     // GradientData object! Leaving out the line below will cause svg/dynamic-updates/SVG*GradientElement-svgdom* to crash.
     SVGGradientElement* gradientElement = toSVGGradientElement(element());
     if (!gradientElement)
-        return false;
+        return SVGPaintServer::invalid();
 
     if (m_shouldCollectGradientAttributes) {
         gradientElement->synchronizeAnimatedSVGAttribute(anyQName());
         if (!collectGradientAttributes(gradientElement))
-            return false;
+            return SVGPaintServer::invalid();
 
         m_shouldCollectGradientAttributes = false;
     }
 
     // Spec: When the geometry of the applicable element has no width or height and objectBoundingBox is specified,
     // then the given effect (e.g. a gradient or a filter) will be ignored.
-    FloatRect objectBoundingBox = object->objectBoundingBox();
+    FloatRect objectBoundingBox = object.objectBoundingBox();
     if (gradientUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX && objectBoundingBox.isEmpty())
-        return false;
+        return SVGPaintServer::invalid();
 
-    OwnPtr<GradientData>& gradientData = m_gradientMap.add(object, nullptr).storedValue->value;
+    OwnPtr<GradientData>& gradientData = m_gradientMap.add(&object, nullptr).storedValue->value;
     if (!gradientData)
         gradientData = adoptPtr(new GradientData);
 
@@ -102,36 +92,22 @@ bool RenderSVGResourceGradient::applyResource(RenderObject* object, RenderStyle*
     }
 
     if (!gradientData->gradient)
-        return false;
+        return SVGPaintServer::invalid();
 
-    const SVGRenderStyle& svgStyle = style->svgStyle();
+    gradientData->gradient->setGradientSpaceTransform(gradientData->userspaceTransform);
 
-    AffineTransform computedGradientSpaceTransform = computeResourceSpaceTransform(object, gradientData->userspaceTransform, svgStyle, resourceMode);
-    gradientData->gradient->setGradientSpaceTransform(computedGradientSpaceTransform);
-
-    // Draw gradient
-    context->save();
-
-    if (resourceMode & ApplyToTextMode)
-        context->setTextDrawingMode(resourceMode & ApplyToFillMode ? TextModeFill : TextModeStroke);
-
-    if (resourceMode & ApplyToFillMode) {
-        context->setAlphaAsFloat(svgStyle.fillOpacity());
-        context->setFillGradient(gradientData->gradient);
-        context->setFillRule(svgStyle.fillRule());
-    } else if (resourceMode & ApplyToStrokeMode) {
-        context->setAlphaAsFloat(svgStyle.strokeOpacity());
-        context->setStrokeGradient(gradientData->gradient);
-        SVGRenderSupport::applyStrokeStyleToContext(context, style, object);
-    }
-
-    return true;
+    return SVGPaintServer(gradientData->gradient);
 }
 
-void RenderSVGResourceGradient::postApplyResource(RenderObject*, GraphicsContext*& context)
+bool RenderSVGResourceGradient::isChildAllowed(RenderObject* child, RenderStyle*) const
 {
-    ASSERT(context);
-    context->restore();
+    if (child->isSVGGradientStop())
+        return true;
+
+    if (!child->isSVGResourceContainer())
+        return false;
+
+    return toRenderSVGResourceContainer(child)->isSVGPaintServer();
 }
 
 void RenderSVGResourceGradient::addStops(GradientData* gradientData, const Vector<Gradient::ColorStop>& stops) const

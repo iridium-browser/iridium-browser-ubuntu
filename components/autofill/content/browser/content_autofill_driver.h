@@ -25,7 +25,6 @@ class Message;
 
 namespace autofill {
 
-class AutofillContext;
 class AutofillClient;
 
 // Class that drives autofill flow in the browser process based on
@@ -43,24 +42,23 @@ class ContentAutofillDriver : public AutofillDriver,
   static ContentAutofillDriver* FromWebContents(content::WebContents* contents);
 
   // AutofillDriver:
-  virtual bool IsOffTheRecord() const OVERRIDE;
-  virtual net::URLRequestContextGetter* GetURLRequestContext() OVERRIDE;
-  virtual base::SequencedWorkerPool* GetBlockingPool() OVERRIDE;
-  virtual bool RendererIsAvailable() OVERRIDE;
-  virtual void SendFormDataToRenderer(int query_id,
-                                      RendererFormDataAction action,
-                                      const FormData& data) OVERRIDE;
-  virtual void PingRenderer() OVERRIDE;
-  virtual void SendAutofillTypePredictionsToRenderer(
-      const std::vector<FormStructure*>& forms) OVERRIDE;
-  virtual void RendererShouldAcceptDataListSuggestion(
-      const base::string16& value) OVERRIDE;
-  virtual void RendererShouldClearFilledForm() OVERRIDE;
-  virtual void RendererShouldClearPreviewedForm() OVERRIDE;
-  virtual void RendererShouldFillFieldWithValue(
-      const base::string16& value) OVERRIDE;
-  virtual void RendererShouldPreviewFieldWithValue(
-      const base::string16& value) OVERRIDE;
+  bool IsOffTheRecord() const override;
+  net::URLRequestContextGetter* GetURLRequestContext() override;
+  base::SequencedWorkerPool* GetBlockingPool() override;
+  bool RendererIsAvailable() override;
+  void SendFormDataToRenderer(int query_id,
+                              RendererFormDataAction action,
+                              const FormData& data) override;
+  void PingRenderer() override;
+  void SendAutofillTypePredictionsToRenderer(
+      const std::vector<FormStructure*>& forms) override;
+  void RendererShouldAcceptDataListSuggestion(
+      const base::string16& value) override;
+  void RendererShouldClearFilledForm() override;
+  void RendererShouldClearPreviewedForm() override;
+  void RendererShouldFillFieldWithValue(const base::string16& value) override;
+  void RendererShouldPreviewFieldWithValue(
+      const base::string16& value) override;
 
   AutofillExternalDelegate* autofill_external_delegate() {
     return &autofill_external_delegate_;
@@ -74,16 +72,16 @@ class ContentAutofillDriver : public AutofillDriver,
       AutofillClient* client,
       const std::string& app_locale,
       AutofillManager::AutofillDownloadManagerState enable_download_manager);
-  virtual ~ContentAutofillDriver();
+  ~ContentAutofillDriver() override;
 
   // content::WebContentsObserver:
-  virtual void DidNavigateMainFrame(
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void NavigationEntryCommitted(
-      const content::LoadCommittedDetails& load_details) OVERRIDE;
-  virtual void WasHidden() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+      const content::FrameNavigateParams& params) override;
+  void NavigationEntryCommitted(
+      const content::LoadCommittedDetails& load_details) override;
+  void WasHidden() override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // Sets the manager to |manager| and sets |manager|'s external delegate
   // to |autofill_external_delegate_|. Takes ownership of |manager|.

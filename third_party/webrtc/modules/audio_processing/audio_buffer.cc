@@ -51,18 +51,11 @@ int KeyboardChannelIndex(AudioProcessing::ChannelLayout layout) {
   return -1;
 }
 
-void StereoToMono(const float* left, const float* right, float* out,
+template <typename T>
+void StereoToMono(const T* left, const T* right, T* out,
                   int samples_per_channel) {
-  for (int i = 0; i < samples_per_channel; ++i) {
+  for (int i = 0; i < samples_per_channel; ++i)
     out[i] = (left[i] + right[i]) / 2;
-  }
-}
-
-void StereoToMono(const int16_t* left, const int16_t* right, int16_t* out,
-                  int samples_per_channel) {
-  for (int i = 0; i < samples_per_channel; ++i) {
-    out[i] = (left[i] + right[i]) >> 1;
-  }
 }
 
 }  // namespace
@@ -114,13 +107,7 @@ class IFChannelBuffer {
   void RefreshI() {
     if (!ivalid_) {
       assert(fvalid_);
-      const float* const float_data = fbuf_.data();
-      int16_t* const int_data = ibuf_.data();
-      const int length = ibuf_.length();
-      for (int i = 0; i < length; ++i)
-        int_data[i] = WEBRTC_SPL_SAT(std::numeric_limits<int16_t>::max(),
-                                     float_data[i],
-                                     std::numeric_limits<int16_t>::min());
+      FloatS16ToS16(fbuf_.data(), ibuf_.length(), ibuf_.data());
       ivalid_ = true;
     }
   }
@@ -228,10 +215,10 @@ void AudioBuffer::CopyFrom(const float* const* data,
     data_ptr = process_buffer_->channels();
   }
 
-  // Convert to int16.
+  // Convert to the S16 range.
   for (int i = 0; i < num_proc_channels_; ++i) {
-    ScaleAndRoundToInt16(data_ptr[i], proc_samples_per_channel_,
-                         channels_->ibuf()->channel(i));
+    FloatToFloatS16(data_ptr[i], proc_samples_per_channel_,
+                    channels_->fbuf()->channel(i));
   }
 }
 
@@ -241,16 +228,15 @@ void AudioBuffer::CopyTo(int samples_per_channel,
   assert(samples_per_channel == output_samples_per_channel_);
   assert(ChannelsFromLayout(layout) == num_proc_channels_);
 
-  // Convert to float.
+  // Convert to the float range.
   float* const* data_ptr = data;
   if (output_samples_per_channel_ != proc_samples_per_channel_) {
     // Convert to an intermediate buffer for subsequent resampling.
     data_ptr = process_buffer_->channels();
   }
   for (int i = 0; i < num_proc_channels_; ++i) {
-    ScaleToFloat(channels_->ibuf()->channel(i),
-                 proc_samples_per_channel_,
-                 data_ptr[i]);
+    FloatS16ToFloat(channels_->fbuf()->channel(i), proc_samples_per_channel_,
+                    data_ptr[i]);
   }
 
   // Resample.
@@ -289,6 +275,15 @@ float* AudioBuffer::data_f(int channel) {
   return channels_->fbuf()->channel(channel);
 }
 
+const float* const* AudioBuffer::channels_f() const {
+  return channels_->fbuf_const()->channels();
+}
+
+float* const* AudioBuffer::channels_f() {
+  mixed_low_pass_valid_ = false;
+  return channels_->fbuf()->channels();
+}
+
 const int16_t* AudioBuffer::low_pass_split_data(int channel) const {
   return split_channels_low_.get()
       ? split_channels_low_->ibuf_const()->channel(channel)
@@ -315,6 +310,19 @@ float* AudioBuffer::low_pass_split_data_f(int channel) {
       : data_f(channel);
 }
 
+const float* const* AudioBuffer::low_pass_split_channels_f() const {
+  return split_channels_low_.get()
+      ? split_channels_low_->fbuf_const()->channels()
+      : channels_f();
+}
+
+float* const* AudioBuffer::low_pass_split_channels_f() {
+  mixed_low_pass_valid_ = false;
+  return split_channels_low_.get()
+      ? split_channels_low_->fbuf()->channels()
+      : channels_f();
+}
+
 const int16_t* AudioBuffer::high_pass_split_data(int channel) const {
   return split_channels_high_.get()
       ? split_channels_high_->ibuf_const()->channel(channel)
@@ -336,6 +344,18 @@ const float* AudioBuffer::high_pass_split_data_f(int channel) const {
 float* AudioBuffer::high_pass_split_data_f(int channel) {
   return split_channels_high_.get()
       ? split_channels_high_->fbuf()->channel(channel)
+      : NULL;
+}
+
+const float* const* AudioBuffer::high_pass_split_channels_f() const {
+  return split_channels_high_.get()
+      ? split_channels_high_->fbuf_const()->channels()
+      : NULL;
+}
+
+float* const* AudioBuffer::high_pass_split_channels_f() {
+  return split_channels_high_.get()
+      ? split_channels_high_->fbuf()->channels()
       : NULL;
 }
 
@@ -415,12 +435,7 @@ void AudioBuffer::DeinterleaveFrom(AudioFrame* frame) {
     // Downmix directly; no explicit deinterleaving needed.
     int16_t* downmixed = channels_->ibuf()->channel(0);
     for (int i = 0; i < input_samples_per_channel_; ++i) {
-      // HACK(ajm): The downmixing in the int16_t path is in practice never
-      // called from production code. We do this weird scaling to and from float
-      // to satisfy tests checking for bit-exactness with the float path.
-      float downmix_float = (ScaleToFloat(frame->data_[i * 2]) +
-                             ScaleToFloat(frame->data_[i * 2 + 1])) / 2;
-      downmixed[i] = ScaleAndRoundToInt16(downmix_float);
+      downmixed[i] = (frame->data_[i * 2] + frame->data_[i * 2 + 1]) / 2;
     }
   } else {
     assert(num_proc_channels_ == num_input_channels_);

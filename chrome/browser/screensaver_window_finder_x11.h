@@ -14,7 +14,7 @@ class ScreensaverWindowFinder : public ui::EnumerateWindowsDelegate {
   static bool ScreensaverWindowExists();
 
  protected:
-  virtual bool ShouldStopIterating(XID window) OVERRIDE;
+  bool ShouldStopIterating(XID window) override;
 
  private:
   ScreensaverWindowFinder();

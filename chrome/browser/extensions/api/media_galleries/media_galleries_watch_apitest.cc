@@ -7,20 +7,18 @@
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
 #include "chrome/browser/media_galleries/media_galleries_test_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
@@ -79,16 +77,16 @@ class MediaGalleriesGalleryWatchApiTest : public ExtensionApiTest {
  public:
   MediaGalleriesGalleryWatchApiTest()
       : extension_(NULL), background_host_(NULL) {}
-  virtual ~MediaGalleriesGalleryWatchApiTest() {}
+  ~MediaGalleriesGalleryWatchApiTest() override {}
 
  protected:
   // ExtensionApiTest overrides.
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         extensions::switches::kWhitelistedExtensionID, kTestExtensionId);
   }
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
     ensure_media_directories_exists_.reset(new EnsureMediaDirectoriesExists);
     extension_ = LoadExtension(test_data_dir_.AppendASCII(kTestExtensionPath));
@@ -96,7 +94,7 @@ class MediaGalleriesGalleryWatchApiTest : public ExtensionApiTest {
     CreateTestGallery();
     FetchMediaGalleriesList();
   }
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     extension_ = NULL;
     background_host_ = NULL;
     ensure_media_directories_exists_.reset();
@@ -138,9 +136,7 @@ class MediaGalleriesGalleryWatchApiTest : public ExtensionApiTest {
  private:
   void GetBackgroundHostForTestExtension() {
     ASSERT_TRUE(extension_);
-    extensions::ExtensionSystem* extension_system =
-        extensions::ExtensionSystem::Get(browser()->profile());
-    background_host_ = extension_system->process_manager()
+    background_host_ = extensions::ProcessManager::Get(browser()->profile())
                            ->GetBackgroundHostForExtension(extension_->id())
                            ->render_view_host();
     ASSERT_TRUE(background_host_);

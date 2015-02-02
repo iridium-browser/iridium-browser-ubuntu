@@ -33,22 +33,22 @@ using extensions::NativeAppWindow;
 class AshPanelWindowController : public extensions::WindowController {
  public:
   AshPanelWindowController(AppWindow* window, Profile* profile);
-  virtual ~AshPanelWindowController();
+  ~AshPanelWindowController() override;
 
   void NativeWindowChanged();
 
   // Overridden from extensions::WindowController.
-  virtual int GetWindowId() const OVERRIDE;
-  virtual std::string GetWindowTypeText() const OVERRIDE;
-  virtual base::DictionaryValue* CreateWindowValueWithTabs(
-      const extensions::Extension* extension) const OVERRIDE;
-  virtual base::DictionaryValue* CreateTabValue(
-      const extensions::Extension* extension, int tab_index) const OVERRIDE;
-  virtual bool CanClose(Reason* reason) const OVERRIDE;
-  virtual void SetFullscreenMode(bool is_fullscreen,
-                                 const GURL& extension_url) const OVERRIDE;
-  virtual bool IsVisibleToExtension(
-      const extensions::Extension* extension) const OVERRIDE;
+  int GetWindowId() const override;
+  std::string GetWindowTypeText() const override;
+  base::DictionaryValue* CreateWindowValueWithTabs(
+      const extensions::Extension* extension) const override;
+  base::DictionaryValue* CreateTabValue(const extensions::Extension* extension,
+                                        int tab_index) const override;
+  bool CanClose(Reason* reason) const override;
+  void SetFullscreenMode(bool is_fullscreen,
+                         const GURL& extension_url) const override;
+  bool IsVisibleToExtension(
+      const extensions::Extension* extension) const override;
 
  private:
   AppWindow* app_window_;  // Weak pointer; this is owned by app_window_

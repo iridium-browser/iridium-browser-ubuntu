@@ -127,6 +127,16 @@
     'arm_fpu%': 'vfpv3',
     'arm_float_abi%': 'default',
     'arm_thumb': 'default',
+
+    # Default MIPS variable settings.
+    'mips_arch_variant%': 'r2',
+    # Possible values fp32, fp64, fpxx.
+    # fp32 - 32 32-bit FPU registers are available, doubles are placed in
+    #        register pairs.
+    # fp64 - 32 64-bit FPU registers are available.
+    # fpxx - compatibility mode, it chooses fp32 or fp64 depending on runtime
+    #        detection
+    'mips_fpu_mode%': 'fp32',
   },
   'target_defaults': {
     'variables': {
@@ -136,6 +146,14 @@
     'configurations': {
       'DebugBaseCommon': {
         'cflags': [ '-g', '-O0' ],
+        'conditions': [
+          ['(v8_target_arch=="ia32" or v8_target_arch=="x87") and \
+            OS=="linux"', {
+            'defines': [
+              '_GLIBCXX_DEBUG'
+            ],
+          }],
+        ],
       },
       'Optdebug': {
         'inherit_from': [ 'DebugBaseCommon', 'DebugBase2' ],
@@ -313,9 +331,15 @@
           },
           'VCLibrarianTool': {
             'AdditionalOptions': ['/ignore:4221'],
+            'conditions': [
+              ['v8_target_arch=="x64"', {
+                'TargetMachine': '17',  # x64
+              }, {
+                'TargetMachine': '1',  # ia32
+              }],
+            ],
           },
           'VCLinkerTool': {
-            'MinimumRequiredVersion': '5.01',  # XP.
             'AdditionalDependencies': [
               'ws2_32.lib',
             ],
@@ -339,6 +363,13 @@
                 'AdditionalDependencies': [
                   'advapi32.lib',
                 ],
+              }],
+              ['v8_target_arch=="x64"', {
+                'MinimumRequiredVersion': '5.02',  # Server 2003.
+                'TargetMachine': '17',  # x64
+              }, {
+                'MinimumRequiredVersion': '5.01',  # XP.
+                'TargetMachine': '1',  # ia32
               }],
             ],
           },

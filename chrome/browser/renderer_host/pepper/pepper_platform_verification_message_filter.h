@@ -29,14 +29,14 @@ class PepperPlatformVerificationMessageFilter
                                           PP_Instance instance);
 
  private:
-  virtual ~PepperPlatformVerificationMessageFilter();
+  ~PepperPlatformVerificationMessageFilter() override;
 
   // ppapi::host::ResourceMessageFilter overrides.
-  virtual scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
-      const IPC::Message& message) OVERRIDE;
-  virtual int32_t OnResourceMessageReceived(
+  scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
+      const IPC::Message& message) override;
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
   int32_t OnChallengePlatform(ppapi::host::HostMessageContext* context,
                               const std::string& service_id,

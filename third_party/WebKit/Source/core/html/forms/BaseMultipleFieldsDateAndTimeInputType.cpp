@@ -65,8 +65,8 @@ public:
         , m_hasMinute(false)
         , m_hasSecond(false) { }
 
-    virtual void visitField(DateTimeFormat::FieldType, int) OVERRIDE FINAL;
-    virtual void visitLiteral(const String&) OVERRIDE FINAL { }
+    virtual void visitField(DateTimeFormat::FieldType, int) override final;
+    virtual void visitLiteral(const String&) override final { }
 
     bool validateFormat(const String& format, const BaseMultipleFieldsDateAndTimeInputType&);
 
@@ -189,7 +189,7 @@ void BaseMultipleFieldsDateAndTimeInputType::editControlValueChanged()
         input->setNeedsValidityCheck();
     } else {
         input->setValueInternal(newValue, DispatchNoEvent);
-        input->setNeedsStyleRecalc(SubtreeStyleChange);
+        input->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::ControlValue));
         input->dispatchFormControlInputEvent();
     }
     input->notifyFormStateChanged();
@@ -420,14 +420,12 @@ void BaseMultipleFieldsDateAndTimeInputType::forwardEvent(Event* event)
 void BaseMultipleFieldsDateAndTimeInputType::disabledAttributeChanged()
 {
     spinButtonElement()->releaseCapture();
-    clearButtonElement()->releaseCapture();
     if (DateTimeEditElement* edit = dateTimeEditElement())
         edit->disabledStateChanged();
 }
 
 void BaseMultipleFieldsDateAndTimeInputType::requiredAttributeChanged()
 {
-    clearButtonElement()->releaseCapture();
     updateClearButtonVisibility();
 }
 
@@ -467,7 +465,6 @@ void BaseMultipleFieldsDateAndTimeInputType::minOrMaxAttributeChanged()
 void BaseMultipleFieldsDateAndTimeInputType::readonlyAttributeChanged()
 {
     spinButtonElement()->releaseCapture();
-    clearButtonElement()->releaseCapture();
     if (DateTimeEditElement* edit = dateTimeEditElement())
         edit->readOnlyStateChanged();
 }
@@ -630,7 +627,7 @@ AXObject* BaseMultipleFieldsDateAndTimeInputType::popupRootAXObject()
 {
     if (PickerIndicatorElement* picker = pickerIndicatorElement())
         return picker->popupRootAXObject();
-    return 0;
+    return nullptr;
 }
 
 } // namespace blink

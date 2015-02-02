@@ -31,10 +31,10 @@
 #include "config.h"
 #include "public/web/WebDocument.h"
 
-#include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/V8ElementRegistrationOptions.h"
 #include "core/accessibility/AXObjectCache.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/CSSSelectorWatch.h"
@@ -300,7 +300,7 @@ WebAXObject WebDocument::accessibilityObject() const
 {
     const Document* document = constUnwrap<Document>();
     AXObjectCache* cache = document->axObjectCache();
-    return cache ? WebAXObject(cache->getOrCreate(document->renderView())) : WebAXObject();
+    return cache ? WebAXObject(cache->getOrCreateAXObjectFromRenderView(document->renderView())) : WebAXObject();
 }
 
 WebAXObject WebDocument::accessibilityObjectFromID(int axID) const
@@ -330,9 +330,12 @@ v8::Handle<v8::Value> WebDocument::registerEmbedderCustomElement(const WebString
 {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     Document* document = unwrap<Document>();
-    Dictionary dictionary(options, isolate);
     TrackExceptionState exceptionState;
-    ScriptValue constructor = document->registerElement(ScriptState::current(isolate), name, dictionary, exceptionState, CustomElement::EmbedderNames);
+    ElementRegistrationOptions registrationOptions;
+    V8ElementRegistrationOptions::toImpl(isolate, options, registrationOptions, exceptionState);
+    if (exceptionState.hadException())
+        return v8::Handle<v8::Value>();
+    ScriptValue constructor = document->registerElement(ScriptState::current(isolate), name, registrationOptions, exceptionState, CustomElement::EmbedderNames);
     ec = exceptionState.code();
     if (exceptionState.hadException())
         return v8::Handle<v8::Value>();

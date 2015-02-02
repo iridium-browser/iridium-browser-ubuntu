@@ -1,8 +1,0 @@
-include_rules = [
-  "+dbus",
-  "+gpu",
-  "+mojo/embedder",
-  "+net",
-  "+ui/gfx/switches.h",
-  "+ui/gl",
-]

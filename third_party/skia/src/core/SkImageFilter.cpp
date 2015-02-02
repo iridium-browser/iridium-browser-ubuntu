@@ -97,7 +97,7 @@ bool SkImageFilter::Common::unflatten(SkReadBuffer& buffer, int expectedCount) {
     if (!buffer.isValid() || !buffer.validate(SkIsValidRect(rect))) {
         return false;
     }
-    
+
     uint32_t flags = buffer.readUInt();
     fCropRect = CropRect(rect, flags);
     if (buffer.isVersionLT(SkReadBuffer::kImageFilterUniqueID_Version)) {
@@ -249,19 +249,20 @@ bool SkImageFilter::filterImageGPU(Proxy* proxy, const SkBitmap& src, const Cont
     SkRect dstRect = SkRect::MakeWH(srcRect.width(), srcRect.height());
     GrContext* context = srcTexture->getContext();
 
-    GrTextureDesc desc;
-    desc.fFlags = kRenderTarget_GrTextureFlagBit,
+    GrSurfaceDesc desc;
+    desc.fFlags = kRenderTarget_GrSurfaceFlag,
     desc.fWidth = bounds.width();
     desc.fHeight = bounds.height();
     desc.fConfig = kRGBA_8888_GrPixelConfig;
 
-    GrAutoScratchTexture dst(context, desc);
-    if (NULL == dst.texture()) {
+    SkAutoTUnref<GrTexture> dst(
+        context->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch));
+    if (!dst) {
         return false;
     }
     GrContext::AutoMatrix am;
     am.setIdentity(context);
-    GrContext::AutoRenderTarget art(context, dst.texture()->asRenderTarget());
+    GrContext::AutoRenderTarget art(context, dst->asRenderTarget());
     GrContext::AutoClip acs(context, dstRect);
     GrFragmentProcessor* fp;
     offset->fX = bounds.left();
@@ -269,18 +270,17 @@ bool SkImageFilter::filterImageGPU(Proxy* proxy, const SkBitmap& src, const Cont
     bounds.offset(-srcOffset);
     SkMatrix matrix(ctx.ctm());
     matrix.postTranslate(SkIntToScalar(-bounds.left()), SkIntToScalar(-bounds.top()));
-    this->asFragmentProcessor(&fp, srcTexture, matrix, bounds);
-    SkASSERT(fp);
-    GrPaint paint;
-    paint.addColorProcessor(fp)->unref();
-    context->drawRectToRect(paint, dstRect, srcRect);
+    if (this->asFragmentProcessor(&fp, srcTexture, matrix, bounds)) {
+        SkASSERT(fp);
+        GrPaint paint;
+        paint.addColorProcessor(fp)->unref();
+        context->drawRectToRect(paint, dstRect, srcRect);
 
-    SkAutoTUnref<GrTexture> resultTex(dst.detach());
-    WrapTexture(resultTex, bounds.width(), bounds.height(), result);
-    return true;
-#else
-    return false;
+        WrapTexture(dst, bounds.width(), bounds.height(), result);
+        return true;
+    }
 #endif
+    return false;
 }
 
 bool SkImageFilter::applyCropRect(const Context& ctx, const SkBitmap& src,
@@ -342,7 +342,8 @@ bool SkImageFilter::applyCropRect(const Context& ctx, Proxy* proxy, const SkBitm
 bool SkImageFilter::onFilterBounds(const SkIRect& src, const SkMatrix& ctm,
                                    SkIRect* dst) const {
     if (fInputCount < 1) {
-        return false;
+        *dst = src;
+        return true;
     }
 
     SkIRect bounds;
@@ -399,9 +400,8 @@ bool SkImageFilter::getInputResultGPU(SkImageFilter::Proxy* proxy,
                 if (kUnknown_SkColorType == info.colorType()) {
                     return false;
                 }
-                GrTexture* resultTex = GrLockAndRefCachedBitmapTexture(context, *result, NULL);
-                result->setPixelRef(new SkGrPixelRef(info, resultTex))->unref();
-                GrUnlockAndUnrefCachedBitmapTexture(resultTex);
+                SkAutoTUnref<GrTexture> resultTex(GrRefCachedBitmapTexture(context, *result, NULL));
+                result->setPixelRef(SkNEW_ARGS(SkGrPixelRef, (info, resultTex)))->unref();
             }
             return true;
         } else {
@@ -496,7 +496,8 @@ SkImageFilter::Cache* SkImageFilter::Cache::Create(size_t maxBytes) {
     return SkNEW_ARGS(CacheImpl, (maxBytes));
 }
 
+SK_DECLARE_STATIC_LAZY_PTR(SkImageFilter::Cache, cache, CreateCache);
+
 SkImageFilter::Cache* SkImageFilter::Cache::Get() {
-    SK_DECLARE_STATIC_LAZY_PTR(SkImageFilter::Cache, cache, CreateCache);
     return cache.get();
 }

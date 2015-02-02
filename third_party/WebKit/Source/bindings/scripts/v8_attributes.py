@@ -38,7 +38,7 @@ from idl_types import inherits_interface
 from v8_globals import includes, interfaces
 import v8_types
 import v8_utilities
-from v8_utilities import (capitalize, cpp_name, has_extended_attribute,
+from v8_utilities import (cpp_name_or_partial, capitalize, cpp_name, has_extended_attribute,
                           has_extended_attribute_value, scoped_name, strip_suffix,
                           uncapitalize, extended_attribute_value_as_list)
 
@@ -125,6 +125,7 @@ def attribute_context(interface, attribute):
         'is_static': attribute.is_static,
         'is_url': 'URL' in extended_attributes,
         'is_unforgeable': 'Unforgeable' in extended_attributes,
+        'use_output_parameter_for_result': idl_type.use_output_parameter_for_result,
         'measure_as': v8_utilities.measure_as(attribute),  # [MeasureAs]
         'name': attribute.name,
         'only_exposed_to_private_script': is_only_exposed_to_private_script,
@@ -234,6 +235,8 @@ def getter_expression(interface, attribute, context):
         arguments.append('isNull')
     if context['is_getter_raises_exception']:
         arguments.append('exceptionState')
+    if attribute.idl_type.use_output_parameter_for_result:
+        arguments.append('result')
     return '%s(%s)' % (getter_name, ', '.join(arguments))
 
 
@@ -323,6 +326,10 @@ def setter_context(interface, attribute, context):
          has_extended_attribute_value(attribute, 'TypeChecking', 'Interface')) and
         idl_type.is_wrapper_type)
 
+    type_checked = (has_type_checking_interface and
+                    # These allow null values, so a type-check is still required.
+                    not idl_type.is_nullable)
+
     context.update({
         'has_setter_exception_state':
             is_setter_raises_exception or has_type_checking_interface or
@@ -336,7 +343,8 @@ def setter_context(interface, attribute, context):
             'cppValue', isolate='scriptState->isolate()',
             creation_context='scriptState->context()->Global()'),
         'v8_value_to_local_cpp_value': idl_type.v8_value_to_local_cpp_value(
-            extended_attributes, 'v8Value', 'cppValue'),
+            extended_attributes, 'v8Value', 'cppValue',
+            needs_type_check=not type_checked),
     })
 
     # setter_expression() depends on context values we set above.
@@ -429,14 +437,17 @@ def scoped_content_attribute_name(interface, attribute):
 # [Replaceable]
 def setter_callback_name(interface, attribute):
     cpp_class_name = cpp_name(interface)
+    cpp_class_name_or_partial = cpp_name_or_partial(interface)
+
     extended_attributes = attribute.extended_attributes
     if (('Replaceable' in extended_attributes and
          'PutForwards' not in extended_attributes) or
         is_constructor_attribute(attribute)):
-        return '{0}V8Internal::{0}ForceSetAttributeOnThisCallback'.format(cpp_class_name)
+        return '%sV8Internal::%sForceSetAttributeOnThisCallback' % (
+            cpp_class_name_or_partial, cpp_class_name)
     if attribute.is_read_only and 'PutForwards' not in extended_attributes:
         return '0'
-    return '%sV8Internal::%sAttributeSetterCallback' % (cpp_class_name, attribute.name)
+    return '%sV8Internal::%sAttributeSetterCallback' % (cpp_class_name_or_partial, attribute.name)
 
 
 # [DoNotCheckSecurity], [Unforgeable]

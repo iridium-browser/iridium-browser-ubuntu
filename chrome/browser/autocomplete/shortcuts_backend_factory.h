@@ -26,24 +26,24 @@ class ShortcutsBackendFactory
   static ShortcutsBackendFactory* GetInstance();
 
   // Creates and returns a backend for testing purposes.
-  static scoped_refptr<RefcountedBrowserContextKeyedService>
-      BuildProfileForTesting(content::BrowserContext* profile);
+  static scoped_refptr<RefcountedKeyedService> BuildProfileForTesting(
+      content::BrowserContext* profile);
 
   // Creates and returns a backend but without creating its persistent database
   // for testing purposes.
-  static scoped_refptr<RefcountedBrowserContextKeyedService>
-      BuildProfileNoDatabaseForTesting(content::BrowserContext* profile);
+  static scoped_refptr<RefcountedKeyedService> BuildProfileNoDatabaseForTesting(
+      content::BrowserContext* profile);
 
  private:
   friend struct DefaultSingletonTraits<ShortcutsBackendFactory>;
 
   ShortcutsBackendFactory();
-  virtual ~ShortcutsBackendFactory();
+  ~ShortcutsBackendFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual scoped_refptr<RefcountedBrowserContextKeyedService>
-      BuildServiceInstanceFor(content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  scoped_refptr<RefcountedKeyedService> BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_SHORTCUTS_BACKEND_FACTORY_H_

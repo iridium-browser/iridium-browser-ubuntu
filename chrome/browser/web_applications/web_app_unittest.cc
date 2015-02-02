@@ -22,7 +22,7 @@ using content::RenderViewHostTester;
 
 class WebApplicationTest : public ChromeRenderViewHostTestHarness {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 #if defined(TOOLKIT_VIEWS)
     extensions::TabHelper::CreateForWebContents(web_contents());

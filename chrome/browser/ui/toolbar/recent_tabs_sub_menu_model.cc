@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/favicon_base/favicon_types.h"
 #include "grit/browser_resources.h"
@@ -310,6 +309,10 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
                                 browser_->host_desktop_type(), disposition);
     }
   }
+  UMA_HISTOGRAM_TIMES("WrenchMenu.TimeToAction.RecentTab",
+                       menu_opened_timer_.Elapsed());
+  UMA_HISTOGRAM_ENUMERATION("WrenchMenu.MenuAction", MENU_ACTION_RECENT_TAB,
+                             LIMIT_MENU_ACTION);
 }
 
 int RecentTabsSubMenuModel::GetFirstRecentTabsCommandId() {
@@ -669,7 +672,7 @@ browser_sync::OpenTabsUIDelegate*
     ProfileSyncService* service = ProfileSyncServiceFactory::GetInstance()->
         GetForProfile(browser_->profile());
     // Only return the delegate if it exists and it is done syncing sessions.
-    if (service && service->ShouldPushChanges())
+    if (service && service->SyncActive())
       open_tabs_delegate_ = service->GetOpenTabsUIDelegate();
   }
   return open_tabs_delegate_;

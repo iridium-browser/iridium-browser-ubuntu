@@ -59,7 +59,7 @@ class SupervisedUserSettingsService : public KeyedService,
   typedef base::Callback<void(const base::DictionaryValue*)> SettingsCallback;
 
   SupervisedUserSettingsService();
-  virtual ~SupervisedUserSettingsService();
+  ~SupervisedUserSettingsService() override;
 
   // Initializes the service by loading its settings from a file underneath the
   // |profile_path|. File I/O will be serialized via the
@@ -109,24 +109,23 @@ class SupervisedUserSettingsService : public KeyedService,
                                                    const base::Value& value);
 
   // KeyedService implementation:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // SyncableService implementation:
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const
-      OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
   // PrefStore::Observer implementation:
-  virtual void OnPrefValueChanged(const std::string& key) OVERRIDE;
-  virtual void OnInitializationCompleted(bool success) OVERRIDE;
+  void OnPrefValueChanged(const std::string& key) override;
+  void OnInitializationCompleted(bool success) override;
 
  private:
   base::DictionaryValue* GetOrCreateDictionary(const std::string& key) const;

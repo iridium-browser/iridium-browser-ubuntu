@@ -87,6 +87,17 @@ bool AudioParameters::IsValid() const {
          (frames_per_buffer_ <= media::limits::kMaxSamplesPerPacket);
 }
 
+std::string AudioParameters::AsHumanReadableString() const {
+  std::ostringstream s;
+  s << "format: " << format()
+    << " channels: " << channels()
+    << " channel_layout: " << channel_layout()
+    << " sample_rate: " << sample_rate()
+    << " bits_per_sample: " << bits_per_sample()
+    << " frames_per_buffer: " << frames_per_buffer();
+  return s.str();
+}
+
 int AudioParameters::GetBytesPerBuffer() const {
   return frames_per_buffer_ * GetBytesPerFrame();
 }
@@ -100,9 +111,9 @@ int AudioParameters::GetBytesPerFrame() const {
 }
 
 base::TimeDelta AudioParameters::GetBufferDuration() const {
-  return base::TimeDelta::FromMicroseconds(
+  return base::TimeDelta::FromMicroseconds(static_cast<int64>(
       frames_per_buffer_ * base::Time::kMicrosecondsPerSecond /
-      static_cast<float>(sample_rate_));
+      static_cast<float>(sample_rate_)));
 }
 
 bool AudioParameters::Equals(const AudioParameters& other) const {

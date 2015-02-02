@@ -55,8 +55,8 @@ class MockRemoteFileSyncService : public RemoteFileSyncService {
   MOCK_METHOD1(PromoteDemotedChanges, void(const base::Closure& callback));
 
   virtual void DumpFiles(const GURL& origin,
-                         const ListCallback& callback) OVERRIDE;
-  virtual void DumpDatabase(const ListCallback& callback) OVERRIDE;
+                         const ListCallback& callback) override;
+  virtual void DumpDatabase(const ListCallback& callback) override;
 
   void SetServiceState(RemoteServiceState state);
 
@@ -67,6 +67,7 @@ class MockRemoteFileSyncService : public RemoteFileSyncService {
       RemoteServiceState state,
       const std::string& description);
   void NotifyFileStatusChanged(const storage::FileSystemURL& url,
+                               SyncFileType file_type,
                                SyncFileStatus sync_status,
                                SyncAction action_taken,
                                SyncDirection direction);

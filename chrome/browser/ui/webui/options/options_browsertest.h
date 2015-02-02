@@ -16,7 +16,7 @@ class OptionsBrowserTest : public WebUIBrowserTest,
                            public content::WebUIMessageHandler {
  public:
   OptionsBrowserTest();
-  virtual ~OptionsBrowserTest();
+  ~OptionsBrowserTest() override;
 
  protected:
   // Clears the preference at the given |path|.
@@ -24,10 +24,10 @@ class OptionsBrowserTest : public WebUIBrowserTest,
 
  private:
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // WebUIBrowserTest implementation.
-  virtual content::WebUIMessageHandler* GetMockMessageHandler() OVERRIDE;
+  content::WebUIMessageHandler* GetMockMessageHandler() override;
 
   // A callback for the 'optionsTestReportHistory' message, this sends the
   // URLs in the "back" tab history, including the current entry, back to the

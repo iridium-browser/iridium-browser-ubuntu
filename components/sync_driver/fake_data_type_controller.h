@@ -23,19 +23,18 @@ class FakeDataTypeController : public DataTypeController {
  public:
   explicit FakeDataTypeController(syncer::ModelType type);
 
-  virtual void LoadModels(
-      const ModelLoadCallback& model_load_callback) OVERRIDE;
-  virtual void OnModelLoaded() OVERRIDE;
-  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual syncer::ModelType type() const OVERRIDE;
-  virtual std::string name() const OVERRIDE;
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
-  virtual ChangeProcessor* GetChangeProcessor() const OVERRIDE;
-  virtual State state() const OVERRIDE;
-  virtual void OnSingleDataTypeUnrecoverableError(
-      const syncer::SyncError& error) OVERRIDE;
-  virtual bool ReadyForStart() const OVERRIDE;
+  void LoadModels(const ModelLoadCallback& model_load_callback) override;
+  void OnModelLoaded() override;
+  void StartAssociating(const StartCallback& start_callback) override;
+  void Stop() override;
+  syncer::ModelType type() const override;
+  std::string name() const override;
+  syncer::ModelSafeGroup model_safe_group() const override;
+  ChangeProcessor* GetChangeProcessor() const override;
+  State state() const override;
+  void OnSingleDataTypeUnrecoverableError(
+      const syncer::SyncError& error) override;
+  bool ReadyForStart() const override;
 
   void FinishStart(ConfigureResult result);
 
@@ -48,7 +47,7 @@ class FakeDataTypeController : public DataTypeController {
   void SetReadyForStart(bool ready);
 
  protected:
-  virtual ~FakeDataTypeController();
+  ~FakeDataTypeController() override;
 
  private:
   DataTypeController::State state_;

@@ -8,6 +8,7 @@ import os
 
 from telemetry.page import page as page_module
 from telemetry.page import page_set_archive_info
+from telemetry.user_story import user_story_set
 from telemetry.util import cloud_storage
 
 PUBLIC_BUCKET = cloud_storage.PUBLIC_BUCKET
@@ -19,11 +20,11 @@ class PageSetError(Exception):
   pass
 
 
-class PageSet(object):
-  def __init__(self, file_path=None, archive_data_file='',
-               credentials_path=None, user_agent_type=None,
+class PageSet(user_story_set.UserStorySet):
+  def __init__(self, file_path=None, archive_data_file='', user_agent_type=None,
                make_javascript_deterministic=True, startup_url='',
                serving_dirs=None, bucket=None):
+    super(PageSet, self).__init__()
     # The default value of file_path is location of the file that define this
     # page set instance's class.
     if file_path is None:
@@ -35,54 +36,41 @@ class PageSet(object):
     self.file_path = file_path
     # These attributes can be set dynamically by the page set.
     self.archive_data_file = archive_data_file
-    self.credentials_path = credentials_path
     self.user_agent_type = user_agent_type
     self.make_javascript_deterministic = make_javascript_deterministic
     self._wpr_archive_info = None
     self.startup_url = startup_url
-    self.pages = []
-    self.serving_dirs = set()
-    serving_dirs = [] if serving_dirs is None else serving_dirs
-    # Makes sure that page_set's serving_dirs are absolute paths
-    for sd in serving_dirs:
-      if os.path.isabs(sd):
-        self.serving_dirs.add(os.path.realpath(sd))
-      else:
-        self.serving_dirs.add(os.path.realpath(os.path.join(self.base_dir, sd)))
+    self.user_stories = []
+    # Convert any relative serving_dirs to absolute paths.
+    self._serving_dirs = set(os.path.realpath(os.path.join(self.base_dir, d))
+                             for d in serving_dirs or [])
     if self._IsValidPrivacyBucket(bucket):
       self._bucket = bucket
     else:
       raise ValueError("Pageset privacy bucket %s is invalid" % bucket)
 
-  @classmethod
-  def Name(cls):
-    return cls.__module__.split('.')[-1]
+  @property
+  def pages(self):
+    return self.user_stories
 
-  @classmethod
-  def Description(cls):
-    if cls.__doc__:
-      return cls.__doc__.splitlines()[0]
-    else:
-      return ''
+  def AddUserStory(self, user_story):
+    assert isinstance(user_story, page_module.Page)
+    assert user_story.page_set is self
+    super(PageSet, self).AddUserStory(user_story)
 
   def AddPage(self, page):
-    assert page.page_set is self
-    self.pages.append(page)
+    self.AddUserStory(page)
 
   def AddPageWithDefaultRunNavigate(self, page_url):
     """ Add a simple page with url equals to page_url that contains only default
     RunNavigateSteps.
     """
-    self.AddPage(page_module.Page(
+    self.AddUserStory(page_module.Page(
       page_url, self, self.base_dir))
 
   @staticmethod
   def _IsValidPrivacyBucket(bucket_name):
-    if not bucket_name:
-      return True
-    if (bucket_name in [PUBLIC_BUCKET, PARTNER_BUCKET, INTERNAL_BUCKET]):
-      return True
-    return False
+    return bucket_name in (None, PUBLIC_BUCKET, PARTNER_BUCKET, INTERNAL_BUCKET)
 
   @property
   def base_dir(self):
@@ -90,6 +78,10 @@ class PageSet(object):
       return os.path.dirname(self.file_path)
     else:
       return self.file_path
+
+  @property
+  def serving_dirs(self):
+    return self._serving_dirs
 
   @property
   def wpr_archive_info(self):  # pylint: disable=E0202
@@ -109,7 +101,7 @@ class PageSet(object):
     self._wpr_archive_info = value
 
   def ContainsOnlyFileURLs(self):
-    for page in self.pages:
+    for page in self.user_stories:
       if not page.is_file:
         return False
     return True
@@ -117,10 +109,10 @@ class PageSet(object):
   def ReorderPageSet(self, results_file):
     """Reorders this page set based on the results of a past run."""
     page_set_dict = {}
-    for page in self.pages:
+    for page in self.user_stories:
       page_set_dict[page.url] = page
 
-    pages = []
+    user_stories = []
     with open(results_file, 'rb') as csv_file:
       csv_reader = csv.reader(csv_file)
       csv_header = csv_reader.next()
@@ -136,21 +128,9 @@ class PageSet(object):
         else:
           raise Exception('Unusable results_file.')
 
-    return pages
+    return user_stories
 
   def WprFilePathForPage(self, page):
     if not self.wpr_archive_info:
       return None
     return self.wpr_archive_info.WprFilePathForPage(page)
-
-  def __iter__(self):
-    return self.pages.__iter__()
-
-  def __len__(self):
-    return len(self.pages)
-
-  def __getitem__(self, key):
-    return self.pages[key]
-
-  def __setitem__(self, key, value):
-    self.pages[key] = value

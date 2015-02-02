@@ -13,43 +13,40 @@ namespace extensions {
 class ShellAppDelegate : public AppDelegate {
  public:
   ShellAppDelegate();
-  virtual ~ShellAppDelegate();
+  ~ShellAppDelegate() override;
 
   // AppDelegate overrides:
-  virtual void InitWebContents(content::WebContents* web_contents) OVERRIDE;
-  virtual void ResizeWebContents(content::WebContents* web_contents,
-                                 const gfx::Size& size) OVERRIDE;
-  virtual content::WebContents* OpenURLFromTab(
+  void InitWebContents(content::WebContents* web_contents) override;
+  void ResizeWebContents(content::WebContents* web_contents,
+                         const gfx::Size& size) override;
+  content::WebContents* OpenURLFromTab(
       content::BrowserContext* context,
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
-  virtual void AddNewContents(content::BrowserContext* context,
-                              content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
-  virtual content::ColorChooser* ShowColorChooser(
-      content::WebContents* web_contents,
-      SkColor initial_color) OVERRIDE;
-  virtual void RunFileChooser(
-      content::WebContents* tab,
-      const content::FileChooserParams& params) OVERRIDE;
-  virtual void RequestMediaAccessPermission(
+      const content::OpenURLParams& params) override;
+  void AddNewContents(content::BrowserContext* context,
+                      content::WebContents* new_contents,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_pos,
+                      bool user_gesture,
+                      bool* was_blocked) override;
+  content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
+                                          SkColor initial_color) override;
+  void RunFileChooser(content::WebContents* tab,
+                      const content::FileChooserParams& params) override;
+  void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
       const content::MediaResponseCallback& callback,
-      const Extension* extension) OVERRIDE;
-  virtual bool CheckMediaAccessPermission(content::WebContents* web_contents,
-                                          const GURL& security_origin,
-                                          content::MediaStreamType type,
-                                          const Extension* extension) OVERRIDE;
-  virtual int PreferredIconSize() OVERRIDE;
-  virtual void SetWebContentsBlocked(content::WebContents* web_contents,
-                                     bool blocked) OVERRIDE;
-  virtual bool IsWebContentsVisible(
-      content::WebContents* web_contents) OVERRIDE;
-  virtual void SetTerminatingCallback(const base::Closure& callback) OVERRIDE;
+      const Extension* extension) override;
+  bool CheckMediaAccessPermission(content::WebContents* web_contents,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type,
+                                  const Extension* extension) override;
+  int PreferredIconSize() override;
+  void SetWebContentsBlocked(content::WebContents* web_contents,
+                             bool blocked) override;
+  bool IsWebContentsVisible(content::WebContents* web_contents) override;
+  void SetTerminatingCallback(const base::Closure& callback) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShellAppDelegate);

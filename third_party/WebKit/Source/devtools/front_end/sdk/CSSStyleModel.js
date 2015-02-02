@@ -45,13 +45,10 @@ WebInspector.CSSStyleModel = function(target)
     target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._mainFrameNavigated, this);
     target.registerCSSDispatcher(new WebInspector.CSSDispatcher(this));
     this._agent.enable(this._wasEnabled.bind(this));
-    /** @type {!StringMap.<!WebInspector.CSSStyleSheetHeader>} */
-    this._styleSheetIdToHeader = new StringMap();
-    /** @type {!StringMap.<!Object.<!PageAgent.FrameId, !Array.<!CSSAgent.StyleSheetId>>>} */
-    this._styleSheetIdsForURL = new StringMap();
-
-    if (Runtime.experiments.isEnabled("disableAgentsWhenProfile"))
-        WebInspector.profilingLock().addEventListener(WebInspector.Lock.Events.StateChanged, this._profilingStateChanged, this);
+    /** @type {!Map.<string, !WebInspector.CSSStyleSheetHeader>} */
+    this._styleSheetIdToHeader = new Map();
+    /** @type {!Map.<string, !Object.<!PageAgent.FrameId, !Array.<!CSSAgent.StyleSheetId>>>} */
+    this._styleSheetIdsForURL = new Map();
 }
 
 WebInspector.CSSStyleModel.PseudoStatePropertyName = "pseudoState";
@@ -83,15 +80,16 @@ WebInspector.CSSStyleModel.Events = {
 WebInspector.CSSStyleModel.MediaTypes = ["all", "braille", "embossed", "handheld", "print", "projection", "screen", "speech", "tty", "tv"];
 
 WebInspector.CSSStyleModel.prototype = {
-    _profilingStateChanged: function()
+    suspendModel: function()
     {
-        if (WebInspector.profilingLock().isAcquired()) {
-            this._agent.disable();
-            this._isEnabled = false;
-            this._resetStyleSheets();
-        } else {
-            this._agent.enable(this._wasEnabled.bind(this));
-        }
+        this._agent.disable();
+        this._isEnabled = false;
+        this._resetStyleSheets();
+    },
+
+    resumeModel: function()
+    {
+        this._agent.enable(this._wasEnabled.bind(this));
     },
 
     /**
@@ -213,7 +211,7 @@ WebInspector.CSSStyleModel.prototype = {
      */
     allStyleSheets: function()
     {
-        var values = this._styleSheetIdToHeader.values();
+        var values = this._styleSheetIdToHeader.valuesArray();
         /**
          * @param {!WebInspector.CSSStyleSheetHeader} a
          * @param {!WebInspector.CSSStyleSheetHeader} b
@@ -396,7 +394,7 @@ WebInspector.CSSStyleModel.prototype = {
     requestViaInspectorStylesheet: function(node, callback)
     {
         var frameId = node.frameId() || this.target().resourceTreeModel.mainFrame.id;
-        var headers = this._styleSheetIdToHeader.values();
+        var headers = this._styleSheetIdToHeader.valuesArray();
         for (var i = 0; i < headers.length; ++i) {
             var styleSheetHeader = headers[i];
             if (styleSheetHeader.frameId === frameId && styleSheetHeader.isViaInspector()) {
@@ -442,7 +440,7 @@ WebInspector.CSSStyleModel.prototype = {
      */
     styleSheetHeaders: function()
     {
-        return this._styleSheetIdToHeader.values();
+        return this._styleSheetIdToHeader.valuesArray();
     },
 
     /**
@@ -589,7 +587,7 @@ WebInspector.CSSStyleModel.prototype = {
 
     _resetStyleSheets: function()
     {
-        var headers = this._styleSheetIdToHeader.values();
+        var headers = this._styleSheetIdToHeader.valuesArray();
         this._styleSheetIdsForURL.clear();
         this._styleSheetIdToHeader.clear();
         for (var i = 0; i < headers.length; ++i)
@@ -1040,7 +1038,7 @@ WebInspector.CSSRule.prototype = {
 
     /**
      * @param {number} index
-     * @return {?WebInspector.CSSLocation}
+     * @return {!WebInspector.CSSLocation}
      */
     rawSelectorLocation: function(index)
     {
@@ -1303,6 +1301,7 @@ WebInspector.CSSMediaQueryExpression = function(payload)
     this._value = payload.value;
     this._unit = payload.unit;
     this._feature = payload.feature;
+    this._valueRange = payload.valueRange ? WebInspector.TextRange.fromObject(payload.valueRange) : null;
     this._computedLength = payload.computedLength || null;
 }
 
@@ -1338,6 +1337,14 @@ WebInspector.CSSMediaQueryExpression.prototype = {
     feature: function()
     {
         return this._feature;
+    },
+
+    /**
+     * @return {?WebInspector.TextRange}
+     */
+    valueRange: function()
+    {
+        return this._valueRange;
     },
 
     /**

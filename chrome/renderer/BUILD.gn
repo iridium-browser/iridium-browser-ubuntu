@@ -21,6 +21,7 @@ grit("resources") {
     "grit/renderer_resources.h",
     "renderer_resources_100_percent.pak",
     "renderer_resources_200_percent.pak",
+    "renderer_resources_300_percent.pak",
   ]
 }
 
@@ -37,8 +38,10 @@ static_library("renderer") {
     "//chrome:strings",
     "//components/autofill/content/renderer",
     "//components/cdm/renderer",
-    "//components/data_reduction_proxy/common",
+    "//components/data_reduction_proxy/core/common",
+    "//components/error_page/renderer",
     "//components/password_manager/content/renderer",
+    "//components/plugins/renderer",
     "//components/startup_metric_utils",
     "//components/translate/content/renderer",
     "//components/translate/core/common",
@@ -76,7 +79,6 @@ static_library("renderer") {
                            ".", "..")
     deps += [
       "//components/pdf/renderer",
-      "//components/plugins/renderer",
       "//ppapi:ppapi_host",
       "//ppapi:ppapi_ipc",
       "//ppapi:ppapi_proxy",
@@ -128,11 +130,11 @@ static_library("renderer") {
     deps += [ "//third_party/hunspell" ]
   }
 
-  if (printing_mode > 0) {
+  if (enable_basic_printing || enable_print_preview) {
     deps += [ "//printing" ]
     sources += rebase_path(gypi_values.chrome_renderer_printing_sources,
                            ".", "..")
-    if (printing_mode == 1) {
+    if (enable_print_preview) {
       sources += rebase_path(gypi_values.chrome_renderer_full_printing_sources,
                              ".", "..")
     }
@@ -179,10 +181,10 @@ source_set("test_support") {
     "//testing/gtest",
   ]
 
-  if (printing_mode == 1) {
+  if (enable_print_preview) {
     deps += [ "//chrome/service" ]
   }
-  if (printing_mode != 0) {
+  if (enable_basic_printing || enable_print_preview) {
     sources += [
       "printing/mock_printer.cc",
       "printing/mock_printer.h",

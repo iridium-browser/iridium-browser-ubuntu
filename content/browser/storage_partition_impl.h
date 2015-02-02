@@ -21,7 +21,7 @@ namespace content {
 
 class StoragePartitionImpl : public StoragePartition {
  public:
-  CONTENT_EXPORT virtual ~StoragePartitionImpl();
+  CONTENT_EXPORT ~StoragePartitionImpl() override;
 
   // Quota managed data uses a different bitmask for types than
   // StoragePartition uses. This method generates that mask.
@@ -33,30 +33,30 @@ class StoragePartitionImpl : public StoragePartition {
       storage::SpecialStoragePolicy* special_storage_policy);
 
   // StoragePartition interface.
-  virtual base::FilePath GetPath() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetURLRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaURLRequestContext() OVERRIDE;
-  virtual storage::QuotaManager* GetQuotaManager() OVERRIDE;
-  virtual ChromeAppCacheService* GetAppCacheService() OVERRIDE;
-  virtual storage::FileSystemContext* GetFileSystemContext() OVERRIDE;
-  virtual storage::DatabaseTracker* GetDatabaseTracker() OVERRIDE;
-  virtual DOMStorageContextWrapper* GetDOMStorageContext() OVERRIDE;
-  virtual IndexedDBContextImpl* GetIndexedDBContext() OVERRIDE;
-  virtual ServiceWorkerContextWrapper* GetServiceWorkerContext() OVERRIDE;
+  base::FilePath GetPath() override;
+  net::URLRequestContextGetter* GetURLRequestContext() override;
+  net::URLRequestContextGetter* GetMediaURLRequestContext() override;
+  storage::QuotaManager* GetQuotaManager() override;
+  ChromeAppCacheService* GetAppCacheService() override;
+  storage::FileSystemContext* GetFileSystemContext() override;
+  storage::DatabaseTracker* GetDatabaseTracker() override;
+  DOMStorageContextWrapper* GetDOMStorageContext() override;
+  IndexedDBContextImpl* GetIndexedDBContext() override;
+  ServiceWorkerContextWrapper* GetServiceWorkerContext() override;
+  GeofencingManager* GetGeofencingManager() override;
 
-  virtual void ClearDataForOrigin(
-      uint32 remove_mask,
-      uint32 quota_storage_remove_mask,
-      const GURL& storage_origin,
-      net::URLRequestContextGetter* request_context_getter,
-      const base::Closure& callback) OVERRIDE;
-  virtual void ClearData(uint32 remove_mask,
-                         uint32 quota_storage_remove_mask,
-                         const GURL& storage_origin,
-                         const OriginMatcherFunction& origin_matcher,
-                         const base::Time begin,
-                         const base::Time end,
-                         const base::Closure& callback) OVERRIDE;
+  void ClearDataForOrigin(uint32 remove_mask,
+                          uint32 quota_storage_remove_mask,
+                          const GURL& storage_origin,
+                          net::URLRequestContextGetter* request_context_getter,
+                          const base::Closure& callback) override;
+  void ClearData(uint32 remove_mask,
+                 uint32 quota_storage_remove_mask,
+                 const GURL& storage_origin,
+                 const OriginMatcherFunction& origin_matcher,
+                 const base::Time begin,
+                 const base::Time end,
+                 const base::Closure& callback) override;
 
   WebRTCIdentityStore* GetWebRTCIdentityStore();
 
@@ -117,7 +117,8 @@ class StoragePartitionImpl : public StoragePartition {
       IndexedDBContextImpl* indexed_db_context,
       ServiceWorkerContextWrapper* service_worker_context,
       WebRTCIdentityStore* webrtc_identity_store,
-      storage::SpecialStoragePolicy* special_storage_policy);
+      storage::SpecialStoragePolicy* special_storage_policy,
+      GeofencingManager* geofencing_manager);
 
   void ClearDataImpl(uint32 remove_mask,
                      uint32 quota_storage_remove_mask,
@@ -157,6 +158,7 @@ class StoragePartitionImpl : public StoragePartition {
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
   scoped_refptr<WebRTCIdentityStore> webrtc_identity_store_;
   scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
+  scoped_refptr<GeofencingManager> geofencing_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(StoragePartitionImpl);
 };

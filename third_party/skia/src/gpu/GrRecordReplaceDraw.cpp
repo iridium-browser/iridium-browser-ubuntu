@@ -6,49 +6,34 @@
  */
 
 #include "GrRecordReplaceDraw.h"
+#include "SkCanvasPriv.h"
 #include "SkImage.h"
 #include "SkRecordDraw.h"
+#include "SkRecords.h"
 
-GrReplacements::ReplacementInfo* GrReplacements::push() {
-    SkDEBUGCODE(this->validate());
-    return fReplacements.push();
+GrReplacements::ReplacementInfo* GrReplacements::newReplacement(uint32_t pictureID,
+                                                                unsigned int start,
+                                                                const SkMatrix& ctm) {
+    ReplacementInfo* replacement = SkNEW_ARGS(ReplacementInfo, (pictureID, start, ctm));
+    fReplacementHash.add(replacement);
+    return replacement;
 }
 
 void GrReplacements::freeAll() {
-    for (int i = 0; i < fReplacements.count(); ++i) {
-        fReplacements[i].fImage->unref();
-        SkDELETE(fReplacements[i].fPaint);
+    SkTDynamicHash<ReplacementInfo, ReplacementInfo::Key>::Iter iter(&fReplacementHash);
+
+    for (; !iter.done(); ++iter) {
+        ReplacementInfo* replacement = &(*iter);
+        SkDELETE(replacement);
     }
-    fReplacements.reset();
+
+    fReplacementHash.reset();
 }
 
-#ifdef SK_DEBUG
-void GrReplacements::validate() const {
-    // Check that the ranges are monotonically increasing and non-overlapping
-    if (fReplacements.count() > 0) {
-        SkASSERT(fReplacements[0].fStart < fReplacements[0].fStop);
-
-        for (int i = 1; i < fReplacements.count(); ++i) {
-            SkASSERT(fReplacements[i].fStart < fReplacements[i].fStop);
-            SkASSERT(fReplacements[i - 1].fStop < fReplacements[i].fStart);
-        }
-    }
-}
-#endif
-
-const GrReplacements::ReplacementInfo*
-GrReplacements::lookupByStart(size_t start, int* searchStart) const {
-    SkDEBUGCODE(this->validate());
-    for (int i = *searchStart; i < fReplacements.count(); ++i) {
-        if (start == fReplacements[i].fStart) {
-            *searchStart = i + 1;
-            return &fReplacements[i];
-        } else if (start < fReplacements[i].fStart) {
-            return NULL;  // the ranges are monotonically increasing and non-overlapping
-        }
-    }
-
-    return NULL;
+const GrReplacements::ReplacementInfo* GrReplacements::lookupByStart(uint32_t pictureID,
+                                                                     size_t start,
+                                                                     const SkMatrix& ctm) const {
+    return fReplacementHash.find(ReplacementInfo::Key(pictureID, start, ctm));
 }
 
 static inline void draw_replacement_bitmap(const GrReplacements::ReplacementInfo* ri,
@@ -66,61 +51,138 @@ static inline void draw_replacement_bitmap(const GrReplacements::ReplacementInfo
     canvas->restore();
 }
 
-void GrRecordReplaceDraw(const SkRecord& record,
-                         SkCanvas* canvas,
-                         const SkBBoxHierarchy* bbh,
-                         const GrReplacements* replacements,
-                         SkDrawPictureCallback* callback) {
+// Used by GrRecordReplaceDraw. It intercepts nested drawPicture calls and
+// also draws them with replaced layers.
+class ReplaceDraw : public SkRecords::Draw {
+public:
+    ReplaceDraw(SkCanvas* canvas,
+                const SkPicture* picture,
+                const GrReplacements* replacements,
+                const SkMatrix& initialMatrix,
+                SkDrawPictureCallback* callback)
+        : INHERITED(canvas)
+        , fCanvas(canvas)
+        , fPicture(picture)
+        , fReplacements(replacements)
+        , fInitialMatrix(initialMatrix)
+        , fCallback(callback)
+        , fIndex(0)
+        , fNumReplaced(0) {
+    }
+
+    int draw() {
+        const SkBBoxHierarchy* bbh = fPicture->fBBH.get();
+        const SkRecord* record = fPicture->fRecord.get();
+        if (NULL == record) {
+            return 0;
+        }
+
+        fNumReplaced = 0;
+
+        fOps.rewind();
+
+        if (bbh) {
+            // Draw only ops that affect pixels in the canvas's current clip.
+            // The SkRecord and BBH were recorded in identity space.  This canvas
+            // is not necessarily in that same space.  getClipBounds() returns us
+            // this canvas' clip bounds transformed back into identity space, which
+            // lets us query the BBH.
+            SkRect query = { 0, 0, 0, 0 };
+            (void)fCanvas->getClipBounds(&query);
+
+            bbh->search(query, &fOps);
+
+            for (fIndex = 0; fIndex < fOps.count(); ++fIndex) {
+                if (fCallback && fCallback->abortDrawing()) {
+                    return fNumReplaced;
+                }
+
+                record->visit<void>(fOps[fIndex], *this);
+            }
+
+        } else {
+            for (fIndex = 0; fIndex < (int) record->count(); ++fIndex) {
+                if (fCallback && fCallback->abortDrawing()) {
+                    return fNumReplaced;
+                }
+
+                record->visit<void>(fIndex, *this);
+            }
+        }
+
+        return fNumReplaced;
+    }
+
+    // Same as Draw for all ops except DrawPicture and SaveLayer.
+    template <typename T> void operator()(const T& r) {
+        this->INHERITED::operator()(r);
+    }
+    void operator()(const SkRecords::DrawPicture& dp) {
+        SkAutoCanvasMatrixPaint acmp(fCanvas, dp.matrix, dp.paint, dp.picture->cullRect());
+
+        // Draw sub-pictures with the same replacement list but a different picture
+        ReplaceDraw draw(fCanvas, dp.picture, fReplacements, fInitialMatrix, fCallback);
+
+        fNumReplaced += draw.draw();
+    }
+    void operator()(const SkRecords::SaveLayer& sl) {
+
+        // For a saveLayer command, check if it can be replaced by a drawBitmap
+        // call and, if so, draw it and then update the current op index accordingly.
+        size_t startOffset;
+        if (fOps.count()) {
+            startOffset = fOps[fIndex];
+        } else {
+            startOffset = fIndex;
+        }
+
+        const SkMatrix& ctm = fCanvas->getTotalMatrix();
+        const GrReplacements::ReplacementInfo* ri = fReplacements->lookupByStart(
+                                                            fPicture->uniqueID(),
+                                                            startOffset,
+                                                            ctm);
+
+        if (ri) {
+            fNumReplaced++;
+            draw_replacement_bitmap(ri, fCanvas, fInitialMatrix);
+
+            if (fPicture->fBBH.get()) {
+                while (fOps[fIndex] < ri->fStop) {
+                    ++fIndex;
+                }
+                SkASSERT(fOps[fIndex] == ri->fStop);
+            } else {
+                fIndex = ri->fStop;
+            }
+            return;
+        }
+
+        // This is a fail for layer hoisting
+        this->INHERITED::operator()(sl);
+    }
+
+private:
+    SkCanvas*              fCanvas;
+    const SkPicture*       fPicture;
+    const GrReplacements*  fReplacements;
+    const SkMatrix         fInitialMatrix;
+    SkDrawPictureCallback* fCallback;
+
+    SkTDArray<unsigned>    fOps;
+    int                    fIndex;
+    int                    fNumReplaced;
+
+    typedef Draw INHERITED;
+};
+
+int GrRecordReplaceDraw(const SkPicture* picture,
+                        SkCanvas* canvas,
+                        const GrReplacements* replacements,
+                        const SkMatrix& initialMatrix,
+                        SkDrawPictureCallback* callback) {
     SkAutoCanvasRestore saveRestore(canvas, true /*save now, restore at exit*/);
 
-    SkRecords::Draw draw(canvas);
-    const GrReplacements::ReplacementInfo* ri = NULL;
-    int searchStart = 0;
+    ReplaceDraw draw(canvas, picture, replacements, initialMatrix, callback);
 
-    const SkMatrix initialMatrix = canvas->getTotalMatrix();
-
-    if (bbh) {
-        // Draw only ops that affect pixels in the canvas's current clip.
-        // The SkRecord and BBH were recorded in identity space.  This canvas
-        // is not necessarily in that same space.  getClipBounds() returns us
-        // this canvas' clip bounds transformed back into identity space, which
-        // lets us query the BBH.
-        SkRect query = { 0, 0, 0, 0 };
-        (void)canvas->getClipBounds(&query);
-
-        SkTDArray<void*> ops;
-        bbh->search(query, &ops);
-
-        for (int i = 0; i < ops.count(); i++) {
-            if (callback && callback->abortDrawing()) {
-                return;
-            }
-            ri = replacements->lookupByStart((uintptr_t)ops[i], &searchStart);
-            if (ri) {
-                draw_replacement_bitmap(ri, canvas, initialMatrix);
-
-                while ((uintptr_t)ops[i] < ri->fStop) {
-                    ++i;
-                }
-                SkASSERT((uintptr_t)ops[i] == ri->fStop);
-                continue;
-            }
-
-            record.visit<void>((uintptr_t)ops[i], draw);
-        }
-    } else {
-        for (unsigned int i = 0; i < record.count(); ++i) {
-            if (callback && callback->abortDrawing()) {
-                return;
-            }
-            ri = replacements->lookupByStart(i, &searchStart);
-            if (ri) {
-                draw_replacement_bitmap(ri, canvas, initialMatrix);
-                i = ri->fStop;
-                continue;
-            }
-
-            record.visit<void>(i, draw);
-        }
-    }
+    return draw.draw();
 }

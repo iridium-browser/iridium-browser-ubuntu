@@ -39,10 +39,10 @@ class StorageMonitorLinux : public StorageMonitor,
   // Use StorageMonitor::GetInstance() instead.
   // |mtab_file_path| is the path to a mtab file to watch for mount points.
   explicit StorageMonitorLinux(const base::FilePath& mtab_file_path);
-  virtual ~StorageMonitorLinux();
+  ~StorageMonitorLinux() override;
 
   // Must be called for StorageMonitorLinux to work.
-  virtual void Init() OVERRIDE;
+  void Init() override;
 
  protected:
   // Gets device information given a |device_path| and |mount_point|.
@@ -57,8 +57,8 @@ class StorageMonitorLinux : public StorageMonitor,
       device::MediaTransferProtocolManager* test_manager);
 
   // MtabWatcherLinux::Delegate implementation.
-  virtual void UpdateMtab(
-      const MtabWatcherLinux::MountPointDeviceMap& new_mtab) OVERRIDE;
+  void UpdateMtab(
+      const MtabWatcherLinux::MountPointDeviceMap& new_mtab) override;
 
  private:
   // Structure to save mounted device information such as device path, unique
@@ -90,12 +90,12 @@ class StorageMonitorLinux : public StorageMonitor,
   typedef std::map<base::FilePath, ReferencedMountPoint> MountPriorityMap;
 
   // StorageMonitor implementation.
-  virtual bool GetStorageInfoForPath(const base::FilePath& path,
-                                     StorageInfo* device_info) const OVERRIDE;
-  virtual void EjectDevice(const std::string& device_id,
-                           base::Callback<void(EjectStatus)> callback) OVERRIDE;
-  virtual device::MediaTransferProtocolManager*
-      media_transfer_protocol_manager() OVERRIDE;
+  bool GetStorageInfoForPath(const base::FilePath& path,
+                             StorageInfo* device_info) const override;
+  void EjectDevice(const std::string& device_id,
+                   base::Callback<void(EjectStatus)> callback) override;
+  device::MediaTransferProtocolManager* media_transfer_protocol_manager()
+      override;
 
   // Called when the MtabWatcher has been created.
   void OnMtabWatcherCreated(MtabWatcherLinux* watcher);

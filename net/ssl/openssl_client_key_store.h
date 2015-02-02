@@ -43,8 +43,8 @@ class NET_EXPORT OpenSSLClientKeyStore {
   // Returns false if an error occured.
   // This function does not take ownership of the private_key, but may
   // increment its internal reference count.
-  NET_EXPORT bool RecordClientCertPrivateKey(const X509Certificate* cert,
-                                             EVP_PKEY* private_key);
+  bool RecordClientCertPrivateKey(const X509Certificate* cert,
+                                  EVP_PKEY* private_key);
 
   // Given a certificate's |public_key|, return the corresponding private
   // key that has been recorded previously by RecordClientCertPrivateKey().
@@ -73,7 +73,9 @@ class NET_EXPORT OpenSSLClientKeyStore {
    public:
     explicit KeyPair(EVP_PKEY* pub_key, EVP_PKEY* priv_key);
     KeyPair(const KeyPair& other);
-    void operator=(const KeyPair& other);
+    // Intentionally pass by value, in order to use the copy-and-swap idiom.
+    void operator=(KeyPair other);
+    void swap(KeyPair& other);
     ~KeyPair();
 
     crypto::ScopedEVP_PKEY public_key;

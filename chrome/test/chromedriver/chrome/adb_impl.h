@@ -23,31 +23,31 @@ class AdbImpl : public Adb {
   explicit AdbImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& io_message_loop_proxy,
       int port);
-  virtual ~AdbImpl();
+  ~AdbImpl() override;
 
   // Overridden from Adb:
-  virtual Status GetDevices(std::vector<std::string>* devices) OVERRIDE;
-  virtual Status ForwardPort(const std::string& device_serial,
-                             int local_port,
-                             const std::string& remote_abstract) OVERRIDE;
-  virtual Status SetCommandLineFile(const std::string& device_serial,
-                                    const std::string& command_line_file,
-                                    const std::string& exec_name,
-                                    const std::string& args) OVERRIDE;
-  virtual Status CheckAppInstalled(const std::string& device_serial,
-                                   const std::string& package) OVERRIDE;
-  virtual Status ClearAppData(const std::string& device_serial,
-                              const std::string& package) OVERRIDE;
-  virtual Status SetDebugApp(const std::string& device_serial,
-                             const std::string& package) OVERRIDE;
-  virtual Status Launch(const std::string& device_serial,
-                        const std::string& package,
-                        const std::string& activity) OVERRIDE;
-  virtual Status ForceStop(const std::string& device_serial,
-                           const std::string& package) OVERRIDE;
-  virtual Status GetPidByName(const std::string& device_serial,
-                              const std::string& process_name,
-                              int* pid) OVERRIDE;
+  Status GetDevices(std::vector<std::string>* devices) override;
+  Status ForwardPort(const std::string& device_serial,
+                     int local_port,
+                     const std::string& remote_abstract) override;
+  Status SetCommandLineFile(const std::string& device_serial,
+                            const std::string& command_line_file,
+                            const std::string& exec_name,
+                            const std::string& args) override;
+  Status CheckAppInstalled(const std::string& device_serial,
+                           const std::string& package) override;
+  Status ClearAppData(const std::string& device_serial,
+                      const std::string& package) override;
+  Status SetDebugApp(const std::string& device_serial,
+                     const std::string& package) override;
+  Status Launch(const std::string& device_serial,
+                const std::string& package,
+                const std::string& activity) override;
+  Status ForceStop(const std::string& device_serial,
+                   const std::string& package) override;
+  Status GetPidByName(const std::string& device_serial,
+                      const std::string& process_name,
+                      int* pid) override;
 
  private:
   Status ExecuteCommand(const std::string& command,

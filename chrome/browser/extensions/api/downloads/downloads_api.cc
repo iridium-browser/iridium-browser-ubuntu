@@ -167,7 +167,7 @@ const char kUrlRegexKey[] = "urlRegex";
 
 // Note: Any change to the danger type strings, should be accompanied by a
 // corresponding change to downloads.json.
-const char* kDangerStrings[] = {
+const char* const kDangerStrings[] = {
   kDangerSafe,
   kDangerFile,
   kDangerUrl,
@@ -183,7 +183,7 @@ COMPILE_ASSERT(arraysize(kDangerStrings) == content::DOWNLOAD_DANGER_TYPE_MAX,
 
 // Note: Any change to the state strings, should be accompanied by a
 // corresponding change to downloads.json.
-const char* kStateStrings[] = {
+const char* const kStateStrings[] = {
   kStateInProgress,
   kStateComplete,
   kStateInterrupted,
@@ -297,12 +297,13 @@ class DownloadFileIconExtractorImpl : public DownloadFileIconExtractor {
  public:
   DownloadFileIconExtractorImpl() {}
 
-  virtual ~DownloadFileIconExtractorImpl() {}
+  ~DownloadFileIconExtractorImpl() override {}
 
-  virtual bool ExtractIconURLForPath(const base::FilePath& path,
-                                     float scale,
-                                     IconLoader::IconSize icon_size,
-                                     IconURLCallback callback) OVERRIDE;
+  bool ExtractIconURLForPath(const base::FilePath& path,
+                             float scale,
+                             IconLoader::IconSize icon_size,
+                             IconURLCallback callback) override;
+
  private:
   void OnIconLoadComplete(
       float scale, const IconURLCallback& callback, gfx::Image* icon);
@@ -346,7 +347,8 @@ IconLoader::IconSize IconLoaderSizeFromPixelSize(int pixel_size) {
 
 typedef base::hash_map<std::string, DownloadQuery::FilterType> FilterTypeMap;
 
-void InitFilterTypeMap(FilterTypeMap& filter_types) {
+void InitFilterTypeMap(FilterTypeMap* filter_types_ptr) {
+  FilterTypeMap& filter_types = *filter_types_ptr;
   filter_types[kBytesReceivedKey] = DownloadQuery::FILTER_BYTES_RECEIVED;
   filter_types[kExistsKey] = DownloadQuery::FILTER_EXISTS;
   filter_types[kFilenameKey] = DownloadQuery::FILTER_FILENAME;
@@ -370,7 +372,8 @@ void InitFilterTypeMap(FilterTypeMap& filter_types) {
 
 typedef base::hash_map<std::string, DownloadQuery::SortType> SortTypeMap;
 
-void InitSortTypeMap(SortTypeMap& sorter_types) {
+void InitSortTypeMap(SortTypeMap* sorter_types_ptr) {
+  SortTypeMap& sorter_types = *sorter_types_ptr;
   sorter_types[kBytesReceivedKey] = DownloadQuery::SORT_BYTES_RECEIVED;
   sorter_types[kDangerKey] = DownloadQuery::SORT_DANGER;
   sorter_types[kEndTimeKey] = DownloadQuery::SORT_END_TIME;
@@ -453,8 +456,8 @@ void CompileDownloadQueryOrderBy(
   // comparisons.
   static base::LazyInstance<SortTypeMap> sorter_types =
     LAZY_INSTANCE_INITIALIZER;
-  if (sorter_types.Get().size() == 0)
-    InitSortTypeMap(sorter_types.Get());
+  if (sorter_types.Get().empty())
+    InitSortTypeMap(sorter_types.Pointer());
 
   for (std::vector<std::string>::const_iterator iter = order_by_strs.begin();
        iter != order_by_strs.end(); ++iter) {
@@ -486,8 +489,8 @@ void RunDownloadQuery(
   // comparisons.
   static base::LazyInstance<FilterTypeMap> filter_types =
     LAZY_INSTANCE_INITIALIZER;
-  if (filter_types.Get().size() == 0)
-    InitFilterTypeMap(filter_types.Get());
+  if (filter_types.Get().empty())
+    InitFilterTypeMap(filter_types.Pointer());
 
   DownloadQuery query_out;
 
@@ -599,7 +602,7 @@ class ExtensionDownloadsEventRouterData : public base::SupportsUserData::Data {
     download_item->SetUserData(kKey, this);
   }
 
-  virtual ~ExtensionDownloadsEventRouterData() {
+  ~ExtensionDownloadsEventRouterData() override {
     if (updated_ > 0) {
       UMA_HISTOGRAM_PERCENTAGE("Download.OnChanged",
                                (changed_fired_ * 100 / updated_));
@@ -889,11 +892,9 @@ class ManagerDestructionObserver : public DownloadManager::Observer {
     manager_->AddObserver(this);
   }
 
-  virtual ~ManagerDestructionObserver() {
-    manager_->RemoveObserver(this);
-  }
+  ~ManagerDestructionObserver() override { manager_->RemoveObserver(this); }
 
-  virtual void ManagerGoingDown(DownloadManager* manager) OVERRIDE {
+  void ManagerGoingDown(DownloadManager* manager) override {
     manager_file_existence_last_checked_->erase(manager);
     if (manager_file_existence_last_checked_->size() == 0) {
       delete manager_file_existence_last_checked_;

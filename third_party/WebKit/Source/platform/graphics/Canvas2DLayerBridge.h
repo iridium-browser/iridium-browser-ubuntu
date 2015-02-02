@@ -26,8 +26,6 @@
 #ifndef Canvas2DLayerBridge_h
 #define Canvas2DLayerBridge_h
 
-#include "SkDeferredCanvas.h"
-#include "SkImage.h"
 #include "platform/PlatformExport.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/ImageBufferSurface.h"
@@ -35,6 +33,8 @@
 #include "public/platform/WebExternalTextureLayerClient.h"
 #include "public/platform/WebExternalTextureMailbox.h"
 #include "third_party/khronos/GLES2/gl2.h"
+#include "third_party/skia/include/core/SkImage.h"
+#include "third_party/skia/include/utils/SkDeferredCanvas.h"
 #include "wtf/DoublyLinkedList.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
@@ -56,14 +56,14 @@ public:
     virtual ~Canvas2DLayerBridge();
 
     // WebExternalTextureLayerClient implementation.
-    virtual bool prepareMailbox(WebExternalTextureMailbox*, WebExternalBitmap*) OVERRIDE;
-    virtual void mailboxReleased(const WebExternalTextureMailbox&, bool lostResource) OVERRIDE;
+    virtual bool prepareMailbox(WebExternalTextureMailbox*, WebExternalBitmap*) override;
+    virtual void mailboxReleased(const WebExternalTextureMailbox&, bool lostResource) override;
 
     // SkDeferredCanvas::NotificationClient implementation
-    virtual void prepareForDraw() OVERRIDE;
-    virtual void storageAllocatedForRecordingChanged(size_t) OVERRIDE;
-    virtual void flushedDrawCommands() OVERRIDE;
-    virtual void skippedPendingDrawCommands() OVERRIDE;
+    virtual void prepareForDraw() override;
+    virtual void storageAllocatedForRecordingChanged(size_t) override;
+    virtual void flushedDrawCommands() override;
+    virtual void skippedPendingDrawCommands() override;
 
     // ImageBufferSurface implementation
     void finalizeFrame(const FloatRect &dirtyRect);
@@ -90,6 +90,8 @@ public:
     bool isHidden() { return m_isHidden; }
 
     void beginDestruction();
+
+    PassRefPtr<SkImage> newImageSnapshot();
 
 protected:
     Canvas2DLayerBridge(PassOwnPtr<WebGraphicsContext3DProvider>, PassOwnPtr<SkDeferredCanvas>, PassRefPtr<SkSurface>, int, OpacityMode);

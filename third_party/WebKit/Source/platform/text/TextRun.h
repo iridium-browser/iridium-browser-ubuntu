@@ -27,20 +27,15 @@
 #include "platform/PlatformExport.h"
 #include "platform/fonts/Glyph.h"
 #include "platform/geometry/FloatRect.h"
+#include "platform/heap/Heap.h"
 #include "platform/text/TextDirection.h"
 #include "platform/text/TextPath.h"
 #include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
 
-namespace blink {
+class SkTextBlob;
 
-class FloatPoint;
-class Font;
-class GraphicsContext;
-class GlyphBuffer;
-class SimpleFontData;
-struct GlyphData;
-struct WidthIterator;
+namespace blink {
 
 class PLATFORM_EXPORT TextRun {
     WTF_MAKE_FAST_ALLOCATED;
@@ -212,10 +207,6 @@ public:
     class RenderingContext : public RefCounted<RenderingContext> {
     public:
         virtual ~RenderingContext() { }
-
-        virtual GlyphData glyphDataForCharacter(const Font&, const TextRun&, WidthIterator&, UChar32 character, bool mirror, int currentCharacter, unsigned& advanceLength) = 0;
-        virtual void drawSVGGlyphs(GraphicsContext*, const TextRun&, const SimpleFontData*, const GlyphBuffer&, int from, int to, const FloatPoint&) const = 0;
-        virtual float floatWidthUsingSVGFont(const Font&, const TextRun&, int& charsConsumed, Glyph& glyphId) const = 0;
     };
 
     RenderingContext* renderingContext() const { return m_renderingContext.get(); }
@@ -257,10 +248,13 @@ inline void TextRun::setTabSize(bool allow, unsigned size)
 
 // Container for parameters needed to paint TextRun.
 struct TextRunPaintInfo {
+    STACK_ALLOCATED();
+public:
     explicit TextRunPaintInfo(const TextRun& r)
         : run(r)
         , from(0)
         , to(r.length())
+        , cachedTextBlob(nullptr)
     {
     }
 
@@ -268,6 +262,7 @@ struct TextRunPaintInfo {
     int from;
     int to;
     FloatRect bounds;
+    RefPtr<const SkTextBlob>* cachedTextBlob;
 };
 
 }

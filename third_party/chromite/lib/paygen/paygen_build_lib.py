@@ -773,21 +773,23 @@ class _PaygenBuild(object):
              _FilterForMp(_FilterForBasic(images)),
              _FilterForMp(previous_images))))
 
-    # Full test payloads.
-    payload_sublists_skip.append(
-        (self._skip_full_payloads or self._skip_test_payloads,
-         self._DiscoverRequiredFullPayloads(_FilterForTest(images))))
+    # Only discover test payloads if Autotest is not disabled.
+    if self._control_dir:
+      # Full test payloads.
+      payload_sublists_skip.append(
+          (self._skip_full_payloads or self._skip_test_payloads,
+           self._DiscoverRequiredFullPayloads(_FilterForTest(images))))
 
-    # Delta for current -> NPO (test payloads).
-    payload_sublists_skip.append(
-        (self._skip_delta_payloads or self._skip_test_payloads,
-         self._DiscoverRequiredTestNpoDeltas(_FilterForTest(images))))
+      # Delta for current -> NPO (test payloads).
+      payload_sublists_skip.append(
+          (self._skip_delta_payloads or self._skip_test_payloads,
+           self._DiscoverRequiredTestNpoDeltas(_FilterForTest(images))))
 
-    # Deltas for previous -> current (test payloads).
-    payload_sublists_skip.append(
-        (self._skip_delta_payloads or self._skip_test_payloads,
-         self._DiscoverRequiredFromPreviousDeltas(
-             _FilterForTest(images), _FilterForTest(previous_images))))
+      # Deltas for previous -> current (test payloads).
+      payload_sublists_skip.append(
+          (self._skip_delta_payloads or self._skip_test_payloads,
+           self._DiscoverRequiredFromPreviousDeltas(
+               _FilterForTest(images), _FilterForTest(previous_images))))
 
     # Organize everything into a single list of (payload, skip) pairs; also, be
     # sure to fill in a URL for each payload.
@@ -842,13 +844,21 @@ class _PaygenBuild(object):
       A (possibly empty) list of payload URIs.
     """
     if version in self._version_to_full_test_payloads:
+      # Serve from cache, if possible.
       return self._version_to_full_test_payloads[version]
 
     payload_search_uri = gspaths.ChromeosReleases.PayloadUri(
         self._build.channel, self._build.board, version, '*',
         bucket=self._build.bucket)
-    full_test_payloads = [u for u in urilib.ListFiles(payload_search_uri)
-                          if not u.endswith('.log')]
+
+    payload_candidate = urilib.ListFiles(payload_search_uri)
+
+    # We create related files for each payload that have the payload name
+    # plus these extensions. Skip these files.
+    NOT_PAYLOAD = ('.json', '.log')
+    full_test_payloads = [u for u in payload_candidate
+                          if not any([u.endswith(n) for n in NOT_PAYLOAD])]
+    # Store in cache.
     self._version_to_full_test_payloads[version] = full_test_payloads
     return full_test_payloads
 
@@ -1150,8 +1160,7 @@ class _PaygenBuild(object):
 
         # Test payloads.
         if not self._control_dir:
-          logging.info('Payload autotesting skipped')
-          can_finish = False
+          logging.info('Payload autotesting disabled.')
         elif not can_finish:
           logging.warning('Not all payloads were generated/uploaded, '
                           'skipping payload autotesting.')
@@ -1239,7 +1248,7 @@ def ValidateBoardConfig(board):
 def CreatePayloads(build, work_dir, dry_run=False, ignore_finished=False,
                    skip_full_payloads=False, skip_delta_payloads=False,
                    skip_test_payloads=False, skip_nontest_payloads=False,
-                   skip_autotest=False, output_dir=None, run_parallel=False,
+                   disable_tests=False, output_dir=None, run_parallel=False,
                    run_on_builder=False):
   """Helper method than generates payloads for a given build.
 
@@ -1252,7 +1261,7 @@ def CreatePayloads(build, work_dir, dry_run=False, ignore_finished=False,
     skip_delta_payloads: Do not generate delta payloads.
     skip_test_payloads: Do not generate test payloads.
     skip_nontest_payloads: Do not generate non-test payloads.
-    skip_autotest: Do not generate test artifacts or run tests.
+    disable_tests: Do not attempt generating test artifacts or running tests.
     output_dir: Directory for payload files, or None for GS default locations.
     run_parallel: Generate payloads in parallel processes.
     run_on_builder: Running in a cbuildbot environment on a builder.
@@ -1261,7 +1270,7 @@ def CreatePayloads(build, work_dir, dry_run=False, ignore_finished=False,
 
   control_dir = None
   try:
-    if not skip_autotest:
+    if not disable_tests:
       control_dir = _FindControlFileDir(work_dir)
 
     _PaygenBuild(build, work_dir, dry_run=dry_run,

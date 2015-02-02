@@ -50,9 +50,9 @@ class RemoteToLocalSyncerTest : public testing::Test {
 
   RemoteToLocalSyncerTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
-  virtual ~RemoteToLocalSyncerTest() {}
+  ~RemoteToLocalSyncerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(database_dir_.CreateUniqueTempDir());
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
 
@@ -69,12 +69,11 @@ class RemoteToLocalSyncerTest : public testing::Test {
                                    kSyncRootFolderTitle));
     remote_change_processor_.reset(new FakeRemoteChangeProcessor);
 
-    context_.reset(new SyncEngineContext(
-        fake_drive_service.PassAs<drive::DriveServiceInterface>(),
-        drive_uploader.Pass(),
-        NULL,
-        base::ThreadTaskRunnerHandle::Get(),
-        base::ThreadTaskRunnerHandle::Get()));
+    context_.reset(new SyncEngineContext(fake_drive_service.Pass(),
+                                         drive_uploader.Pass(),
+                                         nullptr,
+                                         base::ThreadTaskRunnerHandle::Get(),
+                                         base::ThreadTaskRunnerHandle::Get()));
     context_->SetRemoteChangeProcessor(remote_change_processor_.get());
 
     RegisterSyncableFileSystem();
@@ -86,7 +85,7 @@ class RemoteToLocalSyncerTest : public testing::Test {
     sync_task_manager_->Initialize(SYNC_STATUS_OK);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     sync_task_manager_.reset();
     RevokeSyncableFileSystem();
     fake_drive_helper_.reset();
@@ -381,7 +380,7 @@ TEST_F(RemoteToLocalSyncerTest, Conflict_CreateFileOnFolder) {
   VerifyConsistency();
 
   // Tracker for the remote file should has low priority.
-  EXPECT_FALSE(GetMetadataDatabase()->GetDirtyTracker(NULL));
+  EXPECT_FALSE(GetMetadataDatabase()->GetDirtyTracker(nullptr));
   EXPECT_TRUE(GetMetadataDatabase()->HasDemotedDirtyTracker());
 }
 
@@ -446,7 +445,7 @@ TEST_F(RemoteToLocalSyncerTest, Conflict_CreateFileOnFile) {
   VerifyConsistency();
 
   // Tracker for the remote file should be lowered.
-  EXPECT_FALSE(GetMetadataDatabase()->GetDirtyTracker(NULL));
+  EXPECT_FALSE(GetMetadataDatabase()->GetDirtyTracker(nullptr));
   EXPECT_TRUE(GetMetadataDatabase()->HasDemotedDirtyTracker());
 }
 

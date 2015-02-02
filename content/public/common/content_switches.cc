@@ -96,6 +96,10 @@ const char kDisableApplicationCache[]       = "disable-application-cache";
 // users with many windows/tabs and lots of memory.
 const char kDisableBackingStoreLimit[]      = "disable-backing-store-limit";
 
+// Disable the Blink Scheduler. Ensures there's no reordering of blink tasks.
+// This switch is intended only for performance tests.
+const char kDisableBlinkScheduler[]         = "disable-blink-scheduler";
+
 // Disable the creation of compositing layers when it would prevent LCD text.
 const char kDisablePreferCompositingToLCDText[] =
     "disable-prefer-compositing-to-lcd-text";
@@ -109,9 +113,6 @@ const char kDisableDatabases[]              = "disable-databases";
 
 // Disables delegated renderer.
 const char kDisableDelegatedRenderer[]      = "disable-delegated-renderer";
-
-// Disables desktop notifications (default enabled on windows).
-const char kDisableDesktopNotifications[]   = "disable-desktop-notifications";
 
 // Handles URL requests by NPAPI plugins through the renderer.
 const char kDisableDirectNPAPIRequests[]    = "disable-direct-npapi-requests";
@@ -204,6 +205,10 @@ const char kDisableLogging[]                = "disable-logging";
 // Disables Media Source API (i.e., the MediaSource object).
 const char kDisableMediaSource[]            = "disable-media-source";
 
+// Disable rasterizer that writes directly to GPU memory.
+// Overrides the kEnableOneCopy flag.
+const char kDisableOneCopy[]                = "disable-one-copy";
+
 // Disable Pepper3D.
 const char kDisablePepper3d[]               = "disable-pepper-3d";
 
@@ -247,6 +252,9 @@ const char kDisableSmoothScrolling[]        = "disable-smooth-scrolling";
 // Disables the use of a 3D software rasterizer.
 const char kDisableSoftwareRasterizer[]     = "disable-software-rasterizer";
 
+// Disables SVG 1.1 DOM.
+const char kDisableSVG1DOM[]                = "disable-svg1dom";
+
 // Disable multithreaded GPU compositing of web content.
 const char kDisableThreadedCompositing[]     = "disable-threaded-compositing";
 
@@ -267,15 +275,14 @@ const char kDisableXSLT[]                   = "disable-xslt";
 // Disables Blink's XSSAuditor. The XSSAuditor mitigates reflective XSS.
 const char kDisableXSSAuditor[]             = "disable-xss-auditor";
 
-// Disable rasterizer that writes directly to GPU memory associated with tiles.
-// Overrides the kEnableZeroCopy flag.
-const char kDisableZeroCopy[]               = "disable-zero-copy";
-
 // Specifies if the |DOMAutomationController| needs to be bound in the
 // renderer. This binding happens on per-frame basis and hence can potentially
 // be a performance bottleneck. One should only enable it when automating dom
 // based tests.
 const char kDomAutomationController[]       = "dom-automation";
+
+// Enable antialiasing on 2d canvas clips (as opposed to draw operations)
+const char kEnable2dCanvasClipAntialiasing[] = "enable-2d-canvas-clip-aa";
 
 // Enable partially decoding jpeg images using the GPU.
 // At least YUV decoding will be accelerated when using this flag.
@@ -288,9 +295,6 @@ const char kEnableAcceleratedJpegDecoding[] =
 // ** DO NOT use this flag unless you know what you are doing. **
 const char kEnableBleedingEdgeRenderingFastPaths[] =
     "enable-bleeding-edge-rendering-fast-paths";
-
-// Disable deferred image filters.
-const char kDisableDeferredFilters[]         = "disable-deferred-filters";
 
 // Enables LCD text.
 const char kEnableLCDText[]                 = "enable-lcd-text";
@@ -306,6 +310,9 @@ const char kEnableLayerSquashing[] =
 
 // Enable experimental container node culling.
 const char kEnableContainerCulling[]        = "enable-container-culling";
+
+// Enable the experimental Credential Manager JavaScript API.
+const char kEnableCredentialManagerAPI[]    = "enable-credential-manager-api";
 
 // Use a BeginFrame signal from browser to renderer to schedule rendering.
 const char kEnableBeginFrameScheduling[]    = "enable-begin-frame-scheduling";
@@ -367,6 +374,9 @@ const char kEnableGpuRasterization[]        = "enable-gpu-rasterization";
 // tiles may be displayed during fast scrolls especially on slower devices.
 const char kEnableLowResTiling[] = "enable-low-res-tiling";
 
+// Dynamically apply color profiles to web content images.
+const char kEnableImageColorProfiles[]      = "enable-image-color-profiles";
+
 // Paint content on the compositor thread instead of the main thread.
 const char kEnableImplSidePainting[]        = "enable-impl-side-painting";
 
@@ -421,6 +431,9 @@ const char kEnableSeccompFilterSandbox[] =
 // Enables the Skia benchmarking extension
 const char kEnableSkiaBenchmarking[]        = "enable-skia-benchmarking";
 
+// Enables slimming paint: http://www.chromium.org/blink/slimming-paint
+const char kEnableSlimmingPaint[]           = "enable-slimming-paint";
+
 // On platforms that support it, enables smooth scroll animation.
 const char kEnableSmoothScrolling[]         = "enable-smooth-scrolling";
 
@@ -448,6 +461,9 @@ const char kEnableServiceWorkerSync[]       = "enable-service-worker-sync";
 // Enable use of experimental TCP sockets API for sending data in the
 // SYN packet.
 const char kEnableTcpFastOpen[]             = "enable-tcp-fastopen";
+
+// Enable experimental text blob rendering.
+const char kEnableTextBlobs[]               = "enable-text-blobs";
 
 // Enabled threaded compositing for layout tests.
 const char kEnableThreadedCompositing[]     = "enable-threaded-compositing";
@@ -478,8 +494,8 @@ const char kEnableV8IdleNotificationAfterCommit[] =
 // pinch gestures.
 const char kEnableViewport[]                = "enable-viewport";
 
-// Enables the use of the legacy viewport meta tag. Turning this on also
-// turns on the @viewport CSS rule
+// Enables the viewport meta tag, the de facto way to control layout which works
+// only on mobile browsers.
 const char kEnableViewportMeta[]            = "enable-viewport-meta";
 
 // Resizes of the main frame are the caused by changing between landscape
@@ -505,14 +521,14 @@ const char kEnableZeroCopy[]                = "enable-zero-copy";
 // Load NPAPI plugins from the specified directory.
 const char kExtraPluginDir[]                = "extra-plugin-dir";
 
-// Some field trials may be randomized in the browser, and the randomly selected
-// outcome needs to be propagated to the renderer. For instance, this is used
-// to modify histograms recorded in the renderer, or to get the renderer to
-// also set of its state (initialize, or not initialize components) to match the
-// experiment(s). The option is also useful for forcing field trials when
-// testing changes locally. The argument is a list of name and value pairs,
-// separated by slashes. See FieldTrialList::CreateTrialsFromString() in
-// field_trial.h for details.
+// This option can be used to force field trials when testing changes locally.
+// The argument is a list of name and value pairs, separated by slashes. If a
+// trial name is prefixed with an asterisk, that trial will start activated.
+// For example, the following argument defines two trials, with the second one
+// activated: "GoogleNow/Enable/*MaterialDesignNTP/Default/"
+// This option is also used by the browser to send the list of trials to
+// renderers, using the same format. See
+// FieldTrialList::CreateTrialsFromString() in field_trial.h for details.
 const char kForceFieldTrials[]              = "force-fieldtrials";
 
 // Always use the Skia GPU backend for drawing layer tiles. Only valid with GPU
@@ -702,6 +718,9 @@ const char kRendererProcessLimit[]          = "renderer-process-limit";
 // Causes the renderer process to display a dialog on launch.
 const char kRendererStartupDialog[]         = "renderer-startup-dialog";
 
+// Handles frame scrolls via the root RenderLayer instead of the FrameView.
+const char kRootLayerScrolls[]              = "root-layer-scrolls";
+
 // Causes the process to run as a sandbox IPC subprocess.
 const char kSandboxIPCProcess[]             = "sandbox-ipc";
 
@@ -890,10 +909,6 @@ const char kDisableOverscrollEdgeEffect[]   = "disable-overscroll-edge-effect";
 // WebRTC is enabled by default on Android.
 const char kDisableWebRTC[]                 = "disable-webrtc";
 
-// Enable the PowerSaveBlocker in ContentVideoView. Android only.
-const char kEnableContentVideoViewPowerSaveBlocker[] =
-    "enable-content-video-view-power-save-blocker";
-
 // Enable the recognition part of the Web Speech API.
 const char kEnableSpeechRecognition[]       = "enable-speech-recognition";
 
@@ -933,17 +948,19 @@ const char kEnableSpeechDispatcher[] = "enable-speech-dispatcher";
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 // Disables support for Core Animation plugins. This is triggered when
-// accelerated compositing is disabled. See http://crbug.com/122430 .
+// accelerated compositing is disabled. See http://crbug.com/122430.
 const char kDisableCoreAnimationPlugins[] =
     "disable-core-animation-plugins";
+
+// Allows input events to be handed on the compositor thread.
+// This feature is under development, see http://crbug.com/138003.
+extern const char kEnableThreadedEventHandlingMac[] =
+    "enable-threaded-event-handling-mac";
 #endif
 
 #if defined(OS_WIN)
 // Device scale factor passed to certain processes like renderers, etc.
 const char kDeviceScaleFactor[]     = "device-scale-factor";
-
-// Disables the DirectWrite font rendering system on windows.
-const char kDisableDirectWrite[]             = "disable-direct-write";
 
 // Disable the Legacy Window which corresponds to the size of the WebContents.
 const char kDisableLegacyIntermediateWindow[] = "disable-legacy-window";
@@ -953,6 +970,11 @@ const char kDisableLegacyIntermediateWindow[] = "disable-legacy-window";
 // the kernel. This is only supported on Windows 8 and beyond.
 const char kEnableWin32kRendererLockDown[]
     = "enable_win32k_renderer_lockdown";
+#endif
+
+#if defined(ENABLE_PLUGINS)
+// Enables the plugin power saver feature.
+const char kEnablePluginPowerSaver[] = "enable-plugin-power-saver";
 #endif
 
 // Don't dump stuff here, follow the same order as the header.

@@ -19,48 +19,29 @@
 class SkTileGrid : public SkBBoxHierarchy {
 public:
     SkTileGrid(int xTiles, int yTiles, const SkTileGridFactory::TileGridInfo& info);
-
     virtual ~SkTileGrid();
 
-    /**
-     * Insert a data pointer and corresponding bounding box
-     * @param data   An arbitrary data pointer, may be NULL.
-     * @param bounds The bounding box, should not be empty.
-     * @param defer  Ignored; SkTileGrid does not defer insertions.
-     */
-    virtual void insert(void* data, const SkRect& bounds, bool) SK_OVERRIDE;
-
-    virtual void flushDeferredInserts() SK_OVERRIDE {};
-
-    /**
-     * Populate 'results' with data pointers corresponding to bounding boxes that intersect 'query'.
-     * This will be fastest if the query is an exact match to a single grid tile.
-     */
-    virtual void search(const SkRect& query, SkTDArray<void*>* results) const SK_OVERRIDE;
-
-    virtual void clear() SK_OVERRIDE;
-
-    virtual int getCount() const SK_OVERRIDE { return fCount; }
-
-    virtual int getDepth() const SK_OVERRIDE { return -1; }
-
-    virtual void rewindInserts() SK_OVERRIDE;
+    virtual void insert(SkAutoTMalloc<SkRect>* boundsArray, int N) SK_OVERRIDE;
+    virtual void search(const SkRect& query, SkTDArray<unsigned>* results) const SK_OVERRIDE;
 
     // For testing.
     int tileCount(int x, int y) { return fTiles[y * fXTiles + x].count(); }
 
 private:
-    struct Entry {
-        size_t order;  // Insertion order.  Used to preserve order when merging multiple tiles.
-        void*  data;
-    };
+    void reserve(int);
+    void shrinkToFit();
+
+    void commonAdjust(SkRect*) const;
+    void userToGrid(const SkRect&, SkIRect* grid) const;
 
     const int fXTiles, fYTiles;
-    SkTileGridFactory::TileGridInfo fInfo;
-    size_t fCount;
+    const SkScalar fInvWidth, fInvHeight;
+    const SkScalar fMarginWidth, fMarginHeight;
+    const SkPoint fOffset;
+    const SkRect  fGridBounds;
 
-    // (fXTiles * fYTiles) SkTDArrays, each listing data overlapping that tile in insertion order.
-    SkTDArray<Entry>* fTiles;
+    // (fXTiles * fYTiles) SkTDArrays, each listing ops overlapping that tile in order.
+    SkTDArray<unsigned>* fTiles;
 
     typedef SkBBoxHierarchy INHERITED;
 };

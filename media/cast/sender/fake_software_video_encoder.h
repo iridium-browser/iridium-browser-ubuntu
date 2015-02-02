@@ -14,15 +14,16 @@ namespace cast {
 class FakeSoftwareVideoEncoder : public SoftwareVideoEncoder {
  public:
   FakeSoftwareVideoEncoder(const VideoSenderConfig& video_config);
-  virtual ~FakeSoftwareVideoEncoder();
+  ~FakeSoftwareVideoEncoder() override;
 
   // SoftwareVideoEncoder implementations.
-  virtual void Initialize() OVERRIDE;
-  virtual bool Encode(const scoped_refptr<media::VideoFrame>& video_frame,
-                      EncodedFrame* encoded_image) OVERRIDE;
-  virtual void UpdateRates(uint32 new_bitrate) OVERRIDE;
-  virtual void GenerateKeyFrame() OVERRIDE;
-  virtual void LatestFrameIdToReference(uint32 frame_id) OVERRIDE;
+  void Initialize() override;
+  void Encode(const scoped_refptr<media::VideoFrame>& video_frame,
+              const base::TimeTicks& reference_time,
+              EncodedFrame* encoded_frame) override;
+  void UpdateRates(uint32 new_bitrate) override;
+  void GenerateKeyFrame() override;
+  void LatestFrameIdToReference(uint32 frame_id) override;
 
  private:
   VideoSenderConfig video_config_;

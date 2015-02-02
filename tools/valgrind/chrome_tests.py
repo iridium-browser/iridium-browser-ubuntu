@@ -11,6 +11,7 @@ import multiprocessing
 import optparse
 import os
 import stat
+import subprocess
 import sys
 
 import logging_utils
@@ -26,6 +27,10 @@ class MultipleGTestFiltersSpecified(Exception): pass
 class BuildDirNotFound(Exception): pass
 
 class BuildDirAmbiguous(Exception): pass
+
+class ExecutableNotFound(Exception): pass
+
+class BadBinary(Exception): pass
 
 class ChromeTests:
   SLOW_TOOLS = ["memcheck", "tsan", "tsan_rv", "drmemory"]
@@ -115,7 +120,24 @@ class ChromeTests:
         cmd.append(arg)
     if exe:
       self._EnsureBuildDirFound()
-      cmd.append(os.path.join(self._options.build_dir, exe))
+      exe_path = os.path.join(self._options.build_dir, exe)
+      if not os.path.exists(exe_path):
+        raise ExecutableNotFound("Couldn't find '%s'" % exe_path)
+
+      # Make sure we don't try to test ASan-built binaries
+      # with other dynamic instrumentation-based tools.
+      # TODO(timurrrr): also check TSan and MSan?
+      # `nm` might not be available, so use try-except.
+      try:
+        nm_output = subprocess.check_output(["nm", exe_path])
+        if nm_output.find("__asan_init") != -1:
+          raise BadBinary("You're trying to run an executable instrumented "
+                          "with AddressSanitizer under %s. Please provide "
+                          "an uninstrumented executable." % tool_name)
+      except OSError:
+        pass
+
+      cmd.append(exe_path)
       # Valgrind runs tests slowly, so slow tests hurt more; show elapased time
       # so we can find the slowpokes.
       cmd.append("--gtest_print_time")
@@ -126,6 +148,8 @@ class ChromeTests:
       cmd.append("--gtest_repeat=%s" % self._options.gtest_repeat)
     if self._options.gtest_shuffle:
       cmd.append("--gtest_shuffle")
+    if self._options.gtest_break_on_failure:
+      cmd.append("--gtest_break_on_failure")
     if self._options.brave_new_test_launcher:
       cmd.append("--brave-new-test-launcher")
     if self._options.test_launcher_bot_mode:
@@ -375,14 +399,8 @@ class ChromeTests:
   def TestMessageCenter(self):
     return self.SimpleTest("message_center", "message_center_unittests")
 
-  def TestMojoAppsJS(self):
-    return self.SimpleTest("mojo_apps_js", "mojo_apps_js_unittests")
-
   def TestMojoCommon(self):
     return self.SimpleTest("mojo_common", "mojo_common_unittests")
-
-  def TestMojoJS(self):
-    return self.SimpleTest("mojo_js", "mojo_js_unittests")
 
   def TestMojoPublicBindings(self):
     return self.SimpleTest("mojo_public_bindings",
@@ -404,15 +422,8 @@ class ChromeTests:
     return self.SimpleTest("mojo_public_utility",
                            "mojo_public_utility_unittests")
 
-  def TestMojoApplicationManager(self):
-    return self.SimpleTest("mojo_application_manager",
-                           "mojo_application_manager_unittests")
-
   def TestMojoSystem(self):
     return self.SimpleTest("mojo_system", "mojo_system_unittests")
-
-  def TestMojoViewManager(self):
-    return self.SimpleTest("mojo_view_manager", "mojo_view_manager_unittests")
 
   def TestNet(self):
     return self.SimpleTest("net", "net_unittests")
@@ -452,6 +463,9 @@ class ChromeTests:
       logging.warning("unit_tests are disabled for memcheck on MacOS.")
       return 0;
     return self.SimpleTest("chrome", "unit_tests")
+
+  def TestUIBaseUnit(self):
+    return self.SimpleTest("chrome", "ui_base_unittests")
 
   def TestUIUnit(self):
     return self.SimpleTest("chrome", "ui_unittests")
@@ -511,7 +525,7 @@ class ChromeTests:
     assert((chunk_size == 0) != (len(self._args) == 0))
     # Build the ginormous commandline in 'cmd'.
     # It's going to be roughly
-    #  python valgrind_test.py ... python run_webkit_tests.py ...
+    #  python valgrind_test.py ...
     # but we'll use the --indirect flag to valgrind_test.py
     # to avoid valgrinding python.
     # Start by building the valgrind_test.py commandline.
@@ -520,7 +534,7 @@ class ChromeTests:
     cmd.append("--trace_children")
     cmd.append("--indirect_webkit_layout")
     cmd.append("--ignore_exit_code")
-    # Now build script_cmd, the run_webkits_tests.py commandline
+    # Now build script_cmd, the run-webkits-tests commandline.
     # Store each chunk in its own directory so that we can find the data later
     chunk_dir = os.path.join("layout", "chunk_%05d" % chunk_num)
     out_dir = os.path.join(path_utils.ScriptDir(), "latest")
@@ -531,8 +545,8 @@ class ChromeTests:
         os.remove(f)
     else:
       os.makedirs(out_dir)
-    script = os.path.join(self._source_dir, "webkit", "tools", "layout_tests",
-                          "run_webkit_tests.py")
+    script = os.path.join(self._source_dir, "third_party", "WebKit", "Tools",
+                          "Scripts", "run-webkit-tests")
     # http://crbug.com/260627: After the switch to content_shell from DRT, each
     # test now brings up 3 processes.  Under Valgrind, they become memory bound
     # and can eventually OOM if we don't reduce the total count.
@@ -549,8 +563,8 @@ class ChromeTests:
                   # http://crbug.com/176908: Don't launch a browser when done.
                   "--no-show-results",
                   "--nocheck-sys-deps"]
-    # Pass build mode to run_webkit_tests.py.  We aren't passed it directly,
-    # so parse it out of build_dir.  run_webkit_tests.py can only handle
+    # Pass build mode to run-webkit-tests.  We aren't passed it directly,
+    # so parse it out of build_dir.  run-webkit-tests can only handle
     # the two values "Release" and "Debug".
     # TODO(Hercules): unify how all our scripts pass around build mode
     # (--mode / --target / --build-dir / --debug)
@@ -677,17 +691,13 @@ class ChromeTests:
     "media": TestMedia,          "media_unittests": TestMedia,
     "message_center": TestMessageCenter,
     "message_center_unittests" : TestMessageCenter,
-    "mojo_apps_js": TestMojoAppsJS,
     "mojo_common": TestMojoCommon,
-    "mojo_js": TestMojoJS,
     "mojo_system": TestMojoSystem,
     "mojo_public_system": TestMojoPublicSystem,
     "mojo_public_utility": TestMojoPublicUtility,
     "mojo_public_bindings": TestMojoPublicBindings,
     "mojo_public_env": TestMojoPublicEnv,
     "mojo_public_sysperf": TestMojoPublicSysPerf,
-    "mojo_application_manager": TestMojoApplicationManager,
-    "mojo_view_manager": TestMojoViewManager,
     "net": TestNet,              "net_unittests": TestNet,
     "net_perf": TestNetPerf,     "net_perftests": TestNetPerf,
     "phonenumber": TestPhoneNumber,
@@ -701,6 +711,7 @@ class ChromeTests:
     "sync": TestSync,            "sync_unit_tests": TestSync,
     "sync_integration_tests": TestSyncIntegration,
     "sync_integration": TestSyncIntegration,
+    "ui_base_unit": TestUIBaseUnit,       "ui_base_unittests": TestUIBaseUnit,
     "ui_unit": TestUIUnit,       "ui_unittests": TestUIUnit,
     "unit": TestUnit,            "unit_tests": TestUnit,
     "url": TestURL,              "url_unittests": TestURL,
@@ -728,6 +739,12 @@ def _main():
   parser.add_option("--gtest_repeat", help="argument for --gtest_repeat")
   parser.add_option("--gtest_shuffle", action="store_true", default=False,
                     help="Randomize tests' orders on every iteration.")
+  parser.add_option("--gtest_break_on_failure", action="store_true",
+                    default=False,
+                    help="Drop in to debugger on assertion failure. Also "
+                         "useful for forcing tests to exit with a stack dump "
+                         "on the first assertion failure when running with "
+                         "--gtest_repeat=-1")
   parser.add_option("-v", "--verbose", action="store_true", default=False,
                     help="verbose output - enable debug log messages")
   parser.add_option("--tool", dest="valgrind_tool", default="memcheck",

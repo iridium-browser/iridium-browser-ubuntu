@@ -33,7 +33,7 @@
 
 namespace blink {
 
-class AXList FINAL : public AXRenderObject {
+class AXList final : public AXRenderObject {
 
 private:
     explicit AXList(RenderObject*);
@@ -41,11 +41,12 @@ public:
     static PassRefPtr<AXList> create(RenderObject*);
     virtual ~AXList();
 
-    virtual bool isList() const OVERRIDE { return true; }
+    virtual bool isList() const override { return true; }
 
-    virtual AccessibilityRole roleValue() const OVERRIDE { return ListRole; }
+    virtual AccessibilityRole roleValue() const override final;
 private:
-    virtual bool computeAccessibilityIsIgnored() const OVERRIDE;
+    bool isDescriptionList() const;
+    virtual bool computeAccessibilityIsIgnored() const override;
 };
 
 } // namespace blink

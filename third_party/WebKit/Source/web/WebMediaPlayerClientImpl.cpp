@@ -11,7 +11,6 @@
 #include "core/rendering/RenderView.h"
 #include "core/rendering/compositing/RenderLayerCompositor.h"
 #include "modules/encryptedmedia/HTMLMediaElementEncryptedMedia.h"
-#include "modules/encryptedmedia/MediaKeyNeededEvent.h"
 #include "modules/mediastream/MediaStreamRegistry.h"
 #include "platform/audio/AudioBus.h"
 #include "platform/audio/AudioSourceProviderClient.h"
@@ -124,9 +123,9 @@ void WebMediaPlayerClientImpl::keyMessage(const WebString& keySystem, const WebS
     HTMLMediaElementEncryptedMedia::keyMessage(mediaElement(), keySystem, sessionId, message, messageLength, defaultURL);
 }
 
-void WebMediaPlayerClientImpl::keyNeeded(const WebString& contentType, const unsigned char* initData, unsigned initDataLength)
+void WebMediaPlayerClientImpl::encrypted(const WebString& initDataType, const unsigned char* initData, unsigned initDataLength)
 {
-    HTMLMediaElementEncryptedMedia::keyNeeded(mediaElement(), contentType, initData, initDataLength);
+    HTMLMediaElementEncryptedMedia::encrypted(mediaElement(), initDataType, initData, initDataLength);
 }
 
 void WebMediaPlayerClientImpl::setWebLayer(WebLayer* layer)

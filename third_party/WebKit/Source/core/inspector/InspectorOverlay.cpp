@@ -119,29 +119,29 @@ private:
     const ShapeOutsideInfo& m_shapeOutsideInfo;
 };
 
-class InspectorOverlayChromeClient FINAL: public EmptyChromeClient {
+class InspectorOverlayChromeClient final: public EmptyChromeClient {
 public:
     InspectorOverlayChromeClient(ChromeClient& client, InspectorOverlay* overlay)
         : m_client(client)
         , m_overlay(overlay)
     { }
 
-    virtual void setCursor(const Cursor& cursor) OVERRIDE
+    virtual void setCursor(const Cursor& cursor) override
     {
         m_client.setCursor(cursor);
     }
 
-    virtual void setToolTip(const String& tooltip, TextDirection direction) OVERRIDE
+    virtual void setToolTip(const String& tooltip, TextDirection direction) override
     {
         m_client.setToolTip(tooltip, direction);
     }
 
-    virtual void invalidateContentsAndRootView(const IntRect&) OVERRIDE
+    virtual void invalidateContentsAndRootView(const IntRect&) override
     {
         m_overlay->invalidate();
     }
 
-    virtual void invalidateContentsForSlowScroll(const IntRect&) OVERRIDE
+    virtual void invalidateContentsForSlowScroll(const IntRect&) override
     {
         m_overlay->invalidate();
     }
@@ -315,8 +315,12 @@ static void buildNodeHighlight(Node& node, const HighlightConfig& highlightConfi
     if (renderer->node() && renderer->node()->isSVGElement() && !renderer->isSVGRoot()) {
         Vector<FloatQuad> quads;
         renderer->absoluteQuads(quads);
-        for (size_t i = 0; i < quads.size(); ++i)
+        FrameView* containingView = renderer->frameView();
+        for (size_t i = 0; i < quads.size(); ++i) {
+            if (containingView)
+                contentsQuadToScreen(containingView, quads[i]);
             highlight->appendQuad(quads[i], highlightConfig.content, highlightConfig.contentOutline);
+        }
         return;
     }
 
@@ -745,7 +749,7 @@ Page* InspectorOverlay::overlayPage()
     loader.load(FrameLoadRequest(0, blankURL(), SubstituteData(data, "text/html", "UTF-8", KURL(), ForceSynchronousLoad)));
     v8::Isolate* isolate = toIsolate(frame.get());
     ScriptState* scriptState = ScriptState::forMainWorld(frame.get());
-    ASSERT(!scriptState->contextIsValid());
+    ASSERT(scriptState->contextIsValid());
     ScriptState::Scope scope(scriptState);
     v8::Handle<v8::Object> global = scriptState->context()->Global();
     v8::Handle<v8::Value> overlayHostObj = toV8(m_overlayHost.get(), global, isolate);
@@ -831,6 +835,26 @@ bool InspectorOverlay::getBoxModel(Node* node, RefPtr<TypeBuilder::DOM::BoxModel
     }
 
     return true;
+}
+
+PassRefPtr<JSONObject> InspectorOverlay::highlightJSONForNode(Node* node)
+{
+    HighlightConfig config;
+    config.content = Color(255, 0, 0, 0);
+    config.contentOutline = Color(128, 0, 0, 0);
+    config.padding = Color(0, 255, 0, 0);
+    config.border = Color(0, 0, 255, 0);
+    config.margin = Color(255, 255, 255, 0);
+    config.eventTarget = Color(128, 128, 128, 0);
+    config.shape = Color(0, 0, 0, 0);
+    config.shapeMargin = Color(128, 128, 128, 0);
+    config.showInfo = true;
+    config.showRulers = true;
+    config.showExtensionLines = true;
+    Highlight highlight;
+    appendPathsForShapeOutside(highlight, config, node);
+    buildNodeHighlight(*node, config, &highlight);
+    return highlight.asJSONObject();
 }
 
 void InspectorOverlay::freePage()

@@ -14,16 +14,16 @@ namespace athena {
 class AthenaChromeAppWindowClient : public AthenaAppWindowClientBase {
  public:
   AthenaChromeAppWindowClient();
-  virtual ~AthenaChromeAppWindowClient();
+  ~AthenaChromeAppWindowClient() override;
 
  private:
   // extensions::AppWindowClient
-  virtual extensions::AppWindow* CreateAppWindow(
+  extensions::AppWindow* CreateAppWindow(
       content::BrowserContext* context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OpenDevToolsWindow(content::WebContents* web_contents,
-                                  const base::Closure& callback) OVERRIDE;
-  virtual bool IsCurrentChannelOlderThanDev() OVERRIDE;
+      const extensions::Extension* extension) override;
+  void OpenDevToolsWindow(content::WebContents* web_contents,
+                          const base::Closure& callback) override;
+  bool IsCurrentChannelOlderThanDev() override;
 
   DISALLOW_COPY_AND_ASSIGN(AthenaChromeAppWindowClient);
 };

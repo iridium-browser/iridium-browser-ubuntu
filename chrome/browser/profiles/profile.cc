@@ -14,7 +14,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/notification_service.h"
@@ -60,11 +60,17 @@ TestingProfile* Profile::AsTestingProfile() {
   return NULL;
 }
 
+chrome::ChromeZoomLevelPrefs* Profile::GetZoomLevelPrefs() {
+  return NULL;
+}
+
 Profile::Delegate::~Delegate() {
 }
 
 // static
 const char Profile::kProfileKey[] = "__PROFILE__";
+// This must be a string which can never be a valid domain.
+const char Profile::kNoHostedDomainFound[] = "NO_HOSTED_DOMAIN";
 
 // static
 void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -136,12 +142,21 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kSelectFileLastDirectory,
       std::string(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  // TODO(wjmaclean): remove the following two prefs once migration to per-
+  // partition zoom is complete.
   registry->RegisterDoublePref(
-      prefs::kDefaultZoomLevel,
+      prefs::kDefaultZoomLevelDeprecated,
       0.0,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterDictionaryPref(
-      prefs::kPerHostZoomLevels,
+      prefs::kPerHostZoomLevelsDeprecated,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+  registry->RegisterDictionaryPref(
+      prefs::kPartitionDefaultZoomLevel,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(
+      prefs::kPartitionPerHostZoomLevels,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterStringPref(
       prefs::kDefaultApps,
@@ -237,6 +252,8 @@ bool Profile::IsSyncAccessible() {
 void Profile::MaybeSendDestroyedNotification() {
   if (!sent_destroyed_notification_) {
     sent_destroyed_notification_ = true;
+
+    NotifyWillBeDestroyed(this);
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_PROFILE_DESTROYED,
         content::Source<Profile>(this),

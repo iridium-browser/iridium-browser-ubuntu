@@ -3,13 +3,21 @@ caitkp@chromium.org
 erikwright@chromium.org
 jochen@chromium.org
 
-per-file autofill*=estade@chromium.org
-per-file autofill*=isherman@chromium.org
+per-file app_modal_dialog*=avi@chromium.org
+
+# Can not match autofill* due to crbug.com/397984
+per-file autofill.gypi=estade@chromium.org
+per-file autofill.gypi=isherman@chromium.org
+per-file autofill_strings.grdp=estade@chromium.org
+per-file autofill_strings.grdp=isherman@chromium.org
 
 per-file bookmarks.gypi=sky@chromium.org
 
 per-file cloud_devices*=gene@chromium.org
 per-file cloud_devices*=vitalybuka@chromium.org
+
+per-file constrained_window*=gbillock@chromium.org
+per-file constrained_window*=msw@chromium.org
 
 per-file content_settings*=markusheintz@chromium.org
 per-file content_settings*=bauerb@chromium.org
@@ -19,6 +27,8 @@ per-file copresence.gypi=rkc@chromium.org
 per-file copresence.gypi=ckehoe@chromium.org
 per-file copresence.gypi=xiyuan@chromium.org
 per-file copresence.gypi=derat@chromium.org
+
+per-file copresence_sockets.gypi=rkc@chromium.org
 
 per-file crash.gypi=jochen@chromium.org
 per-file crash.gypi=rsesek@chromium.org
@@ -43,9 +53,12 @@ per-file domain_reliability.gypi=mmenke@chromium.org
 per-file domain_reliability.gypi=szym@chromium.org
 per-file domain_reliability.gypi=ttuttle@chromium.org
 
+per-file enhanced_bookmarks*=kkimlabs@chromium.org
 per-file enhanced_bookmarks*=noyau@chromium.org
 per-file enhanced_bookmarks*=sky@chromium.org
-per-file enhanced_bookmarks*=yfriedman@chromium.org
+
+per-file error_page*=mmenke@chromium.org
+per-file error_page*=ttuttle@chromium.org
 
 per-file favicon*=sky@chromium.org
 per-file favicon*=stevenjb@chromium.org
@@ -82,6 +95,10 @@ per-file json_schema.gypi=calamity@chromium.org
 per-file json_schema.gypi=kalman@chromium.org
 per-file json_schema.gypi=mpcomplete@chromium.org
 
+per-file keyed_service.gypi=erg@chromium.org
+per-file keyed_service.gypi=phajdan.jr@chromium.org
+per-file keyed_service.gypi=rlp@chromium.org
+
 per-file leveldb_proto*=cjhopman@chromium.org
 per-file leveldb_proto*=mathp@chromium.org
 
@@ -97,10 +114,6 @@ per-file nacl*=jvoung@chromium.org
 per-file nacl*=mseaborn@chromium.org
 per-file nacl*=noelallen@chromium.org
 per-file nacl*=teravest@chromium.org
-
-per-file native_app_window*=benwells@chromium.org
-per-file native_app_window*=jackhou@chromium.org
-per-file native_app_window*=jamescook@chromium.org
 
 per-file navigation_interception.gypi=mkosiba@chromium.org
 
@@ -125,6 +138,7 @@ per-file password_manager*=dubroy@chromium.org
 per-file password_manager*=gcasto@chromium.org
 per-file password_manager*=isherman@chromium.org
 per-file password_manager*=mdm@chromium.org
+per-file password_manager*=mkwst@chromium.org
 per-file password_manager*=stuartmorgan@chromium.org
 per-file password_manager*=tim@chromium.org
 per-file password_manager*=vabr@chromium.org
@@ -192,6 +206,9 @@ per-file sync_driver*=rlarocque@chromium.org
 per-file sync_driver*=tim@chromium.org
 per-file sync_driver*=zea@chromium.org
 
+per-file timers*=chirantan@chromium.org
+per-file timers*=derat@chromium.org
+
 per-file tracing*=jbauman@chromium.org
 per-file tracing*=nduca@chromium.org
 
@@ -199,6 +216,10 @@ per-file translate.gypi=andrewhayden@chromium.org
 per-file translate.gypi=droger@chromium.org
 per-file translate.gypi=hajimehoshi@chromium.org
 per-file translate.gypi=toyoshim@chromium.org
+per-file translate_strings.grdp=andrewhayden@chromium.org
+per-file translate_strings.grdp=droger@chromium.org
+per-file translate_strings.grdp=hajimehoshi@chromium.org
+per-file translate_strings.grdp=toyoshim@chromium.org
 
 per-file startup_metric_utils.gypi=jeremy@chromium.org
 

@@ -36,10 +36,10 @@
 WebInspector.LayersPanel = function()
 {
     WebInspector.PanelWithSidebarTree.call(this, "layers", 225);
-    this.registerRequiredCSS("layersPanel.css");
+    this.registerRequiredCSS("timeline/timelinePanel.css");
     this._target = null;
 
-    this.sidebarElement().classList.add("outline-disclosure");
+    this.sidebarElement().classList.add("outline-disclosure", "layer-tree");
     this.sidebarTree.element.classList.remove("sidebar-tree");
 
     WebInspector.targetManager.observeTargets(this);
@@ -237,13 +237,43 @@ WebInspector.LayersPanel.LayerTreeRevealer = function()
 WebInspector.LayersPanel.LayerTreeRevealer.prototype = {
     /**
      * @param {!Object} snapshotData
+     * @return {!Promise}
      */
     reveal: function(snapshotData)
     {
         if (!(snapshotData instanceof WebInspector.DeferredLayerTree))
-            return;
-        var panel = /** @type {?WebInspector.LayersPanel} */ (WebInspector.inspectorView.showPanel("layers"));
-        if (panel)
-            panel._showLayerTree(/** @type {!WebInspector.DeferredLayerTree} */ (snapshotData));
+            return Promise.rejectWithError("Internal error: not a WebInspector.DeferredLayerTree");
+        var panel = WebInspector.LayersPanel._instance();
+        WebInspector.inspectorView.setCurrentPanel(panel);
+        panel._showLayerTree(/** @type {!WebInspector.DeferredLayerTree} */ (snapshotData));
+        return Promise.resolve();
+    }
+}
+
+/**
+ * @return {!WebInspector.LayersPanel}
+ */
+WebInspector.LayersPanel._instance = function()
+{
+    if (!WebInspector.LayersPanel._instanceObject)
+        WebInspector.LayersPanel._instanceObject = new WebInspector.LayersPanel();
+    return WebInspector.LayersPanel._instanceObject;
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.PanelFactory}
+ */
+WebInspector.LayersPanelFactory = function()
+{
+}
+
+WebInspector.LayersPanelFactory.prototype = {
+    /**
+     * @return {!WebInspector.Panel}
+     */
+    createPanel: function()
+    {
+        return WebInspector.LayersPanel._instance();
     }
 }

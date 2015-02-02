@@ -16,7 +16,8 @@
 #include "cc/quads/render_pass_draw_quad.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/trees/layer_tree_impl.h"
-#include "cc/trees/occlusion_tracker.h"
+#include "cc/trees/occlusion.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
 
@@ -124,13 +125,9 @@ void DelegatedRendererLayerImpl::SetFrameData(
                  &invalid_frame,
                  resource_map,
                  &resources_in_frame);
-  for (size_t i = 0; i < render_pass_list.size(); ++i) {
-    RenderPass* pass = render_pass_list[i];
-    for (QuadList::Iterator iter = pass->quad_list.begin();
-         iter != pass->quad_list.end();
-         ++iter) {
-      iter->IterateResources(remap_resources_to_parent_callback);
-    }
+  for (const auto& pass : render_pass_list) {
+    for (const auto& quad : pass->quad_list)
+      quad->IterateResources(remap_resources_to_parent_callback);
   }
 
   if (invalid_frame) {
@@ -152,7 +149,8 @@ void DelegatedRendererLayerImpl::SetFrameData(
   gfx::RectF damage_in_layer = damage_in_frame;
   damage_in_layer.Scale(inverse_device_scale_factor_);
   SetUpdateRect(gfx::IntersectRects(
-      gfx::UnionRects(update_rect(), damage_in_layer), gfx::Rect(bounds())));
+      gfx::UnionRects(update_rect(), gfx::ToEnclosingRect(damage_in_layer)),
+      gfx::Rect(bounds())));
 
   SetRenderPasses(&render_pass_list);
   have_render_passes_to_push_ = true;
@@ -183,8 +181,7 @@ void DelegatedRendererLayerImpl::ClearRenderPasses() {
 
 scoped_ptr<LayerImpl> DelegatedRendererLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return DelegatedRendererLayerImpl::Create(
-      tree_impl, id()).PassAs<LayerImpl>();
+  return DelegatedRendererLayerImpl::Create(tree_impl, id());
 }
 
 void DelegatedRendererLayerImpl::ReleaseResources() {
@@ -258,7 +255,7 @@ bool DelegatedRendererLayerImpl::WillDraw(DrawMode draw_mode,
 
 void DelegatedRendererLayerImpl::AppendQuads(
     RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
+    const Occlusion& occlusion_in_content_space,
     AppendQuadsData* append_quads_data) {
   AppendRainbowDebugBorder(render_pass, append_quads_data);
 
@@ -285,7 +282,7 @@ void DelegatedRendererLayerImpl::AppendQuads(
     DCHECK(target_render_pass_id.layer_id == render_target()->id());
 
     AppendRenderPassQuads(render_pass,
-                          occlusion_tracker,
+                          occlusion_in_content_space,
                           append_quads_data,
                           root_delegated_render_pass,
                           frame_size);
@@ -297,7 +294,7 @@ void DelegatedRendererLayerImpl::AppendQuads(
     const RenderPass* delegated_render_pass =
         render_passes_in_draw_order_[render_pass_index];
     AppendRenderPassQuads(render_pass,
-                          occlusion_tracker,
+                          occlusion_in_content_space,
                           append_quads_data,
                           delegated_render_pass,
                           frame_size);
@@ -387,18 +384,14 @@ void DelegatedRendererLayerImpl::AppendRainbowDebugBorder(
 
 void DelegatedRendererLayerImpl::AppendRenderPassQuads(
     RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
+    const Occlusion& occlusion_in_content_space,
     AppendQuadsData* append_quads_data,
     const RenderPass* delegated_render_pass,
     const gfx::Size& frame_size) const {
-  const SharedQuadState* delegated_shared_quad_state = NULL;
-  SharedQuadState* output_shared_quad_state = NULL;
+  const SharedQuadState* delegated_shared_quad_state = nullptr;
+  SharedQuadState* output_shared_quad_state = nullptr;
 
-  for (QuadList::ConstIterator iter = delegated_render_pass->quad_list.begin();
-       iter != delegated_render_pass->quad_list.end();
-       ++iter) {
-    const DrawQuad* delegated_quad = &*iter;
-
+  for (const auto& delegated_quad : delegated_render_pass->quad_list) {
     bool is_root_delegated_render_pass =
         delegated_render_pass == render_passes_in_draw_order_.back();
 
@@ -447,10 +440,13 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
       quad_content_to_delegated_target_space.ConcatTransform(draw_transform());
     }
 
+    Occlusion occlusion_in_quad_space =
+        occlusion_in_content_space.GetOcclusionWithGivenDrawTransform(
+            quad_content_to_delegated_target_space);
+
     gfx::Rect quad_visible_rect =
-        occlusion_tracker.GetCurrentOcclusionForLayer(
-                              quad_content_to_delegated_target_space)
-            .GetUnoccludedContentRect(delegated_quad->visible_rect);
+        occlusion_in_quad_space.GetUnoccludedContentRect(
+            delegated_quad->visible_rect);
 
     if (quad_visible_rect.IsEmpty())
       continue;

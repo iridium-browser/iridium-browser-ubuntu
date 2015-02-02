@@ -15,10 +15,12 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_split.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/policy_export.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "policy/proto/device_management_backend.pb.h"
+
 
 namespace net {
 class URLRequestContextGetter;
@@ -73,7 +75,7 @@ class POLICY_EXPORT DeviceManagementRequestJob {
   void Start(const Callback& callback);
 
  protected:
-  typedef std::vector<std::pair<std::string, std::string> > ParameterMap;
+  typedef base::StringPairs ParameterMap;
 
   DeviceManagementRequestJob(JobType type,
                              const std::string& agent_parameter,
@@ -122,7 +124,7 @@ class POLICY_EXPORT DeviceManagementService : public net::URLFetcherDelegate {
   };
 
   explicit DeviceManagementService(scoped_ptr<Configuration> configuration);
-  virtual ~DeviceManagementService();
+  ~DeviceManagementService() override;
 
   // The ID of URLFetchers created by the DeviceManagementService. This can be
   // used by tests that use a TestURLFetcherFactory to get the pending fetchers
@@ -152,7 +154,7 @@ class POLICY_EXPORT DeviceManagementService : public net::URLFetcherDelegate {
   friend class DeviceManagementRequestJobImpl;
 
   // net::URLFetcherDelegate override.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // Starts processing any queued jobs.
   void Initialize();

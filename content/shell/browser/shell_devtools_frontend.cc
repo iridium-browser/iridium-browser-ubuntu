@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
-#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,51 +18,16 @@
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
 #include "content/shell/browser/shell_content_browser_client.h"
-#include "content/shell/browser/shell_devtools_delegate.h"
+#include "content/shell/browser/shell_devtools_manager_delegate.h"
 #include "content/shell/browser/webkit_test_controller.h"
 #include "content/shell/common/shell_switches.h"
 #include "net/base/filename_util.h"
 
 namespace content {
 
-// DevTools frontend path for inspector LayoutTests.
-GURL GetDevToolsPathAsURL(const std::string& settings,
-                          const std::string& frontend_url) {
-  if (!frontend_url.empty())
-    return GURL(frontend_url);
-  base::FilePath dir_exe;
-  if (!PathService::Get(base::DIR_EXE, &dir_exe)) {
-    NOTREACHED();
-    return GURL();
-  }
-#if defined(OS_MACOSX)
-  // On Mac, the executable is in
-  // out/Release/Content Shell.app/Contents/MacOS/Content Shell.
-  // We need to go up 3 directories to get to out/Release.
-  dir_exe = dir_exe.AppendASCII("../../..");
-#endif
-  base::FilePath dev_tools_path = dir_exe.AppendASCII(
-      "resources/inspector/devtools.html");
-
-  GURL result = net::FilePathToFileURL(dev_tools_path);
-  if (!settings.empty())
-      result = GURL(base::StringPrintf("%s?settings=%s&experiments=true",
-                                       result.spec().c_str(),
-                                       settings.c_str()));
-  return result;
-}
-
 // static
 ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
     WebContents* inspected_contents) {
-  return ShellDevToolsFrontend::Show(inspected_contents, "", "");
-}
-
-// static
-ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
-    WebContents* inspected_contents,
-    const std::string& settings,
-    const std::string& frontend_url) {
   scoped_refptr<DevToolsAgentHost> agent(
       DevToolsAgentHost::GetOrCreateFor(inspected_contents));
   Shell* shell = Shell::CreateNewWindow(inspected_contents->GetBrowserContext(),
@@ -75,12 +39,10 @@ ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
       shell,
       agent.get());
 
-  ShellDevToolsDelegate* delegate = ShellContentBrowserClient::Get()->
-      shell_browser_main_parts()->devtools_delegate();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    shell->LoadURL(GetDevToolsPathAsURL(settings, frontend_url));
-  else
-    shell->LoadURL(delegate->devtools_http_handler()->GetFrontendURL());
+  DevToolsHttpHandler* http_handler = ShellContentBrowserClient::Get()
+                                          ->shell_browser_main_parts()
+                                          ->devtools_http_handler();
+  shell->LoadURL(http_handler->GetFrontendURL());
 
   return devtools_frontend;
 }
@@ -127,11 +89,6 @@ void ShellDevToolsFrontend::DocumentOnLoadCompletedInMainFrame() {
 void ShellDevToolsFrontend::WebContentsDestroyed() {
   agent_host_->DetachClient();
   delete this;
-}
-
-void ShellDevToolsFrontend::RenderProcessGone(base::TerminationStatus status) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
-    WebKitTestController::Get()->DevToolsProcessCrashed();
 }
 
 void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(

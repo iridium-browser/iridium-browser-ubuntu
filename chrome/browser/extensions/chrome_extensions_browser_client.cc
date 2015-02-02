@@ -5,7 +5,6 @@
 #include "chrome/browser/extensions/chrome_extensions_browser_client.h"
 
 #include "base/command_line.h"
-#include "base/path_service.h"
 #include "base/version.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
@@ -40,7 +39,10 @@
 #include "extensions/browser/url_request_util.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/extensions/updater/extension_cache_impl.h"
 #include "chromeos/chromeos_switches.h"
+#else
+#include "extensions/browser/updater/null_extension_cache.h"
 #endif
 
 namespace extensions {
@@ -242,6 +244,13 @@ void ChromeExtensionsBrowserClient::RegisterExtensionFunctions(
   extensions::api::GeneratedFunctionRegistry::RegisterAll(registry);
 }
 
+scoped_ptr<extensions::RuntimeAPIDelegate>
+ChromeExtensionsBrowserClient::CreateRuntimeAPIDelegate(
+    content::BrowserContext* context) const {
+  return scoped_ptr<extensions::RuntimeAPIDelegate>(
+      new ChromeRuntimeAPIDelegate(context));
+}
+
 ComponentExtensionResourceManager*
 ChromeExtensionsBrowserClient::GetComponentExtensionResourceManager() {
   if (!resource_manager_)
@@ -260,11 +269,32 @@ net::NetLog* ChromeExtensionsBrowserClient::GetNetLog() {
   return g_browser_process->net_log();
 }
 
-scoped_ptr<extensions::RuntimeAPIDelegate>
-ChromeExtensionsBrowserClient::CreateRuntimeAPIDelegate(
-    content::BrowserContext* context) const {
-  return scoped_ptr<extensions::RuntimeAPIDelegate>(
-      new ChromeRuntimeAPIDelegate(context));
+ExtensionCache* ChromeExtensionsBrowserClient::GetExtensionCache() {
+  if (!extension_cache_.get()) {
+#if defined(OS_CHROMEOS)
+    extension_cache_.reset(new ExtensionCacheImpl());
+#else
+    extension_cache_.reset(new NullExtensionCache());
+#endif
+  }
+  return extension_cache_.get();
+}
+
+bool ChromeExtensionsBrowserClient::IsBackgroundUpdateAllowed() {
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableBackgroundNetworking);
+}
+
+bool ChromeExtensionsBrowserClient::IsMinBrowserVersionSupported(
+    const std::string& min_version) {
+  chrome::VersionInfo version_info;
+  base::Version browser_version = base::Version(version_info.Version());
+  Version browser_min_version(min_version);
+  if (browser_version.IsValid() && browser_min_version.IsValid() &&
+      browser_min_version.CompareTo(browser_version) > 0) {
+    return false;
+  }
+  return true;
 }
 
 }  // namespace extensions

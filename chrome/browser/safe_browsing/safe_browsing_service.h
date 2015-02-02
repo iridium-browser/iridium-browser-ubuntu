@@ -39,6 +39,10 @@ namespace base {
 class Thread;
 }
 
+namespace content {
+class DownloadManager;
+}
+
 namespace net {
 class URLRequestContext;
 class URLRequestContextGetter;
@@ -131,11 +135,14 @@ class SafeBrowsingService
   void RegisterDelayedAnalysisCallback(
       const safe_browsing::DelayedAnalysisCallback& callback);
 
+  // Adds |download_manager| to the set monitored by safe browsing.
+  void AddDownloadManager(content::DownloadManager* download_manager);
+
  protected:
   // Creates the safe browsing service.  Need to initialize before using.
   SafeBrowsingService();
 
-  virtual ~SafeBrowsingService();
+  ~SafeBrowsingService() override;
 
   virtual SafeBrowsingDatabaseManager* CreateDatabaseManager();
 
@@ -181,9 +188,9 @@ class SafeBrowsingService
   void Stop(bool shutdown);
 
   // content::NotificationObserver override
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Starts following the safe browsing preference on |pref_service|.
   void AddPrefService(PrefService* pref_service);

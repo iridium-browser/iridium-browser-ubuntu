@@ -30,11 +30,11 @@ class DnsSdDeviceLister
   virtual void Discover(bool force_update);
 
  protected:
-  virtual void OnDeviceChanged(
+  void OnDeviceChanged(
       bool added,
-      const local_discovery::ServiceDescription& service_description) OVERRIDE;
-  virtual void OnDeviceRemoved(const std::string& service_name) OVERRIDE;
-  virtual void OnDeviceCacheFlushed() OVERRIDE;
+      const local_discovery::ServiceDescription& service_description) override;
+  void OnDeviceRemoved(const std::string& service_name) override;
+  void OnDeviceCacheFlushed() override;
 
  private:
   // The delegate to notify of changes to services.

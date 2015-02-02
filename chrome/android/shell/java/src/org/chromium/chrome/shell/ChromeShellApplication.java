@@ -31,12 +31,18 @@ public class ChromeShellApplication extends ChromiumApplication {
      * for its operation. We used to link the data statically to our binary,
      * but don't do that any more and need to install along with pak files.
      * See src/third_party/icu/README.chromium.
+     *
+     *  V8's initial snapshot used to be statically linked to the binary, but
+     *  now it's loaded from external files. Therefore we need to install such
+     *  snapshots (natives_blob.bin and snapshot.bin) along with pak files.
      */
     private static final String[] CHROME_MANDATORY_PAKS = {
         "en-US.pak",
         "resources.pak",
         "chrome_100_percent.pak",
         "icudtl.dat",
+        "natives_blob.bin",
+        "snapshot_blob.bin"
     };
     private static final String COMMAND_LINE_FILE = "/data/local/tmp/chrome-shell-command-line";
 
@@ -75,7 +81,8 @@ public class ChromeShellApplication extends ChromiumApplication {
         mObservers.remove(observer);
     }
 
-    public static void initCommandLine() {
+    @Override
+    public void initCommandLine() {
         if (!CommandLine.isInitialized()) {
             CommandLine.initFromFile(COMMAND_LINE_FILE);
         }
@@ -91,6 +98,10 @@ public class ChromeShellApplication extends ChromiumApplication {
 
     @Override
     protected void showAutofillSettings() {
+    }
+
+    @Override
+    protected void showPasswordSettings() {
     }
 
     @Override

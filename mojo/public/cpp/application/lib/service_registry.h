@@ -26,30 +26,26 @@ class ServiceRegistry : public ServiceProvider, public ApplicationConnection {
   ServiceRegistry(ApplicationImpl* application_impl,
                   const std::string& url,
                   ServiceProviderPtr service_provider);
-  virtual ~ServiceRegistry();
+  ~ServiceRegistry() override;
 
   // ApplicationConnection overrides.
-  virtual void AddServiceConnector(ServiceConnectorBase* service_connector)
-      MOJO_OVERRIDE;
-  virtual const std::string& GetRemoteApplicationURL() MOJO_OVERRIDE;
-  virtual ApplicationConnection* ConnectToApplication(
-      const std::string& url) MOJO_OVERRIDE;
-  virtual ServiceProvider* GetServiceProvider() MOJO_OVERRIDE;
+  void AddServiceConnector(ServiceConnectorBase* service_connector) override;
+  const std::string& GetRemoteApplicationURL() override;
+  ApplicationConnection* ConnectToApplication(const std::string& url) override;
+  ServiceProvider* GetServiceProvider() override;
 
   virtual void RemoveServiceConnector(ServiceConnectorBase* service_connector);
 
  private:
   // ServiceProvider method.
-  virtual void ConnectToService(const mojo::String& service_name,
-                                ScopedMessagePipeHandle client_handle)
-      MOJO_OVERRIDE;
+  void ConnectToService(const mojo::String& service_name,
+                        ScopedMessagePipeHandle client_handle) override;
 
   ApplicationImpl* application_impl_;
   const std::string url_;
 
  private:
-  bool RemoveServiceConnectorInternal(
-      ServiceConnectorBase* service_connector);
+  bool RemoveServiceConnectorInternal(ServiceConnectorBase* service_connector);
 
   Application* application_;
   typedef std::map<std::string, ServiceConnectorBase*>

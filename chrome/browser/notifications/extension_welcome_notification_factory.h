@@ -25,13 +25,13 @@ class ExtensionWelcomeNotificationFactory
   friend struct DefaultSingletonTraits<ExtensionWelcomeNotificationFactory>;
 
   ExtensionWelcomeNotificationFactory();
-  virtual ~ExtensionWelcomeNotificationFactory();
+  ~ExtensionWelcomeNotificationFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_EXTENSION_WELCOME_NOTIFICATION_FACTORY_H_

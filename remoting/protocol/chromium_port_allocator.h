@@ -9,7 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "third_party/libjingle/source/talk/p2p/client/httpportallocator.h"
+#include "third_party/webrtc/p2p/client/httpportallocator.h"
 
 namespace net {
 class URLRequestContextGetter;
@@ -29,14 +29,14 @@ class ChromiumPortAllocator : public cricket::HttpPortAllocatorBase {
       const scoped_refptr<net::URLRequestContextGetter>& url_context,
       const NetworkSettings& network_settings);
 
-  virtual ~ChromiumPortAllocator();
+  ~ChromiumPortAllocator() override;
 
   // cricket::HttpPortAllocatorBase overrides.
-  virtual cricket::PortAllocatorSession* CreateSessionInternal(
+  cricket::PortAllocatorSession* CreateSessionInternal(
       const std::string& content_name,
       int component,
       const std::string& ice_username_fragment,
-      const std::string& ice_password) OVERRIDE;
+      const std::string& ice_password) override;
 
  private:
   ChromiumPortAllocator(

@@ -9,6 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -21,9 +22,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/signin/signin_promo.h"
-#include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
-#include "chrome/browser/supervised_user/supervised_user_service.h"
-#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -63,6 +61,12 @@ using testing::_;
 using testing::Return;
 #endif  // defined(ENABLE_CONFIGURATION_POLICY) && !defined(OS_CHROMEOS)
 
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
+#include "chrome/browser/supervised_user/supervised_user_service.h"
+#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
+#endif
+
 using extensions::Extension;
 
 namespace {
@@ -86,11 +90,13 @@ Browser* FindOneOtherBrowser(Browser* browser) {
 
 class StartupBrowserCreatorTest : public ExtensionBrowserTest {
  protected:
-  virtual bool SetUpUserDataDirectory() OVERRIDE {
+  StartupBrowserCreatorTest() {}
+
+  bool SetUpUserDataDirectory() override {
     return ExtensionBrowserTest::SetUpUserDataDirectory();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
     command_line->AppendSwitchASCII(switches::kHomePage, url::kAboutBlankURL);
@@ -133,17 +139,28 @@ class StartupBrowserCreatorTest : public ExtensionBrowserTest {
     }
     return NULL;
   }
+
+  // A helper function that checks the session restore UI (infobar) is shown
+  // when Chrome starts up after crash.
+  void EnsureRestoreUIWasShown(content::WebContents* web_contents) {
+#if defined(OS_MACOSX)
+    InfoBarService* infobar_service =
+        InfoBarService::FromWebContents(web_contents);
+    EXPECT_EQ(1U, infobar_service->infobar_count());
+#endif  // defined(OS_MACOSX)
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(StartupBrowserCreatorTest);
 };
 
 class OpenURLsPopupObserver : public chrome::BrowserListObserver {
  public:
   OpenURLsPopupObserver() : added_browser_(NULL) { }
 
-  virtual void OnBrowserAdded(Browser* browser) OVERRIDE {
-    added_browser_ = browser;
-  }
+  void OnBrowserAdded(Browser* browser) override { added_browser_ = browser; }
 
-  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE { }
+  void OnBrowserRemoved(Browser* browser) override {}
 
   Browser* added_browser_;
 };
@@ -942,6 +959,19 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   static_cast<ProfileImpl*>(profile_urls)->last_session_exit_type_ =
       Profile::EXIT_CRASHED;
 
+#if !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
+  // Use HistogramTester to make sure a bubble is shown when it's not on
+  // platform Mac OS X and it's not official Chrome build.
+  //
+  // On Mac OS X, an infobar is shown to restore the previous session, which
+  // is tested by function EnsureRestoreUIWasShown.
+  //
+  // Under a Google Chrome build, it is not tested because a task is posted to
+  // the file thread before the bubble is shown. It is difficult to make sure
+  // that the histogram check runs after all threads have finished their tasks.
+  base::HistogramTester histogram_tester;
+#endif  // !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
+
   CommandLine dummy(CommandLine::NO_PROGRAM);
   dummy.AppendSwitchASCII(switches::kTestType, "browser");
   int return_code;
@@ -969,9 +999,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   ASSERT_EQ(1, tab_strip->count());
   content::WebContents* web_contents = tab_strip->GetWebContentsAt(0);
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL), web_contents->GetURL());
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents);
-  EXPECT_EQ(1U, infobar_service->infobar_count());
+  EnsureRestoreUIWasShown(web_contents);
 
   // The profile which normally opens last open pages displays the new tab page.
   ASSERT_EQ(1u, chrome::GetBrowserCount(profile_last,
@@ -982,8 +1010,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   ASSERT_EQ(1, tab_strip->count());
   web_contents = tab_strip->GetWebContentsAt(0);
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL), web_contents->GetURL());
-  infobar_service = InfoBarService::FromWebContents(web_contents);
-  EXPECT_EQ(1U, infobar_service->infobar_count());
+  EnsureRestoreUIWasShown(web_contents);
 
   // The profile which normally opens URLs displays the new tab page.
   ASSERT_EQ(1u, chrome::GetBrowserCount(profile_urls,
@@ -994,13 +1021,18 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorTest, ProfilesLaunchedAfterCrash) {
   ASSERT_EQ(1, tab_strip->count());
   web_contents = tab_strip->GetWebContentsAt(0);
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL), web_contents->GetURL());
-  infobar_service = InfoBarService::FromWebContents(web_contents);
-  EXPECT_EQ(1U, infobar_service->infobar_count());
+  EnsureRestoreUIWasShown(web_contents);
+
+#if !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
+  // Each profile should have one session restore bubble shown, so we should
+  // observe count 3 in bucket 0 (which represents bubble shown).
+  histogram_tester.ExpectBucketCount("SessionCrashed.Bubble", 0, 3);
+#endif  // !defined(OS_MACOSX) && !defined(GOOGLE_CHROME_BUILD)
 }
 
 class SupervisedUserBrowserCreatorTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     InProcessBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kSupervisedUserId, "asdf");
   }
@@ -1042,8 +1074,8 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBrowserCreatorTest,
 
 class StartupBrowserCreatorFirstRunTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
+  void SetUpCommandLine(CommandLine* command_line) override;
+  void SetUpInProcessBrowserTestFixture() override;
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::MockConfigurationPolicyProvider provider_;

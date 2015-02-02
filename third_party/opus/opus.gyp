@@ -5,17 +5,19 @@
 {
   'variables': {
     'conditions': [
-      ['target_arch=="arm" or target_arch=="armv7" or target_arch=="arm64"', {
+      ['target_arch=="arm" or target_arch=="arm64"', {
         'use_opus_fixed_point%': 1,
       }, {
         'use_opus_fixed_point%': 0,
       }],
-      ['target_arch=="arm" or target_arch=="armv7"', {
+      ['target_arch=="arm"', {
         'use_opus_arm_optimization%': 1,
       }, {
         'use_opus_arm_optimization%': 0,
       }],
-      ['target_arch=="arm"', {
+      ['target_arch=="arm" and (OS=="win" or OS=="android" or OS=="linux")', {
+        # Based on the conditions in celt/arm/armcpu.c:
+        # defined(_MSC_VER) || defined(__linux__).
         'use_opus_rtcd%': 1,
       }, {
         'use_opus_rtcd%': 0,
@@ -40,7 +42,12 @@
           'src/include',
         ],
       },
-      'includes': ['opus_srcs.gypi', ],
+      'includes': [
+        'opus_srcs.gypi',
+        # Disable LTO due to ELF section name out of range
+        # crbug.com/422251
+        '../../build/android/disable_lto.gypi',
+      ],
       'sources': ['<@(opus_common_sources)'],
       'conditions': [
         ['OS!="win"', {
@@ -76,7 +83,7 @@
             ],
           },
         }],
-        ['os_posix==1 and (target_arch=="arm" or target_arch=="armv7" or target_arch=="arm64")', {
+        ['os_posix==1 and (target_arch=="arm" or target_arch=="arm64")', {
           'cflags!': ['-Os'],
           'cflags': ['-O3'],
         }],

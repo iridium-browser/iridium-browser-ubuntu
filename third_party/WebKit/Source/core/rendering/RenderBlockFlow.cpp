@@ -46,7 +46,6 @@
 #include "core/rendering/RenderView.h"
 #include "core/rendering/TextAutosizer.h"
 #include "core/rendering/line/LineWidth.h"
-#include "core/rendering/svg/SVGTextRunRenderingContext.h"
 #include "platform/text/BidiTextRun.h"
 
 namespace blink {
@@ -361,8 +360,6 @@ void RenderBlockFlow::layoutBlock(bool relayoutChildren)
     while (!done)
         done = layoutBlockFlow(relayoutChildren, pageLogicalHeight, layoutScope);
 
-    fitBorderToLinesIfNeeded();
-
     RenderView* renderView = view();
     if (renderView->layoutState()->pageLogicalHeight())
         setPageLogicalOffset(renderView->layoutState()->pageLogicalOffset(*this, logicalTop()));
@@ -597,7 +594,6 @@ void RenderBlockFlow::layoutBlockChild(RenderBox* child, MarginInfo& marginInfo,
     if (!child->needsLayout())
         child->markForPaginationRelayoutIfNeeded(layoutScope);
 
-    bool childHadLayout = child->everHadLayout();
     bool childNeededLayout = child->needsLayout();
     if (childNeededLayout)
         child->layout();
@@ -672,13 +668,10 @@ void RenderBlockFlow::layoutBlockChild(RenderBox* child, MarginInfo& marginInfo,
     if (childRenderBlockFlow)
         addOverhangingFloats(childRenderBlockFlow, !childNeededLayout);
 
-    // If the child moved, we have to invalidate it's paint  as well as any floating/positioned
+    // If the child moved, we have to invalidate its paint as well as any floating/positioned
     // descendants. An exception is if we need a layout. In this case, we know we're going to
     // invalidate our paint (and the child) anyway.
-    bool didNotDoFullLayoutAndMoved = childHadLayout && !selfNeedsLayout() && (childOffset.width() || childOffset.height());
-    bool didNotLayoutAndNeedsPaintInvalidation = !childHadLayout && child->checkForPaintInvalidation();
-
-    if (didNotDoFullLayoutAndMoved || didNotLayoutAndNeedsPaintInvalidation)
+    if (!selfNeedsLayout() && (childOffset.width() || childOffset.height()))
         child->invalidatePaintForOverhangingFloats(true);
 
     if (paginated) {
@@ -1045,8 +1038,7 @@ void RenderBlockFlow::layoutBlockChildren(bool relayoutChildren, SubtreeLayoutSc
         RenderBox* child = next;
         next = child->nextSiblingBox();
 
-        // FIXME: this should only be set from clearNeedsLayout crbug.com/361250
-        child->setLayoutDidGetCalled(true);
+        child->setMayNeedPaintInvalidation(true);
 
         if (childToExclude == child)
             continue; // Skip this child, since it will be positioned by the specialized subclass (fieldsets and ruby runs).
@@ -1895,21 +1887,9 @@ LayoutUnit RenderBlockFlow::getClearDelta(RenderBox* child, LayoutUnit logicalTo
             LayoutRect borderBox = child->borderBoxRect();
             LayoutUnit childLogicalWidthAtOldLogicalTopOffset = isHorizontalWritingMode() ? borderBox.width() : borderBox.height();
 
-            // FIXME: None of this is right for perpendicular writing-mode children.
-            LayoutUnit childOldLogicalWidth = child->logicalWidth();
-            LayoutUnit childOldMarginLeft = child->marginLeft();
-            LayoutUnit childOldMarginRight = child->marginRight();
-            LayoutUnit childOldLogicalTop = child->logicalTop();
-
-            child->setLogicalTop(newLogicalTop);
-            child->updateLogicalWidth();
-            borderBox = child->borderBoxRect();
-            LayoutUnit childLogicalWidthAtNewLogicalTopOffset = isHorizontalWritingMode() ? borderBox.width() : borderBox.height();
-
-            child->setLogicalTop(childOldLogicalTop);
-            child->setLogicalWidth(childOldLogicalWidth);
-            child->setMarginLeft(childOldMarginLeft);
-            child->setMarginRight(childOldMarginRight);
+            LogicalExtentComputedValues computedValues;
+            child->logicalExtentAfterUpdatingLogicalWidth(newLogicalTop, computedValues);
+            LayoutUnit childLogicalWidthAtNewLogicalTopOffset = computedValues.m_extent;
 
             if (childLogicalWidthAtNewLogicalTopOffset <= availableLogicalWidthAtNewLogicalTopOffset) {
                 // Even though we may not be moving, if the logical width did shrink because of the presence of new floats, then
@@ -2000,6 +1980,9 @@ void RenderBlockFlow::setStaticInlinePositionForChild(RenderBox* child, LayoutUn
 void RenderBlockFlow::addChild(RenderObject* newChild, RenderObject* beforeChild)
 {
     if (RenderMultiColumnFlowThread* flowThread = multiColumnFlowThread()) {
+        if (beforeChild == flowThread)
+            beforeChild = flowThread->firstChild();
+        ASSERT(!beforeChild || beforeChild->isDescendantOf(flowThread));
         flowThread->addChild(newChild, beforeChild);
         return;
     }
@@ -2067,7 +2050,7 @@ void RenderBlockFlow::invalidatePaintForOverhangingFloats(bool paintAllDescendan
             && (floatingObject->shouldPaint() || (paintAllDescendants && floatingObject->renderer()->isDescendantOf(this)))) {
 
             RenderBox* floatingRenderer = floatingObject->renderer();
-            floatingRenderer->setShouldDoFullPaintInvalidation(true);
+            floatingRenderer->setShouldDoFullPaintInvalidation();
             floatingRenderer->invalidatePaintForOverhangingFloats(false);
         }
     }
@@ -2178,7 +2161,7 @@ void RenderBlockFlow::removeFloatingObjects()
 
 LayoutPoint RenderBlockFlow::flipFloatForWritingModeForChild(const FloatingObject* child, const LayoutPoint& point) const
 {
-    if (!style()->isFlippedBlocksWritingMode())
+    if (!style()->slowIsFlippedBlocksWritingMode())
         return point;
 
     // This is similar to RenderBox::flipForWritingModeForChild. We have to subtract out our left/top offsets twice, since
@@ -2624,7 +2607,7 @@ bool RenderBlockFlow::hitTestFloats(const HitTestRequest& request, HitTestResult
 
     LayoutPoint adjustedLocation = accumulatedOffset;
     if (isRenderView()) {
-        adjustedLocation += toLayoutSize(toRenderView(this)->frameView()->scrollPosition());
+        adjustedLocation += toLayoutSize(LayoutPoint(toRenderView(this)->frameView()->scrollPositionDouble()));
     }
 
     const FloatingObjectSet& floatingObjectSet = m_floatingObjects->set();
@@ -2644,76 +2627,6 @@ bool RenderBlockFlow::hitTestFloats(const HitTestRequest& request, HitTestResult
     }
 
     return false;
-}
-
-void RenderBlockFlow::adjustForBorderFit(LayoutUnit x, LayoutUnit& left, LayoutUnit& right) const
-{
-    if (style()->visibility() != VISIBLE)
-        return;
-
-    // We don't deal with relative positioning. Our assumption is that you shrink to fit the lines without accounting
-    // for either overflow or translations via relative positioning.
-    if (childrenInline()) {
-        for (RootInlineBox* box = firstRootBox(); box; box = box->nextRootBox()) {
-            if (box->firstChild())
-                left = std::min(left, x + static_cast<LayoutUnit>(box->firstChild()->x()));
-            if (box->lastChild())
-                right = std::max(right, x + static_cast<LayoutUnit>(ceilf(box->lastChild()->logicalRight())));
-        }
-    } else {
-        for (RenderBox* obj = firstChildBox(); obj; obj = obj->nextSiblingBox()) {
-            if (!obj->isFloatingOrOutOfFlowPositioned()) {
-                if (obj->isRenderBlockFlow() && !obj->hasOverflowClip()) {
-                    toRenderBlockFlow(obj)->adjustForBorderFit(x + obj->x(), left, right);
-                } else if (obj->style()->visibility() == VISIBLE) {
-                    // We are a replaced element or some kind of non-block-flow object.
-                    left = std::min(left, x + obj->x());
-                    right = std::max(right, x + obj->x() + obj->width());
-                }
-            }
-        }
-    }
-
-    if (m_floatingObjects) {
-        const FloatingObjectSet& floatingObjectSet = m_floatingObjects->set();
-        FloatingObjectSetIterator end = floatingObjectSet.end();
-        for (FloatingObjectSetIterator it = floatingObjectSet.begin(); it != end; ++it) {
-            FloatingObject* floatingObject = it->get();
-            // Only examine the object if our m_shouldPaint flag is set.
-            if (floatingObject->shouldPaint()) {
-                LayoutUnit floatLeft = xPositionForFloatIncludingMargin(floatingObject) - floatingObject->renderer()->x();
-                LayoutUnit floatRight = floatLeft + floatingObject->renderer()->width();
-                left = std::min(left, floatLeft);
-                right = std::max(right, floatRight);
-            }
-        }
-    }
-}
-
-void RenderBlockFlow::fitBorderToLinesIfNeeded()
-{
-    if (style()->borderFit() == BorderFitBorder || hasOverrideWidth())
-        return;
-
-    // Walk any normal flow lines to snugly fit.
-    LayoutUnit left = LayoutUnit::max();
-    LayoutUnit right = LayoutUnit::min();
-    LayoutUnit oldWidth = contentWidth();
-    adjustForBorderFit(0, left, right);
-
-    // Clamp to our existing edges. We can never grow. We only shrink.
-    LayoutUnit leftEdge = borderLeft() + paddingLeft();
-    LayoutUnit rightEdge = leftEdge + oldWidth;
-    left = std::min(rightEdge, std::max(leftEdge, left));
-    right = std::max(left, std::min(rightEdge, right));
-
-    LayoutUnit newContentWidth = right - left;
-    if (newContentWidth == oldWidth)
-        return;
-
-    setOverrideLogicalContentWidth(newContentWidth);
-    layoutBlock(false);
-    clearOverrideLogicalContentWidth();
 }
 
 LayoutUnit RenderBlockFlow::logicalLeftFloatOffsetForLine(LayoutUnit logicalTop, LayoutUnit fixedOffset, LayoutUnit logicalHeight) const
@@ -2803,6 +2716,13 @@ bool RenderBlockFlow::avoidsFloats() const
     // Floats can't intrude into our box if we have a non-auto column count or width.
     // Note: we need to use RenderBox::avoidsFloats here since RenderBlock::avoidsFloats is always true.
     return RenderBox::avoidsFloats() || !style()->hasAutoColumnCount() || !style()->hasAutoColumnWidth();
+}
+
+void RenderBlockFlow::moveChildrenTo(RenderBoxModelObject* toBoxModelObject, RenderObject* startChild, RenderObject* endChild, RenderObject* beforeChild, bool fullRemoveInsert)
+{
+    if (childrenInline())
+        deleteLineBoxTree();
+    RenderBoxModelObject::moveChildrenTo(toBoxModelObject, startChild, endChild, beforeChild, fullRemoveInsert);
 }
 
 LayoutUnit RenderBlockFlow::logicalLeftSelectionOffset(const RenderBlock* rootBlock, LayoutUnit position) const

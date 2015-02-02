@@ -41,16 +41,16 @@ class ExtensionInstalledBubbleView
                                Browser* browser,
                                const SkBitmap& icon);
 
-  virtual ~ExtensionInstalledBubbleView();
+  ~ExtensionInstalledBubbleView() override;
 
   // ExtensionInstalledBubble::Delegate:
-  virtual bool MaybeShowNow() OVERRIDE;
+  bool MaybeShowNow() override;
 
   // views::WidgetDelegate:
-  virtual void WindowClosing() OVERRIDE;
+  void WindowClosing() override;
 
   // views::BubbleDelegate:
-  virtual gfx::Rect GetAnchorRect() const OVERRIDE;
+  gfx::Rect GetAnchorRect() const override;
 
   ExtensionInstalledBubble bubble_;
 

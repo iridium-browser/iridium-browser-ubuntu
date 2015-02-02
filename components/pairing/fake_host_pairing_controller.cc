@@ -128,7 +128,8 @@ void FakeHostPairingController::OnUpdateStatusChanged(
     UpdateStatus update_status) {
 }
 
-void FakeHostPairingController::SetEnrollmentComplete(bool success) {
+void FakeHostPairingController::OnEnrollmentStatusChanged(
+    EnrollmentStatus enrollment_status) {
 }
 
 void FakeHostPairingController::PairingStageChanged(Stage new_stage) {
@@ -138,10 +139,6 @@ void FakeHostPairingController::PairingStageChanged(Stage new_stage) {
       break;
     }
     case STAGE_WAITING_FOR_CODE_CONFIRMATION: {
-      ChangeStageLater(STAGE_UPDATING);
-      break;
-    }
-    case STAGE_UPDATING: {
       ChangeStageLater(STAGE_WAITING_FOR_CONTROLLER_AFTER_UPDATE);
       break;
     }
@@ -158,7 +155,7 @@ void FakeHostPairingController::PairingStageChanged(Stage new_stage) {
         enrollment_should_fail_ = false;
         ChangeStageLater(STAGE_ENROLLMENT_ERROR);
       } else {
-        ChangeStageLater(STAGE_PAIRING_DONE);
+        ChangeStageLater(STAGE_ENROLLMENT_SUCCESS);
       }
       break;
     }
@@ -166,7 +163,7 @@ void FakeHostPairingController::PairingStageChanged(Stage new_stage) {
       ChangeStageLater(STAGE_WAITING_FOR_CONTROLLER_AFTER_UPDATE);
       break;
     }
-    case STAGE_PAIRING_DONE: {
+    case STAGE_ENROLLMENT_SUCCESS: {
       ChangeStageLater(STAGE_FINISHED);
       break;
     }

@@ -28,21 +28,20 @@ class ExtensionBackedDataTypeController
       Profile* profile);
 
   // UIDataTypeController overrides.
-  virtual bool ReadyForStart() const OVERRIDE;
-  virtual bool StartModels() OVERRIDE;
+  bool ReadyForStart() const override;
+  bool StartModels() override;
 
   // ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
 
  private:
   // Refcounted via DataTypeController.
-  virtual ~ExtensionBackedDataTypeController();
+  ~ExtensionBackedDataTypeController() override;
 
   // Returns whether the extension syncing this type is enabled.
   bool IsSyncingExtensionEnabled() const;

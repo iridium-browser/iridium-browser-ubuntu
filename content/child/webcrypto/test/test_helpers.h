@@ -48,6 +48,9 @@ void PrintTo(const CryptoData& data, ::std::ostream* os);
 bool operator==(const CryptoData& a, const CryptoData& b);
 bool operator!=(const CryptoData& a, const CryptoData& b);
 
+// Gives a human-readable description of |status| and any error it represents.
+std::string StatusToString(const Status& status);
+
 // TODO(eroman): For Linux builds using system NSS, AES-GCM and RSA-OAEP, and
 // RSA key import are a runtime dependency.
 bool SupportsAesGcm();
@@ -83,18 +86,22 @@ std::vector<uint8_t> MakeJsonVector(const base::DictionaryValue& dict);
 ::testing::AssertionResult ReadJsonTestFileToList(
     const char* test_file_name,
     scoped_ptr<base::ListValue>* list);
+// Same as ReadJsonTestFile(), but returns the value as a Dictionary.
+::testing::AssertionResult ReadJsonTestFileToDictionary(
+    const char* test_file_name,
+    scoped_ptr<base::DictionaryValue>* dict);
 
 // Reads a string property from the dictionary with path |property_name|
 // (which can include periods for nested dictionaries). Interprets the
 // string as a hex encoded string and converts it to a bytes list.
 //
 // Returns empty vector on failure.
-std::vector<uint8_t> GetBytesFromHexString(base::DictionaryValue* dict,
-                                           const char* property_name);
+std::vector<uint8_t> GetBytesFromHexString(const base::DictionaryValue* dict,
+                                           const std::string& property_name);
 
 // Reads a string property with path "property_name" and converts it to a
 // WebCryptoAlgorith. Returns null algorithm on failure.
-blink::WebCryptoAlgorithm GetDigestAlgorithm(base::DictionaryValue* dict,
+blink::WebCryptoAlgorithm GetDigestAlgorithm(const base::DictionaryValue* dict,
                                              const char* property_name);
 
 // Returns true if any of the vectors in the input list have identical content.
@@ -125,15 +132,15 @@ void ImportRsaKeyPair(const std::vector<uint8_t>& spki_der,
                       const std::vector<uint8_t>& pkcs8_der,
                       const blink::WebCryptoAlgorithm& algorithm,
                       bool extractable,
-                      blink::WebCryptoKeyUsageMask public_key_usage_mask,
-                      blink::WebCryptoKeyUsageMask private_key_usage_mask,
+                      blink::WebCryptoKeyUsageMask public_key_usages,
+                      blink::WebCryptoKeyUsageMask private_key_usages,
                       blink::WebCryptoKey* public_key,
                       blink::WebCryptoKey* private_key);
 
 Status ImportKeyJwkFromDict(const base::DictionaryValue& dict,
                             const blink::WebCryptoAlgorithm& algorithm,
                             bool extractable,
-                            blink::WebCryptoKeyUsageMask usage_mask,
+                            blink::WebCryptoKeyUsageMask usages,
                             blink::WebCryptoKey* key);
 
 // Parses a vector of JSON into a dictionary.
@@ -169,6 +176,29 @@ void ImportExportJwkSymmetricKey(
     const blink::WebCryptoAlgorithm& import_algorithm,
     blink::WebCryptoKeyUsageMask usages,
     const std::string& jwk_alg);
+
+// Wrappers around GenerateKey() which expect the result to be either a secret
+// key or a public/private keypair. If the result does not match the
+// expectation, then it fails with Status::ErrorUnexpected().
+Status GenerateSecretKey(const blink::WebCryptoAlgorithm& algorithm,
+                         bool extractable,
+                         blink::WebCryptoKeyUsageMask usages,
+                         blink::WebCryptoKey* key);
+Status GenerateKeyPair(const blink::WebCryptoAlgorithm& algorithm,
+                       bool extractable,
+                       blink::WebCryptoKeyUsageMask usages,
+                       blink::WebCryptoKey* public_key,
+                       blink::WebCryptoKey* private_key);
+
+// Reads a key format string as used in some JSON test files and converts it to
+// a WebCryptoKeyFormat.
+blink::WebCryptoKeyFormat GetKeyFormatFromJsonTestCase(
+    const base::DictionaryValue* test);
+
+// Extracts the key data bytes from |test| as used insome JSON test files.
+std::vector<uint8_t> GetKeyDataFromJsonTestCase(
+    const base::DictionaryValue* test,
+    blink::WebCryptoKeyFormat key_format);
 
 }  // namespace webcrypto
 

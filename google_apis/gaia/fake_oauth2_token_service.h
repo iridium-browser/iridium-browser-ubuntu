@@ -20,9 +20,9 @@ class URLRequestContextGetter;
 class FakeOAuth2TokenService : public OAuth2TokenService {
  public:
   FakeOAuth2TokenService();
-  virtual ~FakeOAuth2TokenService();
+  ~FakeOAuth2TokenService() override;
 
-  virtual std::vector<std::string> GetAccounts() OVERRIDE;
+  std::vector<std::string> GetAccounts() override;
 
   void AddAccount(const std::string& account_id);
   void RemoveAccount(const std::string& account_id);
@@ -42,20 +42,19 @@ class FakeOAuth2TokenService : public OAuth2TokenService {
 
  protected:
   // OAuth2TokenService overrides.
-  virtual void FetchOAuth2Token(RequestImpl* request,
-                                const std::string& account_id,
-                                net::URLRequestContextGetter* getter,
-                                const std::string& client_id,
-                                const std::string& client_secret,
-                                const ScopeSet& scopes) OVERRIDE;
+  void FetchOAuth2Token(RequestImpl* request,
+                        const std::string& account_id,
+                        net::URLRequestContextGetter* getter,
+                        const std::string& client_id,
+                        const std::string& client_secret,
+                        const ScopeSet& scopes) override;
 
-  virtual void InvalidateOAuth2Token(const std::string& account_id,
-                                     const std::string& client_id,
-                                     const ScopeSet& scopes,
-                                     const std::string& access_token) OVERRIDE;
+  void InvalidateOAuth2Token(const std::string& account_id,
+                             const std::string& client_id,
+                             const ScopeSet& scopes,
+                             const std::string& access_token) override;
 
-  virtual bool RefreshTokenIsAvailable(const std::string& account_id) const
-      OVERRIDE;
+  bool RefreshTokenIsAvailable(const std::string& account_id) const override;
 
  private:
   struct PendingRequest {
@@ -70,12 +69,12 @@ class FakeOAuth2TokenService : public OAuth2TokenService {
   };
 
   // OAuth2TokenService overrides.
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+  net::URLRequestContextGetter* GetRequestContext() override;
 
-  virtual OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
+  OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
       const std::string& account_id,
       net::URLRequestContextGetter* getter,
-      OAuth2AccessTokenConsumer* consumer) OVERRIDE;
+      OAuth2AccessTokenConsumer* consumer) override;
 
   std::set<std::string> account_ids_;
   std::vector<PendingRequest> pending_requests_;

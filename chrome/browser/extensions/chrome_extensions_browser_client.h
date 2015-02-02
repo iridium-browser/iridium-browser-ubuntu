@@ -38,64 +38,63 @@ class ContentSettingsPrefsObserver;
 class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
  public:
   ChromeExtensionsBrowserClient();
-  virtual ~ChromeExtensionsBrowserClient();
+  ~ChromeExtensionsBrowserClient() override;
 
   // BrowserClient overrides:
-  virtual bool IsShuttingDown() OVERRIDE;
-  virtual bool AreExtensionsDisabled(const base::CommandLine& command_line,
-                                     content::BrowserContext* context) OVERRIDE;
-  virtual bool IsValidContext(content::BrowserContext* context) OVERRIDE;
-  virtual bool IsSameContext(content::BrowserContext* first,
-                             content::BrowserContext* second) OVERRIDE;
-  virtual bool HasOffTheRecordContext(
-      content::BrowserContext* context) OVERRIDE;
-  virtual content::BrowserContext* GetOffTheRecordContext(
-      content::BrowserContext* context) OVERRIDE;
-  virtual content::BrowserContext* GetOriginalContext(
-      content::BrowserContext* context) OVERRIDE;
-  virtual bool IsGuestSession(content::BrowserContext* context) const OVERRIDE;
-  virtual bool IsExtensionIncognitoEnabled(
+  bool IsShuttingDown() override;
+  bool AreExtensionsDisabled(const base::CommandLine& command_line,
+                             content::BrowserContext* context) override;
+  bool IsValidContext(content::BrowserContext* context) override;
+  bool IsSameContext(content::BrowserContext* first,
+                     content::BrowserContext* second) override;
+  bool HasOffTheRecordContext(content::BrowserContext* context) override;
+  content::BrowserContext* GetOffTheRecordContext(
+      content::BrowserContext* context) override;
+  content::BrowserContext* GetOriginalContext(
+      content::BrowserContext* context) override;
+  bool IsGuestSession(content::BrowserContext* context) const override;
+  bool IsExtensionIncognitoEnabled(
       const std::string& extension_id,
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool CanExtensionCrossIncognito(
+      content::BrowserContext* context) const override;
+  bool CanExtensionCrossIncognito(
       const extensions::Extension* extension,
-      content::BrowserContext* context) const OVERRIDE;
-  virtual net::URLRequestJob* MaybeCreateResourceBundleRequestJob(
+      content::BrowserContext* context) const override;
+  net::URLRequestJob* MaybeCreateResourceBundleRequestJob(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate,
       const base::FilePath& directory_path,
       const std::string& content_security_policy,
-      bool send_cors_header) OVERRIDE;
-  virtual bool AllowCrossRendererResourceLoad(net::URLRequest* request,
-                                              bool is_incognito,
-                                              const Extension* extension,
-                                              InfoMap* extension_info_map)
-      OVERRIDE;
-  virtual PrefService* GetPrefServiceForContext(
-      content::BrowserContext* context) OVERRIDE;
-  virtual void GetEarlyExtensionPrefsObservers(
+      bool send_cors_header) override;
+  bool AllowCrossRendererResourceLoad(net::URLRequest* request,
+                                      bool is_incognito,
+                                      const Extension* extension,
+                                      InfoMap* extension_info_map) override;
+  PrefService* GetPrefServiceForContext(
+      content::BrowserContext* context) override;
+  void GetEarlyExtensionPrefsObservers(
       content::BrowserContext* context,
-      std::vector<ExtensionPrefsObserver*>* observers) const OVERRIDE;
-  virtual ProcessManagerDelegate* GetProcessManagerDelegate() const OVERRIDE;
-  virtual scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate()
-      OVERRIDE;
-  virtual bool DidVersionUpdate(content::BrowserContext* context) OVERRIDE;
-  virtual void PermitExternalProtocolHandler() OVERRIDE;
-  virtual scoped_ptr<AppSorting> CreateAppSorting() OVERRIDE;
-  virtual bool IsRunningInForcedAppMode() OVERRIDE;
-  virtual ApiActivityMonitor* GetApiActivityMonitor(
-      content::BrowserContext* context) OVERRIDE;
-  virtual ExtensionSystemProvider* GetExtensionSystemFactory() OVERRIDE;
-  virtual void RegisterExtensionFunctions(
-      ExtensionFunctionRegistry* registry) const OVERRIDE;
-  virtual scoped_ptr<extensions::RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual ComponentExtensionResourceManager*
-  GetComponentExtensionResourceManager() OVERRIDE;
-  virtual void BroadcastEventToRenderers(
-      const std::string& event_name,
-      scoped_ptr<base::ListValue> args) OVERRIDE;
-  virtual net::NetLog* GetNetLog() OVERRIDE;
+      std::vector<ExtensionPrefsObserver*>* observers) const override;
+  ProcessManagerDelegate* GetProcessManagerDelegate() const override;
+  scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() override;
+  bool DidVersionUpdate(content::BrowserContext* context) override;
+  void PermitExternalProtocolHandler() override;
+  scoped_ptr<AppSorting> CreateAppSorting() override;
+  bool IsRunningInForcedAppMode() override;
+  ApiActivityMonitor* GetApiActivityMonitor(
+      content::BrowserContext* context) override;
+  ExtensionSystemProvider* GetExtensionSystemFactory() override;
+  void RegisterExtensionFunctions(
+      ExtensionFunctionRegistry* registry) const override;
+  scoped_ptr<extensions::RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
+      content::BrowserContext* context) const override;
+  ComponentExtensionResourceManager* GetComponentExtensionResourceManager()
+      override;
+  void BroadcastEventToRenderers(const std::string& event_name,
+                                 scoped_ptr<base::ListValue> args) override;
+  net::NetLog* GetNetLog() override;
+  ExtensionCache* GetExtensionCache() override;
+  bool IsBackgroundUpdateAllowed() override;
+  bool IsMinBrowserVersionSupported(const std::string& min_version) override;
 
  private:
   friend struct base::DefaultLazyInstanceTraits<ChromeExtensionsBrowserClient>;
@@ -110,6 +109,8 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   scoped_ptr<ChromeExtensionsAPIClient> api_client_;
 
   scoped_ptr<ChromeComponentExtensionResourceManager> resource_manager_;
+
+  scoped_ptr<ExtensionCache> extension_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeExtensionsBrowserClient);
 };

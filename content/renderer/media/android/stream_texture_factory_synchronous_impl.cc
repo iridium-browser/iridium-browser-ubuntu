@@ -11,7 +11,7 @@
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop_proxy.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "base/synchronization/lock.h"
 #include "cc/output/context_provider.h"
 #include "content/common/android/surface_texture_peer.h"
@@ -36,8 +36,8 @@ class StreamTextureProxyImpl
   // StreamTextureProxy implementation:
   virtual void BindToLoop(int32 stream_id,
                           cc::VideoFrameProvider::Client* client,
-                          scoped_refptr<base::MessageLoopProxy> loop) OVERRIDE;
-  virtual void Release() OVERRIDE;
+                          scoped_refptr<base::MessageLoopProxy> loop) override;
+  virtual void Release() override;
 
  private:
   void BindOnThread(int32 stream_id);
@@ -87,11 +87,11 @@ void StreamTextureProxyImpl::BindToLoop(
     int32 stream_id,
     cc::VideoFrameProvider::Client* client,
     scoped_refptr<base::MessageLoopProxy> loop) {
-  DCHECK(loop);
+  DCHECK(loop.get());
 
   {
     base::AutoLock lock(lock_);
-    DCHECK(!loop_ || (loop == loop_));
+    DCHECK(!loop_.get() || (loop.get() == loop_.get()));
     loop_ = loop;
     client_ = client;
   }
@@ -110,7 +110,7 @@ void StreamTextureProxyImpl::BindToLoop(
 
 void StreamTextureProxyImpl::BindOnThread(int32 stream_id) {
   surface_texture_ = context_provider_->GetSurfaceTexture(stream_id);
-  if (!surface_texture_) {
+  if (!surface_texture_.get()) {
     LOG(ERROR) << "Failed to get SurfaceTexture for stream.";
     return;
   }
@@ -166,26 +166,26 @@ StreamTextureFactorySynchronousImpl::StreamTextureFactorySynchronousImpl(
 StreamTextureFactorySynchronousImpl::~StreamTextureFactorySynchronousImpl() {}
 
 StreamTextureProxy* StreamTextureFactorySynchronousImpl::CreateProxy() {
-  bool had_proxy = !!context_provider_;
+  bool had_proxy = !!context_provider_.get();
   if (!had_proxy)
     context_provider_ = create_context_provider_callback_.Run();
 
-  if (!context_provider_)
+  if (!context_provider_.get())
     return NULL;
 
   if (observer_ && !had_proxy)
     context_provider_->AddObserver(observer_);
-  return new StreamTextureProxyImpl(context_provider_);
+  return new StreamTextureProxyImpl(context_provider_.get());
 }
 
 void StreamTextureFactorySynchronousImpl::EstablishPeer(int32 stream_id,
                                                         int player_id) {
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   scoped_refptr<gfx::SurfaceTexture> surface_texture =
       context_provider_->GetSurfaceTexture(stream_id);
-  if (surface_texture) {
+  if (surface_texture.get()) {
     SurfaceTexturePeer::GetInstance()->EstablishSurfaceTexturePeer(
-        base::Process::Current().handle(),
+        base::GetCurrentProcessHandle(),
         surface_texture,
         frame_id_,
         player_id);
@@ -196,7 +196,7 @@ unsigned StreamTextureFactorySynchronousImpl::CreateStreamTexture(
     unsigned texture_target,
     unsigned* texture_id,
     gpu::Mailbox* texture_mailbox) {
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   unsigned stream_id = 0;
   GLES2Interface* gl = context_provider_->ContextGL();
   gl->GenTextures(1, texture_id);
@@ -213,7 +213,7 @@ void StreamTextureFactorySynchronousImpl::SetStreamTextureSize(
     const gfx::Size& size) {}
 
 gpu::gles2::GLES2Interface* StreamTextureFactorySynchronousImpl::ContextGL() {
-  DCHECK(context_provider_);
+  DCHECK(context_provider_.get());
   return context_provider_->ContextGL();
 }
 
@@ -221,7 +221,7 @@ void StreamTextureFactorySynchronousImpl::AddObserver(
     StreamTextureFactoryContextObserver* obs) {
   DCHECK(!observer_);
   observer_ = obs;
-  if (context_provider_)
+  if (context_provider_.get())
     context_provider_->AddObserver(obs);
 }
 
@@ -229,7 +229,7 @@ void StreamTextureFactorySynchronousImpl::RemoveObserver(
     StreamTextureFactoryContextObserver* obs) {
   DCHECK_EQ(observer_, obs);
   observer_ = NULL;
-  if (context_provider_)
+  if (context_provider_.get())
     context_provider_->RemoveObserver(obs);
 }
 

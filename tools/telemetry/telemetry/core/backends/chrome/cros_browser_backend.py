@@ -15,9 +15,11 @@ from telemetry.core.forwarders import cros_forwarder
 
 
 class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
-  def __init__(self, browser_options, cri, is_guest, extensions_to_load):
+  def __init__(self, cros_platform_backend, browser_options, cri, is_guest,
+               extensions_to_load):
     super(CrOSBrowserBackend, self).__init__(
-        supports_tab_control=True, supports_extensions=not is_guest,
+        cros_platform_backend, supports_tab_control=True,
+        supports_extensions=not is_guest,
         browser_options=browser_options,
         output_profile_path=None, extensions_to_load=extensions_to_load)
 
@@ -70,9 +72,6 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
             '--enable-smooth-scrolling',
             '--enable-threaded-compositing',
             '--enable-per-tile-painting',
-            # Disables the start page, as well as other external apps that can
-            # steal focus or make measurements inconsistent.
-            '--disable-default-apps',
             # Allow devtools to connect to chrome.
             '--remote-debugging-port=%i' % self._remote_debugging_port,
             # Open a maximized window.
@@ -82,6 +81,11 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
             # Debug logging.
             '--vmodule=*/chromeos/net/*=2,*/chromeos/login/*=2'])
 
+    # Disables the start page, as well as other external apps that can
+    # steal focus or make measurements inconsistent.
+    if self.browser_options.disable_default_apps:
+      args.append('--disable-default-apps')
+
     # Disable GAIA services unless we're using GAIA login, or if there's an
     # explicit request for it.
     if (self.browser_options.disable_gaia_services and
@@ -89,6 +93,11 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       args.append('--disable-gaia-services')
 
     return args
+
+  @property
+  def _use_host_resolver_rules(self):
+    """Always use the --host-resolver-rules Chrome flag; even for netsim."""
+    return True
 
   @property
   def pid(self):
@@ -231,21 +240,3 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
     # Wait for extensions to load.
     self._WaitForBrowserToComeUp()
-
-    # Workaround for crbug.com/374462 - the bug doesn't manifest in the guest
-    # session, which also starts with an open browser tab.
-    retries = 3
-    while not self._is_guest and not self.browser_options.gaia_login:
-      try:
-        # Open a new window/tab.
-        tab = self.tab_list_backend.New(timeout=30)
-        tab.Navigate('about:blank', timeout=10)
-        break
-      except (exceptions.TabCrashException, util.TimeoutException,
-              IndexError):
-        retries -= 1
-        logging.warning('TabCrashException/TimeoutException in '
-                        'new tab creation/navigation, '
-                        'remaining retries %d', retries)
-        if not retries:
-          raise

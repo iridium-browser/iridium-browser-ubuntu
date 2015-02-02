@@ -31,7 +31,8 @@ SensorManagerAndroid::SensorManagerAndroid()
       device_orientation_buffer_(NULL),
       is_light_buffer_ready_(false),
       is_motion_buffer_ready_(false),
-      is_orientation_buffer_ready_(false) {
+      is_orientation_buffer_ready_(false),
+      is_using_backup_sensors_for_orientation_(false) {
   memset(received_motion_data_, 0, sizeof(received_motion_data_));
   device_sensors_.Reset(Java_DeviceSensors_getInstance(
       AttachCurrentThread(), base::android::GetApplicationContext()));
@@ -67,7 +68,7 @@ void SensorManagerAndroid::GotOrientation(
 
   if (!is_orientation_buffer_ready_) {
     SetOrientationBufferReadyStatus(true);
-    updateRotationVectorHistogram(true);
+    updateRotationVectorHistogram(!is_using_backup_sensors_for_orientation_);
   }
 }
 
@@ -150,14 +151,14 @@ void SensorManagerAndroid::GotLight(JNIEnv*, jobject, double value) {
 
 bool SensorManagerAndroid::Start(EventType event_type) {
   DCHECK(!device_sensors_.is_null());
-  int rate_in_milliseconds = (event_type == kTypeLight)
-                                 ? kLightSensorIntervalMillis
-                                 : kInertialSensorIntervalMillis;
+  int rate_in_microseconds = (event_type == kTypeLight)
+                                 ? kLightSensorIntervalMicroseconds
+                                 : kInertialSensorIntervalMicroseconds;
   return Java_DeviceSensors_start(AttachCurrentThread(),
                                   device_sensors_.obj(),
                                   reinterpret_cast<intptr_t>(this),
                                   static_cast<jint>(event_type),
-                                  rate_in_milliseconds);
+                                  rate_in_microseconds);
 }
 
 void SensorManagerAndroid::Stop(EventType event_type) {
@@ -173,6 +174,11 @@ int SensorManagerAndroid::GetNumberActiveDeviceMotionSensors() {
       AttachCurrentThread(), device_sensors_.obj());
 }
 
+bool SensorManagerAndroid::isUsingBackupSensorsForOrientation() {
+  DCHECK(!device_sensors_.is_null());
+  return Java_DeviceSensors_isUsingBackupSensorsForOrientation(
+      AttachCurrentThread(), device_sensors_.obj());
+}
 
 // ----- Shared memory API methods
 
@@ -250,7 +256,8 @@ void SensorManagerAndroid::CheckMotionBufferReadyToRead() {
       received_motion_data_[RECEIVED_MOTION_DATA_ROTATION_RATE] ==
       number_active_device_motion_sensors_) {
     device_motion_buffer_->seqlock.WriteBegin();
-    device_motion_buffer_->data.interval = kInertialSensorIntervalMillis;
+    device_motion_buffer_->data.interval =
+        kInertialSensorIntervalMicroseconds / 1000.;
     device_motion_buffer_->seqlock.WriteEnd();
     SetMotionBufferReadyStatus(true);
 
@@ -307,6 +314,9 @@ bool SensorManagerAndroid::StartFetchingDeviceOrientationData(
 
   if (!success)
     updateRotationVectorHistogram(false);
+  else
+    is_using_backup_sensors_for_orientation_ =
+        isUsingBackupSensorsForOrientation();
 
   return success;
 }

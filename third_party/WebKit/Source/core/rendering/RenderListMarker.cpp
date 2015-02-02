@@ -1120,7 +1120,7 @@ LayoutRect RenderListMarker::localSelectionRect()
     if (!box)
         return LayoutRect(LayoutPoint(), size());
     RootInlineBox& root = inlineBoxWrapper()->root();
-    LayoutUnit newLogicalTop = root.block().style()->isFlippedBlocksWritingMode() ? inlineBoxWrapper()->logicalBottom() - root.selectionBottom() : root.selectionTop() - inlineBoxWrapper()->logicalTop();
+    LayoutUnit newLogicalTop = root.block().style()->slowIsFlippedBlocksWritingMode() ? inlineBoxWrapper()->logicalBottom() - root.selectionBottom() : root.selectionTop() - inlineBoxWrapper()->logicalTop();
     if (root.block().style()->isHorizontalWritingMode())
         return LayoutRect(0, newLogicalTop, width(), root.selectionHeight());
     return LayoutRect(newLogicalTop, 0, root.selectionHeight(), height());
@@ -1166,7 +1166,7 @@ void RenderListMarker::imageChanged(WrappedImagePtr o, const IntRect*)
     if (width() != m_image->imageSize(this, style()->effectiveZoom()).width() || height() != m_image->imageSize(this, style()->effectiveZoom()).height() || m_image->errorOccurred())
         setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
     else
-        setShouldDoFullPaintInvalidation(true);
+        setShouldDoFullPaintInvalidation();
 }
 
 void RenderListMarker::updateMarginsAndContent()
@@ -1631,6 +1631,21 @@ LayoutRect RenderListMarker::selectionRectForPaintInvalidation(const RenderLayer
     LayoutRect rect(0, root.selectionTop() - y(), width(), root.selectionHeight());
     mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, 0);
     return rect;
+}
+
+void RenderListMarker::listItemStyleDidChange()
+{
+    RefPtr<RenderStyle> newStyle = RenderStyle::create();
+    // The marker always inherits from the list item, regardless of where it might end
+    // up (e.g., in some deeply nested line box). See CSS3 spec.
+    newStyle->inheritFrom(m_listItem->style());
+    if (style()) {
+        // Reuse the current margins. Otherwise resetting the margins to initial values
+        // would trigger unnecessary layout.
+        newStyle->setMarginStart(style()->marginStart());
+        newStyle->setMarginEnd(style()->marginRight());
+    }
+    setStyle(newStyle.release());
 }
 
 } // namespace blink

@@ -76,10 +76,9 @@ class MockServiceResolver : public ServiceResolver {
         callback_(callback), mock_delegate_(mock_delegate) {
   }
 
-  virtual ~MockServiceResolver() {
-  }
+  ~MockServiceResolver() override {}
 
-  virtual void StartResolving() OVERRIDE {
+  void StartResolving() override {
     started_resolving_ = true;
     mock_delegate_->ServiceResolverStarted(service_name_, this);
   }
@@ -88,9 +87,7 @@ class MockServiceResolver : public ServiceResolver {
     return started_resolving_;
   }
 
-  virtual std::string GetName() const OVERRIDE {
-    return service_name_;
-  }
+  std::string GetName() const override { return service_name_; }
 
   const ServiceResolver::ResolveCompleteCallback& callback() {
     return callback_; }
@@ -109,34 +106,31 @@ class MockServiceDiscoveryClient : public ServiceDiscoveryClient {
       : mock_delegate_(mock_delegate) {
   }
 
-  virtual ~MockServiceDiscoveryClient() {
-  }
+  ~MockServiceDiscoveryClient() override {}
 
   // Create a service watcher object listening for DNS-SD service announcements
   // on service type |service_type|.
-  virtual scoped_ptr<ServiceWatcher> CreateServiceWatcher(
+  scoped_ptr<ServiceWatcher> CreateServiceWatcher(
       const std::string& service_type,
-      const ServiceWatcher::UpdatedCallback& callback) OVERRIDE {
-    scoped_ptr<MockServiceWatcher> mock_service_watcher(
+      const ServiceWatcher::UpdatedCallback& callback) override {
+    return make_scoped_ptr(
         new MockServiceWatcher(service_type, callback, mock_delegate_));
-    return mock_service_watcher.PassAs<ServiceWatcher>();
   }
 
   // Create a service resolver object for getting detailed service information
   // for the service called |service_name|.
-  virtual scoped_ptr<ServiceResolver> CreateServiceResolver(
+  scoped_ptr<ServiceResolver> CreateServiceResolver(
       const std::string& service_name,
-      const ServiceResolver::ResolveCompleteCallback& callback) OVERRIDE {
-    scoped_ptr<MockServiceResolver> mock_service_resolver(
+      const ServiceResolver::ResolveCompleteCallback& callback) override {
+    return make_scoped_ptr(
         new MockServiceResolver(service_name, callback, mock_delegate_));
-    return mock_service_resolver.PassAs<ServiceResolver>();
   }
 
   // Not used in this test.
-  virtual scoped_ptr<LocalDomainResolver> CreateLocalDomainResolver(
-    const std::string& domain,
-    net::AddressFamily address_family,
-    const LocalDomainResolver::IPAddressCallback& callback) OVERRIDE {
+  scoped_ptr<LocalDomainResolver> CreateLocalDomainResolver(
+      const std::string& domain,
+      net::AddressFamily address_family,
+      const LocalDomainResolver::IPAddressCallback& callback) override {
     NOTREACHED();
     return scoped_ptr<LocalDomainResolver>();
   }
@@ -178,7 +172,7 @@ class PrivetDeviceListerTest : public testing::Test {
   virtual ~PrivetDeviceListerTest() {
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     example_attrs_.push_back("tXtvers=1");
     example_attrs_.push_back("ty=My Printer");
     example_attrs_.push_back("nOte=This is my Printer");

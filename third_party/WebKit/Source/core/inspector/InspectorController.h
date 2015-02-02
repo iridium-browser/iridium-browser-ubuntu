@@ -41,13 +41,13 @@
 namespace blink {
 
 class ContextMenuProvider;
-class DOMWrapperWorld;
 class LocalFrame;
 class GraphicsContext;
 class GraphicsLayer;
 class InjectedScriptManager;
 class InspectorBackendDispatcher;
 class InspectorAgent;
+class InspectorAnimationAgent;
 class InspectorClient;
 class InspectorCSSAgent;
 class InspectorDOMAgent;
@@ -60,10 +60,7 @@ class InspectorResourceAgent;
 class InspectorTimelineAgent;
 class InspectorTracingAgent;
 class InspectorOverlay;
-class InspectorState;
 class InstrumentingAgents;
-class IntPoint;
-class IntSize;
 class Page;
 class PlatformGestureEvent;
 class PlatformKeyboardEvent;
@@ -91,7 +88,7 @@ public:
     void setInspectorFrontendClient(InspectorFrontendClient*);
     void didClearDocumentOfWindowObject(LocalFrame*);
     void setInjectedScriptForOrigin(const String& origin, const String& source);
-    void showContextMenu(float x, float y, PassRefPtr<ContextMenuProvider>);
+    void showContextMenu(float x, float y, PassRefPtrWillBeRawPtr<ContextMenuProvider>);
 
     void dispatchMessageFromFrontend(const String& message);
 
@@ -120,6 +117,7 @@ public:
     void resume();
 
     void setResourcesDataSizeLimitsFromInternals(int maximumResourcesContentSize, int maximumSingleResourceContentSize);
+    PassRefPtr<JSONObject> highlightJSONForNode(Node*);
 
     void willProcessTask();
     void didProcessTask();
@@ -157,6 +155,7 @@ private:
     RawPtrWillBeMember<InspectorResourceAgent> m_resourceAgent;
     RawPtrWillBeMember<InspectorLayerTreeAgent> m_layerTreeAgent;
     RawPtrWillBeMember<InspectorTracingAgent> m_tracingAgent;
+    RawPtrWillBeMember<InspectorAnimationAgent> m_animationAgent;
 
     RefPtrWillBeMember<InspectorBackendDispatcher> m_inspectorBackendDispatcher;
     InspectorFrontendClient* m_inspectorFrontendClient;

@@ -33,14 +33,43 @@
 ## epoger will rebaseline by 25 Dec 2013
 #gradtext
 
-# jvanverth
-fontcache
+# robertphillips - skia:2995
+blurrects
 
-# reed - conservative_rasterclip CL
+# senorblanco https://codereview.chromium.org/681643003/
+# minor pixel diffs from bounds change
+testimagefilters
+
+# sugoi https://codereview.chromium.org/646213004/
+# New shadow only option in SkDropShadowImageFilter
+dropshadowimagefilter
+
+# senorblanco https://codereview.chromium.org/637283009/
+# quality improvements to imagemagnifier GM
+imagemagnifier
+
+# robertphillips https://codereview.chromium.org/698493002/
+multipicturedraw_biglayer_simple
+multipicturedraw_biglayer_tiled
+multipicturedraw_invpathclip_simple
+multipicturedraw_invpathclip_tiled
+multipicturedraw_noclip_simple
+multipicturedraw_noclip_tiled
+multipicturedraw_pathclip_simple
 multipicturedraw_pathclip_tiled
+multipicturedraw_rectclip_simple
+multipicturedraw_rectclip_tiled
+multipicturedraw_rrectclip_simple
+multipicturedraw_rrectclip_tiled
+multipicturedraw_sierpinski_simple
+multipicturedraw_sierpinski_tiled
 
-# rileya - https://codereview.chromium.org/516463005/ will rebaseline after bots cycle
-yuv_to_rgb_effect
+#jvanverth https://codereview.chromium.org/703463002
+dftext
+nested_aa
+path-reverse
+pathfill
+polygons
+pathopsinverse
+rects
 
-#edgdaniel https://codereview.chromium.org/703783002/
-dashing

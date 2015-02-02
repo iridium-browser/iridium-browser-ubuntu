@@ -20,20 +20,18 @@ class GlobalShortcutListenerX11 : public GlobalShortcutListener,
                                   public ui::PlatformEventDispatcher {
  public:
   GlobalShortcutListenerX11();
-  virtual ~GlobalShortcutListenerX11();
+  ~GlobalShortcutListenerX11() override;
 
   // ui::PlatformEventDispatcher implementation.
-  virtual bool CanDispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
-  virtual uint32_t DispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
+  bool CanDispatchEvent(const ui::PlatformEvent& event) override;
+  uint32_t DispatchEvent(const ui::PlatformEvent& event) override;
 
  private:
   // GlobalShortcutListener implementation.
-  virtual void StartListening() OVERRIDE;
-  virtual void StopListening() OVERRIDE;
-  virtual bool RegisterAcceleratorImpl(
-      const ui::Accelerator& accelerator) OVERRIDE;
-  virtual void UnregisterAcceleratorImpl(
-      const ui::Accelerator& accelerator) OVERRIDE;
+  void StartListening() override;
+  void StopListening() override;
+  bool RegisterAcceleratorImpl(const ui::Accelerator& accelerator) override;
+  void UnregisterAcceleratorImpl(const ui::Accelerator& accelerator) override;
 
   // Invoked when a global shortcut is pressed.
   void OnXKeyPressEvent(::XEvent* x_event);

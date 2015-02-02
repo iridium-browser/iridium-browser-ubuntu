@@ -39,26 +39,24 @@ class WebstoreInlineInstaller
  protected:
   friend class base::RefCountedThreadSafe<WebstoreInlineInstaller>;
 
-  virtual ~WebstoreInlineInstaller();
+  ~WebstoreInlineInstaller() override;
 
   // Implementations WebstoreStandaloneInstaller Template Method's hooks.
-  virtual bool CheckRequestorAlive() const OVERRIDE;
-  virtual const GURL& GetRequestorURL() const OVERRIDE;
-  virtual bool ShouldShowPostInstallUI() const OVERRIDE;
-  virtual bool ShouldShowAppInstalledBubble() const OVERRIDE;
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
-      const OVERRIDE;
-  virtual bool CheckInlineInstallPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
-  virtual bool CheckRequestorPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
+  bool CheckRequestorAlive() const override;
+  const GURL& GetRequestorURL() const override;
+  bool ShouldShowPostInstallUI() const override;
+  bool ShouldShowAppInstalledBubble() const override;
+  content::WebContents* GetWebContents() const override;
+  scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
+      const override;
+  bool CheckInlineInstallPermitted(const base::DictionaryValue& webstore_data,
+                                   std::string* error) const override;
+  bool CheckRequestorPermitted(const base::DictionaryValue& webstore_data,
+                               std::string* error) const override;
 
  private:
   // content::WebContentsObserver interface implementation.
-  virtual void WebContentsDestroyed() OVERRIDE;
+  void WebContentsDestroyed() override;
 
   // Checks whether the install is initiated by a page in a verified site
   // (which is at least a domain, but can also have a port or a path).

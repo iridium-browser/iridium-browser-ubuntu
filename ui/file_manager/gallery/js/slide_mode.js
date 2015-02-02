@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Slide mode displays a single image and has a set of controls to navigate
  * between the images and to edit an image.
@@ -12,6 +10,7 @@
  * @param {Element} content Content container element.
  * @param {Element} toolbar Toolbar element.
  * @param {ImageEditor.Prompt} prompt Prompt.
+ * @param {ErrorBanner} errorBanner Error banner.
  * @param {cr.ui.ArrayDataModel} dataModel Data model.
  * @param {cr.ui.ListSelectionModel} selectionModel Selection model.
  * @param {Object} context Context.
@@ -21,13 +20,14 @@
  *     function.
  * @constructor
  */
-function SlideMode(container, content, toolbar, prompt, dataModel,
+function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
     selectionModel, context, volumeManager, toggleMode, displayStringFunction) {
   this.container_ = container;
   this.document_ = container.ownerDocument;
   this.content = content;
   this.toolbar_ = toolbar;
   this.prompt_ = prompt;
+  this.errorBanner_ = errorBanner;
   this.dataModel_ = dataModel;
   this.selectionModel_ = selectionModel;
   this.context_ = context;
@@ -177,12 +177,6 @@ SlideMode.prototype.initDom_ = function() {
       this.document_, this.dataModel_, this.selectionModel_);
   this.ribbonSpacer_.appendChild(this.ribbon_);
 
-  // Error indicator.
-  var errorWrapper = util.createChild(this.container_, 'prompt-wrapper');
-  errorWrapper.setAttribute('pos', 'center');
-
-  this.errorBanner_ = util.createChild(errorWrapper, 'error-banner');
-
   util.createChild(this.container_, 'spinner');
 
   var slideShowButton = this.toolbar_.querySelector('button.slideshow');
@@ -201,12 +195,12 @@ SlideMode.prototype.initDom_ = function() {
 
   this.editButton_ = this.toolbar_.querySelector('button.edit');
   this.editButton_.title = this.displayStringFunction_('GALLERY_EDIT');
-  this.editButton_.setAttribute('disabled', '');  // Disabled by default.
+  this.editButton_.disabled = true;  // Disabled by default.
   this.editButton_.addEventListener('click', this.toggleEditor.bind(this));
 
   this.printButton_ = this.toolbar_.querySelector('button.print');
   this.printButton_.title = this.displayStringFunction_('GALLERY_PRINT');
-  this.printButton_.setAttribute('disabled', '');  // Disabled by default.
+  this.printButton_.disabled = true;  // Disabled by default.
   this.printButton_.addEventListener('click', this.print_.bind(this));
 
   this.editBarSpacer_ = this.toolbar_.querySelector('.edit-bar-spacer');
@@ -243,9 +237,9 @@ SlideMode.prototype.initDom_ = function() {
 
 /**
  * Load items, display the selected item.
- * @param {Rect} zoomFromRect Rectangle for zoom effect.
- * @param {function} displayCallback Called when the image is displayed.
- * @param {function} loadCallback Called when the image is displayed.
+ * @param {ImageRect} zoomFromRect Rectangle for zoom effect.
+ * @param {function()} displayCallback Called when the image is displayed.
+ * @param {function()} loadCallback Called when the image is displayed.
  */
 SlideMode.prototype.enter = function(
     zoomFromRect, displayCallback, loadCallback) {
@@ -275,7 +269,7 @@ SlideMode.prototype.enter = function(
     if (this.getItemCount_() === 0) {
       this.displayedIndex_ = -1;
       //TODO(hirono) Show this message in the grid mode too.
-      this.showErrorBanner_('GALLERY_NO_IMAGES');
+      this.errorBanner_.show('GALLERY_NO_IMAGES');
       fulfill();
       return;
     }
@@ -329,8 +323,8 @@ SlideMode.prototype.enter = function(
 
 /**
  * Leave the mode.
- * @param {Rect} zoomToRect Rectangle for zoom effect.
- * @param {function} callback Called when the image is committed and
+ * @param {ImageRect} zoomToRect Rectangle for zoom effect.
+ * @param {function()} callback Called when the image is committed and
  *   the zoom-out animation has started.
  */
 SlideMode.prototype.leave = function(zoomToRect, callback) {
@@ -351,15 +345,15 @@ SlideMode.prototype.leave = function(zoomToRect, callback) {
 
   this.viewport_.resetView();
   if (this.getItemCount_() === 0) {
-    this.showErrorBanner_(false);
+    this.errorBanner_.clear();
     commitDone();
   } else {
     this.commitItem_(commitDone);
   }
 
   // Disable the slide-mode only buttons when leaving.
-  this.editButton_.setAttribute('disabled', '');
-  this.printButton_.setAttribute('disabled', '');
+  this.editButton_.disabled = true;
+  this.printButton_.disabled = true;
 
   // Disable touch operation.
   this.touchHandlers_.enabled = false;
@@ -369,7 +363,7 @@ SlideMode.prototype.leave = function(zoomToRect, callback) {
 /**
  * Execute an action when the editor is not busy.
  *
- * @param {function} action Function to execute.
+ * @param {function()} action Function to execute.
  */
 SlideMode.prototype.executeWhenReady = function(action) {
   this.editor_.executeWhenReady(action);
@@ -406,7 +400,7 @@ SlideMode.prototype.getSelectedIndex = function() {
 };
 
 /**
- * @return {Rect} Screen rectangle of the selected image.
+ * @return {ImageRect} Screen rectangle of the selected image.
  */
 SlideMode.prototype.getSelectedImageRect = function() {
   if (this.getSelectedIndex() < 0)
@@ -439,7 +433,7 @@ SlideMode.prototype.toggleFullScreen_ = function() {
  */
 SlideMode.prototype.onSelection_ = function() {
   if (this.selectionModel_.selectedIndexes.length === 0)
-    return;  // Temporary empty selection.
+    return;  // Ignore temporary empty selection.
 
   // Forget the saved selection if the user changed the selection manually.
   if (!this.isSlideshowOn_())
@@ -550,7 +544,7 @@ SlideMode.prototype.loadSelectedItem_ = function() {
 /**
  * Unload the current image.
  *
- * @param {Rect} zoomToRect Rectangle for zoom effect.
+ * @param {ImageRect} zoomToRect Rectangle for zoom effect.
  * @private
  */
 SlideMode.prototype.unloadImage_ = function(zoomToRect) {
@@ -585,10 +579,13 @@ SlideMode.prototype.onSplice_ = function(event) {
       // Removed item is the rightmost, but there are more items.
       this.select(event.index - 1);  // Select the new last index.
     } else {
-      // No items left. Unload the image and show the banner.
+      // No items left. Unload the image, disable edit and print button, and
+      // show the banner.
       this.commitItem_(function() {
         this.unloadImage_();
-        this.showErrorBanner_('GALLERY_NO_IMAGES');
+        this.printButton_.disabled = true;
+        this.editButton_.disabled = true;
+        this.errorBanner_.show('GALLERY_NO_IMAGES');
       }.bind(this));
     }
   }.bind(this), 0);
@@ -673,9 +670,10 @@ SlideMode.prototype.selectLast = function() {
  *
  * @param {Gallery.Item} item Item.
  * @param {Object} effect Transition effect object.
- * @param {function} displayCallback Called when the image is displayed
+ * @param {function()} displayCallback Called when the image is displayed
  *     (which can happen before the image load due to caching).
- * @param {function} loadCallback Called when the image is fully loaded.
+ * @param {function(number, number)} loadCallback Called when the image is fully
+ *     loaded.
  * @private
  */
 SlideMode.prototype.loadItem_ = function(
@@ -689,13 +687,13 @@ SlideMode.prototype.loadItem_ = function(
     if (loadType === ImageView.LOAD_TYPE_ERROR) {
       // if we have a specific error, then display it
       if (error) {
-        this.showErrorBanner_(error);
+        this.errorBanner_.show(error);
       } else {
         // otherwise try to infer general error
-        this.showErrorBanner_('GALLERY_IMAGE_ERROR');
+        this.errorBanner_.show('GALLERY_IMAGE_ERROR');
       }
     } else if (loadType === ImageView.LOAD_TYPE_OFFLINE) {
-      this.showErrorBanner_('GALLERY_IMAGE_OFFLINE');
+      this.errorBanner_.show('GALLERY_IMAGE_OFFLINE');
     }
 
     ImageUtil.metrics.recordUserAction(ImageUtil.getMetricName('View'));
@@ -720,11 +718,11 @@ SlideMode.prototype.loadItem_ = function(
 
     // Enable or disable buttons for editing and printing.
     if (error) {
-      this.editButton_.setAttribute('disabled', '');
-      this.printButton_.setAttribute('disabled', '');
+      this.editButton_.disabled = true;
+      this.printButton_.disabled = true;
     } else {
-      this.editButton_.removeAttribute('disabled');
-      this.printButton_.removeAttribute('disabled');
+      this.editButton_.disabled = false;
+      this.printButton_.disabled = false;
     }
 
     // For once edited image, disallow the 'overwrite' setting change.
@@ -763,12 +761,12 @@ SlideMode.prototype.loadItem_ = function(
 /**
  * Commit changes to the current item and reset all messages/indicators.
  *
- * @param {function} callback Callback.
+ * @param {function()} callback Callback.
  * @private
  */
 SlideMode.prototype.commitItem_ = function(callback) {
   this.showSpinner_(false);
-  this.showErrorBanner_(false);
+  this.errorBanner_.clear();
   this.editor_.getPrompt().hide();
   this.editor_.closeSession(callback);
 };
@@ -859,12 +857,12 @@ SlideMode.prototype.onKeyDown = function(event) {
 
   switch (keyID) {
     case 'Ctrl-U+0050':  // Ctrl+'p' prints the current image.
-      if (!this.printButton_.hasAttribute('disabled'))
+      if (!this.printButton_.disabled)
         this.print_();
       break;
 
     case 'U+0045':  // 'e' toggles the editor.
-      if (!this.editButton_.hasAttribute('disabled'))
+      if (!this.editButton_.disabled)
         this.toggleEditor(event);
       break;
 
@@ -962,7 +960,7 @@ SlideMode.prototype.updateThumbnails = function() {
  * Save the current image to a file.
  *
  * @param {Gallery.Item} item Item to save the image.
- * @param {function} callback Callback.
+ * @param {function()} callback Callback.
  * @private
  */
 SlideMode.prototype.saveCurrentImage_ = function(item, callback) {
@@ -1277,18 +1275,6 @@ SlideMode.prototype.print_ = function() {
 };
 
 /**
- * Displays the error banner.
- * @param {string} message Message.
- * @private
- */
-SlideMode.prototype.showErrorBanner_ = function(message) {
-  if (message) {
-    this.errorBanner_.textContent = this.displayStringFunction_(message);
-  }
-  ImageUtil.setAttribute(this.container_, 'error', !!message);
-};
-
-/**
  * Shows/hides the busy spinner.
  *
  * @param {boolean} on True if show, false if hide.
@@ -1319,14 +1305,14 @@ SlideMode.prototype.applyViewportChange = function() {
 
 /**
  * Touch handlers of the slide mode.
- * @param {DOMElement} targetElement Event source.
+ * @param {Element} targetElement Event source.
  * @param {SlideMode} slideMode Slide mode to be operated by the handler.
  * @constructor
  */
 function TouchHandler(targetElement, slideMode) {
   /**
    * Event source.
-   * @type {DOMElement}
+   * @type {Element}
    * @private
    */
   this.targetElement_ = targetElement;

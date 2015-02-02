@@ -31,11 +31,9 @@ namespace {
 class TestBrowserWindowAura : public TestBrowserWindow {
  public:
   explicit TestBrowserWindowAura(aura::Window* native_window);
-  virtual ~TestBrowserWindowAura();
+  ~TestBrowserWindowAura() override;
 
-  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE {
-    return native_window_;
-  }
+  gfx::NativeWindow GetNativeWindow() const override { return native_window_; }
 
  private:
   gfx::NativeWindow native_window_;
@@ -58,8 +56,8 @@ class WindowPositionerTest : public AshTestBase {
  public:
   WindowPositionerTest();
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   aura::Window* window() { return window_.get(); }

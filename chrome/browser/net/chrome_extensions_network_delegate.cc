@@ -15,7 +15,6 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/browser/process_manager.h"
 #include "net/url_request/url_request.h"
@@ -39,10 +38,8 @@ void NotifyEPMRequestStatus(RequestStatus status,
     return;
 
   extensions::ProcessManager* process_manager =
-      extensions::ExtensionSystem::Get(profile)->process_manager();
-  // This may be NULL in unit tests.
-  if (!process_manager)
-    return;
+      extensions::ProcessManager::Get(profile);
+  DCHECK(process_manager);
 
   // Will be NULL if the request was not issued on behalf of a renderer (e.g. a
   // system-level request).
@@ -83,39 +80,38 @@ class ChromeExtensionsNetworkDelegateImpl
  public:
   explicit ChromeExtensionsNetworkDelegateImpl(
       extensions::EventRouterForwarder* event_router);
-  virtual ~ChromeExtensionsNetworkDelegateImpl();
+  ~ChromeExtensionsNetworkDelegateImpl() override;
 
  private:
   // ChromeExtensionsNetworkDelegate implementation.
-  virtual void ForwardProxyErrors(net::URLRequest* request) OVERRIDE;
-  virtual void ForwardStartRequestStatus(net::URLRequest* request) OVERRIDE;
-  virtual void ForwardDoneRequestStatus(net::URLRequest* request) OVERRIDE;
-  virtual int OnBeforeURLRequest(net::URLRequest* request,
-                                 const net::CompletionCallback& callback,
-                                 GURL* new_url) OVERRIDE;
-  virtual int OnBeforeSendHeaders(net::URLRequest* request,
-                                  const net::CompletionCallback& callback,
-                                  net::HttpRequestHeaders* headers) OVERRIDE;
-  virtual void OnSendHeaders(net::URLRequest* request,
-                             const net::HttpRequestHeaders& headers) OVERRIDE;
-  virtual int OnHeadersReceived(
+  void ForwardProxyErrors(net::URLRequest* request) override;
+  void ForwardStartRequestStatus(net::URLRequest* request) override;
+  void ForwardDoneRequestStatus(net::URLRequest* request) override;
+  int OnBeforeURLRequest(net::URLRequest* request,
+                         const net::CompletionCallback& callback,
+                         GURL* new_url) override;
+  int OnBeforeSendHeaders(net::URLRequest* request,
+                          const net::CompletionCallback& callback,
+                          net::HttpRequestHeaders* headers) override;
+  void OnSendHeaders(net::URLRequest* request,
+                     const net::HttpRequestHeaders& headers) override;
+  int OnHeadersReceived(
       net::URLRequest* request,
       const net::CompletionCallback& callback,
       const net::HttpResponseHeaders* original_response_headers,
       scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
-      GURL* allowed_unsafe_redirect_url) OVERRIDE;
-  virtual void OnBeforeRedirect(net::URLRequest* request,
-                                const GURL& new_location) OVERRIDE;
-  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
-  virtual void OnCompleted(net::URLRequest* request, bool started) OVERRIDE;
-  virtual void OnURLRequestDestroyed(net::URLRequest* request) OVERRIDE;
-  virtual void OnPACScriptError(int line_number,
-                                const base::string16& error) OVERRIDE;
-  virtual net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
+      GURL* allowed_unsafe_redirect_url) override;
+  void OnBeforeRedirect(net::URLRequest* request,
+                        const GURL& new_location) override;
+  void OnResponseStarted(net::URLRequest* request) override;
+  void OnCompleted(net::URLRequest* request, bool started) override;
+  void OnURLRequestDestroyed(net::URLRequest* request) override;
+  void OnPACScriptError(int line_number, const base::string16& error) override;
+  net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       net::URLRequest* request,
       const net::AuthChallengeInfo& auth_info,
       const AuthCallback& callback,
-      net::AuthCredentials* credentials) OVERRIDE;
+      net::AuthCredentials* credentials) override;
 
   scoped_refptr<extensions::EventRouterForwarder> event_router_;
 

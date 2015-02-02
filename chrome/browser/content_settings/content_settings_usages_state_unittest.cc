@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/message_loop/message_loop.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/test/test_browser_thread.h"
@@ -28,7 +28,8 @@ class ContentSettingsUsagesStateTests : public testing::Test {
  protected:
   void ClearOnNewOrigin(ContentSettingsType type) {
     TestingProfile profile;
-    ContentSettingsUsagesState state(&profile, type);
+    ContentSettingsUsagesState state(profile.GetHostContentSettingsMap(),
+                                     profile.GetPrefs(), type);
     GURL url_0("http://www.example.com");
 
     scoped_ptr<NavigationEntry> entry(NavigationEntry::Create());
@@ -133,7 +134,8 @@ class ContentSettingsUsagesStateTests : public testing::Test {
 
   void ShowPortOnSameHost(ContentSettingsType type) {
     TestingProfile profile;
-    ContentSettingsUsagesState state(&profile, type);
+    ContentSettingsUsagesState state(profile.GetHostContentSettingsMap(),
+                                     profile.GetPrefs(), type);
     GURL url_0("http://www.example.com");
 
     scoped_ptr<NavigationEntry> entry(NavigationEntry::Create());

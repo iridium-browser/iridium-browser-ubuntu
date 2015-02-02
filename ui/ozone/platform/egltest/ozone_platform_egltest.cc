@@ -16,6 +16,7 @@
 #include "ui/events/ozone/events_ozone.h"
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/vsync_provider.h"
+#include "ui/ozone/common/native_display_delegate_ozone.h"
 #include "ui/ozone/public/cursor_factory_ozone.h"
 #include "ui/ozone/public/gpu_platform_support.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
@@ -25,10 +26,6 @@
 #include "ui/ozone/public/surface_ozone_egl.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/platform_window_delegate.h"
-
-#if defined(OS_CHROMEOS)
-#include "ui/ozone/common/chromeos/native_display_delegate_ozone.h"
-#endif
 
 namespace ui {
 
@@ -54,26 +51,26 @@ class EgltestWindow : public PlatformWindow, public PlatformEventDispatcher {
                 LibeglplatformShimLoader* eglplatform_shim,
                 EventFactoryEvdev* event_factory,
                 const gfx::Rect& bounds);
-  virtual ~EgltestWindow();
+  ~EgltestWindow() override;
 
   // PlatformWindow:
-  virtual gfx::Rect GetBounds() OVERRIDE;
-  virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void Close() OVERRIDE;
-  virtual void SetCapture() OVERRIDE;
-  virtual void ReleaseCapture() OVERRIDE;
-  virtual void ToggleFullscreen() OVERRIDE;
-  virtual void Maximize() OVERRIDE;
-  virtual void Minimize() OVERRIDE;
-  virtual void Restore() OVERRIDE;
-  virtual void SetCursor(PlatformCursor cursor) OVERRIDE;
-  virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
+  gfx::Rect GetBounds() override;
+  void SetBounds(const gfx::Rect& bounds) override;
+  void Show() override;
+  void Hide() override;
+  void Close() override;
+  void SetCapture() override;
+  void ReleaseCapture() override;
+  void ToggleFullscreen() override;
+  void Maximize() override;
+  void Minimize() override;
+  void Restore() override;
+  void SetCursor(PlatformCursor cursor) override;
+  void MoveCursorTo(const gfx::Point& location) override;
 
   // PlatformEventDispatcher:
-  virtual bool CanDispatchEvent(const PlatformEvent& event) OVERRIDE;
-  virtual uint32_t DispatchEvent(const PlatformEvent& event) OVERRIDE;
+  bool CanDispatchEvent(const PlatformEvent& event) override;
+  uint32_t DispatchEvent(const PlatformEvent& event) override;
 
  private:
   PlatformWindowDelegate* delegate_;
@@ -154,9 +151,8 @@ bool EgltestWindow::CanDispatchEvent(const ui::PlatformEvent& ne) {
 
 uint32_t EgltestWindow::DispatchEvent(const ui::PlatformEvent& native_event) {
   DispatchEventFromNativeUiEvent(
-      native_event,
-      base::Bind(&PlatformWindowDelegate::DispatchEvent,
-                 base::Unretained(delegate_)));
+      native_event, base::Bind(&PlatformWindowDelegate::DispatchEvent,
+                               base::Unretained(delegate_)));
 
   return ui::POST_DISPATCH_STOP_PROPAGATION;
 }
@@ -172,20 +168,20 @@ class SurfaceOzoneEgltest : public SurfaceOzoneEGL {
       : eglplatform_shim_(eglplatform_shim) {
     native_window_ = eglplatform_shim_->ShimGetNativeWindow(window_id);
   }
-  virtual ~SurfaceOzoneEgltest() {
+  ~SurfaceOzoneEgltest() {
     bool ret = eglplatform_shim_->ShimReleaseNativeWindow(native_window_);
     DCHECK(ret);
   }
 
-  virtual intptr_t GetNativeWindow() OVERRIDE { return native_window_; }
+  intptr_t GetNativeWindow() override { return native_window_; }
 
-  virtual bool OnSwapBuffers() OVERRIDE { return true; }
+  bool OnSwapBuffers() override { return true; }
 
-  virtual bool ResizeNativeWindow(const gfx::Size& viewport_size) OVERRIDE {
+  bool ResizeNativeWindow(const gfx::Size& viewport_size) override {
     return true;
   }
 
-  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() OVERRIDE {
+  scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override {
     return scoped_ptr<gfx::VSyncProvider>();
   }
 
@@ -203,17 +199,16 @@ class SurfaceFactoryEgltest : public ui::SurfaceFactoryOzone {
  public:
   SurfaceFactoryEgltest(LibeglplatformShimLoader* eglplatform_shim)
       : eglplatform_shim_(eglplatform_shim) {}
-  virtual ~SurfaceFactoryEgltest() {}
+  ~SurfaceFactoryEgltest() override {}
 
   // SurfaceFactoryOzone:
-  virtual intptr_t GetNativeDisplay() OVERRIDE;
-  virtual scoped_ptr<SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
-      gfx::AcceleratedWidget widget) OVERRIDE;
-  virtual const int32* GetEGLSurfaceProperties(
-      const int32* desired_list) OVERRIDE;
-  virtual bool LoadEGLGLES2Bindings(
+  intptr_t GetNativeDisplay() override;
+  scoped_ptr<SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
+      gfx::AcceleratedWidget widget) override;
+  const int32* GetEGLSurfaceProperties(const int32* desired_list) override;
+  bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
-      SetGLGetProcAddressProcCallback set_gl_get_proc_address) OVERRIDE;
+      SetGLGetProcAddressProcCallback set_gl_get_proc_address) override;
 
  private:
   LibeglplatformShimLoader* eglplatform_shim_;
@@ -320,36 +315,32 @@ class OzonePlatformEgltest : public OzonePlatform {
   }
 
   // OzonePlatform:
-  virtual ui::SurfaceFactoryOzone* GetSurfaceFactoryOzone() OVERRIDE {
+  ui::SurfaceFactoryOzone* GetSurfaceFactoryOzone() override {
     return surface_factory_ozone_.get();
   }
-  virtual CursorFactoryOzone* GetCursorFactoryOzone() OVERRIDE {
+  CursorFactoryOzone* GetCursorFactoryOzone() override {
     return cursor_factory_ozone_.get();
   }
-  virtual GpuPlatformSupport* GetGpuPlatformSupport() OVERRIDE {
+  GpuPlatformSupport* GetGpuPlatformSupport() override {
     return gpu_platform_support_.get();
   }
-  virtual GpuPlatformSupportHost* GetGpuPlatformSupportHost() OVERRIDE {
+  GpuPlatformSupportHost* GetGpuPlatformSupportHost() override {
     return gpu_platform_support_host_.get();
   }
-  virtual scoped_ptr<PlatformWindow> CreatePlatformWindow(
+  scoped_ptr<PlatformWindow> CreatePlatformWindow(
       PlatformWindowDelegate* delegate,
-      const gfx::Rect& bounds) OVERRIDE {
+      const gfx::Rect& bounds) override {
     return make_scoped_ptr<PlatformWindow>(
         new EgltestWindow(delegate,
                           &eglplatform_shim_,
                           event_factory_ozone_.get(),
                           bounds));
   }
-
-#if defined(OS_CHROMEOS)
-  virtual scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate()
-      OVERRIDE {
+  scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
     return scoped_ptr<NativeDisplayDelegate>(new NativeDisplayDelegateOzone());
   }
-#endif
 
-  virtual void InitializeUI() OVERRIDE {
+  void InitializeUI() override {
     device_manager_ = CreateDeviceManager();
     if (!surface_factory_ozone_)
       surface_factory_ozone_.reset(
@@ -360,7 +351,7 @@ class OzonePlatformEgltest : public OzonePlatform {
     gpu_platform_support_host_.reset(CreateStubGpuPlatformSupportHost());
   }
 
-  virtual void InitializeGPU() OVERRIDE {
+  void InitializeGPU() override {
     if (!surface_factory_ozone_)
       surface_factory_ozone_.reset(
           new SurfaceFactoryEgltest(&eglplatform_shim_));

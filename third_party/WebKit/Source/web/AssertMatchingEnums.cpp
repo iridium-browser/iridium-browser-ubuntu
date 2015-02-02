@@ -76,6 +76,7 @@
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/ResourceLoadPriority.h"
 #include "platform/network/ResourceResponse.h"
+#include "platform/scroll/ScrollTypes.h"
 #include "platform/text/TextChecking.h"
 #include "platform/text/TextDecoration.h"
 #include "platform/weborigin/ReferrerPolicy.h"
@@ -177,6 +178,7 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleAnnotation, AnnotationRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleApplication, ApplicationRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleArticle, ArticleRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleBanner, BannerRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleBlockquote, BlockquoteRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleBrowser, BrowserRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleBusyIndicator, BusyIndicatorRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleButton, ButtonRole);
@@ -189,8 +191,11 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleColumn, ColumnRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleComboBox, ComboBoxRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleComplementary, ComplementaryRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleContentInfo, ContentInfoRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDate, DateRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDateTime, DateTimeRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDefinition, DefinitionRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDescriptionListDetail, DescriptionListDetailRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDescriptionList, DescriptionListRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDescriptionListTerm, DescriptionListTermRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDetails, DetailsRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleDialog, DialogRole);
@@ -234,15 +239,19 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMatte, MatteRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuBar, MenuBarRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuButton, MenuButtonRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuItem, MenuItemRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuItemCheckBox, MenuItemCheckBoxRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuItemRadio, MenuItemRadioRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuListOption, MenuListOptionRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenuListPopup, MenuListPopupRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMenu, MenuRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleMeter, MeterRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleNavigation, NavigationRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleNone, NoneRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleNote, NoteRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleOutline, OutlineRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleParagraph, ParagraphRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRolePopUpButton, PopUpButtonRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRolePre, PreRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRolePresentational, PresentationalRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleProgressIndicator, ProgressIndicatorRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleRadioButton, RadioButtonRole);
@@ -276,6 +285,7 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleTableHeaderContainer, TableHeaderContainer
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleTable, TableRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleTextArea, TextAreaRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleTextField, TextFieldRole);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleTime, TimeRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleTimer, TimerRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleToggleButton, ToggleButtonRole);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleToolbar, ToolbarRole);
@@ -290,7 +300,6 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXRoleWindow, WindowRole);
 
 COMPILE_ASSERT_MATCHING_ENUM(WebAXStateBusy, AXBusyState);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXStateChecked, AXCheckedState);
-COMPILE_ASSERT_MATCHING_ENUM(WebAXStateCollapsed, AXCollapsedState);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXStateEnabled, AXEnabledState);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXStateExpanded, AXExpandedState);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXStateFocusable, AXFocusableState);
@@ -315,6 +324,10 @@ COMPILE_ASSERT_MATCHING_ENUM(WebAXTextDirectionLR, AccessibilityTextDirectionLef
 COMPILE_ASSERT_MATCHING_ENUM(WebAXTextDirectionRL, AccessibilityTextDirectionRightToLeft);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXTextDirectionTB, AccessibilityTextDirectionTopToBottom);
 COMPILE_ASSERT_MATCHING_ENUM(WebAXTextDirectionBT, AccessibilityTextDirectionBottomToTop);
+
+COMPILE_ASSERT_MATCHING_ENUM(WebAXExpandedUndefined, ExpandedUndefined);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXExpandedCollapsed, ExpandedCollapsed);
+COMPILE_ASSERT_MATCHING_ENUM(WebAXExpandedExpanded, ExpandedExpanded);
 
 COMPILE_ASSERT_MATCHING_ENUM(WebApplicationCacheHost::Uncached, ApplicationCacheHost::UNCACHED);
 COMPILE_ASSERT_MATCHING_ENUM(WebApplicationCacheHost::Idle, ApplicationCacheHost::IDLE);

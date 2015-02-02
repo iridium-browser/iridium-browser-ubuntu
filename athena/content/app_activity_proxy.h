@@ -29,29 +29,29 @@ class AppActivityProxy : public Activity,
   AppActivityProxy(AppActivity* replaced_activity,
                    AppActivityRegistry* creator);
 
- protected:
-  virtual ~AppActivityProxy();
-
- // Activity overrides:
-  virtual ActivityViewModel* GetActivityViewModel() OVERRIDE;
-  virtual void SetCurrentState(ActivityState state) OVERRIDE;
-  virtual ActivityState GetCurrentState() OVERRIDE;
-  virtual bool IsVisible() OVERRIDE;
-  virtual ActivityMediaState GetMediaState() OVERRIDE;
-  virtual aura::Window* GetWindow() OVERRIDE;
-  virtual content::WebContents* GetWebContents() OVERRIDE;
+  // Activity overrides:
+  ActivityViewModel* GetActivityViewModel() override;
+  void SetCurrentState(ActivityState state) override;
+  ActivityState GetCurrentState() override;
+  bool IsVisible() override;
+  ActivityMediaState GetMediaState() override;
+  aura::Window* GetWindow() override;
+  content::WebContents* GetWebContents() override;
 
   // ActivityViewModel overrides:
-  virtual void Init() OVERRIDE;
-  virtual SkColor GetRepresentativeColor() const OVERRIDE;
-  virtual base::string16 GetTitle() const OVERRIDE;
-  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
-  virtual bool UsesFrame() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::Widget* CreateWidget() OVERRIDE;
-  virtual gfx::ImageSkia GetOverviewModeImage() OVERRIDE;
-  virtual void PrepareContentsForOverview() OVERRIDE;
-  virtual void ResetContentsView() OVERRIDE;
+  void Init() override;
+  SkColor GetRepresentativeColor() const override;
+  base::string16 GetTitle() const override;
+  gfx::ImageSkia GetIcon() const override;
+  void SetActivityView(ActivityView* activity_view) override;
+  bool UsesFrame() const override;
+  views::View* GetContentsView() override;
+  gfx::ImageSkia GetOverviewModeImage() override;
+  void PrepareContentsForOverview() override;
+  void ResetContentsView() override;
+
+ protected:
+  ~AppActivityProxy() override;
 
  private:
   // The creator of this object which needs to be informed if the object gets
@@ -72,6 +72,9 @@ class AppActivityProxy : public Activity,
 
   // The content proxy.
   scoped_ptr<ContentProxy> content_proxy_;
+
+  // True if restart got already called.
+  bool restart_called_;
 
   DISALLOW_COPY_AND_ASSIGN(AppActivityProxy);
 };

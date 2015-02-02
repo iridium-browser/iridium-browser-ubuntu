@@ -36,7 +36,7 @@ namespace {
 class MouseEventLocationDelegate : public aura::test::TestWindowDelegate {
  public:
   MouseEventLocationDelegate() {}
-  virtual ~MouseEventLocationDelegate() {}
+  ~MouseEventLocationDelegate() override {}
 
   gfx::Point GetMouseEventLocationAndReset() {
     gfx::Point p = mouse_event_location_;
@@ -44,7 +44,7 @@ class MouseEventLocationDelegate : public aura::test::TestWindowDelegate {
     return p;
   }
 
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+  void OnMouseEvent(ui::MouseEvent* event) override {
     mouse_event_location_ = event->location();
     event->SetHandled();
   }
@@ -184,7 +184,7 @@ TEST_F(AshNativeCursorManagerTest, UIScaleShouldNotChangeCursor) {
 }
 
 #if defined(USE_X11)
-// This test is in ash_unittests becuase ui_unittests does not include
+// This test is in ash_unittests because ui_base_unittests does not include
 // 2x assets. crbug.com/372541.
 TEST_F(AshNativeCursorManagerTest, CursorLoaderX11Test) {
   const int kCursorId = 1;

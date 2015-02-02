@@ -24,7 +24,7 @@ class AppListTestModel;
 class AppListTestViewDelegate : public AppListViewDelegate {
  public:
   AppListTestViewDelegate();
-  virtual ~AppListTestViewDelegate();
+  ~AppListTestViewDelegate() override;
 
   int dismiss_count() { return dismiss_count_; }
   int open_search_result_count() { return open_search_result_count_; }
@@ -48,43 +48,42 @@ class AppListTestViewDelegate : public AppListViewDelegate {
   int GetToggleSpeechRecognitionCountAndReset();
 
   // AppListViewDelegate overrides:
-  virtual bool ForceNativeDesktop() const OVERRIDE;
-  virtual void SetProfileByPath(const base::FilePath& profile_path) OVERRIDE;
-  virtual AppListModel* GetModel() OVERRIDE;
-  virtual SpeechUIModel* GetSpeechUI() OVERRIDE;
-  virtual void GetShortcutPathForApp(
+  bool ForceNativeDesktop() const override;
+  void SetProfileByPath(const base::FilePath& profile_path) override;
+  AppListModel* GetModel() override;
+  SpeechUIModel* GetSpeechUI() override;
+  void GetShortcutPathForApp(
       const std::string& app_id,
-      const base::Callback<void(const base::FilePath&)>& callback) OVERRIDE;
-  virtual void StartSearch() OVERRIDE {}
-  virtual void StopSearch() OVERRIDE {}
-  virtual void OpenSearchResult(SearchResult* result,
-                                bool auto_launch,
-                                int event_flags) OVERRIDE;
-  virtual void InvokeSearchResultAction(SearchResult* result,
-                                        int action_index,
-                                        int event_flags) OVERRIDE {}
-  virtual base::TimeDelta GetAutoLaunchTimeout() OVERRIDE;
-  virtual void AutoLaunchCanceled() OVERRIDE;
-  virtual void ViewInitialized() OVERRIDE {}
-  virtual void Dismiss() OVERRIDE;
-  virtual void ViewClosing() OVERRIDE {}
-  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
-  virtual void OpenSettings() OVERRIDE {}
-  virtual void OpenHelp() OVERRIDE {}
-  virtual void OpenFeedback() OVERRIDE {}
-  virtual void ToggleSpeechRecognition() OVERRIDE;
-  virtual void ShowForProfileByPath(
-      const base::FilePath& profile_path) OVERRIDE {}
+      const base::Callback<void(const base::FilePath&)>& callback) override;
+  void StartSearch() override {}
+  void StopSearch() override {}
+  void OpenSearchResult(SearchResult* result,
+                        bool auto_launch,
+                        int event_flags) override;
+  void InvokeSearchResultAction(SearchResult* result,
+                                int action_index,
+                                int event_flags) override {}
+  base::TimeDelta GetAutoLaunchTimeout() override;
+  void AutoLaunchCanceled() override;
+  void ViewInitialized() override {}
+  void Dismiss() override;
+  void ViewClosing() override {}
+  gfx::ImageSkia GetWindowIcon() override;
+  void OpenSettings() override {}
+  void OpenHelp() override {}
+  void OpenFeedback() override {}
+  void ToggleSpeechRecognition() override;
+  void ShowForProfileByPath(const base::FilePath& profile_path) override {}
 #if defined(TOOLKIT_VIEWS)
-  virtual views::View* CreateStartPageWebView(const gfx::Size& size) OVERRIDE;
-  virtual std::vector<views::View*> CreateCustomPageWebViews(
-      const gfx::Size& size) OVERRIDE;
+  views::View* CreateStartPageWebView(const gfx::Size& size) override;
+  std::vector<views::View*> CreateCustomPageWebViews(
+      const gfx::Size& size) override;
 #endif
-  virtual bool IsSpeechRecognitionEnabled() OVERRIDE;
-  virtual const Users& GetUsers() const OVERRIDE;
-  virtual bool ShouldCenterWindow() const OVERRIDE;
-  virtual void AddObserver(AppListViewDelegateObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(AppListViewDelegateObserver* observer) OVERRIDE;
+  bool IsSpeechRecognitionEnabled() override;
+  const Users& GetUsers() const override;
+  bool ShouldCenterWindow() const override;
+  void AddObserver(AppListViewDelegateObserver* observer) override;
+  void RemoveObserver(AppListViewDelegateObserver* observer) override;
 
   // Do a bulk replacement of the items in the model.
   void ReplaceTestModel(int item_count);

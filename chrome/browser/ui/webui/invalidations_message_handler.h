@@ -29,24 +29,22 @@ class InvalidationsMessageHandler
       public invalidation::InvalidationLoggerObserver {
  public:
   InvalidationsMessageHandler();
-  virtual ~InvalidationsMessageHandler();
+  ~InvalidationsMessageHandler() override;
 
   // Implementation of InvalidationLoggerObserver.
-  virtual void OnRegistrationChange(
-      const std::multiset<std::string>& registered_handlers) OVERRIDE;
-  virtual void OnStateChange(const syncer::InvalidatorState& new_state,
-                             const base::Time& last_change_timestamp)
-      OVERRIDE;
-  virtual void OnUpdateIds(const std::string& handler_name,
-                           const syncer::ObjectIdCountMap& ids_set) OVERRIDE;
-  virtual void OnDebugMessage(const base::DictionaryValue& details) OVERRIDE;
-  virtual void OnInvalidation(
-      const syncer::ObjectIdInvalidationMap& new_invalidations) OVERRIDE;
-  virtual void OnDetailedStatus(const base::DictionaryValue& network_details)
-      OVERRIDE;
+  void OnRegistrationChange(
+      const std::multiset<std::string>& registered_handlers) override;
+  void OnStateChange(const syncer::InvalidatorState& new_state,
+                     const base::Time& last_change_timestamp) override;
+  void OnUpdateIds(const std::string& handler_name,
+                   const syncer::ObjectIdCountMap& ids_set) override;
+  void OnDebugMessage(const base::DictionaryValue& details) override;
+  void OnInvalidation(
+      const syncer::ObjectIdInvalidationMap& new_invalidations) override;
+  void OnDetailedStatus(const base::DictionaryValue& network_details) override;
 
   // Implementation of WebUIMessageHandler.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // Triggers the logger to send the current state and objects ids.
   void UpdateContent(const base::ListValue* args);

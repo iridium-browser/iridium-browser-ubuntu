@@ -20,7 +20,7 @@ namespace {
 // dialog controller to be captured and manipulated for tests.
 void TestingShowAppListInstallDialogController(
     WindowedInstallDialogController** controller,
-    const ExtensionInstallPrompt::ShowParams& show_params,
+    ExtensionInstallPromptShowParams* show_params,
     ExtensionInstallPrompt::Delegate* delegate,
     scoped_refptr<ExtensionInstallPrompt::Prompt> prompt) {
   *controller =
@@ -37,7 +37,7 @@ IN_PROC_BROWSER_TEST_F(WindowedInstallDialogControllerBrowserTest,
   // Construct a prompt with a NULL parent window, the way ExtensionEnableFlow
   // will for the Mac app list. For testing, sets a NULL PageNavigator as well.
   scoped_ptr<ExtensionInstallPrompt> prompt(
-      new ExtensionInstallPrompt(browser()->profile(), NULL, NULL));
+      new ExtensionInstallPrompt(browser()->profile(), NULL));
 
   WindowedInstallDialogController* controller = NULL;
   chrome::MockExtensionInstallPromptDelegate delegate;

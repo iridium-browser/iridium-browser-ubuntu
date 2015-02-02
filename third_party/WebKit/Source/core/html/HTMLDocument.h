@@ -29,9 +29,7 @@
 
 namespace blink {
 
-class FrameView;
 class HTMLBodyElement;
-class HTMLElement;
 
 class HTMLDocument : public Document, public ResourceClient {
     DEFINE_WRAPPERTYPEINFO();
@@ -73,7 +71,7 @@ public:
 
     static bool isCaseSensitiveAttribute(const QualifiedName&);
 
-    virtual PassRefPtrWillBeRawPtr<Document> cloneDocumentWithoutChildren() OVERRIDE FINAL;
+    virtual PassRefPtrWillBeRawPtr<Document> cloneDocumentWithoutChildren() override final;
 
 protected:
     HTMLDocument(const DocumentInit&, DocumentClassFlags extendedDocumentClasses = DefaultDocumentClass);

@@ -40,7 +40,7 @@ class VideoDecoderTest : public ::testing::TestWithParam<Codec> {
  public:
   VideoDecoderTest()
       : cast_environment_(new StandaloneCastEnvironment()),
-        vp8_encoder_(GetVideoSenderConfigForTest(), 0),
+        vp8_encoder_(GetVideoSenderConfigForTest()),
         cond_(&lock_) {
     vp8_encoder_.Initialize();
   }
@@ -51,7 +51,7 @@ class VideoDecoderTest : public ::testing::TestWithParam<Codec> {
   }
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     video_decoder_.reset(new VideoDecoder(cast_environment_, GetParam()));
     CHECK_EQ(STATUS_VIDEO_INITIALIZED, video_decoder_->InitializationResult());
 
@@ -83,7 +83,7 @@ class VideoDecoderTest : public ::testing::TestWithParam<Codec> {
         new EncodedFrame());
     // Test only supports VP8, currently.
     CHECK_EQ(CODEC_VIDEO_VP8, GetParam());
-    vp8_encoder_.Encode(video_frame, encoded_frame.get());
+    vp8_encoder_.Encode(video_frame, base::TimeTicks(), encoded_frame.get());
     // Rewrite frame IDs for testing purposes.
     encoded_frame->frame_id = last_frame_id_ + 1 + num_dropped_frames;
     if (last_frame_id_ == 0)

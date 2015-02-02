@@ -199,8 +199,13 @@ IPC_MESSAGE_ROUTED0(InputMsg_Unselect)
 // Requests the renderer to select the region between two points.
 // Expects a SelectRange_ACK message when finished.
 IPC_MESSAGE_ROUTED2(InputMsg_SelectRange,
-                    gfx::Point /* start */,
-                    gfx::Point /* end */)
+                    gfx::Point /* base */,
+                    gfx::Point /* extent */)
+
+// Requests the renderer to move the selection extent point to a new position.
+// Expects a MoveRangeSelectionExtent_ACK message when finished.
+IPC_MESSAGE_ROUTED1(InputMsg_MoveRangeSelectionExtent,
+                    gfx::Point /* extent */)
 
 // Requests the renderer to move the caret selection toward the point.
 // Expects a MoveCaret_ACK message when finished.
@@ -237,13 +242,23 @@ IPC_MESSAGE_ROUTED1(InputHostMsg_SetTouchAction,
 IPC_MESSAGE_ROUTED1(InputHostMsg_DidOverscroll,
                     content::DidOverscrollParams /* params */)
 
+// Acknowledges receipt of a InputMsg_MoveCaret message.
+IPC_MESSAGE_ROUTED0(InputHostMsg_MoveCaret_ACK)
+
+// Acknowledges receipt of a InputMsg_MoveRangeSelectionExtent message.
+IPC_MESSAGE_ROUTED0(InputHostMsg_MoveRangeSelectionExtent_ACK)
+
+// Acknowledges receipt of a InputMsg_SelectRange message.
+IPC_MESSAGE_ROUTED0(InputHostMsg_SelectRange_ACK)
+
 // Required for cancelling an ongoing input method composition.
 IPC_MESSAGE_ROUTED0(InputHostMsg_ImeCancelComposition)
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
 // On Mac and Aura IME can request composition character bounds
 // synchronously (see crbug.com/120597). This IPC message sends the character
 // bounds after every composition change to always have correct bound info.
+// This IPC message is also used on Android 5.0 and above.
 IPC_MESSAGE_ROUTED2(InputHostMsg_ImeCompositionRangeChanged,
                     gfx::Range /* composition range */,
                     std::vector<gfx::Rect> /* character bounds */)

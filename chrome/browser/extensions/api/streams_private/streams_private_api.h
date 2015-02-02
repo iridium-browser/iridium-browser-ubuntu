@@ -16,6 +16,7 @@
 namespace content {
 class BrowserContext;
 class StreamHandle;
+struct StreamInfo;
 }
 
 namespace extensions {
@@ -28,7 +29,7 @@ class StreamsPrivateAPI : public BrowserContextKeyedAPI,
   static StreamsPrivateAPI* Get(content::BrowserContext* context);
 
   explicit StreamsPrivateAPI(content::BrowserContext* context);
-  virtual ~StreamsPrivateAPI();
+  ~StreamsPrivateAPI() override;
 
   // Send the onExecuteMimeTypeHandler event to |extension_id|.
   // |web_contents| is used to determine the tabId where the document is being
@@ -37,7 +38,7 @@ class StreamsPrivateAPI : public BrowserContextKeyedAPI,
   // in a BrowserPlugin, specify a non-empty |view_id| of the plugin.
   void ExecuteMimeTypeHandler(const std::string& extension_id,
                               content::WebContents* web_contents,
-                              scoped_ptr<content::StreamHandle> stream,
+                              scoped_ptr<content::StreamInfo> stream,
                               const std::string& view_id,
                               int64 expected_content_size);
 
@@ -55,10 +56,9 @@ class StreamsPrivateAPI : public BrowserContextKeyedAPI,
                             linked_ptr<content::StreamHandle> > > StreamMap;
 
   // ExtensionRegistryObserver implementation.
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
 
   // BrowserContextKeyedAPI implementation.
   static const char* service_name() {
@@ -84,10 +84,10 @@ class StreamsPrivateAbortFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("streamsPrivate.abort", STREAMSPRIVATE_ABORT)
 
  protected:
-  virtual ~StreamsPrivateAbortFunction() {}
+  ~StreamsPrivateAbortFunction() override {}
 
   // ExtensionFunction:
-  virtual ExtensionFunction::ResponseAction Run() OVERRIDE;
+  ExtensionFunction::ResponseAction Run() override;
 
  private:
   void OnClose();

@@ -38,8 +38,6 @@ class TestVolumeMountWatcherWin : public VolumeMountWatcherWin {
 
   void FlushWorkerPoolForTesting();
 
-  virtual void DeviceCheckComplete(const base::FilePath& device_path);
-
   const std::vector<base::FilePath>& devices_checked() const {
       return devices_checked_;
   }
@@ -49,10 +47,11 @@ class TestVolumeMountWatcherWin : public VolumeMountWatcherWin {
   void ReleaseDeviceCheck();
 
   // VolumeMountWatcherWin:
+  virtual void DeviceCheckComplete(const base::FilePath& device_path) override;
   virtual GetAttachedDevicesCallbackType
-      GetAttachedDevicesCallback() const OVERRIDE;
+      GetAttachedDevicesCallback() const override;
   virtual GetDeviceDetailsCallbackType
-      GetDeviceDetailsCallback() const OVERRIDE;
+      GetDeviceDetailsCallback() const override;
 
   // Should be used by unit tests to make sure the worker pool doesn't survive
   // into other test runs.

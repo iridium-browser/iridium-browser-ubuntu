@@ -15,7 +15,7 @@ namespace policy {
 class IncognitoModePolicyHandlerTest
     : public ConfigurationPolicyPrefStoreTest {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     handler_list_.AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
           new IncognitoModePolicyHandler));
   }

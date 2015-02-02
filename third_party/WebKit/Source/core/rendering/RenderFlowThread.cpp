@@ -139,7 +139,7 @@ void RenderFlowThread::computeLogicalHeight(LayoutUnit, LayoutUnit logicalTop, L
 
     for (RenderMultiColumnSetList::const_iterator iter = m_multiColumnSetList.begin(); iter != m_multiColumnSetList.end(); ++iter) {
         RenderMultiColumnSet* columnSet = *iter;
-        computedValues.m_extent += columnSet->logicalHeightOfAllFlowThreadContent();
+        computedValues.m_extent += columnSet->logicalHeightInFlowThread();
     }
 }
 
@@ -225,7 +225,7 @@ void RenderFlowThread::updateRegionsFlowThreadPortionRect()
         RenderMultiColumnSet* columnSet = *iter;
 
         LayoutUnit columnSetLogicalWidth = columnSet->pageLogicalWidth();
-        LayoutUnit columnSetLogicalHeight = std::min<LayoutUnit>(RenderFlowThread::maxLogicalHeight() - logicalHeight, columnSet->logicalHeightOfAllFlowThreadContent());
+        LayoutUnit columnSetLogicalHeight = std::min<LayoutUnit>(RenderFlowThread::maxLogicalHeight() - logicalHeight, columnSet->logicalHeightInFlowThread());
 
         LayoutRect columnSetRect(style()->direction() == LTR ? LayoutUnit() : logicalWidth() - columnSetLogicalWidth, logicalHeight, columnSetLogicalWidth, columnSetLogicalHeight);
 
@@ -353,7 +353,7 @@ LayoutUnit RenderFlowThread::offsetFromLogicalTopOfFirstRegion(const RenderBlock
         if (containerBlock->style()->writingMode() != currentBlock->style()->writingMode()) {
             // We have to put the block rect in container coordinates
             // and we have to take into account both the container and current block flipping modes
-            if (containerBlock->style()->isFlippedBlocksWritingMode()) {
+            if (containerBlock->style()->slowIsFlippedBlocksWritingMode()) {
                 if (containerBlock->isHorizontalWritingMode())
                     blockRect.setY(currentBlock->height() - blockRect.maxY());
                 else

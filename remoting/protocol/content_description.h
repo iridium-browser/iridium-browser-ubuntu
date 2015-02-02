@@ -7,10 +7,10 @@
 
 #include <string>
 
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "remoting/protocol/session_config.h"
-#include "third_party/libjingle/source/talk/p2p/base/sessiondescription.h"
+#include "third_party/webrtc/p2p/base/sessiondescription.h"
 
 namespace buzz {
 class XmlElement;
@@ -30,9 +30,9 @@ class ContentDescription : public cricket::ContentDescription {
 
   ContentDescription(scoped_ptr<CandidateSessionConfig> config,
                      scoped_ptr<buzz::XmlElement> authenticator_message);
-  virtual ~ContentDescription();
+  ~ContentDescription() override;
 
-  virtual ContentDescription* Copy() const OVERRIDE;
+  ContentDescription* Copy() const override;
 
   const CandidateSessionConfig* config() const {
     return candidate_config_.get();

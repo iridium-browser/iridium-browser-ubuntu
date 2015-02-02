@@ -28,11 +28,11 @@ class CONTENT_EXPORT PepperTrueTypeFontHost : public ppapi::host::ResourceHost {
                          PP_Resource resource,
                          const ppapi::proxy::SerializedTrueTypeFontDesc& desc);
 
-  virtual ~PepperTrueTypeFontHost();
+  ~PepperTrueTypeFontHost() override;
 
-  virtual int32_t OnResourceMessageReceived(
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
  private:
   int32_t OnHostMsgGetTableTags(ppapi::host::HostMessageContext* context);

@@ -31,6 +31,10 @@
 /** @interface */
 function InspectorFrontendHostAPI()
 {
+    /**
+     * @type {!WebInspector.EventTarget}
+     */
+    this.events;
 }
 
 /** @typedef {{type:string, id:(number|undefined),
@@ -46,6 +50,7 @@ InspectorFrontendHostAPI.Events = {
     DeviceCountUpdated: "deviceCountUpdated",
     DevicesUpdated: "devicesUpdated",
     DispatchMessage: "dispatchMessage",
+    DispatchMessageChunk: "dispatchMessageChunk",
     EnterInspectElementMode: "enterInspectElementMode",
     FileSystemsLoaded: "fileSystemsLoaded",
     FileSystemRemoved: "fileSystemRemoved",
@@ -70,20 +75,21 @@ InspectorFrontendHostAPI.EventDescriptors = [
     [InspectorFrontendHostAPI.Events.DeviceCountUpdated, ["count"]],
     [InspectorFrontendHostAPI.Events.DevicesUpdated, ["devices"]],
     [InspectorFrontendHostAPI.Events.DispatchMessage, ["messageObject"]],
-    [InspectorFrontendHostAPI.Events.EnterInspectElementMode, [], true],
+    [InspectorFrontendHostAPI.Events.DispatchMessageChunk, ["messageChunk", "messageSize"]],
+    [InspectorFrontendHostAPI.Events.EnterInspectElementMode, []],
     [InspectorFrontendHostAPI.Events.FileSystemsLoaded, ["fileSystems"]],
     [InspectorFrontendHostAPI.Events.FileSystemRemoved, ["fileSystemPath"]],
     [InspectorFrontendHostAPI.Events.FileSystemAdded, ["errorMessage", "fileSystem"]],
     [InspectorFrontendHostAPI.Events.IndexingTotalWorkCalculated, ["requestId", "fileSystemPath", "totalWork"]],
     [InspectorFrontendHostAPI.Events.IndexingWorked, ["requestId", "fileSystemPath", "worked"]],
     [InspectorFrontendHostAPI.Events.IndexingDone, ["requestId", "fileSystemPath"]],
-    [InspectorFrontendHostAPI.Events.KeyEventUnhandled, ["event"], true],
-    [InspectorFrontendHostAPI.Events.RevealSourceLine, ["url", "lineNumber", "columnNumber"], true],
+    [InspectorFrontendHostAPI.Events.KeyEventUnhandled, ["event"]],
+    [InspectorFrontendHostAPI.Events.RevealSourceLine, ["url", "lineNumber", "columnNumber"]],
     [InspectorFrontendHostAPI.Events.SavedURL, ["url"]],
     [InspectorFrontendHostAPI.Events.SearchCompleted, ["requestId", "fileSystemPath", "files"]],
     [InspectorFrontendHostAPI.Events.SetToolbarColors, ["backgroundColor", "color"]],
     [InspectorFrontendHostAPI.Events.SetUseSoftMenu, ["useSoftMenu"]],
-    [InspectorFrontendHostAPI.Events.ShowConsole, [], true]
+    [InspectorFrontendHostAPI.Events.ShowConsole, []]
 ];
 
 InspectorFrontendHostAPI.prototype = {
@@ -94,6 +100,8 @@ InspectorFrontendHostAPI.prototype = {
      * @param {string} content
      */
     append: function(url, content) { },
+
+    loadCompleted: function() { },
 
     /**
      * @param {number} requestId
@@ -246,7 +254,7 @@ InspectorFrontendHostAPI.prototype = {
 
     /**
      * @param {boolean} isDocked
-     * @param {!function()} callback
+     * @param {function()} callback
      */
     setIsDocked: function(isDocked, callback) { },
 
@@ -270,8 +278,9 @@ InspectorFrontendHostAPI.prototype = {
      * @param {number} x
      * @param {number} y
      * @param {!Array.<!InspectorFrontendHostAPI.ContextMenuDescriptor>} items
+     * @param {!Document} document
      */
-    showContextMenuAtPoint: function(x, y, items) { },
+    showContextMenuAtPoint: function(x, y, items, document) { },
 
     /**
      * @return {boolean}
@@ -287,9 +296,21 @@ InspectorFrontendHostAPI.prototype = {
 /**
  * @constructor
  * @implements {InspectorFrontendHostAPI}
+ * @suppressGlobalPropertiesCheck
  */
 WebInspector.InspectorFrontendHostStub = function()
 {
+    /**
+     * @param {!Event} event
+     */
+    function stopEventPropagation(event)
+    {
+        // Let browser handle Ctrl+/Ctrl- shortcuts in hosted mode.
+        var zoomModifier = WebInspector.isMac() ? event.metaKey : event.ctrlKey;
+        if (zoomModifier && (event.keyCode === 187 || event.keyCode === 189))
+            event.stopPropagation();
+    }
+    document.addEventListener("keydown", stopEventPropagation, true);
 }
 
 WebInspector.InspectorFrontendHostStub.prototype = {
@@ -331,6 +352,10 @@ WebInspector.InspectorFrontendHostStub.prototype = {
         return "unknown";
     },
 
+    loadCompleted: function()
+    {
+    },
+
     bringToFront: function()
     {
         this._windowVisible = true;
@@ -343,7 +368,7 @@ WebInspector.InspectorFrontendHostStub.prototype = {
 
     /**
      * @param {boolean} isDocked
-     * @param {!function()} callback
+     * @param {function()} callback
      */
     setIsDocked: function(isDocked, callback)
     {
@@ -389,6 +414,7 @@ WebInspector.InspectorFrontendHostStub.prototype = {
 
     /**
      * @param {string} url
+     * @suppressGlobalPropertiesCheck
      */
     inspectedURLChanged: function(url)
     {
@@ -580,8 +606,9 @@ WebInspector.InspectorFrontendHostStub.prototype = {
      * @param {number} x
      * @param {number} y
      * @param {!Array.<!InspectorFrontendHostAPI.ContextMenuDescriptor>} items
+     * @param {!Document} document
      */
-    showContextMenuAtPoint: function(x, y, items)
+    showContextMenuAtPoint: function(x, y, items, document)
     {
         throw "Soft context menu should be used";
     },
@@ -635,8 +662,6 @@ var InspectorFrontendHost = window.InspectorFrontendHost || null;
  */
 function InspectorFrontendAPIImpl()
 {
-    this._isLoaded = false;
-    this._pendingCommands = [];
     this._debugFrontend = !!Runtime.queryParam("debugFrontend");
 
     var descriptors = InspectorFrontendHostAPI.EventDescriptors;
@@ -645,16 +670,6 @@ function InspectorFrontendAPIImpl()
 }
 
 InspectorFrontendAPIImpl.prototype = {
-    loadCompleted: function()
-    {
-        this._isLoaded = true;
-        for (var i = 0; i < this._pendingCommands.length; ++i)
-            this._pendingCommands[i]();
-        this._pendingCommands = [];
-        if (window.opener)
-            window.opener.postMessage(["loadCompleted"], "*");
-    },
-
     /**
      * @param {string} name
      * @param {!Array.<string>} signature
@@ -665,45 +680,22 @@ InspectorFrontendAPIImpl.prototype = {
         var params = Array.prototype.slice.call(arguments, 3);
 
         if (this._debugFrontend)
-            setImmediate(innerDispatch.bind(this));
+            setImmediate(innerDispatch);
         else
-            innerDispatch.call(this);
+            innerDispatch();
 
-        /**
-         * @this {!InspectorFrontendAPIImpl}
-         */
         function innerDispatch()
         {
-            if (runOnceLoaded)
-                this._runOnceLoaded(dispatchAfterLoad);
-            else
-                dispatchAfterLoad();
-
-            function dispatchAfterLoad()
-            {
-                // Single argument methods get dispatched with the param.
-                if (signature.length < 2) {
-                    InspectorFrontendHost.events.dispatchEventToListeners(name, params[0]);
-                    return;
-                }
-                var data = {};
-                for (var i = 0; i < signature.length; ++i)
-                    data[signature[i]] = params[i];
-                InspectorFrontendHost.events.dispatchEventToListeners(name, data);
+            // Single argument methods get dispatched with the param.
+            if (signature.length < 2) {
+                InspectorFrontendHost.events.dispatchEventToListeners(name, params[0]);
+                return;
             }
+            var data = {};
+            for (var i = 0; i < signature.length; ++i)
+                data[signature[i]] = params[i];
+            InspectorFrontendHost.events.dispatchEventToListeners(name, data);
         }
-    },
-
-    /**
-     * @param {function()} command
-     */
-    _runOnceLoaded: function(command)
-    {
-        if (this._isLoaded) {
-            command();
-            return;
-        }
-        this._pendingCommands.push(command);
     },
 
     /**

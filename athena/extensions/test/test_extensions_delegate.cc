@@ -4,6 +4,7 @@
 
 #include "athena/extensions/public/extensions_delegate.h"
 #include "base/macros.h"
+#include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/extension_set.h"
 
 namespace athena {
@@ -13,18 +14,23 @@ class TestExtensionsDelegate : public ExtensionsDelegate {
  public:
   TestExtensionsDelegate() {}
 
-  virtual ~TestExtensionsDelegate() {}
+  ~TestExtensionsDelegate() override {}
 
  private:
   // ExtensionsDelegate:
-  virtual content::BrowserContext* GetBrowserContext() const OVERRIDE {
-    return NULL;
+  content::BrowserContext* GetBrowserContext() const override {
+    return nullptr;
   }
-  virtual const extensions::ExtensionSet& GetInstalledExtensions() OVERRIDE {
+  const extensions::ExtensionSet& GetInstalledExtensions() override {
     return shell_extensions_;
   }
-  virtual bool LaunchApp(const std::string& app_id) OVERRIDE { return true; }
-  virtual bool UnloadApp(const std::string& app_id) OVERRIDE { return false; }
+  bool LaunchApp(const std::string& app_id) override { return true; }
+  bool UnloadApp(const std::string& app_id) override { return false; }
+
+  scoped_ptr<extensions::ExtensionInstallUI> CreateExtensionInstallUI()
+      override {
+    return scoped_ptr<extensions::ExtensionInstallUI>();
+  }
 
   extensions::ExtensionSet shell_extensions_;
 

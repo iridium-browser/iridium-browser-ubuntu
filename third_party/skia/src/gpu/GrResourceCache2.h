@@ -24,23 +24,29 @@ public:
     GrResourceCache2() : fCount(0) {};
     ~GrResourceCache2();
 
-    void insertResource(GrGpuResource* resource);
+    void insertResource(GrGpuResource*);
 
-    void removeResource(GrGpuResource* resource);
+    void removeResource(GrGpuResource*);
 
     void abandonAll();
 
     void releaseAll();
 
+    enum {
+        /** Preferentially returns scratch resources with no pending IO. */
+        kPreferNoPendingIO_ScratchFlag = 0x1,
+        /** Will not return any resources that match but have pending IO. */
+        kRequireNoPendingIO_ScratchFlag = 0x2,
+    };
+    GrGpuResource* findAndRefScratchResource(const GrResourceKey& scratchKey, uint32_t flags = 0);
+
 private:
 #ifdef SK_DEBUG
-    bool isInCache(const GrGpuResource* r) const {
-        return fResources.isInList(r);
-    }
+    bool isInCache(const GrGpuResource* r) const { return fResources.isInList(r); }
 #endif
 
+    class AvailableForScratchUse;
 
-    void removeScratch(const GrGpuResource* resource);
     struct ScratchMapTraits {
         static const GrResourceKey& GetKey(const GrGpuResource& r) {
             return r.getScratchKey();

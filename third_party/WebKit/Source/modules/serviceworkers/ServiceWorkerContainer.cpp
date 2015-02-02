@@ -61,14 +61,14 @@ public:
         : m_resolver(resolver)
         , m_adapter(m_resolver) { }
     virtual ~GetRegistrationCallback() { }
-    virtual void onSuccess(WebServiceWorkerRegistration* registration) OVERRIDE
+    virtual void onSuccess(WebServiceWorkerRegistration* registration) override
     {
         if (registration)
             m_adapter.onSuccess(registration);
         else if (m_resolver->executionContext() && !m_resolver->executionContext()->activeDOMObjectsAreStopped())
             m_resolver->resolve();
     }
-    virtual void onError(WebServiceWorkerError* error) OVERRIDE { m_adapter.onError(error); }
+    virtual void onError(WebServiceWorkerError* error) override { m_adapter.onError(error); }
 private:
     RefPtr<ScriptPromiseResolver> m_resolver;
     CallbackPromiseAdapter<ServiceWorkerRegistration, ServiceWorkerError> m_adapter;
@@ -100,7 +100,7 @@ void ServiceWorkerContainer::trace(Visitor* visitor)
     visitor->trace(m_ready);
 }
 
-ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptState, const String& url, const RegistrationOptionList& options)
+ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptState, const String& url, const RegistrationOptions& options)
 {
     ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
     RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
@@ -118,6 +118,12 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
     String errorMessage;
     if (!documentOrigin->canAccessFeatureRequiringSecureOrigin(errorMessage)) {
         resolver->reject(DOMException::create(NotSupportedError, errorMessage));
+        return promise;
+    }
+
+    KURL pageURL = KURL(KURL(), documentOrigin->toString());
+    if (!pageURL.protocolIsInHTTPFamily()) {
+        resolver->reject(DOMException::create(SecurityError, "The URL protocol of the current origin is not supported: " + pageURL.protocol()));
         return promise;
     }
 
@@ -169,7 +175,14 @@ ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, 
         return promise;
     }
 
+    KURL pageURL = KURL(KURL(), documentOrigin->toString());
+    if (!pageURL.protocolIsInHTTPFamily()) {
+        resolver->reject(DOMException::create(SecurityError, "The URL protocol of the current origin is not supported: " + pageURL.protocol()));
+        return promise;
+    }
+
     KURL completedURL = executionContext->completeURL(documentURL);
+    completedURL.removeFragmentIdentifier();
     if (!documentOrigin->canRequest(completedURL)) {
         resolver->reject(DOMException::create(SecurityError, "The documentURL must match the current origin."));
         return promise;
@@ -207,12 +220,6 @@ static void deleteIfNoExistingOwner(WebServiceWorker* serviceWorker)
         delete serviceWorker;
 }
 
-static void deleteIfNoExistingOwner(WebServiceWorkerRegistration* registration)
-{
-    if (registration && !registration->proxy())
-        delete registration;
-}
-
 void ServiceWorkerContainer::setController(WebServiceWorker* serviceWorker)
 {
     if (!executionContext()) {
@@ -225,7 +232,7 @@ void ServiceWorkerContainer::setController(WebServiceWorker* serviceWorker)
 void ServiceWorkerContainer::setReadyRegistration(WebServiceWorkerRegistration* registration)
 {
     if (!executionContext()) {
-        deleteIfNoExistingOwner(registration);
+        ServiceWorkerRegistration::dispose(registration);
         return;
     }
 

@@ -22,7 +22,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
 #include "components/omaha_query_params/omaha_query_params.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
@@ -395,6 +394,11 @@ bool ExtensionUpdater::WillCheckSoon() const {
   return will_check_soon_;
 }
 
+void ExtensionUpdater::SetExtensionCacheForTesting(
+    ExtensionCache* extension_cache) {
+  extension_cache_ = extension_cache;
+}
+
 void ExtensionUpdater::DoCheckSoon() {
   DCHECK(will_check_soon_);
   CheckNow(default_params_);
@@ -609,6 +613,8 @@ bool ExtensionUpdater::GetPingDataForExtension(
   ping_data->rollcall_days = CalculatePingDays(
       extension_prefs_->LastPingDay(id));
   ping_data->is_enabled = service_->IsExtensionEnabled(id);
+  if (!ping_data->is_enabled)
+    ping_data->disable_reasons = extension_prefs_->GetDisableReasons(id);
   ping_data->active_days =
       CalculateActivePingDays(extension_prefs_->LastActivePingDay(id),
                               extension_prefs_->GetActiveBit(id));

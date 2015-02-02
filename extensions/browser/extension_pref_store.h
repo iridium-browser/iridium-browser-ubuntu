@@ -21,12 +21,12 @@ class ExtensionPrefStore : public ValueMapPrefStore,
                      bool incognito_pref_store);
 
   // Overrides for ExtensionPrefValueMap::Observer:
-  virtual void OnInitializationCompleted() OVERRIDE;
-  virtual void OnPrefValueChanged(const std::string& key) OVERRIDE;
-  virtual void OnExtensionPrefValueMapDestruction() OVERRIDE;
+  void OnInitializationCompleted() override;
+  void OnPrefValueChanged(const std::string& key) override;
+  void OnExtensionPrefValueMapDestruction() override;
 
  protected:
-  virtual ~ExtensionPrefStore();
+  ~ExtensionPrefStore() override;
 
  private:
   ExtensionPrefValueMap* extension_pref_value_map_;  // Weak pointer.

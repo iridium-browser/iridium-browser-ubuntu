@@ -44,15 +44,15 @@ FakeDesktopEnvironment::~FakeDesktopEnvironment() {}
 
 // DesktopEnvironment implementation.
 scoped_ptr<AudioCapturer> FakeDesktopEnvironment::CreateAudioCapturer() {
-  return scoped_ptr<AudioCapturer>();
+  return nullptr;
 }
 
 scoped_ptr<InputInjector> FakeDesktopEnvironment::CreateInputInjector() {
-  return scoped_ptr<InputInjector>(new FakeInputInjector());
+  return make_scoped_ptr(new FakeInputInjector());
 }
 
 scoped_ptr<ScreenControls> FakeDesktopEnvironment::CreateScreenControls() {
-  return scoped_ptr<ScreenControls>(new FakeScreenControls());
+  return make_scoped_ptr(new FakeScreenControls());
 }
 
 scoped_ptr<webrtc::DesktopCapturer>
@@ -60,12 +60,12 @@ FakeDesktopEnvironment::CreateVideoCapturer() {
   scoped_ptr<FakeDesktopCapturer> result(new FakeDesktopCapturer());
   if (!frame_generator_.is_null())
     result->set_frame_generator(frame_generator_);
-  return result.PassAs<webrtc::DesktopCapturer>();
+  return result.Pass();
 }
 
 scoped_ptr<webrtc::MouseCursorMonitor>
 FakeDesktopEnvironment::CreateMouseCursorMonitor() {
-  return scoped_ptr<webrtc::MouseCursorMonitor>(new FakeMouseCursorMonitor());
+  return make_scoped_ptr(new FakeMouseCursorMonitor());
 }
 
 std::string FakeDesktopEnvironment::GetCapabilities() const {
@@ -76,7 +76,7 @@ void FakeDesktopEnvironment::SetCapabilities(const std::string& capabilities) {}
 
 scoped_ptr<GnubbyAuthHandler> FakeDesktopEnvironment::CreateGnubbyAuthHandler(
     protocol::ClientStub* client_stub) {
-  return scoped_ptr<GnubbyAuthHandler>();
+  return nullptr;
 }
 
 FakeDesktopEnvironmentFactory::FakeDesktopEnvironmentFactory() {}
@@ -87,7 +87,7 @@ scoped_ptr<DesktopEnvironment> FakeDesktopEnvironmentFactory::Create(
     base::WeakPtr<ClientSessionControl> client_session_control) {
   scoped_ptr<FakeDesktopEnvironment> result(new FakeDesktopEnvironment());
   result->set_frame_generator(frame_generator_);
-  return result.PassAs<DesktopEnvironment>();
+  return result.Pass();
 }
 
 void FakeDesktopEnvironmentFactory::SetEnableCurtaining(bool enable) {}

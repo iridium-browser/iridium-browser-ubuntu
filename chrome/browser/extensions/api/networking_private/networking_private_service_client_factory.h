@@ -28,13 +28,13 @@ class NetworkingPrivateServiceClientFactory
   friend struct DefaultSingletonTraits<NetworkingPrivateServiceClientFactory>;
 
   NetworkingPrivateServiceClientFactory();
-  virtual ~NetworkingPrivateServiceClientFactory();
+  ~NetworkingPrivateServiceClientFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* browser_context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* browser_context) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  bool ServiceIsNULLWhileTesting() const override;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateServiceClientFactory);
 };

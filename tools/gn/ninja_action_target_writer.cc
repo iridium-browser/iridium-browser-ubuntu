@@ -32,9 +32,8 @@ void NinjaActionTargetWriter::Run() {
   // operating on the result of that previous step, so we need to be sure to
   // serialize these.
   std::vector<const Target*> extra_hard_deps;
-  for (DepsIterator iter(target_, DepsIterator::LINKED_ONLY);
-       !iter.done(); iter.Advance())
-    extra_hard_deps.push_back(iter.target());
+  for (const auto& pair : target_->GetDeps(Target::DEPS_LINKED))
+    extra_hard_deps.push_back(pair.ptr);
 
   // For ACTIONs this is a bit inefficient since it creates an input dep
   // stamp file even though we're only going to use it once. It would save a
@@ -81,8 +80,8 @@ void NinjaActionTargetWriter::Run() {
   // runtime and should be compiled when the action is, but don't need to be
   // done before we run the action.
   std::vector<OutputFile> data_outs;
-  for (size_t i = 0; i < target_->data_deps().size(); i++)
-    data_outs.push_back(target_->data_deps()[i].ptr->dependency_output_file());
+  for (const auto& dep : target_->data_deps())
+    data_outs.push_back(dep.ptr->dependency_output_file());
   WriteStampForTarget(output_files, data_outs);
 }
 
@@ -125,10 +124,10 @@ std::string NinjaActionTargetWriter::WriteRuleDefinition() {
     path_output_.WriteFile(out_, settings_->build_settings()->python_path());
     out_ << " ";
     path_output_.WriteFile(out_, target_->action_values().script());
-    for (size_t i = 0; i < args.list().size(); i++) {
+    for (const auto& arg : args.list()) {
       out_ << " ";
       SubstitutionWriter::WriteWithNinjaVariables(
-          args.list()[i], args_escape_options, out_);
+          arg, args_escape_options, out_);
     }
     out_ << std::endl;
   } else {
@@ -138,10 +137,10 @@ std::string NinjaActionTargetWriter::WriteRuleDefinition() {
     path_output_.WriteFile(out_, settings_->build_settings()->python_path());
     out_ << " ";
     path_output_.WriteFile(out_, target_->action_values().script());
-    for (size_t i = 0; i < args.list().size(); i++) {
+    for (const auto& arg : args.list()) {
       out_ << " ";
       SubstitutionWriter::WriteWithNinjaVariables(
-          args.list()[i], args_escape_options, out_);
+          arg, args_escape_options, out_);
     }
     out_ << std::endl;
     out_ << "  description = ACTION " << target_label << std::endl;

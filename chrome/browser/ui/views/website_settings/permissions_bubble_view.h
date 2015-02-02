@@ -18,16 +18,16 @@ class PermissionsBubbleDelegateView;
 class PermissionBubbleViewViews : public PermissionBubbleView {
  public:
   explicit PermissionBubbleViewViews(views::View* anchor_view);
-  virtual ~PermissionBubbleViewViews();
+  ~PermissionBubbleViewViews() override;
 
   // PermissionBubbleView:
-  virtual void SetDelegate(Delegate* delegate) OVERRIDE;
-  virtual void Show(const std::vector<PermissionBubbleRequest*>& requests,
-                    const std::vector<bool>& accept_state,
-                    bool customization_mode) OVERRIDE;
-  virtual bool CanAcceptRequestUpdate() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual bool IsVisible() OVERRIDE;
+  void SetDelegate(Delegate* delegate) override;
+  void Show(const std::vector<PermissionBubbleRequest*>& requests,
+            const std::vector<bool>& accept_state,
+            bool customization_mode) override;
+  bool CanAcceptRequestUpdate() override;
+  void Hide() override;
+  bool IsVisible() override;
 
   void Closing();
   void Toggle(int index, bool value);

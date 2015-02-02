@@ -35,13 +35,13 @@ WebInspector.DOMPresentationUtils.decorateNodeLabel = function(node, parentEleme
 {
     var title = node.nodeNameInCorrectCase();
 
-    var nameElement = document.createElement("span");
+    var nameElement = createElement("span");
     nameElement.textContent = title;
     parentElement.appendChild(nameElement);
 
     var idAttribute = node.getAttribute("id");
     if (idAttribute) {
-        var idElement = document.createElement("span");
+        var idElement = createElement("span");
         parentElement.appendChild(idElement);
 
         var part = "#" + idAttribute;
@@ -58,7 +58,7 @@ WebInspector.DOMPresentationUtils.decorateNodeLabel = function(node, parentEleme
         var foundClasses = {};
 
         if (classes.length) {
-            var classesElement = document.createElement("span");
+            var classesElement = createElement("span");
             classesElement.className = "extra";
             parentElement.appendChild(classesElement);
 
@@ -97,15 +97,15 @@ WebInspector.DOMPresentationUtils.createSpansForNodeTitle = function(container, 
 WebInspector.DOMPresentationUtils.linkifyNodeReference = function(node)
 {
     if (!node)
-        return document.createTextNode(WebInspector.UIString("<node>"));
+        return createTextNode(WebInspector.UIString("<node>"));
 
-    var link = document.createElement("span");
+    var link = createElement("span");
     link.className = "node-link";
     WebInspector.DOMPresentationUtils.decorateNodeLabel(node, link);
 
     link.addEventListener("click", WebInspector.Revealer.reveal.bind(WebInspector.Revealer, node, undefined), false);
     link.addEventListener("mouseover", node.highlight.bind(node, undefined, undefined), false);
-    link.addEventListener("mouseout", node.domModel().hideDOMNodeHighlight.bind(node.domModel()), false);
+    link.addEventListener("mouseleave", node.domModel().hideDOMNodeHighlight.bind(node.domModel()), false);
 
     return link;
 }
@@ -120,12 +120,12 @@ WebInspector.DOMPresentationUtils.linkifyNodeReference = function(node)
 WebInspector.DOMPresentationUtils.buildImagePreviewContents = function(target, imageURL, showDimensions, userCallback, precomputedDimensions)
 {
     var resource = target.resourceTreeModel.resourceForURL(imageURL);
-    if (!resource) {
+    if (!resource || resource.resourceType() !== WebInspector.resourceTypes.Image) {
         userCallback();
         return;
     }
 
-    var imageElement = document.createElement("img");
+    var imageElement = createElement("img");
     imageElement.addEventListener("load", buildContent, false);
     imageElement.addEventListener("error", errorCallback, false);
     resource.populateImageSource(imageElement);
@@ -138,7 +138,7 @@ WebInspector.DOMPresentationUtils.buildImagePreviewContents = function(target, i
 
     function buildContent()
     {
-        var container = document.createElement("table");
+        var container = createElement("table");
         container.className = "image-preview-container";
         var naturalWidth = precomputedDimensions ? precomputedDimensions.naturalWidth : imageElement.naturalWidth;
         var naturalHeight = precomputedDimensions ? precomputedDimensions.naturalHeight : imageElement.naturalHeight;

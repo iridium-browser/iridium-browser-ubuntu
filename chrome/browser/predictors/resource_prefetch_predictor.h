@@ -95,7 +95,7 @@ class ResourcePrefetchPredictor
 
   ResourcePrefetchPredictor(const ResourcePrefetchPredictorConfig& config,
                             Profile* profile);
-  virtual ~ResourcePrefetchPredictor();
+  ~ResourcePrefetchPredictor() override;
 
   // Thread safe.
   static bool ShouldRecordRequest(net::URLRequest* request,
@@ -183,13 +183,13 @@ class ResourcePrefetchPredictor
   // Returns true if the request (should have a response in it) is cacheable.
   static bool IsCacheable(const net::URLRequest* request);
 
-  // content::NotificationObserver methods OVERRIDE.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // content::NotificationObserver methods override.
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
-  // KeyedService methods OVERRIDE.
-  virtual void Shutdown() OVERRIDE;
+  // KeyedService methods override.
+  void Shutdown() override;
 
   // Functions called on different network events pertaining to the loading of
   // main frame resource or sub resources.
@@ -263,6 +263,16 @@ class ResourcePrefetchPredictor
                        const std::vector<URLRequestSummary>& new_resources,
                        size_t max_data_map_size,
                        PrefetchDataMap* data_map);
+
+  // Reports overall page load time.
+  void ReportPageLoadTimeStats(base::TimeDelta plt) const;
+
+  // Reports page load time for prefetched and not prefetched pages
+  void ReportPageLoadTimePrefetchStats(
+      base::TimeDelta plt,
+      bool prefetched,
+      base::Callback<void(int)> report_network_type_callback,
+      PrefetchKeyType key_type) const;
 
   // Reports accuracy by comparing prefetched resources with resources that are
   // actually used by the page.

@@ -13,12 +13,12 @@
 class OmniboxUI : public MojoWebUIController<OmniboxUIHandlerMojo> {
  public:
   explicit OmniboxUI(content::WebUI* contents);
-  virtual ~OmniboxUI();
+  ~OmniboxUI() override;
 
  private:
   // MojoWebUIController overrides:
-  virtual scoped_ptr<MojoWebUIHandler> CreateUIHandler(
-      mojo::InterfaceRequest<OmniboxUIHandlerMojo> request) OVERRIDE;
+  void BindUIHandler(
+      mojo::InterfaceRequest<OmniboxUIHandlerMojo> request) override;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxUI);
 };

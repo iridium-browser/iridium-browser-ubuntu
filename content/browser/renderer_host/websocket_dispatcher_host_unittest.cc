@@ -35,14 +35,14 @@ class MockWebSocketHost : public WebSocketHost {
                     net::URLRequestContext* url_request_context,
                     WebSocketDispatcherHostTest* owner);
 
-  virtual ~MockWebSocketHost() {}
+  ~MockWebSocketHost() override {}
 
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& message) override {
     received_messages_.push_back(message);
     return true;
   }
 
-  virtual void GoAway() OVERRIDE;
+  void GoAway() override;
 
   std::vector<IPC::Message> received_messages_;
   base::WeakPtr<WebSocketDispatcherHostTest> owner_;
@@ -60,7 +60,7 @@ class WebSocketDispatcherHostTest : public ::testing::Test {
                    base::Unretained(this)));
   }
 
-  virtual ~WebSocketDispatcherHostTest() {
+  ~WebSocketDispatcherHostTest() override {
     // We need to invalidate the issued WeakPtrs at the beginning of the
     // destructor in order not to access destructed member variables.
     weak_ptr_factory_.InvalidateWeakPtrs();

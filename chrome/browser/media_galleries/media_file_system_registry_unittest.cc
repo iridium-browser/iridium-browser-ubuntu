@@ -75,17 +75,16 @@ class TestMediaFileSystemContext : public MediaFileSystemContext {
   };
 
   explicit TestMediaFileSystemContext(MediaFileSystemRegistry* registry);
-  virtual ~TestMediaFileSystemContext() {}
+  ~TestMediaFileSystemContext() override {}
 
   // MediaFileSystemContext implementation.
-  virtual bool RegisterFileSystem(const std::string& device_id,
-                                  const std::string& fs_name,
-                                  const base::FilePath& path) OVERRIDE;
+  bool RegisterFileSystem(const std::string& device_id,
+                          const std::string& fs_name,
+                          const base::FilePath& path) override;
 
-  virtual void RevokeFileSystem(const std::string& fs_name) OVERRIDE;
+  void RevokeFileSystem(const std::string& fs_name) override;
 
-  virtual base::FilePath GetRegisteredPath(
-      const std::string& fs_name) const OVERRIDE;
+  base::FilePath GetRegisteredPath(const std::string& fs_name) const override;
 
   MediaFileSystemRegistry* registry() { return registry_; }
 
@@ -192,16 +191,16 @@ class MockProfileSharedRenderProcessHostFactory
     : public content::RenderProcessHostFactory {
  public:
   MockProfileSharedRenderProcessHostFactory() {}
-  virtual ~MockProfileSharedRenderProcessHostFactory();
+  ~MockProfileSharedRenderProcessHostFactory() override;
 
   // RPH created with this factory are owned by it.  If the RPH is destroyed
   // for testing purposes, it must be removed from the factory first.
   content::MockRenderProcessHost* ReleaseRPH(
       content::BrowserContext* browser_context);
 
-  virtual content::RenderProcessHost* CreateRenderProcessHost(
+  content::RenderProcessHost* CreateRenderProcessHost(
       content::BrowserContext* browser_context,
-      content::SiteInstance* site_instance) const OVERRIDE;
+      content::SiteInstance* site_instance) const override;
 
  private:
   typedef std::map<content::BrowserContext*, content::MockRenderProcessHost*>
@@ -350,8 +349,8 @@ class MediaFileSystemRegistryTest : public ChromeRenderViewHostTestHarness {
   }
 
  protected:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  private:
   // This makes sure that at least one default gallery exists on the file

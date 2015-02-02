@@ -21,6 +21,7 @@
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "google_apis/gaia/gaia_auth_util.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/escape.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
@@ -82,9 +83,8 @@ void SigninManager::RemoveMergeSessionObserver(
 SigninManager::~SigninManager() {}
 
 void SigninManager::InitTokenService() {
-  const std::string& account_id = GetAuthenticatedUsername();
-  if (token_service_ && !account_id.empty())
-    token_service_->LoadCredentials(account_id);
+  if (token_service_ && IsAuthenticated())
+    token_service_->LoadCredentials(GetAuthenticatedAccountId());
 }
 
 std::string SigninManager::SigninTypeToString(SigninManager::SigninType type) {
@@ -206,10 +206,11 @@ void SigninManager::SignOut(
   const base::Time signin_time =
       base::Time::FromInternalValue(
           client_->GetPrefs()->GetInt64(prefs::kSignedInTime));
-  clear_authenticated_username();
+  ClearAuthenticatedUsername();
+  client_->GetPrefs()->ClearPref(prefs::kGoogleServicesHostedDomain);
   client_->GetPrefs()->ClearPref(prefs::kGoogleServicesUsername);
   client_->GetPrefs()->ClearPref(prefs::kSignedInTime);
-  client_->ClearSigninScopedDeviceId();
+  client_->OnSignedOut();
 
   // Erase (now) stale information from AboutSigninInternals.
   NotifyDiagnosticsObservers(USERNAME, "");
@@ -350,17 +351,18 @@ void SigninManager::CompletePendingSignin() {
 
   if (client_->ShouldMergeSigninCredentialsIntoCookieJar()) {
     merge_session_helper_.reset(new MergeSessionHelper(
-        token_service_, client_->GetURLRequestContext(), NULL));
+        token_service_, GaiaConstants::kChromeSource,
+        client_->GetURLRequestContext(), NULL));
   }
 
   DCHECK(!temp_refresh_token_.empty());
   DCHECK(IsAuthenticated());
-  token_service_->UpdateCredentials(GetAuthenticatedUsername(),
-                                    temp_refresh_token_);
+  std::string account_id = GetAuthenticatedAccountId();
+  token_service_->UpdateCredentials(account_id, temp_refresh_token_);
   temp_refresh_token_.clear();
 
   if (client_->ShouldMergeSigninCredentialsIntoCookieJar())
-    merge_session_helper_->LogIn(GetAuthenticatedUsername());
+    merge_session_helper_->LogIn(account_id);
 }
 
 void SigninManager::OnExternalSigninCompleted(const std::string& username) {

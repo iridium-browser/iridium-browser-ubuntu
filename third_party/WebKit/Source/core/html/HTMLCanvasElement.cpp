@@ -50,6 +50,7 @@
 #include "platform/graphics/GraphicsContextStateSaver.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/RecordingImageBufferSurface.h"
+#include "platform/graphics/StaticBitmapImage.h"
 #include "platform/graphics/UnacceleratedImageBufferSurface.h"
 #include "platform/graphics/gpu/WebGLImageBufferSurface.h"
 #include "platform/transforms/AffineTransform.h"
@@ -95,9 +96,8 @@ HTMLCanvasElement::~HTMLCanvasElement()
     resetDirtyRect();
     v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(-m_externallyAllocatedMemory);
 #if !ENABLE(OILPAN)
-    HashSet<RawPtr<CanvasObserver> >::iterator end = m_observers.end();
-    for (HashSet<RawPtr<CanvasObserver> >::iterator it = m_observers.begin(); it != end; ++it)
-        (*it)->canvasDestroyed(this);
+    for (CanvasObserver* canvasObserver : m_observers)
+        canvasObserver->canvasDestroyed(this);
     // Ensure these go away before the ImageBuffer.
     m_contextStateSaver.clear();
     m_context.clear();
@@ -164,10 +164,11 @@ CanvasRenderingContext* HTMLCanvasElement::getContext(const String& type, Canvas
     // once it is created.
     if (type == "2d") {
         if (m_context && !m_context->is2d())
-            return 0;
+            return nullptr;
         if (!m_context) {
             blink::Platform::current()->histogramEnumeration("Canvas.ContextType", Context2d, ContextTypeCount);
-            m_context = CanvasRenderingContext2D::create(this, static_cast<Canvas2DContextAttributes*>(attrs), document().inQuirksMode());
+
+            m_context = CanvasRenderingContext2D::create(this, static_cast<Canvas2DContextAttributes*>(attrs), document());
             setNeedsCompositingUpdate();
         }
         return m_context.get();
@@ -183,12 +184,12 @@ CanvasRenderingContext* HTMLCanvasElement::getContext(const String& type, Canvas
             updateExternallyAllocatedMemory();
         } else if (!m_context->is3d()) {
             dispatchEvent(WebGLContextEvent::create(EventTypeNames::webglcontextcreationerror, false, true, "Canvas has an existing, non-WebGL context"));
-            return 0;
+            return nullptr;
         }
         return m_context.get();
     }
 
-    return 0;
+    return nullptr;
 }
 
 void HTMLCanvasElement::didDraw(const FloatRect& rect)
@@ -250,9 +251,8 @@ void HTMLCanvasElement::willProcessTask()
 
 void HTMLCanvasElement::notifyObserversCanvasChanged(const FloatRect& rect)
 {
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<CanvasObserver> >::iterator end = m_observers.end();
-    for (WillBeHeapHashSet<RawPtrWillBeWeakMember<CanvasObserver> >::iterator it = m_observers.begin(); it != end; ++it)
-        (*it)->canvasChanged(this, rect);
+    for (CanvasObserver* canvasObserver : m_observers)
+        canvasObserver->canvasChanged(this, rect);
 }
 
 void HTMLCanvasElement::reset()
@@ -306,13 +306,12 @@ void HTMLCanvasElement::reset()
                     renderBox()->contentChanged(CanvasChanged);
             }
             if (hadImageBuffer)
-                renderer->setShouldDoFullPaintInvalidation(true);
+                renderer->setShouldDoFullPaintInvalidation();
         }
     }
 
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<CanvasObserver> >::iterator end = m_observers.end();
-    for (WillBeHeapHashSet<RawPtrWillBeWeakMember<CanvasObserver> >::iterator it = m_observers.begin(); it != end; ++it)
-        (*it)->canvasResized(this);
+    for (CanvasObserver* canvasObserver : m_observers)
+        canvasObserver->canvasResized(this);
 }
 
 bool HTMLCanvasElement::paintsIntoCanvasBuffer() const
@@ -334,18 +333,12 @@ void HTMLCanvasElement::paint(GraphicsContext* context, const LayoutRect& r)
     if (m_context) {
         if (!paintsIntoCanvasBuffer() && !document().printing())
             return;
-        m_context->paintRenderingResultsToCanvas();
+        m_context->paintRenderingResultsToCanvas(CanvasRenderingContext::Front);
     }
 
     if (hasImageBuffer()) {
-        ImageBuffer* imageBuffer = buffer();
-        if (imageBuffer) {
-            CompositeOperator compositeOperator = !m_context || m_context->hasAlpha() ? CompositeSourceOver : CompositeCopy;
-            if (m_presentedImage)
-                context->drawImage(m_presentedImage.get(), pixelSnappedIntRect(r), compositeOperator, DoNotRespectImageOrientation);
-            else
-                context->drawImageBuffer(imageBuffer, pixelSnappedIntRect(r), 0, compositeOperator);
-        }
+        CompositeOperator compositeOperator = !m_context || m_context->hasAlpha() ? CompositeSourceOver : CompositeCopy;
+        context->drawImageBuffer(buffer(), pixelSnappedIntRect(r), 0, compositeOperator);
     } else {
         // When alpha is false, we should draw to opaque black.
         if (m_context && !m_context->hasAlpha())
@@ -359,21 +352,6 @@ void HTMLCanvasElement::paint(GraphicsContext* context, const LayoutRect& r)
 bool HTMLCanvasElement::is3D() const
 {
     return m_context && m_context->is3d();
-}
-
-void HTMLCanvasElement::makePresentationCopy()
-{
-    if (!m_presentedImage) {
-        // The buffer contains the last presented data, so save a copy of it.
-        m_presentedImage = buffer()->copyImage(CopyBackingStore, Unscaled);
-        updateExternallyAllocatedMemory();
-    }
-}
-
-void HTMLCanvasElement::clearPresentationCopy()
-{
-    m_presentedImage.clear();
-    updateExternallyAllocatedMemory();
 }
 
 void HTMLCanvasElement::setSurfaceSize(const IntSize& size)
@@ -420,9 +398,7 @@ String HTMLCanvasElement::toDataURLInternal(const String& mimeType, const double
         return ImageDataToDataURL(ImageDataBuffer(imageData->size(), imageData->data()), encodingMimeType, quality);
 
     if (m_context && m_context->is3d()) {
-        toWebGLRenderingContext(m_context.get())->setSavingImage(isSaving);
-        m_context->paintRenderingResultsToCanvas();
-        toWebGLRenderingContext(m_context.get())->setSavingImage(false);
+        m_context->paintRenderingResultsToCanvas(isSaving ? CanvasRenderingContext::Front : CanvasRenderingContext::Back);
     }
 
     return buffer()->toDataURL(encodingMimeType, quality);
@@ -472,6 +448,61 @@ bool HTMLCanvasElement::shouldAccelerate(const IntSize& size) const
     return true;
 }
 
+class UnacceleratedSurfaceFactory : public RecordingImageBufferFallbackSurfaceFactory {
+public:
+    virtual PassOwnPtr<ImageBufferSurface> createSurface(const IntSize& size, OpacityMode opacityMode)
+    {
+        return adoptPtr(new UnacceleratedImageBufferSurface(size, opacityMode));
+    }
+
+    virtual ~UnacceleratedSurfaceFactory() { }
+};
+
+class Accelerated2dSurfaceFactory : public RecordingImageBufferFallbackSurfaceFactory {
+public:
+    Accelerated2dSurfaceFactory(int msaaSampleCount) : m_msaaSampleCount(msaaSampleCount) { }
+
+    virtual PassOwnPtr<ImageBufferSurface> createSurface(const IntSize& size, OpacityMode opacityMode)
+    {
+        OwnPtr<ImageBufferSurface> surface = adoptPtr(new Canvas2DImageBufferSurface(size, opacityMode, m_msaaSampleCount));
+        if (surface->isValid())
+            return surface.release();
+        return adoptPtr(new UnacceleratedImageBufferSurface(size, opacityMode));
+    }
+
+    virtual ~Accelerated2dSurfaceFactory() { }
+private:
+    int m_msaaSampleCount;
+};
+
+PassOwnPtr<RecordingImageBufferFallbackSurfaceFactory> HTMLCanvasElement::createSurfaceFactory(const IntSize& deviceSize, int* msaaSampleCount) const
+{
+    *msaaSampleCount = 0;
+    OwnPtr<RecordingImageBufferFallbackSurfaceFactory> surfaceFactory;
+    if (shouldAccelerate(deviceSize)) {
+        if (document().settings())
+            *msaaSampleCount = document().settings()->accelerated2dCanvasMSAASampleCount();
+        surfaceFactory = adoptPtr(new Accelerated2dSurfaceFactory(*msaaSampleCount));
+    } else {
+        surfaceFactory = adoptPtr(new UnacceleratedSurfaceFactory());
+    }
+    return surfaceFactory.release();
+}
+
+bool HTMLCanvasElement::shouldUseDisplayList(const IntSize& deviceSize)
+{
+    if (RuntimeEnabledFeatures::forceDisplayList2dCanvasEnabled())
+        return true;
+
+    if (!RuntimeEnabledFeatures::displayList2dCanvasEnabled())
+        return false;
+
+    if (shouldAccelerate(deviceSize))
+        return false;
+
+    return true;
+}
+
 PassOwnPtr<ImageBufferSurface> HTMLCanvasElement::createImageBufferSurface(const IntSize& deviceSize, int* msaaSampleCount)
 {
     OpacityMode opacityMode = !m_context || m_context->hasAlpha() ? NonOpaque : Opaque;
@@ -485,25 +516,20 @@ PassOwnPtr<ImageBufferSurface> HTMLCanvasElement::createImageBufferSurface(const
         // FIXME: Actually, avoid setting m_accelerationDisabled at all when
         // doing GPU-based rasterization.
         if (m_accelerationDisabled)
-            return adoptPtr(new UnacceleratedImageBufferSurface(size(), opacityMode));
-        return adoptPtr(new WebGLImageBufferSurface(size(), opacityMode));
+            return adoptPtr(new UnacceleratedImageBufferSurface(deviceSize, opacityMode));
+        return adoptPtr(new WebGLImageBufferSurface(deviceSize, opacityMode));
     }
 
-    if (RuntimeEnabledFeatures::displayList2dCanvasEnabled()) {
-        OwnPtr<ImageBufferSurface> surface = adoptPtr(new RecordingImageBufferSurface(size(), opacityMode));
+    OwnPtr<RecordingImageBufferFallbackSurfaceFactory> surfaceFactory = createSurfaceFactory(deviceSize, msaaSampleCount);
+
+    if (shouldUseDisplayList(deviceSize)) {
+        OwnPtr<ImageBufferSurface> surface = adoptPtr(new RecordingImageBufferSurface(deviceSize, surfaceFactory.release(), opacityMode));
         if (surface->isValid())
             return surface.release();
+        surfaceFactory = createSurfaceFactory(deviceSize, msaaSampleCount); // recreate because old previous one was released
     }
 
-    if (shouldAccelerate(deviceSize)) {
-        if (document().settings())
-            *msaaSampleCount = document().settings()->accelerated2dCanvasMSAASampleCount();
-        OwnPtr<ImageBufferSurface> surface = adoptPtr(new Canvas2DImageBufferSurface(size(), opacityMode, *msaaSampleCount));
-        if (surface->isValid())
-            return surface.release();
-    }
-
-    return adoptPtr(new UnacceleratedImageBufferSurface(size(), opacityMode));
+    return surfaceFactory->createSurface(deviceSize, opacityMode);
 }
 
 void HTMLCanvasElement::createImageBuffer()
@@ -597,8 +623,6 @@ void HTMLCanvasElement::updateExternallyAllocatedMemory() const
         bufferCount += 2;
     if (m_copiedImage)
         bufferCount++;
-    if (m_presentedImage)
-        bufferCount++;
 
     Checked<intptr_t, RecordOverflow> checkedExternallyAllocatedMemory = 4 * bufferCount;
     checkedExternallyAllocatedMemory *= width();
@@ -620,7 +644,7 @@ GraphicsContext* HTMLCanvasElement::drawingContext() const
 GraphicsContext* HTMLCanvasElement::existingDrawingContext() const
 {
     if (!hasImageBuffer())
-        return 0;
+        return nullptr;
 
     return drawingContext();
 }
@@ -646,9 +670,7 @@ Image* HTMLCanvasElement::copiedImage() const
 {
     if (!m_copiedImage && buffer()) {
         if (m_context && m_context->is3d()) {
-            toWebGLRenderingContext(m_context.get())->setSavingImage(true);
-            m_context->paintRenderingResultsToCanvas();
-            toWebGLRenderingContext(m_context.get())->setSavingImage(false);
+            m_context->paintRenderingResultsToCanvas(CanvasRenderingContext::Front);
         }
         m_copiedImage = buffer()->copyImage(CopyBackingStore, Unscaled);
         updateExternallyAllocatedMemory();
@@ -731,18 +753,25 @@ PassRefPtr<Image> HTMLCanvasElement::getSourceImageForCanvas(SourceImageMode mod
         return nullptr;
     }
 
-    if (mode == CopySourceImageIfVolatile) {
-        *status = NormalSourceImageStatus;
-        return copiedImage();
+    if (m_context && m_context->is3d()) {
+        m_context->paintRenderingResultsToCanvas(CanvasRenderingContext::Back);
+        *status = ExternalSourceImageStatus;
+
+        // can't create SkImage from WebGLImageBufferSurface (contains only SkBitmap)
+        return m_imageBuffer->copyImage(DontCopyBackingStore, Unscaled);
     }
 
-    if (m_context && m_context->is3d()) {
-        m_context->paintRenderingResultsToCanvas();
-        *status = ExternalSourceImageStatus;
-    } else {
+    RefPtr<SkImage> image = m_imageBuffer->newImageSnapshot();
+    if (image) {
         *status = NormalSourceImageStatus;
+
+        return StaticBitmapImage::create(image.release());
     }
-    return m_imageBuffer->copyImage(DontCopyBackingStore, Unscaled);
+
+
+    *status = InvalidSourceImageStatus;
+
+    return nullptr;
 }
 
 bool HTMLCanvasElement::wouldTaintOrigin(SecurityOrigin*) const

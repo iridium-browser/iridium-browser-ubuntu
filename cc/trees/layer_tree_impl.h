@@ -18,17 +18,6 @@
 #include "cc/output/renderer.h"
 #include "cc/resources/ui_resource_client.h"
 
-#if defined(COMPILER_GCC)
-namespace BASE_HASH_NAMESPACE {
-template<>
-struct hash<cc::LayerImpl*> {
-  size_t operator()(cc::LayerImpl* ptr) const {
-    return hash<size_t>()(reinterpret_cast<size_t>(ptr));
-  }
-};
-}  // namespace BASE_HASH_NAMESPACE
-#endif  // COMPILER
-
 namespace base {
 namespace debug {
 class TracedValue;
@@ -88,7 +77,6 @@ class CC_EXPORT LayerTreeImpl {
   bool IsRecycleTree() const;
   LayerImpl* FindActiveTreeLayerById(int id);
   LayerImpl* FindPendingTreeLayerById(int id);
-  LayerImpl* FindRecycleTreeLayerById(int id);
   bool PinchGestureActive() const;
   BeginFrameArgs CurrentBeginFrameArgs() const;
   base::TimeDelta begin_impl_frame_interval() const;
@@ -103,6 +91,8 @@ class CC_EXPORT LayerTreeImpl {
   bool use_gpu_rasterization() const;
   bool create_low_res_tiling() const;
   BlockingTaskRunner* BlockingMainThreadTaskRunner() const;
+  bool RequiresHighResToDraw() const;
+  bool SmoothnessTakesPriority() const;
 
   // Tree specific methods exposed to layer-impl tree.
   // ---------------------------------------------------------------------------
@@ -137,11 +127,12 @@ class CC_EXPORT LayerTreeImpl {
   LayerImpl* InnerViewportScrollLayer() const;
   // This function may return NULL, it is the caller's responsibility to check.
   LayerImpl* OuterViewportScrollLayer() const;
-  gfx::Vector2dF TotalScrollOffset() const;
-  gfx::Vector2dF TotalMaxScrollOffset() const;
+  gfx::ScrollOffset TotalScrollOffset() const;
+  gfx::ScrollOffset TotalMaxScrollOffset() const;
   gfx::Vector2dF TotalScrollDelta() const;
 
   LayerImpl* InnerViewportContainerLayer() const;
+  LayerImpl* OuterViewportContainerLayer() const;
   LayerImpl* CurrentlyScrollingLayer() const;
   void SetCurrentlyScrollingLayer(LayerImpl* layer);
   void ClearCurrentlyScrollingLayer();
@@ -232,10 +223,6 @@ class CC_EXPORT LayerTreeImpl {
   void SetContentsTexturesPurged();
   void ResetContentsTexturesPurged();
 
-  void SetRequiresHighResToDraw();
-  void ResetRequiresHighResToDraw();
-  bool RequiresHighResToDraw() const;
-
   // Set on the active tree when the viewport size recently changed
   // and the active tree's size is now out of date.
   bool ViewportSizeInvalid() const;
@@ -247,8 +234,9 @@ class CC_EXPORT LayerTreeImpl {
 
   void SetRootLayerScrollOffsetDelegate(
       LayerScrollOffsetDelegate* root_layer_scroll_offset_delegate);
+  void OnRootLayerDelegatedScrollOffsetChanged();
   void UpdateScrollOffsetDelegate();
-  gfx::Vector2dF GetDelegatedScrollOffset(LayerImpl* layer);
+  gfx::ScrollOffset GetDelegatedScrollOffset(LayerImpl* layer);
 
   // Call this function when you expect there to be a swap buffer.
   // See swap_promise.h for how to use SwapPromise.
@@ -322,10 +310,11 @@ class CC_EXPORT LayerTreeImpl {
     return top_controls_content_offset_ + top_controls_delta_;
   }
 
-  void SetPageScaleAnimation(const gfx::Vector2d& target_offset,
-                             bool anchor_point,
-                             float page_scale,
-                             base::TimeDelta duration);
+  void SetPageScaleAnimation(
+      const gfx::Vector2d& target_offset,
+      bool anchor_point,
+      float page_scale,
+      base::TimeDelta duration);
   scoped_ptr<PageScaleAnimation> TakePageScaleAnimation();
 
  protected:
@@ -370,7 +359,6 @@ class CC_EXPORT LayerTreeImpl {
   LayerImplList render_surface_layer_list_;
 
   bool contents_textures_purged_;
-  bool requires_high_res_to_draw_;
   bool viewport_size_invalid_;
   bool needs_update_draw_properties_;
 

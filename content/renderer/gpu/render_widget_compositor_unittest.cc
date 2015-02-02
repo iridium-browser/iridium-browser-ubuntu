@@ -35,7 +35,7 @@ class TestRenderWidget : public RenderWidget {
   MockWebWidget mock_webwidget_;
 
  private:
-  virtual ~TestRenderWidget() { webwidget_ = NULL; }
+  ~TestRenderWidget() override { webwidget_ = NULL; }
 
   DISALLOW_COPY_AND_ASSIGN(TestRenderWidget);
 };
@@ -46,7 +46,7 @@ class RenderWidgetCompositorTest : public testing::Test {
       : render_widget_(make_scoped_refptr(new TestRenderWidget())),
         render_widget_compositor_(
             RenderWidgetCompositor::Create(render_widget_.get(), false)) {}
-  virtual ~RenderWidgetCompositorTest() {}
+  ~RenderWidgetCompositorTest() override {}
 
  protected:
   MockRenderThread render_thread_;

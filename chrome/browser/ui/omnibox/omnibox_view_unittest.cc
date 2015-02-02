@@ -18,7 +18,7 @@ namespace {
 
 class OmniboxViewTest : public PlatformTest {
  public:
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     ui::Clipboard::DestroyClipboardForCurrentThread();
   }
 

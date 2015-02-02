@@ -99,7 +99,7 @@ void RenderTheme::adjustStyle(RenderStyle* style, Element* e, const CachedUAStyl
     else if (style->display() == LIST_ITEM || style->display() == TABLE)
         style->setDisplay(BLOCK);
 
-    if (uaStyle && uaStyle->hasAppearance && isControlStyled(style, uaStyle)) {
+    if (uaStyle && isControlStyled(style, uaStyle)) {
         if (part == MenulistPart) {
             style->setAppearance(MenulistButtonPart);
             part = MenulistButtonPart;
@@ -628,7 +628,7 @@ bool RenderTheme::stateChanged(RenderObject* o, ControlState state) const
     if (state == PressedControlState && !isEnabled(o))
         return false;
 
-    o->setShouldDoFullPaintInvalidation(true);
+    o->setShouldDoFullPaintInvalidation();
     return true;
 }
 
@@ -875,8 +875,6 @@ void RenderTheme::paintSliderTicks(RenderObject* o, const PaintInfo& paintInfo, 
         tickRegionWidth = trackBounds.height() - thumbSize.width();
     }
     RefPtrWillBeRawPtr<HTMLDataListOptionsCollection> options = dataList->options();
-    GraphicsContextStateSaver stateSaver(*paintInfo.context);
-    paintInfo.context->setFillColor(o->resolveColor(CSSPropertyColor));
     for (unsigned i = 0; HTMLOptionElement* optionElement = options->item(i); i++) {
         String value = optionElement->value();
         if (!input->isValidValue(value))
@@ -889,7 +887,7 @@ void RenderTheme::paintSliderTicks(RenderObject* o, const PaintInfo& paintInfo, 
             tickRect.setX(tickPosition);
         else
             tickRect.setY(tickPosition);
-        paintInfo.context->fillRect(tickRect);
+        paintInfo.context->fillRect(tickRect, o->resolveColor(CSSPropertyColor));
     }
 }
 
@@ -940,6 +938,64 @@ void RenderTheme::adjustSearchFieldResultsDecorationStyle(RenderStyle*, Element*
 void RenderTheme::platformColorsDidChange()
 {
     Page::scheduleForcedStyleRecalcForAllPages();
+}
+
+static FontDescription& getCachedFontDescription(CSSValueID systemFontID)
+{
+    DEFINE_STATIC_LOCAL(FontDescription, caption, ());
+    DEFINE_STATIC_LOCAL(FontDescription, icon, ());
+    DEFINE_STATIC_LOCAL(FontDescription, menu, ());
+    DEFINE_STATIC_LOCAL(FontDescription, messageBox, ());
+    DEFINE_STATIC_LOCAL(FontDescription, smallCaption, ());
+    DEFINE_STATIC_LOCAL(FontDescription, statusBar, ());
+    DEFINE_STATIC_LOCAL(FontDescription, webkitMiniControl, ());
+    DEFINE_STATIC_LOCAL(FontDescription, webkitSmallControl, ());
+    DEFINE_STATIC_LOCAL(FontDescription, webkitControl, ());
+    DEFINE_STATIC_LOCAL(FontDescription, defaultDescription, ());
+    switch (systemFontID) {
+    case CSSValueCaption:
+        return caption;
+    case CSSValueIcon:
+        return icon;
+    case CSSValueMenu:
+        return menu;
+    case CSSValueMessageBox:
+        return messageBox;
+    case CSSValueSmallCaption:
+        return smallCaption;
+    case CSSValueStatusBar:
+        return statusBar;
+    case CSSValueWebkitMiniControl:
+        return webkitMiniControl;
+    case CSSValueWebkitSmallControl:
+        return webkitSmallControl;
+    case CSSValueWebkitControl:
+        return webkitControl;
+    case CSSValueNone:
+        return defaultDescription;
+    default:
+        ASSERT_NOT_REACHED();
+        return defaultDescription;
+    }
+}
+
+void RenderTheme::systemFont(CSSValueID systemFontID, FontDescription& fontDescription)
+{
+    fontDescription = getCachedFontDescription(systemFontID);
+    if (fontDescription.isAbsoluteSize())
+        return;
+
+    FontStyle fontStyle = FontStyleNormal;
+    FontWeight fontWeight = FontWeightNormal;
+    float fontSize = 0;
+    AtomicString fontFamily;
+    systemFont(systemFontID, fontStyle, fontWeight, fontSize, fontFamily);
+    fontDescription.setStyle(fontStyle);
+    fontDescription.setWeight(fontWeight);
+    fontDescription.setSpecifiedSize(fontSize);
+    fontDescription.setIsAbsoluteSize(true);
+    fontDescription.firstFamily().setFamily(fontFamily);
+    fontDescription.setGenericFamily(FontDescription::NoFamily);
 }
 
 Color RenderTheme::systemColor(CSSValueID cssValueId) const

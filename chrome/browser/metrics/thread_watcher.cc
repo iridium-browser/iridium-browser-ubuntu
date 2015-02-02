@@ -89,9 +89,6 @@ NOINLINE void ThreadUnresponsive_IO() {
   ReportThreadHang();
 }
 
-MSVC_POP_WARNING()
-MSVC_ENABLE_OPTIMIZE();
-
 void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
   base::debug::Alias(&thread_id);
 
@@ -120,6 +117,9 @@ void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
 
   CHECK(false) << "Unknown thread was unresponsive.";  // Shouldn't be reached.
 }
+
+MSVC_POP_WARNING()
+MSVC_ENABLE_OPTIMIZE();
 
 }  // namespace
 
@@ -439,7 +439,7 @@ ThreadWatcherList::CrashDataThresholds::CrashDataThresholds()
 
 // static
 void ThreadWatcherList::StartWatchingAll(const CommandLine& command_line) {
-  // TODO(rtenneti): Enable ThreadWatcher.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   uint32 unresponsive_threshold;
   CrashOnHangThreadMap crash_on_hang_threads;
   ParseCommandLine(command_line,
@@ -453,12 +453,16 @@ void ThreadWatcherList::StartWatchingAll(const CommandLine& command_line) {
       FROM_HERE,
       base::Bind(&ThreadWatcherList::SetStopped, false));
 
-  WatchDogThread::PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&ThreadWatcherList::InitializeAndStartWatching,
-                 unresponsive_threshold,
-                 crash_on_hang_threads),
-      base::TimeDelta::FromSeconds(g_initialize_delay_seconds));
+  if (!WatchDogThread::PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&ThreadWatcherList::InitializeAndStartWatching,
+                     unresponsive_threshold,
+                     crash_on_hang_threads),
+          base::TimeDelta::FromSeconds(g_initialize_delay_seconds))) {
+    // Disarm() the startup timebomb, if we couldn't post the task to start the
+    // ThreadWatcher (becasue WatchDog thread is not running).
+    StartupTimeBomb::DisarmStartupTimeBomb();
+  }
 }
 
 // static
@@ -916,48 +920,24 @@ class StartupWatchDogThread : public base::Watchdog {
   // alarming.
   explicit StartupWatchDogThread(const base::TimeDelta& duration)
       : base::Watchdog(duration, "Startup watchdog thread", true) {
-#if defined(OS_ANDROID)
-    // TODO(rtenneti): Delete this code, after getting data.
-    start_time_clock_= base::Time::Now();
-    start_time_monotonic_ = base::TimeTicks::Now();
-    start_time_thread_now_ = base::TimeTicks::IsThreadNowSupported()
-        ? base::TimeTicks::ThreadNow() : base::TimeTicks::Now();
-#endif  // OS_ANDROID
   }
 
   // Alarm is called if the time expires after an Arm() without someone calling
   // Disarm(). When Alarm goes off, in release mode we get the crash dump
   // without crashing and in debug mode we break into the debugger.
-  virtual void Alarm() OVERRIDE {
+  void Alarm() override {
 #if !defined(NDEBUG)
     StartupHang();
     return;
 #elif !defined(OS_ANDROID)
     WatchDogThread::PostTask(FROM_HERE, base::Bind(&StartupHang));
     return;
-#else  // Android release: gather stats to figure out when to crash.
-    // TODO(rtenneti): Delete this code, after getting data.
-    UMA_HISTOGRAM_TIMES("StartupTimeBomb.Alarm.TimeDuration",
-                        base::Time::Now() - start_time_clock_);
-    UMA_HISTOGRAM_TIMES("StartupTimeBomb.Alarm.TimeTicksDuration",
-                        base::TimeTicks::Now() - start_time_monotonic_);
-    if (base::TimeTicks::IsThreadNowSupported()) {
-      UMA_HISTOGRAM_TIMES(
-          "StartupTimeBomb.Alarm.ThreadNowDuration",
-          base::TimeTicks::ThreadNow() - start_time_thread_now_);
-    }
-    return;
+#else
+    // TODO(rtenneti): Enable crashing for Android.
 #endif  // OS_ANDROID
   }
 
  private:
-#if defined(OS_ANDROID)
-  // TODO(rtenneti): Delete this code, after getting data.
-  base::Time start_time_clock_;
-  base::TimeTicks start_time_monotonic_;
-  base::TimeTicks start_time_thread_now_;
-#endif  // OS_ANDROID
-
   DISALLOW_COPY_AND_ASSIGN(StartupWatchDogThread);
 };
 
@@ -974,9 +954,7 @@ class ShutdownWatchDogThread : public base::Watchdog {
 
   // Alarm is called if the time expires after an Arm() without someone calling
   // Disarm(). We crash the browser if this method is called.
-  virtual void Alarm() OVERRIDE {
-    ShutdownHang();
-  }
+  void Alarm() override { ShutdownHang(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShutdownWatchDogThread);

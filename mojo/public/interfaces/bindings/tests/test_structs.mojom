@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import "mojo/public/interfaces/bindings/tests/rect.mojom"
-
 [JavaPackage="org.chromium.mojo.bindings.test.mojom.test_structs"]
-module mojo.test {
+module mojo.test;
+
+import "mojo/public/interfaces/bindings/tests/rect.mojom";
 
 struct NamedRegion {
   string? name;
-  Rect[]? rects;
+  array<Rect>? rects;
 };
 
 struct RectPair {
@@ -49,10 +49,10 @@ struct NoDefaultFieldValues {
   handle? f20;
   handle<shared_buffer> f21;
   handle<shared_buffer>? f22;
-  string[] f23;
-  string?[] f24;
-  string[]? f25;
-  string?[]? f26;
+  array<string> f23;
+  array<string?> f24;
+  array<string>? f25;
+  array<string?>? f26;
   EmptyStruct f27;
   EmptyStruct? f28;
 };
@@ -82,4 +82,58 @@ struct DefaultFieldValues {
   Rect? f16 = default;
 };
 
-}
+
+// Used to verify that the code generated for enum and const values defined
+// within a struct is correct. Assuming that a constant's value can be a literal
+// or another constant and that enum values can either be an integer constant or
+// another value from the same enum type.
+
+struct ScopedConstants {
+  const int32 TEN = 10;
+  const int32 ALSO_TEN = TEN;
+  enum EType {
+    E0,
+    E1,
+    E2 = 10,
+    E3 = E2,
+    E4,
+  };
+  const int32 TEN_TOO = EType.E2;
+  EType f0 = E0; // 0
+  EType f1 = E1; // 1
+  EType f2 = E2; // 10
+  EType f3 = E3; // 10
+  EType f4 = E4; // 11
+  int32 f5 = TEN;
+  int32 f6 = ALSO_TEN;
+};
+
+// Used to verify that all possible Map key field types can be encoded and
+// decoded successfully.
+
+struct MapKeyTypes {
+  map<bool, bool> f0;
+  map<int8, int8> f1;
+  map<uint8, uint8> f2;
+  map<int16, int16> f3;
+  map<uint16, uint16> f4;
+  map<int32, int32> f5;
+  map<uint32, uint32> f6;
+  map<int64, int64> f7;
+  map<uint64, uint64> f8;
+  map<float, float> f9;
+  map<double, double> f10;
+  map<string, string> f11;
+};
+
+// Used to verify that some common or difficult value types can be encoded and
+// decoded successfully.
+
+struct MapValueTypes {
+  map<string, array<string>> f0;
+  map<string, array<string>?> f1;
+  map<string, array<string?>> f2;
+  map<string, array<string, 2>> f3;
+  map<string, array<array<string, 2>?>> f4;
+  map<string, array<array<string, 2>, 1>> f5;
+};

@@ -65,6 +65,10 @@ cr.define('print_preview', function() {
       this.isCancelButtonEnabled = isEnabled;
     },
 
+    get isPrintButtonEnabled() {
+      return !this.getChildElement('button.print').disabled;
+    },
+
     set isPrintButtonEnabled(isEnabled) {
       this.isPrintButtonEnabled_ = isEnabled;
       this.updatePrintButtonEnabledState_();
@@ -79,6 +83,11 @@ cr.define('print_preview', function() {
       var summaryEl = this.getChildElement('.summary');
       summaryEl.innerHTML = '';
       summaryEl.textContent = message;
+    },
+
+    /** @override */
+    decorateInternal: function() {
+      cr.ui.reverseButtonStrips(this.getElement());
     },
 
     /** @override */
@@ -175,21 +184,30 @@ cr.define('print_preview', function() {
       }
 
       var html;
+      var label;
       if (numPages != numSheets) {
         html = loadTimeData.getStringF('printPreviewSummaryFormatLong',
                                        '<b>' + numSheets + '</b>',
                                        '<b>' + summaryLabel + '</b>',
                                        numPages,
                                        pagesLabel);
+        label = loadTimeData.getStringF('printPreviewSummaryFormatLong',
+                                        numSheets, summaryLabel,
+                                        numPages, pagesLabel);
       } else {
         html = loadTimeData.getStringF('printPreviewSummaryFormatShort',
                                        '<b>' + numSheets + '</b>',
                                        '<b>' + summaryLabel + '</b>');
+        label = loadTimeData.getStringF('printPreviewSummaryFormatShort',
+                                        numSheets, summaryLabel);
       }
 
       // Removing extra spaces from within the string.
       html = html.replace(/\s{2,}/g, ' ');
-      this.getChildElement('.summary').innerHTML = html;
+
+      var summary = this.getChildElement('.summary');
+      summary.innerHTML = html;
+      summary.setAttribute('aria-label', label);
     },
 
     /**

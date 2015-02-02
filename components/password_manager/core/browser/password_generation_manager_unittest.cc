@@ -18,6 +18,7 @@
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
+#include "components/password_manager/core/browser/test_password_store.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -35,21 +36,19 @@ class TestPasswordManagerDriver : public StubPasswordManagerDriver {
         password_generation_manager_(client),
         password_autofill_manager_(client, NULL),
         is_off_the_record_(false) {}
-  virtual ~TestPasswordManagerDriver() {}
+  ~TestPasswordManagerDriver() override {}
 
   // PasswordManagerDriver implementation.
-  virtual bool IsOffTheRecord() OVERRIDE { return is_off_the_record_; }
-  virtual PasswordGenerationManager* GetPasswordGenerationManager() OVERRIDE {
+  bool IsOffTheRecord() override { return is_off_the_record_; }
+  PasswordGenerationManager* GetPasswordGenerationManager() override {
     return &password_generation_manager_;
   }
-  virtual PasswordManager* GetPasswordManager() OVERRIDE {
-    return &password_manager_;
-  }
-  virtual PasswordAutofillManager* GetPasswordAutofillManager() OVERRIDE {
+  PasswordManager* GetPasswordManager() override { return &password_manager_; }
+  PasswordAutofillManager* GetPasswordAutofillManager() override {
     return &password_autofill_manager_;
   }
-  virtual void AccountCreationFormsFound(
-      const std::vector<autofill::FormData>& forms) OVERRIDE {
+  void AccountCreationFormsFound(
+      const std::vector<autofill::FormData>& forms) override {
     found_account_creation_forms_.insert(
         found_account_creation_forms_.begin(), forms.begin(), forms.end());
   }
@@ -72,14 +71,21 @@ class TestPasswordManagerDriver : public StubPasswordManagerDriver {
 class TestPasswordManagerClient : public StubPasswordManagerClient {
  public:
   TestPasswordManagerClient(scoped_ptr<PrefService> prefs)
-      : prefs_(prefs.Pass()), driver_(this), is_sync_enabled_(false) {}
+      : prefs_(prefs.Pass()),
+        store_(new TestPasswordStore),
+        driver_(this),
+        is_sync_enabled_(false) {}
 
-  virtual PasswordStore* GetPasswordStore() OVERRIDE { return NULL; }
-  virtual PrefService* GetPrefs() OVERRIDE { return prefs_.get(); }
-  virtual PasswordManagerDriver* GetDriver() OVERRIDE { return &driver_; }
-  virtual void AuthenticateAutofillAndFillForm(
-      scoped_ptr<autofill::PasswordFormFillData> fill_data) OVERRIDE {}
-  virtual bool IsPasswordSyncEnabled() OVERRIDE { return is_sync_enabled_; }
+  ~TestPasswordManagerClient() override {
+    store_->Shutdown();
+  }
+
+  PasswordStore* GetPasswordStore() override { return store_.get(); }
+  PrefService* GetPrefs() override { return prefs_.get(); }
+  PasswordManagerDriver* GetDriver() override { return &driver_; }
+  bool IsPasswordSyncEnabled(CustomPassphraseState state) override {
+    return is_sync_enabled_;
+  }
 
   void set_is_password_sync_enabled(bool enabled) {
     is_sync_enabled_ = enabled;
@@ -87,6 +93,7 @@ class TestPasswordManagerClient : public StubPasswordManagerClient {
 
  private:
   scoped_ptr<PrefService> prefs_;
+  scoped_refptr<TestPasswordStore> store_;
   TestPasswordManagerDriver driver_;
   bool is_sync_enabled_;
 };
@@ -97,24 +104,24 @@ class TestPasswordManagerClient : public StubPasswordManagerClient {
 class TestAutofillMetrics : public autofill::AutofillMetrics {
  public:
   TestAutofillMetrics() {}
-  virtual ~TestAutofillMetrics() {}
+  ~TestAutofillMetrics() override {}
 };
 
 }  // anonymous namespace
 
 class PasswordGenerationManagerTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Construct a PrefService and register all necessary prefs before handing
     // it off to |client_|, as the initialization flow of |client_| will
     // indirectly cause those prefs to be immediately accessed.
     scoped_ptr<TestingPrefServiceSimple> prefs(new TestingPrefServiceSimple());
     prefs->registry()->RegisterBooleanPref(prefs::kPasswordManagerSavingEnabled,
                                            true);
-    client_.reset(new TestPasswordManagerClient(prefs.PassAs<PrefService>()));
+    client_.reset(new TestPasswordManagerClient(prefs.Pass()));
   }
 
-  virtual void TearDown() OVERRIDE { client_.reset(); }
+  void TearDown() override { client_.reset(); }
 
   PasswordGenerationManager* GetGenerationManager() {
     return client_->GetDriver()->GetPasswordGenerationManager();

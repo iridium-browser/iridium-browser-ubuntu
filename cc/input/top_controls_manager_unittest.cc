@@ -14,7 +14,7 @@
 #include "cc/trees/layer_tree_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/frame_time.h"
-#include "ui/gfx/vector2d_f.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace cc {
 namespace {
@@ -35,24 +35,20 @@ class MockTopControlsManagerClient : public TopControlsManagerClient {
     root_scroll_layer_ = LayerImpl::Create(active_tree_.get(), 1);
   }
 
-  virtual ~MockTopControlsManagerClient() {}
+  ~MockTopControlsManagerClient() override {}
 
-  virtual void DidChangeTopControlsPosition() OVERRIDE {
+  void DidChangeTopControlsPosition() override {
     redraw_needed_ = true;
     update_draw_properties_needed_ = true;
   }
 
-  virtual bool HaveRootScrollLayer() const OVERRIDE {
-    return true;
-  }
+  bool HaveRootScrollLayer() const override { return true; }
 
-  virtual void SetControlsTopOffset(float offset) OVERRIDE {
+  void SetControlsTopOffset(float offset) override {
     top_controls_top_offset_ = offset;
   }
 
-  virtual float ControlsTopOffset() const OVERRIDE {
-    return top_controls_top_offset_;
-  }
+  float ControlsTopOffset() const override { return top_controls_top_offset_; }
 
   LayerImpl* rootScrollLayer() {
     return root_scroll_layer_.get();

@@ -31,15 +31,15 @@ class CONTENT_EXPORT UploadFileSystemFileElementReader :
       uint64 range_offset,
       uint64 range_length,
       const base::Time& expected_modification_time);
-  virtual ~UploadFileSystemFileElementReader();
+  ~UploadFileSystemFileElementReader() override;
 
   // UploadElementReader overrides:
-  virtual int Init(const net::CompletionCallback& callback) OVERRIDE;
-  virtual uint64 GetContentLength() const OVERRIDE;
-  virtual uint64 BytesRemaining() const OVERRIDE;
-  virtual int Read(net::IOBuffer* buf,
-                   int buf_length,
-                   const net::CompletionCallback& callback) OVERRIDE;
+  int Init(const net::CompletionCallback& callback) override;
+  uint64 GetContentLength() const override;
+  uint64 BytesRemaining() const override;
+  int Read(net::IOBuffer* buf,
+           int buf_length,
+           const net::CompletionCallback& callback) override;
 
  private:
   void OnGetLength(const net::CompletionCallback& callback, int64 result);

@@ -40,7 +40,7 @@ bool FindAndHighlightWrapper(
 
 class SearchMetadataTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
@@ -121,7 +121,6 @@ class SearchMetadataTest : public testing::Test {
     entry.mutable_file_specific_info()->set_content_mime_type(
         drive::util::kGoogleDocumentMimeType);
     EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(entry, &local_id));
-
   }
 
   ResourceEntry GetFileEntry(const std::string& name,
@@ -382,7 +381,7 @@ TEST_F(SearchMetadataTest, SearchMetadata_ExcludeDirectory) {
 
 // "drive", "drive/root", "drive/other" should be excluded.
 TEST_F(SearchMetadataTest, SearchMetadata_ExcludeSpecialDirectories) {
-  const char* kQueries[] = { "drive", "root", "other" };
+  const char* const kQueries[] = { "drive", "root", "other" };
   for (size_t i = 0; i < arraysize(kQueries); ++i) {
     FileError error = FILE_ERROR_FAILED;
     scoped_ptr<MetadataSearchResultVector> result;

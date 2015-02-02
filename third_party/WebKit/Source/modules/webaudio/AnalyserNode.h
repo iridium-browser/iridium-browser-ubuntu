@@ -25,27 +25,27 @@
 #ifndef AnalyserNode_h
 #define AnalyserNode_h
 
+#include "core/dom/DOMTypedArray.h"
 #include "modules/webaudio/AudioBasicInspectorNode.h"
 #include "modules/webaudio/RealtimeAnalyser.h"
-#include "wtf/Forward.h"
 
 namespace blink {
 
 class ExceptionState;
 
-class AnalyserNode FINAL : public AudioBasicInspectorNode {
+class AnalyserNode final : public AudioBasicInspectorNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static AnalyserNode* create(AudioContext* context, float sampleRate)
     {
-        return adoptRefCountedGarbageCollectedWillBeNoop(new AnalyserNode(context, sampleRate));
+        return new AnalyserNode(context, sampleRate);
     }
 
     virtual ~AnalyserNode();
 
     // AudioNode
-    virtual void dispose() OVERRIDE;
-    virtual void process(size_t framesToProcess) OVERRIDE;
+    virtual void dispose() override;
+    virtual void process(size_t framesToProcess) override;
 
     // Javascript bindings
     unsigned fftSize() const { return m_analyser.fftSize(); }
@@ -62,13 +62,13 @@ public:
     void setSmoothingTimeConstant(double k, ExceptionState&);
     double smoothingTimeConstant() const { return m_analyser.smoothingTimeConstant(); }
 
-    void getFloatFrequencyData(Float32Array* array) { m_analyser.getFloatFrequencyData(array); }
-    void getByteFrequencyData(Uint8Array* array) { m_analyser.getByteFrequencyData(array); }
-    void getFloatTimeDomainData(Float32Array* array) { m_analyser.getFloatTimeDomainData(array); }
-    void getByteTimeDomainData(Uint8Array* array) { m_analyser.getByteTimeDomainData(array); }
+    void getFloatFrequencyData(DOMFloat32Array* array) { m_analyser.getFloatFrequencyData(array->view()); }
+    void getByteFrequencyData(DOMUint8Array* array) { m_analyser.getByteFrequencyData(array->view()); }
+    void getFloatTimeDomainData(DOMFloat32Array* array) { m_analyser.getFloatTimeDomainData(array->view()); }
+    void getByteTimeDomainData(DOMUint8Array* array) { m_analyser.getByteTimeDomainData(array->view()); }
 private:
-    virtual double tailTime() const OVERRIDE { return 0; }
-    virtual double latencyTime() const OVERRIDE { return 0; }
+    virtual double tailTime() const override { return 0; }
+    virtual double latencyTime() const override { return 0; }
 
     AnalyserNode(AudioContext*, float sampleRate);
 

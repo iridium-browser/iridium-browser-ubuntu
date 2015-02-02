@@ -103,6 +103,9 @@ void TestInterfaces::SetTestIsRunning(bool running) {
 void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
                                              bool generate_pixels) {
   std::string spec = GURL(test_url).spec();
+  size_t path_start = spec.rfind("LayoutTests/");
+  if (path_start != std::string::npos)
+    spec = spec.substr(path_start);
   test_runner_->setShouldGeneratePixelResults(generate_pixels);
   if (spec.find("loading/") != std::string::npos)
     test_runner_->setShouldDumpFrameLoadCallbacks(true);
@@ -118,11 +121,19 @@ void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
     std::string settings = "";
     std::string test_path = spec.substr(spec.find("/inspector/") + 11);
     size_t slash_index = test_path.find("/");
+    std::string test_path_setting = base::StringPrintf(
+        "\"testPath\":\"\\\"%s\\\"\"", spec.c_str());
+
+    // TODO(pfeldman): remove once migrated to testPath.
+    std::string last_active_panel;
     if (slash_index != std::string::npos) {
-      settings = base::StringPrintf("{\"lastActivePanel\":\"\\\"%s\\\"\"}",
-                                    test_path.substr(0, slash_index).c_str());
+      last_active_panel = base::StringPrintf(
+          ",\"lastActivePanel\":\"\\\"%s\\\"\"",
+          test_path.substr(0, slash_index).c_str());
     }
-    test_runner_->ShowDevTools(settings, std::string());
+
+    test_runner_->ShowDevTools(base::StringPrintf("{%s%s}",
+        test_path_setting.c_str(), last_active_panel.c_str()), std::string());
   }
   if (spec.find("/viewsource/") != std::string::npos) {
     test_runner_->setShouldEnableViewSource(true);
@@ -172,13 +183,8 @@ const std::vector<WebTestProxyBase*>& TestInterfaces::GetWindowList() {
 blink::WebThemeEngine* TestInterfaces::GetThemeEngine() {
   if (!test_runner_->UseMockTheme())
     return 0;
-#if defined(OS_MACOSX)
-  if (!theme_engine_.get())
-    theme_engine_.reset(new MockWebThemeEngineMac());
-#else
   if (!theme_engine_.get())
     theme_engine_.reset(new MockWebThemeEngine());
-#endif
   return theme_engine_.get();
 }
 

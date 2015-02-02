@@ -16,12 +16,12 @@ namespace athena {
 
 class BackgroundView : public views::View {
  public:
-  BackgroundView() : system_info_view_(NULL) {
+  BackgroundView() : system_info_view_(nullptr) {
     system_info_view_ =
         SystemUI::Get()->CreateSystemInfoView(SystemUI::COLOR_SCHEME_LIGHT);
     AddChildView(system_info_view_);
   }
-  virtual ~BackgroundView() {}
+  ~BackgroundView() override {}
 
   void SetImage(const gfx::ImageSkia& image) {
     image_ = image;
@@ -29,12 +29,12 @@ class BackgroundView : public views::View {
   }
 
   // views::View:
-  virtual void Layout() OVERRIDE {
+  virtual void Layout() override {
     system_info_view_->SetBounds(
         0, 0, width(), system_info_view_->GetPreferredSize().height());
   }
 
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  virtual void OnPaint(gfx::Canvas* canvas) override {
     canvas->DrawImageInt(image_,
                          0,
                          0,

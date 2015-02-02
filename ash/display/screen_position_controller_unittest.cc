@@ -49,9 +49,9 @@ ScreenPositionController* GetScreenPositionController() {
 class ScreenPositionControllerTest : public test::AshTestBase {
  public:
   ScreenPositionControllerTest() {}
-  virtual ~ScreenPositionControllerTest() {}
+  ~ScreenPositionControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AshTestBase::SetUp();
     window_.reset(new aura::Window(&window_delegate_));
     window_->SetType(ui::wm::WINDOW_TYPE_NORMAL);
@@ -60,7 +60,7 @@ class ScreenPositionControllerTest : public test::AshTestBase {
     window_->set_id(1);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     window_.reset();
     AshTestBase::TearDown();
   }

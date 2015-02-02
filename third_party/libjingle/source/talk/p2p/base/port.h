@@ -25,20 +25,20 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef TALK_P2P_BASE_PORT_H_
-#define TALK_P2P_BASE_PORT_H_
+#ifndef WEBRTC_P2P_BASE_PORT_H_
+#define WEBRTC_P2P_BASE_PORT_H_
 
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "talk/p2p/base/candidate.h"
-#include "talk/p2p/base/packetsocketfactory.h"
-#include "talk/p2p/base/portinterface.h"
-#include "talk/p2p/base/stun.h"
-#include "talk/p2p/base/stunrequest.h"
-#include "talk/p2p/base/transport.h"
+#include "webrtc/p2p/base/candidate.h"
+#include "webrtc/p2p/base/packetsocketfactory.h"
+#include "webrtc/p2p/base/portinterface.h"
+#include "webrtc/p2p/base/stun.h"
+#include "webrtc/p2p/base/stunrequest.h"
+#include "webrtc/p2p/base/transport.h"
 #include "webrtc/base/asyncpacketsocket.h"
 #include "webrtc/base/network.h"
 #include "webrtc/base/proxyinfo.h"
@@ -308,6 +308,10 @@ class Port : public PortInterface, public rtc::MessageHandler,
   // Returns if Hybrid ICE protocol is used.
   bool IsHybridIce() const;
 
+  void set_candidate_filter(uint32 candidate_filter) {
+    candidate_filter_ = candidate_filter;
+  }
+
  protected:
   enum {
     MSG_CHECKTIMEOUT = 0,
@@ -351,6 +355,8 @@ class Port : public PortInterface, public rtc::MessageHandler,
     return rtc::DSCP_NO_CHANGE;
   }
 
+  uint32 candidate_filter() { return candidate_filter_; }
+
  private:
   void Construct();
   // Called when one of our connections deletes itself.
@@ -391,6 +397,12 @@ class Port : public PortInterface, public rtc::MessageHandler,
   // Information to use when going through a proxy.
   std::string user_agent_;
   rtc::ProxyInfo proxy_;
+
+  // Candidate filter is pushed down to Port such that each Port could
+  // make its own decision on how to create candidates. For example,
+  // when IceTransportsType is set to relay, both RelayPort and
+  // TurnPort will hide raddr to avoid local address leakage.
+  uint32 candidate_filter_;
 
   friend class Connection;
 };
@@ -604,4 +616,4 @@ class ProxyConnection : public Connection {
 
 }  // namespace cricket
 
-#endif  // TALK_P2P_BASE_PORT_H_
+#endif  // WEBRTC_P2P_BASE_PORT_H_

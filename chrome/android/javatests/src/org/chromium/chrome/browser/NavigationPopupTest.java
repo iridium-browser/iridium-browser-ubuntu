@@ -13,9 +13,10 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.shell.ChromeShellActivity;
 import org.chromium.chrome.shell.ChromeShellTestBase;
-import org.chromium.content.browser.NavigationClient;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHistory;
 
@@ -54,16 +55,103 @@ public class NavigationPopupTest extends ChromeShellTestBase {
         }
     }
 
-    private static class TestNavigationClient implements NavigationClient {
+    private static class TestNavigationController implements NavigationController {
         private TestNavigationHistory mHistory;
         private int mNavigatedIndex = INVALID_NAVIGATION_INDEX;
 
-        public TestNavigationClient() {
+        public TestNavigationController() {
             mHistory = new TestNavigationHistory();
             mHistory.addEntry(new TestNavigationEntry(
                     1, "about:blank", null, null, "About Blank", null));
             mHistory.addEntry(new TestNavigationEntry(
                     5, UrlUtils.encodeHtmlDataUri("<html>1</html>"), null, null, null, null));
+        }
+
+        @Override
+        public boolean canGoBack() {
+            return false;
+        }
+
+        @Override
+        public boolean canGoForward() {
+            return false;
+        }
+
+        @Override
+        public boolean canGoToOffset(int offset) {
+            return false;
+        }
+
+        @Override
+        public void goToOffset(int offset) {
+        }
+
+        @Override
+        public void goBack() {
+        }
+
+        @Override
+        public void goForward() {
+        }
+
+        @Override
+        public void loadIfNecessary() {
+        }
+
+        @Override
+        public void requestRestoreLoad() {
+        }
+
+        @Override
+        public void reload(boolean checkForRepost) {
+        }
+
+        @Override
+        public void reloadIgnoringCache(boolean checkForRepost) {
+        }
+
+        @Override
+        public void cancelPendingReload() {
+        }
+
+        @Override
+        public void continuePendingReload() {
+        }
+
+        @Override
+        public void loadUrl(LoadUrlParams params) {
+        }
+
+        @Override
+        public void clearHistory() {
+        }
+
+        @Override
+        public NavigationHistory getNavigationHistory() {
+            return null;
+        }
+
+        @Override
+        public String getOriginalUrlForVisibleNavigationEntry() {
+            return null;
+        }
+
+        @Override
+        public void clearSslPreferences() {
+        }
+
+        @Override
+        public boolean getUseDesktopUserAgent() {
+            return false;
+        }
+
+        @Override
+        public void setUseDesktopUserAgent(boolean override, boolean reloadOnChange) {
+        }
+
+        @Override
+        public NavigationEntry getPendingEntry() {
+            return null;
         }
 
         @Override
@@ -75,14 +163,24 @@ public class NavigationPopupTest extends ChromeShellTestBase {
         public void goToNavigationIndex(int index) {
             mNavigatedIndex = index;
         }
+
+        @Override
+        public int getLastCommittedEntryIndex() {
+            return -1;
+        }
+
+        @Override
+        public boolean removeEntryAtIndex(int index) {
+            return false;
+        }
     }
 
     @MediumTest
     @Feature({"Navigation"})
     public void testFaviconFetching() throws InterruptedException {
-        final TestNavigationClient client = new TestNavigationClient();
+        final TestNavigationController controller = new TestNavigationController();
         final NavigationPopup popup = new NavigationPopup(
-                mActivity, client, true);
+                mActivity, controller, true);
         popup.setWidth(300);
         popup.setAnchorView(mActivity.getActiveContentViewCore().getContainerView());
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -94,24 +192,26 @@ public class NavigationPopupTest extends ChromeShellTestBase {
 
         assertTrue("All favicons did not get updated.",
                 CriteriaHelper.pollForCriteria(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
-                        @Override
-                        public Boolean call() throws Exception {
-                            NavigationHistory history = client.mHistory;
-                            for (int i = 0; i < history.getEntryCount(); i++) {
-                                if (history.getEntryAtIndex(i).getFavicon() == null) return false;
-                            }
-                            return true;
+                    @Override
+                    public boolean isSatisfied() {
+                        try {
+                            return ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
+                                @Override
+                                public Boolean call() throws Exception {
+                                    NavigationHistory history = controller.mHistory;
+                                    for (int i = 0; i < history.getEntryCount(); i++) {
+                                        if (history.getEntryAtIndex(i).getFavicon() == null) {
+                                            return false;
+                                        }
+                                    }
+                                    return true;
+                                }
+                            });
+                        } catch (ExecutionException e) {
+                            return false;
                         }
-                    });
-                } catch (ExecutionException e) {
-                    return false;
-                }
-            }
-        }));
+                    }
+                }));
 
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -124,9 +224,9 @@ public class NavigationPopupTest extends ChromeShellTestBase {
     @SmallTest
     @Feature({"Navigation"})
     public void testItemSelection() {
-        final TestNavigationClient client = new TestNavigationClient();
+        final TestNavigationController controller = new TestNavigationController();
         final NavigationPopup popup = new NavigationPopup(
-                mActivity, client, true);
+                mActivity, controller, true);
         popup.setWidth(300);
         popup.setAnchorView(mActivity.getActiveContentViewCore().getContainerView());
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -144,7 +244,8 @@ public class NavigationPopupTest extends ChromeShellTestBase {
         });
 
         assertFalse("Popup did not hide as expected.", popup.isShowing());
-        assertEquals("Popup attempted to navigate to the wrong index", 5, client.mNavigatedIndex);
+        assertEquals("Popup attempted to navigate to the wrong index", 5,
+                controller.mNavigatedIndex);
     }
 
 }

@@ -20,19 +20,19 @@ class WindowWatcher;
 class ShelfDelegateImpl : public ShelfDelegate {
  public:
   explicit ShelfDelegateImpl(WindowWatcher* watcher);
-  virtual ~ShelfDelegateImpl();
+  ~ShelfDelegateImpl() override;
 
   void set_watcher(WindowWatcher* watcher) { watcher_ = watcher; }
 
   // ShelfDelegate overrides:
-  virtual void OnShelfCreated(Shelf* shelf) OVERRIDE;
-  virtual void OnShelfDestroyed(Shelf* shelf) OVERRIDE;
-  virtual ShelfID GetShelfIDForAppID(const std::string& app_id) OVERRIDE;
-  virtual const std::string& GetAppIDForShelfID(ShelfID id) OVERRIDE;
-  virtual void PinAppWithID(const std::string& app_id) OVERRIDE;
-  virtual bool IsAppPinned(const std::string& app_id) OVERRIDE;
-  virtual bool CanPin() const OVERRIDE;
-  virtual void UnpinAppWithID(const std::string& app_id) OVERRIDE;
+  void OnShelfCreated(Shelf* shelf) override;
+  void OnShelfDestroyed(Shelf* shelf) override;
+  ShelfID GetShelfIDForAppID(const std::string& app_id) override;
+  const std::string& GetAppIDForShelfID(ShelfID id) override;
+  void PinAppWithID(const std::string& app_id) override;
+  bool IsAppPinned(const std::string& app_id) override;
+  bool CanPin() const override;
+  void UnpinAppWithID(const std::string& app_id) override;
 
  private:
   // Used to update Launcher. Owned by main.

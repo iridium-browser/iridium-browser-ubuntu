@@ -79,7 +79,7 @@ public:
     virtual bool isCleanupTask() const { return true; }
 };
 
-WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, WorkerThread* thread, double timeOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
+WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, WorkerThread* thread, double timeOrigin, const SecurityOrigin* starterOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
     : m_url(url)
     , m_userAgent(userAgent)
     , m_script(adoptPtr(new WorkerScriptController(*this)))
@@ -92,6 +92,9 @@ WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, W
     , m_messageStorage(ConsoleMessageStorage::createForWorker(this))
 {
     setSecurityOrigin(SecurityOrigin::create(url));
+    if (starterOrigin)
+        securityOrigin()->transferPrivilegesFrom(*starterOrigin);
+
     m_workerClients->reattachThread();
     m_thread->setWorkerInspectorController(m_workerInspectorController.get());
 }
@@ -212,6 +215,10 @@ void WorkerGlobalScope::dispose()
     // scope are gone.
 }
 
+void WorkerGlobalScope::didEvaluateWorkerScript()
+{
+}
+
 void WorkerGlobalScope::importScripts(const Vector<String>& urls, ExceptionState& exceptionState)
 {
     ASSERT(contentSecurityPolicy());
@@ -219,12 +226,11 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls, ExceptionState
 
     ExecutionContext& executionContext = *this->executionContext();
 
-    Vector<String>::const_iterator urlsEnd = urls.end();
     Vector<KURL> completedURLs;
-    for (Vector<String>::const_iterator it = urls.begin(); it != urlsEnd; ++it) {
-        const KURL& url = executionContext.completeURL(*it);
+    for (const String& urlString : urls) {
+        const KURL& url = executionContext.completeURL(urlString);
         if (!url.isValid()) {
-            exceptionState.throwDOMException(SyntaxError, "The URL '" + *it + "' is invalid.");
+            exceptionState.throwDOMException(SyntaxError, "The URL '" + urlString + "' is invalid.");
             return;
         }
         if (!contentSecurityPolicy()->allowScriptFromSource(url)) {
@@ -233,16 +239,15 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls, ExceptionState
         }
         completedURLs.append(url);
     }
-    Vector<KURL>::const_iterator end = completedURLs.end();
 
-    for (Vector<KURL>::const_iterator it = completedURLs.begin(); it != end; ++it) {
+    for (const KURL& completeURL : completedURLs) {
         RefPtr<WorkerScriptLoader> scriptLoader(WorkerScriptLoader::create());
         scriptLoader->setRequestContext(blink::WebURLRequest::RequestContextScript);
-        scriptLoader->loadSynchronously(executionContext, *it, AllowCrossOriginRequests);
+        scriptLoader->loadSynchronously(executionContext, completeURL, AllowCrossOriginRequests);
 
         // If the fetching attempt failed, throw a NetworkError exception and abort all these steps.
         if (scriptLoader->failed()) {
-            exceptionState.throwDOMException(NetworkError, "The script at '" + it->elidedString() + "' failed to load.");
+            exceptionState.throwDOMException(NetworkError, "The script at '" + completeURL.elidedString() + "' failed to load.");
             return;
         }
 

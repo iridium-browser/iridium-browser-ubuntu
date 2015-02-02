@@ -26,23 +26,22 @@ class StartupPagesHandler : public OptionsPageUIHandler,
                             public ui::TableModelObserver {
  public:
   StartupPagesHandler();
-  virtual ~StartupPagesHandler();
+  ~StartupPagesHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
+  void RegisterMessages() override;
 
   // AutocompleteControllerDelegate implementation.
-  virtual void OnResultChanged(bool default_match_changed) OVERRIDE;
+  void OnResultChanged(bool default_match_changed) override;
 
   // ui::TableModelObserver implementation.
-  virtual void OnModelChanged() OVERRIDE;
-  virtual void OnItemsChanged(int start, int length) OVERRIDE;
-  virtual void OnItemsAdded(int start, int length) OVERRIDE;
-  virtual void OnItemsRemoved(int start, int length) OVERRIDE;
+  void OnModelChanged() override;
+  void OnItemsChanged(int start, int length) override;
+  void OnItemsAdded(int start, int length) override;
+  void OnItemsRemoved(int start, int length) override;
 
  private:
   // Saves the changes that have been made. Called from WebUI.

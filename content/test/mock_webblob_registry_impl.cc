@@ -6,12 +6,10 @@
 
 #include "third_party/WebKit/public/platform/WebBlobData.h"
 #include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/platform/WebThreadSafeData.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 
 using blink::WebBlobData;
 using blink::WebString;
-using blink::WebThreadSafeData;
 using blink::WebURL;
 
 namespace content {
@@ -48,7 +46,8 @@ void MockWebBlobRegistryImpl::registerStreamURL(const WebURL& url,
 }
 
 void MockWebBlobRegistryImpl::addDataToStream(const WebURL& url,
-                                              WebThreadSafeData& data) {
+                                              const char* data,
+                                              size_t length) {
 }
 
 void MockWebBlobRegistryImpl::finalizeStream(const WebURL& url) {

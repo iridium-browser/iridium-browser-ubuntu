@@ -52,7 +52,7 @@ class StyleRuleFontFace;
 class StyleSheet;
 class StyleSheetContents;
 
-class StyleEngine FINAL : public CSSFontSelectorClient  {
+class StyleEngine final : public CSSFontSelectorClient  {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
 
@@ -85,7 +85,7 @@ public:
     void modifiedStyleSheet(StyleSheet*);
     void addStyleSheetCandidateNode(Node*, bool createdByParser);
     void removeStyleSheetCandidateNode(Node*);
-    void removeStyleSheetCandidateNode(Node*, ContainerNode* scopingNode, TreeScope&);
+    void removeStyleSheetCandidateNode(Node*, TreeScope&);
     void modifiedStyleSheetCandidateNode(Node*);
     void enableExitTransitionStylesheets();
     void addXSLStyleSheet(ProcessingInstruction*, bool createdByParser);
@@ -170,16 +170,14 @@ public:
     PassRefPtrWillBeRawPtr<CSSStyleSheet> createSheet(Element*, const String& text, TextPosition startPosition, bool createdByParser);
     void removeSheet(StyleSheetContents*);
 
-    void addScopedStyleResolver(const ScopedStyleResolver* resolver) { m_scopedStyleResolvers.add(resolver); }
-    void removeScopedStyleResolver(const ScopedStyleResolver* resolver) { m_scopedStyleResolvers.remove(resolver); }
-    bool hasOnlyScopedResolverForDocument() const { return m_scopedStyleResolvers.size() == 1; }
+    bool onlyDocumentHasStyles() const { return m_activeTreeScopes.isEmpty(); }
     void collectScopedStyleFeaturesTo(RuleFeatureSet&) const;
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     // CSSFontSelectorClient implementation.
-    virtual void fontsNeedUpdate(CSSFontSelector*) OVERRIDE;
+    virtual void fontsNeedUpdate(CSSFontSelector*) override;
 
 private:
     StyleEngine(Document&);
@@ -232,8 +230,6 @@ private:
 
     typedef WillBeHeapHashMap<RawPtrWillBeWeakMember<TreeScope>, OwnPtrWillBeMember<ShadowTreeStyleSheetCollection> > StyleSheetCollectionMap;
     StyleSheetCollectionMap m_styleSheetCollectionMap;
-    typedef WillBeHeapHashSet<RawPtrWillBeMember<const ScopedStyleResolver> > ScopedStyleResolverSet;
-    ScopedStyleResolverSet m_scopedStyleResolvers;
 
     bool m_documentScopeDirty;
     TreeScopeSet m_dirtyTreeScopes;

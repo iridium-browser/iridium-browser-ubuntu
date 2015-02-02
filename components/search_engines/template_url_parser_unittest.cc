@@ -21,10 +21,9 @@ using base::ASCIIToUTF16;
 class ParamFilterImpl : public TemplateURLParser::ParameterFilter {
  public:
   ParamFilterImpl(std::string name_str, std::string value_str);
-  virtual ~ParamFilterImpl();
+  ~ParamFilterImpl() override;
 
-  virtual bool KeepParameter(const std::string& key,
-                             const std::string& value) OVERRIDE;
+  bool KeepParameter(const std::string& key, const std::string& value) override;
 
  private:
   std::string name_str_;
@@ -53,9 +52,9 @@ bool ParamFilterImpl::KeepParameter(const std::string& key,
 class TemplateURLParserTest : public testing::Test {
  protected:
   TemplateURLParserTest();
-  virtual ~TemplateURLParserTest();
+  ~TemplateURLParserTest() override;
 
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   bool is_disabled() const;
 

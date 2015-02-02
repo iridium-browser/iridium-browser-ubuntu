@@ -6,25 +6,31 @@
 #include "base/strings/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "tools/gn/commands.h"
+#include "tools/gn/setup.h"
 
 namespace commands {
-bool FormatFileToString(const std::string& input_filename,
+bool FormatFileToString(Setup* setup,
+                        const SourceFile& file,
                         bool dump_tree,
                         std::string* output);
 }  // namespace commands
 
 #define FORMAT_TEST(n)                                                 \
   TEST(Format, n) {                                                    \
+    ::Setup setup;                                                     \
     std::string out;                                                   \
     std::string expected;                                              \
     EXPECT_TRUE(commands::FormatFileToString(                          \
-        "//tools/gn/format_test_data/" #n ".gn", false, &out));        \
+        &setup,                                                        \
+        SourceFile("//tools/gn/format_test_data/" #n ".gn"),           \
+        false,                                                         \
+        &out));                                                        \
     ASSERT_TRUE(base::ReadFileToString(                                \
         base::FilePath(FILE_PATH_LITERAL("tools/gn/format_test_data/") \
                            FILE_PATH_LITERAL(#n)                       \
                                FILE_PATH_LITERAL(".golden")),          \
         &expected));                                                   \
-    EXPECT_EQ(out, expected);                                          \
+    EXPECT_EQ(expected, out);                                          \
   }
 
 // These are expanded out this way rather than a runtime loop so that
@@ -43,3 +49,30 @@ FORMAT_TEST(011)
 FORMAT_TEST(012)
 FORMAT_TEST(013)
 FORMAT_TEST(014)
+FORMAT_TEST(015)
+FORMAT_TEST(016)
+FORMAT_TEST(017)
+FORMAT_TEST(018)
+FORMAT_TEST(019)
+FORMAT_TEST(020)
+FORMAT_TEST(021)
+FORMAT_TEST(022)
+FORMAT_TEST(023)
+FORMAT_TEST(024)
+FORMAT_TEST(025)
+FORMAT_TEST(026)
+FORMAT_TEST(027)
+FORMAT_TEST(028)
+FORMAT_TEST(029)
+FORMAT_TEST(030)
+FORMAT_TEST(031)
+// TODO(scottmg): Continued conditions aren't aligned properly: FORMAT_TEST(032)
+FORMAT_TEST(033)
+// TODO(scottmg): args+rebase_path unnecessarily split: FORMAT_TEST(034)
+FORMAT_TEST(035)
+FORMAT_TEST(036)
+// TODO(scottmg): Ugly line breaking: FORMAT_TEST(037)
+FORMAT_TEST(038)
+// TODO(scottmg): Bad break, exceeding 80 col: FORMAT_TEST(039)
+// TODO(scottmg): Bad break, exceeding 80 col: FORMAT_TEST(040)
+FORMAT_TEST(041)

@@ -21,6 +21,7 @@
         'data_stream.mojom',
         'data_stream_serialization.mojom',
         'serial.mojom',
+        'serial_serialization.mojom',
       ],
     },
     {
@@ -41,12 +42,12 @@
       ],
       'dependencies': [
         'device_serial_mojo',
-        '../../mojo/mojo_base.gyp:mojo_cpp_bindings',
+        '../../mojo/public/mojo_public.gyp:mojo_cpp_bindings',
         '../../net/net.gyp:net',
       ],
       'export_dependent_settings': [
         'device_serial_mojo',
-        '../../mojo/mojo_base.gyp:mojo_cpp_bindings',
+        '../../mojo/public/mojo_public.gyp:mojo_cpp_bindings',
       ],
       'sources': [
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/data_stream.mojom.cc',
@@ -55,6 +56,8 @@
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/data_stream_serialization.mojom.h',
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/serial.mojom.cc',
         '<(SHARED_INTERMEDIATE_DIR)/device/serial/serial.mojom.h',
+        '<(SHARED_INTERMEDIATE_DIR)/device/serial/serial_serialization.mojom.cc',
+        '<(SHARED_INTERMEDIATE_DIR)/device/serial/serial_serialization.mojom.h',
         'async_waiter.cc',
         'async_waiter.h',
         'buffer.cc',

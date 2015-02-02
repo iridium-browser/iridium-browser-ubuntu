@@ -25,19 +25,19 @@ class FirstRunDialog : public views::DialogDelegateView,
 
  private:
   explicit FirstRunDialog(Profile* profile);
-  virtual ~FirstRunDialog();
+  ~FirstRunDialog() override;
 
   // This terminates the nested message-loop.
   void Done();
 
   // views::DialogDelegate:
-  virtual views::View* CreateExtraView() OVERRIDE;
-  virtual void OnClosed() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual int GetDialogButtons() const OVERRIDE;
+  views::View* CreateExtraView() override;
+  void OnClosed() override;
+  bool Accept() override;
+  int GetDialogButtons() const override;
 
   // views::LinkListener:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   Profile* profile_;
   views::Checkbox* make_default_;

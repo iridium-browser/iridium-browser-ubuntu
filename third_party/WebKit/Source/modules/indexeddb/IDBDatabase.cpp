@@ -70,7 +70,7 @@ const char IDBDatabase::databaseClosedErrorMessage[] = "The database connection 
 
 IDBDatabase* IDBDatabase::create(ExecutionContext* context, PassOwnPtr<WebIDBDatabase> database, IDBDatabaseCallbacks* callbacks)
 {
-    IDBDatabase* idbDatabase = adoptRefCountedGarbageCollectedWillBeNoop(new IDBDatabase(context, database, callbacks));
+    IDBDatabase* idbDatabase = new IDBDatabase(context, database, callbacks);
     idbDatabase->suspendIfNeeded();
     return idbDatabase;
 }
@@ -110,16 +110,10 @@ int64_t IDBDatabase::nextTransactionId()
     return atomicIncrement(&currentTransactionId);
 }
 
-void IDBDatabase::ackReceivedBlobs(const Vector<WebBlobInfo>* blobInfo)
+void IDBDatabase::ackReceivedBlobs(const Vector<String>& uuids)
 {
-    ASSERT(blobInfo);
-    if (!blobInfo->size() || !m_backend)
+    if (!m_backend)
         return;
-    Vector<WebBlobInfo>::const_iterator iter;
-    Vector<String> uuids;
-    uuids.reserveCapacity(blobInfo->size());
-    for (iter = blobInfo->begin(); iter != blobInfo->end(); ++iter)
-        uuids.append(iter->uuid());
     m_backend->ackReceivedBlobs(uuids);
 }
 
@@ -165,7 +159,7 @@ void IDBDatabase::transactionFinished(const IDBTransaction* transaction)
         closeConnection();
 }
 
-void IDBDatabase::onAbort(int64_t transactionId, PassRefPtrWillBeRawPtr<DOMError> error)
+void IDBDatabase::onAbort(int64_t transactionId, DOMError* error)
 {
     ASSERT(m_transactions.contains(transactionId));
     m_transactions.get(transactionId)->onAbort(error);

@@ -56,6 +56,9 @@
     show,                      // Remove: http://crbug.com/392502
     text_changed,
     text_selection_changed,
+    tree_changed,              // Accessibility tree changed. Don't
+                               // explicitly fire an accessibility event,
+                               // only implicitly due to the change.
     value_changed
   };
 
@@ -66,6 +69,7 @@
     application,
     article,
     banner,
+    blockquote,
     browser,
     busy_indicator,
     button,
@@ -80,10 +84,14 @@
     combo_box,
     complementary,
     content_info,
+    date,
+    date_time,
     definition,
     description_list_detail,
+    description_list,
     description_list_term,
     desktop,
+    details,
     dialog,
     directory,
     disclosure_triangle,
@@ -121,21 +129,24 @@
     log,
     main,
     marquee,
-    math_element,
     math,
     matte,
     menu_bar,
     menu_button,
     menu_item,
+    menu_item_check_box,
+    menu_item_radio,
     menu_list_option,
     menu_list_popup,
     menu,
+    meter,
     navigation,
     note,
     outline,
     pane,
     paragraph,
     pop_up_button,
+    pre,
     presentational,
     progress_indicator,
     radio_button,
@@ -169,6 +180,7 @@
     table,
     text_area,
     text_field,
+    time,
     timer,
     title_bar,
     toggle_button,
@@ -180,6 +192,7 @@
     tooltip,
     value_indicator,
     web_area,
+    web_view,
     window
   };
 
@@ -234,6 +247,7 @@
     live_status,
     role,
     shortcut,
+    text_input_type,
     url,
     value
   };
@@ -283,7 +297,13 @@
     color_value_blue,
 
     // Inline text attributes.
-    text_direction
+    text_direction,
+
+    // Uniquely identifies an AXTree.
+    tree_id,
+
+    // Identifies a child tree which this node hosts.
+    child_tree_id
   };
 
   [cpp_enum_prefix_override="ax_attr"] enum AXFloatAttribute {

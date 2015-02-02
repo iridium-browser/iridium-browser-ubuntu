@@ -31,12 +31,13 @@
 #include "core/rendering/ImageQualityController.h"
 #include "core/rendering/PointerEventsHitRules.h"
 #include "core/rendering/RenderImageResource.h"
-#include "core/rendering/svg/RenderSVGResource.h"
+#include "core/rendering/svg/RenderSVGResourceContainer.h"
 #include "core/rendering/svg/SVGRenderSupport.h"
 #include "core/rendering/svg/SVGResources.h"
 #include "core/rendering/svg/SVGResourcesCache.h"
 #include "core/svg/SVGImageElement.h"
 #include "platform/LengthFunctions.h"
+#include "platform/graphics/DisplayList.h"
 
 namespace blink {
 
@@ -60,58 +61,43 @@ void RenderSVGImage::destroy()
     RenderSVGModelObject::destroy();
 }
 
-bool RenderSVGImage::forceNonUniformScaling(SVGImageElement* image) const
+FloatSize RenderSVGImage::computeImageViewportSize(ImageResource& cachedImage) const
 {
+    if (toSVGImageElement(element())->preserveAspectRatio()->currentValue()->align() != SVGPreserveAspectRatio::SVG_PRESERVEASPECTRATIO_NONE)
+        return m_objectBoundingBox.size();
+
     // Images with preserveAspectRatio=none should force non-uniform
     // scaling. This can be achieved by setting the image's container size to
-    // its intrinsic size. If the image does not have an intrinsic size - or
-    // the intrinsic size is degenerate - set the container size to the bounds
-    // as in pAR!=none cases.
+    // its viewport size (i.e. if a viewBox is available - use that - else use intrinsic size.)
     // See: http://www.w3.org/TR/SVG/single-page.html, 7.8 The ‘preserveAspectRatio’ attribute.
-    if (image->preserveAspectRatio()->currentValue()->align() != SVGPreserveAspectRatio::SVG_PRESERVEASPECTRATIO_NONE)
-        return false;
-    ImageResource* cachedImage = m_imageResource->cachedImage();
-    if (!cachedImage)
-        return false;
     Length intrinsicWidth;
     Length intrinsicHeight;
     FloatSize intrinsicRatio;
-    cachedImage->computeIntrinsicDimensions(intrinsicWidth, intrinsicHeight, intrinsicRatio);
-    if (!intrinsicWidth.isFixed() || !intrinsicHeight.isFixed())
-        return false;
-    // If the viewport defined by the referenced image is zero in either
-    // dimension, then SVGImage will have computed an intrinsic size of 300x150.
-    if (!floatValueForLength(intrinsicWidth, 0) || !floatValueForLength(intrinsicHeight, 0))
-        return false;
-    return true;
+    cachedImage.computeIntrinsicDimensions(intrinsicWidth, intrinsicHeight, intrinsicRatio);
+    return intrinsicRatio;
 }
 
 bool RenderSVGImage::updateImageViewport()
 {
     SVGImageElement* image = toSVGImageElement(element());
     FloatRect oldBoundaries = m_objectBoundingBox;
-    bool updatedViewport = false;
 
     SVGLengthContext lengthContext(image);
     m_objectBoundingBox = FloatRect(image->x()->currentValue()->value(lengthContext), image->y()->currentValue()->value(lengthContext), image->width()->currentValue()->value(lengthContext), image->height()->currentValue()->value(lengthContext));
-
     bool boundsChanged = oldBoundaries != m_objectBoundingBox;
 
-    IntSize newViewportSize;
-    if (forceNonUniformScaling(image)) {
-        LayoutSize intrinsicSize = m_imageResource->intrinsicSize(style()->effectiveZoom());
-        if (intrinsicSize != m_imageResource->imageSize(style()->effectiveZoom())) {
-            newViewportSize = roundedIntSize(intrinsicSize);
+    bool updatedViewport = false;
+    ImageResource* cachedImage = m_imageResource->cachedImage();
+    if (cachedImage && cachedImage->usesImageContainerSize()) {
+        FloatSize imageViewportSize = computeImageViewportSize(*cachedImage);
+        if (imageViewportSize != m_imageResource->imageSize(style()->effectiveZoom())) {
+            m_imageResource->setContainerSizeForRenderer(roundedIntSize(imageViewportSize));
             updatedViewport = true;
         }
-    } else if (boundsChanged) {
-        newViewportSize = enclosingIntRect(m_objectBoundingBox).size();
-        updatedViewport = true;
     }
-    if (updatedViewport)
-        m_imageResource->setContainerSizeForRenderer(newViewportSize);
+
     m_needsBoundariesUpdate |= boundsChanged;
-    return updatedViewport;
+    return updatedViewport || boundsChanged;
 }
 
 void RenderSVGImage::layout()
@@ -122,11 +108,13 @@ void RenderSVGImage::layout()
 
     bool transformOrBoundariesUpdate = m_needsTransformUpdate || m_needsBoundariesUpdate;
     if (m_needsTransformUpdate) {
-        m_localTransform = toSVGImageElement(element())->animatedLocalTransform();
+        m_localTransform = toSVGImageElement(element())->calculateAnimatedLocalTransform();
         m_needsTransformUpdate = false;
     }
 
     if (m_needsBoundariesUpdate) {
+        m_bufferedForeground.clear();
+
         m_paintInvalidationBoundingBox = m_objectBoundingBox;
         SVGRenderSupport::intersectPaintInvalidationRectWithResources(this, m_paintInvalidationBoundingBox);
 
@@ -147,11 +135,6 @@ void RenderSVGImage::layout()
 void RenderSVGImage::paint(PaintInfo& paintInfo, const LayoutPoint&)
 {
     SVGImagePainter(*this).paint(paintInfo);
-}
-
-void RenderSVGImage::invalidateBufferedForeground()
-{
-    m_bufferedForeground.clear();
 }
 
 bool RenderSVGImage::nodeAtFloatPoint(const HitTestRequest& request, HitTestResult& result, const FloatPoint& pointInParent, HitTestAction hitTestAction)
@@ -186,16 +169,16 @@ void RenderSVGImage::imageChanged(WrappedImagePtr, const IntRect*)
         resources->removeClientFromCache(this);
 
     // Eventually notify parent resources, that we've changed.
-    RenderSVGResource::markForLayoutAndParentResourceInvalidation(this, false);
+    RenderSVGResourceContainer::markForLayoutAndParentResourceInvalidation(this, false);
 
     // Update the SVGImageCache sizeAndScales entry in case image loading finished after layout.
     // (https://bugs.webkit.org/show_bug.cgi?id=99489)
     m_objectBoundingBox = FloatRect();
     updateImageViewport();
 
-    invalidateBufferedForeground();
+    m_bufferedForeground.clear();
 
-    setShouldDoFullPaintInvalidation(true);
+    setShouldDoFullPaintInvalidation();
 }
 
 void RenderSVGImage::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&, const RenderLayerModelObject*) const

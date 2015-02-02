@@ -8,24 +8,13 @@ namespace gfx {
 
 GpuMemoryBufferHandle::GpuMemoryBufferHandle()
     : type(EMPTY_BUFFER),
+      id(0),
       handle(base::SharedMemory::NULLHandle())
 #if defined(OS_MACOSX)
       ,
-      io_surface_id(0u)
-#endif
-#if defined(OS_ANDROID)
-      ,
-      buffer_id(0)
-#endif
-#if defined(USE_X11)
-      ,
-      pixmap(0)
+      io_surface_id(0)
 #endif
 {
 }
-
-GpuMemoryBuffer::GpuMemoryBuffer() {}
-
-GpuMemoryBuffer::~GpuMemoryBuffer() {}
 
 }  // namespace gfx

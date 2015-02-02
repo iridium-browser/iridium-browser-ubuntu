@@ -42,11 +42,11 @@ class CONTENT_EXPORT AppCacheUpdateJob
   enum ResultType {
     UPDATE_OK, DB_ERROR, DISKCACHE_ERROR, QUOTA_ERROR, REDIRECT_ERROR,
     MANIFEST_ERROR, NETWORK_ERROR, SERVER_ERROR, CANCELLED_ERROR,
-    NUM_UPDATE_JOB_RESULT_TYPES
+    SECURITY_ERROR, NUM_UPDATE_JOB_RESULT_TYPES
   };
 
   AppCacheUpdateJob(AppCacheServiceImpl* service, AppCacheGroup* group);
-  virtual ~AppCacheUpdateJob();
+  ~AppCacheUpdateJob() override;
 
   // Triggers the update process or adds more info if this update is already
   // in progress.
@@ -114,7 +114,7 @@ class CONTENT_EXPORT AppCacheUpdateJob
     URLFetcher(const GURL& url,
                FetchType fetch_type,
                AppCacheUpdateJob* job);
-    virtual ~URLFetcher();
+    ~URLFetcher() override;
     void Start();
     FetchType fetch_type() const { return fetch_type_; }
     net::URLRequest* request() const { return request_.get(); }
@@ -134,12 +134,11 @@ class CONTENT_EXPORT AppCacheUpdateJob
 
    private:
     // URLRequest::Delegate overrides
-    virtual void OnReceivedRedirect(net::URLRequest* request,
-                                    const net::RedirectInfo& redirect_info,
-                                    bool* defer_redirect) OVERRIDE;
-    virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
-    virtual void OnReadCompleted(net::URLRequest* request,
-                                 int bytes_read) OVERRIDE;
+    void OnReceivedRedirect(net::URLRequest* request,
+                            const net::RedirectInfo& redirect_info,
+                            bool* defer_redirect) override;
+    void OnResponseStarted(net::URLRequest* request) override;
+    void OnReadCompleted(net::URLRequest* request, int bytes_read) override;
 
     void AddConditionalHeaders(const net::HttpResponseHeaders* headers);
     void OnWriteComplete(int result);
@@ -165,23 +164,22 @@ class CONTENT_EXPORT AppCacheUpdateJob
   AppCacheResponseWriter* CreateResponseWriter();
 
   // Methods for AppCacheStorage::Delegate.
-  virtual void OnResponseInfoLoaded(AppCacheResponseInfo* response_info,
-                                    int64 response_id) OVERRIDE;
-  virtual void OnGroupAndNewestCacheStored(AppCacheGroup* group,
-                                           AppCache* newest_cache,
-                                           bool success,
-                                           bool would_exceed_quota) OVERRIDE;
-  virtual void OnGroupMadeObsolete(AppCacheGroup* group,
+  void OnResponseInfoLoaded(AppCacheResponseInfo* response_info,
+                            int64 response_id) override;
+  void OnGroupAndNewestCacheStored(AppCacheGroup* group,
+                                   AppCache* newest_cache,
                                    bool success,
-                                   int response_code) OVERRIDE;
+                                   bool would_exceed_quota) override;
+  void OnGroupMadeObsolete(AppCacheGroup* group,
+                           bool success,
+                           int response_code) override;
 
   // Methods for AppCacheHost::Observer.
-  virtual void OnCacheSelectionComplete(AppCacheHost* host) OVERRIDE {}  // N/A
-  virtual void OnDestructionImminent(AppCacheHost* host) OVERRIDE;
+  void OnCacheSelectionComplete(AppCacheHost* host) override {}  // N/A
+  void OnDestructionImminent(AppCacheHost* host) override;
 
   // Methods for AppCacheServiceImpl::Observer.
-  virtual void OnServiceReinitialized(
-      AppCacheStorageReference* old_storage) OVERRIDE;
+  void OnServiceReinitialized(AppCacheStorageReference* old_storage) override;
 
   void HandleCacheFailure(const AppCacheErrorDetails& details,
                           ResultType result,

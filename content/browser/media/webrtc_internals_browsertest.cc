@@ -149,15 +149,14 @@ static const int64 FAKE_TIME_STAMP = 3600000;
 class MAYBE_WebRtcInternalsBrowserTest: public ContentBrowserTest {
  public:
   MAYBE_WebRtcInternalsBrowserTest() {}
-  virtual ~MAYBE_WebRtcInternalsBrowserTest() {}
+  ~MAYBE_WebRtcInternalsBrowserTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
-    // We need fake devices in this test since we want to run on naked VMs. We
-    // assume these switches are set by default in content_browsertests.
-    ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kUseFakeDeviceForMediaStream));
+  void SetUpOnMainThread() override {
+    // Assume this is set by the content test launcher.
     ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kUseFakeUIForMediaStream));
+    ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kUseFakeDeviceForMediaStream));
   }
 
  protected:

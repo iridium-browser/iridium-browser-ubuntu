@@ -48,13 +48,13 @@ class Me2MeHostAuthenticatorFactory : public AuthenticatorFactory {
   static scoped_ptr<AuthenticatorFactory> CreateRejecting();
 
   Me2MeHostAuthenticatorFactory();
-  virtual ~Me2MeHostAuthenticatorFactory();
+  ~Me2MeHostAuthenticatorFactory() override;
 
   // AuthenticatorFactory interface.
-  virtual scoped_ptr<Authenticator> CreateAuthenticator(
+  scoped_ptr<Authenticator> CreateAuthenticator(
       const std::string& local_jid,
       const std::string& remote_jid,
-      const buzz::XmlElement* first_message) OVERRIDE;
+      const buzz::XmlElement* first_message) override;
 
  private:
   // Used for all host authenticators.

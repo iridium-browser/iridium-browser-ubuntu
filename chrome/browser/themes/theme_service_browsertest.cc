@@ -27,10 +27,9 @@ class ThemeServiceBrowserTest : public ExtensionBrowserTest {
  public:
   ThemeServiceBrowserTest() {
   }
-  virtual ~ThemeServiceBrowserTest() {
-  }
+  ~ThemeServiceBrowserTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
     ExtensionBrowserTest::SetUp();
   }

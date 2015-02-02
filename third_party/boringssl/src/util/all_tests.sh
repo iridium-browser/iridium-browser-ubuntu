@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright (c) 2014, Google Inc.
 #
@@ -36,7 +36,7 @@ TESTS="
 ./crypto/ec/example_mul
 ./crypto/ecdsa/ecdsa_test
 ./crypto/err/err_test
-./crypto/evp/example_sign
+./crypto/evp/evp_test
 ./crypto/hmac/hmac_test
 ./crypto/lhash/lhash_test
 ./crypto/md5/md5_test
@@ -54,7 +54,7 @@ TESTS="
 IFS=$'\n'
 for bin in $TESTS; do
   echo $bin
-  out=$(/bin/bash -c "$bin" | tail -n 1)
+  out=$(bash -c "$bin" | tail -n 1)
   if [ $? -ne 0 ]; then
     echo $bin failed to complete.
     exit 1

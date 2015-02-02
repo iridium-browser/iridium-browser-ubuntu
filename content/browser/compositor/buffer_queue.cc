@@ -15,11 +15,13 @@
 namespace content {
 
 BufferQueue::BufferQueue(scoped_refptr<cc::ContextProvider> context_provider,
-                         unsigned int internalformat)
+                         unsigned int internalformat,
+                         GLHelper* gl_helper)
     : context_provider_(context_provider),
       fbo_(0),
       allocated_count_(0),
-      internalformat_(internalformat) {
+      internalformat_(internalformat),
+      gl_helper_(gl_helper) {
 }
 
 BufferQueue::~BufferQueue() {
@@ -54,7 +56,7 @@ void BufferQueue::CopyBufferDamage(int texture,
                                    int source_texture,
                                    const gfx::Rect& new_damage,
                                    const gfx::Rect& old_damage) {
-  ImageTransportFactory::GetInstance()->GetGLHelper()->CopySubBufferDamage(
+  gl_helper_->CopySubBufferDamage(
       texture,
       source_texture,
       SkRegion(SkIRect::MakeXYWH(new_damage.x(),
@@ -155,13 +157,13 @@ BufferQueue::AllocatedSurface BufferQueue::GetNextSurface() {
   // We don't want to allow anything more than triple buffering.
   DCHECK_LT(allocated_count_, 4U);
 
-  unsigned int id = gl->CreateImageCHROMIUM(
-      size_.width(),
-      size_.height(),
-      internalformat_,
-      GL_IMAGE_SCANOUT_CHROMIUM);
+  unsigned int id =
+      gl->CreateGpuMemoryBufferImageCHROMIUM(size_.width(),
+                                             size_.height(),
+                                             internalformat_,
+                                             GL_SCANOUT_CHROMIUM);
   if (!id) {
-    LOG(ERROR) << "Failed to allocate backing CreateImageCHROMIUM surface";
+    LOG(ERROR) << "Failed to allocate backing image surface";
     gl->DeleteTextures(1, &texture);
     return AllocatedSurface();
   }

@@ -20,12 +20,12 @@ namespace {
 class MockSyncErrorFactory : public syncer::SyncErrorFactory {
  public:
   explicit MockSyncErrorFactory(syncer::ModelType type);
-  virtual ~MockSyncErrorFactory();
+  ~MockSyncErrorFactory() override;
 
   // SyncErrorFactory implementation:
-  virtual syncer::SyncError CreateAndUploadError(
+  syncer::SyncError CreateAndUploadError(
       const tracked_objects::Location& location,
-      const std::string& message) OVERRIDE;
+      const std::string& message) override;
 
  private:
   syncer::ModelType type_;
@@ -57,7 +57,7 @@ const char kSplitItemName[] = "X-SuperMoosePowers";
 class SupervisedUserSettingsServiceTest : public ::testing::Test {
  protected:
   SupervisedUserSettingsServiceTest() {}
-  virtual ~SupervisedUserSettingsServiceTest() {}
+  ~SupervisedUserSettingsServiceTest() override {}
 
   scoped_ptr<syncer::SyncChangeProcessor> CreateSyncProcessor() {
     sync_processor_.reset(new syncer::FakeSyncChangeProcessor);
@@ -119,7 +119,7 @@ class SupervisedUserSettingsServiceTest : public ::testing::Test {
   }
 
   // testing::Test overrides:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     TestingPrefStore* pref_store = new TestingPrefStore;
     settings_service_.Init(pref_store);
     settings_service_.Subscribe(
@@ -131,9 +131,7 @@ class SupervisedUserSettingsServiceTest : public ::testing::Test {
     ASSERT_TRUE(settings_);
   }
 
-  virtual void TearDown() OVERRIDE {
-    settings_service_.Shutdown();
-  }
+  void TearDown() override { settings_service_.Shutdown(); }
 
   base::DictionaryValue split_items_;
   scoped_ptr<base::Value> atomic_setting_value_;
@@ -221,23 +219,18 @@ TEST_F(SupervisedUserSettingsServiceTest, UploadItem) {
   // Uploading should produce changes when we start syncing.
   StartSyncing(syncer::SyncDataList());
   ASSERT_EQ(3u, sync_processor_->changes().size());
-  for (syncer::SyncChangeList::const_iterator it =
-           sync_processor_->changes().begin();
-       it != sync_processor_->changes().end();
-       ++it) {
-    ASSERT_TRUE(it->IsValid());
-    EXPECT_EQ(syncer::SyncChange::ACTION_ADD, it->change_type());
-    VerifySyncDataItem(it->sync_data());
+  for (const syncer::SyncChange& sync_change : sync_processor_->changes()) {
+    ASSERT_TRUE(sync_change.IsValid());
+    EXPECT_EQ(syncer::SyncChange::ACTION_ADD, sync_change.change_type());
+    VerifySyncDataItem(sync_change.sync_data());
   }
 
   // It should also show up in local Sync data.
   syncer::SyncDataList sync_data =
       settings_service_.GetAllSyncData(syncer::SUPERVISED_USER_SETTINGS);
   EXPECT_EQ(3u, sync_data.size());
-  for (syncer::SyncDataList::const_iterator it = sync_data.begin();
-       it != sync_data.end(); ++it) {
-    VerifySyncDataItem(*it);
-  }
+  for (const syncer::SyncData& sync_data_item : sync_data)
+    VerifySyncDataItem(sync_data_item);
 
   // Uploading after we have started syncing should work too.
   sync_processor_->changes().clear();
@@ -251,10 +244,8 @@ TEST_F(SupervisedUserSettingsServiceTest, UploadItem) {
   sync_data = settings_service_.GetAllSyncData(
       syncer::SUPERVISED_USER_SETTINGS);
   EXPECT_EQ(4u, sync_data.size());
-  for (syncer::SyncDataList::const_iterator it = sync_data.begin();
-       it != sync_data.end(); ++it) {
-    VerifySyncDataItem(*it);
-  }
+  for (const syncer::SyncData& sync_data_item : sync_data)
+    VerifySyncDataItem(sync_data_item);
 
   // Uploading an item with a previously seen key should create an UPDATE
   // action.
@@ -269,10 +260,8 @@ TEST_F(SupervisedUserSettingsServiceTest, UploadItem) {
   sync_data = settings_service_.GetAllSyncData(
       syncer::SUPERVISED_USER_SETTINGS);
   EXPECT_EQ(4u, sync_data.size());
-  for (syncer::SyncDataList::const_iterator it = sync_data.begin();
-       it != sync_data.end(); ++it) {
-    VerifySyncDataItem(*it);
-  }
+  for (const syncer::SyncData& sync_data_item : sync_data)
+    VerifySyncDataItem(sync_data_item);
 
   sync_processor_->changes().clear();
   UploadAtomicItem("fjord");
@@ -285,10 +274,8 @@ TEST_F(SupervisedUserSettingsServiceTest, UploadItem) {
   sync_data = settings_service_.GetAllSyncData(
       syncer::SUPERVISED_USER_SETTINGS);
   EXPECT_EQ(4u, sync_data.size());
-  for (syncer::SyncDataList::const_iterator it = sync_data.begin();
-       it != sync_data.end(); ++it) {
-    VerifySyncDataItem(*it);
-  }
+  for (const syncer::SyncData& sync_data_item : sync_data)
+    VerifySyncDataItem(sync_data_item);
 
   // The uploaded items should not show up as settings.
   const base::Value* value = NULL;

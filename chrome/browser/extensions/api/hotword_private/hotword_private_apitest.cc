@@ -24,11 +24,9 @@ class MockHotwordService : public HotwordService {
  public:
   explicit MockHotwordService(Profile* profile)
       : HotwordService(profile), service_available_(true) {};
-  virtual ~MockHotwordService() {}
+  ~MockHotwordService() override {}
 
-  virtual bool IsServiceAvailable() OVERRIDE {
-    return service_available_;
-  }
+  bool IsServiceAvailable() override { return service_available_; }
 
   void setServiceAvailable(bool available) {
     service_available_ = available;
@@ -38,7 +36,7 @@ class MockHotwordService : public HotwordService {
     return new MockHotwordService(static_cast<Profile*>(profile));
   }
 
-  virtual LaunchMode GetHotwordAudioVerificationLaunchMode() OVERRIDE {
+  LaunchMode GetHotwordAudioVerificationLaunchMode() override {
     return launch_mode_;
   }
 
@@ -61,16 +59,14 @@ class MockHotwordClient : public HotwordClient {
         recognized_count_(0) {
   }
 
-  virtual ~MockHotwordClient() {}
+  ~MockHotwordClient() override {}
 
-  virtual void OnHotwordStateChanged(bool enabled) OVERRIDE {
+  void OnHotwordStateChanged(bool enabled) override {
     last_enabled_ = enabled;
     state_changed_count_++;
   }
 
-  virtual void OnHotwordRecognized() OVERRIDE {
-    recognized_count_++;
-  }
+  void OnHotwordRecognized() override { recognized_count_++; }
 
   bool last_enabled() const { return last_enabled_; }
   int state_changed_count() const { return state_changed_count_; }
@@ -87,9 +83,9 @@ class MockHotwordClient : public HotwordClient {
 class HotwordPrivateApiTest : public ExtensionApiTest {
  public:
   HotwordPrivateApiTest() {}
-  virtual ~HotwordPrivateApiTest() {}
+  ~HotwordPrivateApiTest() override {}
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
 
     // Whitelist the test extensions (which all share a common ID) to use
@@ -98,7 +94,7 @@ class HotwordPrivateApiTest : public ExtensionApiTest {
         extensions::switches::kWhitelistedExtensionID, kHotwordTestExtensionId);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
 
     test_data_dir_ = test_data_dir_.AppendASCII("hotword_private");
@@ -248,6 +244,10 @@ IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, OnEnabledChanged) {
   profile()->GetPrefs()->SetBoolean(prefs::kHotwordAlwaysOnSearchEnabled,
                                     true);
   EXPECT_TRUE(listenerNotification.WaitUntilSatisfied());
+
+  listenerNotification.Reset();
+  service()->StartTraining();
+  EXPECT_TRUE(listenerNotification.WaitUntilSatisfied());
 }
 
 IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, HotwordSession) {
@@ -273,7 +273,7 @@ IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, HotwordSession) {
 IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, GetLaunchStateHotwordOnly) {
   service()->SetHotwordAudioVerificationLaunchMode(
       HotwordService::HOTWORD_ONLY);
-  ExtensionTestMessageListener listener("launchMode: 1", false);
+  ExtensionTestMessageListener listener("launchMode: 0", false);
   ASSERT_TRUE(RunComponentExtensionTest("getLaunchState")) << message_;
   EXPECT_TRUE(listener.WaitUntilSatisfied());
 }
@@ -282,7 +282,49 @@ IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest,
     GetLaunchStateHotwordAudioHistory) {
   service()->SetHotwordAudioVerificationLaunchMode(
       HotwordService::HOTWORD_AND_AUDIO_HISTORY);
-  ExtensionTestMessageListener listener("launchMode: 2", false);
+  ExtensionTestMessageListener listener("launchMode: 1", false);
   ASSERT_TRUE(RunComponentExtensionTest("getLaunchState")) << message_;
   EXPECT_TRUE(listener.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, OnFinalizeSpeakerModel) {
+  // Trigger the pref registrar.
+  extensions::HotwordPrivateEventService::GetFactoryInstance();
+  ExtensionTestMessageListener listener("ready", false);
+  ASSERT_TRUE(
+      LoadExtensionAsComponent(test_data_dir_.AppendASCII(
+          "onFinalizeSpeakerModel")));
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+  ExtensionTestMessageListener listenerNotification("notification", false);
+  service()->FinalizeSpeakerModel();
+  EXPECT_TRUE(listenerNotification.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, OnHotwordTriggered) {
+  // Trigger the pref registrar.
+  extensions::HotwordPrivateEventService::GetFactoryInstance();
+  ExtensionTestMessageListener listener("ready", false);
+  ASSERT_TRUE(
+      LoadExtensionAsComponent(test_data_dir_.AppendASCII(
+          "onHotwordTriggered")));
+  EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+  ExtensionTestMessageListener listenerNotification("notification", false);
+  service()->NotifyHotwordTriggered();
+  EXPECT_TRUE(listenerNotification.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, Training) {
+  EXPECT_FALSE(service()->IsTraining());
+
+  ExtensionTestMessageListener listenerTrue("start training", false);
+  ASSERT_TRUE(RunComponentExtensionTest("startTraining")) << message_;
+  EXPECT_TRUE(listenerTrue.WaitUntilSatisfied());
+  EXPECT_TRUE(service()->IsTraining());
+
+  ExtensionTestMessageListener listenerFalse("stop training", false);
+  ASSERT_TRUE(RunComponentExtensionTest("stopTraining")) << message_;
+  EXPECT_TRUE(listenerFalse.WaitUntilSatisfied());
+  EXPECT_FALSE(service()->IsTraining());
 }

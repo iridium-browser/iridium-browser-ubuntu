@@ -14,7 +14,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_member.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
@@ -25,7 +24,6 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/net/about_protocol_handler.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
@@ -42,10 +40,10 @@
 #include "extensions/common/features/feature.h"
 #include "net/base/auth.h"
 #include "net/base/capturing_net_log.h"
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/net_util.h"
 #include "net/base/request_priority.h"
 #include "net/base/upload_bytes_element_reader.h"
-#include "net/base/upload_data_stream.h"
 #include "net/base/upload_file_element_reader.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/url_request/url_request_job_factory_impl.h"
@@ -157,7 +155,7 @@ class TestIPCSender : public IPC::Sender {
 
  private:
   // IPC::Sender
-  virtual bool Send(IPC::Message* message) OVERRIDE {
+  bool Send(IPC::Message* message) override {
     EXPECT_EQ(ExtensionMsg_MessageInvoke::ID, message->type());
 
     EXPECT_FALSE(task_queue_.empty());
@@ -180,7 +178,7 @@ class ExtensionWebRequestTest : public testing::Test {
         event_router_(new EventRouterForwarder) {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
         &enable_referrers_, NULL, NULL, profile_.GetTestingPrefService());
@@ -520,7 +518,7 @@ void ExtensionWebRequestTest::FireURLRequestWithData(
   element_readers.push_back(
       new net::UploadBytesElementReader(&(bytes_2[0]), bytes_2.size()));
   request->set_upload(make_scoped_ptr(
-      new net::UploadDataStream(element_readers.Pass(), 0)));
+      new net::ElementsUploadDataStream(element_readers.Pass(), 0)));
   ipc_sender_.PushTask(base::Bind(&base::DoNothing));
   request->Start();
 }
@@ -696,7 +694,7 @@ TEST_F(ExtensionWebRequestTest, NoAccessRequestBodyData) {
   // a POST, PUT and GET request. For none of them the "requestBody" object
   // property should be present in the details passed to the onBeforeRequest
   // event listener.
-  const char* kMethods[] = { "POST", "PUT", "GET" };
+  const char* const kMethods[] = { "POST", "PUT", "GET" };
 
   // Set up a dummy extension name.
   const std::string kEventName(web_request::OnBeforeRequest::kEventName);
@@ -778,7 +776,7 @@ class ExtensionWebRequestHeaderModificationTest
         event_router_(new EventRouterForwarder) {}
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
         &enable_referrers_, NULL, NULL, profile_.GetTestingPrefService());

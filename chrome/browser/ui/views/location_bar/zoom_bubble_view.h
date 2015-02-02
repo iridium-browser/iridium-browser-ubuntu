@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_ZOOM_BUBBLE_VIEW_H_
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "content/public/browser/notification_observer.h"
@@ -50,6 +51,8 @@ class ZoomBubbleView : public views::BubbleDelegateView,
   static const ZoomBubbleView* GetZoomBubbleForTest();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ZoomBubbleBrowserTest, ImmersiveFullscreen);
+
   // Stores information about the extension that initiated the zoom change, if
   // any.
   struct ZoomBubbleExtensionInfo {
@@ -74,7 +77,7 @@ class ZoomBubbleView : public views::BubbleDelegateView,
                  bool auto_close,
                  ImmersiveModeController* immersive_mode_controller,
                  FullscreenController* fullscreen_controller);
-  virtual ~ZoomBubbleView();
+  ~ZoomBubbleView() override;
 
   // If the bubble is not anchored to a view, places the bubble in the top
   // right (left in RTL) of the |screen_bounds| that contain |web_contents_|'s
@@ -100,32 +103,30 @@ class ZoomBubbleView : public views::BubbleDelegateView,
   void StopTimer();
 
   // extensions::IconImage::Observer overrides:
-  virtual void OnExtensionIconImageChanged(
-      extensions::IconImage* /* image */) OVERRIDE;
+  void OnExtensionIconImageChanged(extensions::IconImage* /* image */) override;
 
   // views::View methods.
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
+  void OnMouseEntered(const ui::MouseEvent& event) override;
+  void OnMouseExited(const ui::MouseEvent& event) override;
 
   // ui::EventHandler method.
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // views::ButtonListener method.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::BubbleDelegateView method.
-  virtual void Init() OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
+  void Init() override;
+  void WindowClosing() override;
 
   // content::NotificationObserver method.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ImmersiveModeController::Observer methods.
-  virtual void OnImmersiveRevealStarted() OVERRIDE;
-  virtual void OnImmersiveModeControllerDestroyed() OVERRIDE;
+  void OnImmersiveRevealStarted() override;
+  void OnImmersiveModeControllerDestroyed() override;
 
   ZoomBubbleExtensionInfo extension_info_;
 

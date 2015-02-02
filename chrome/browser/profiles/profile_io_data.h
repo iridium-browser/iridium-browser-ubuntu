@@ -23,9 +23,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "components/content_settings/core/common/content_settings_types.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
 #include "net/cookies/cookie_monster.h"
@@ -183,12 +183,6 @@ class ProfileIOData {
     return &safe_browsing_enabled_;
   }
 
-  // TODO(feng): move the function to protected area.
-  // IsDataReductionProxyEnabled() should be used as public API.
-  BooleanPrefMember* data_reduction_proxy_enabled() const {
-    return &data_reduction_proxy_enabled_;
-  }
-
   BooleanPrefMember* printing_enabled() const {
     return &printing_enabled_;
   }
@@ -261,7 +255,7 @@ class ProfileIOData {
 
   // Returns whether or not data reduction proxy is enabled in the browser
   // instance on which this profile resides.
-  bool IsDataReductionProxyEnabled() const;
+  virtual bool IsDataReductionProxyEnabled() const;
 
   void set_client_cert_store_factory_for_testing(
     const base::Callback<scoped_ptr<net::ClientCertStore>()>& factory) {
@@ -279,7 +273,7 @@ class ProfileIOData {
         scoped_ptr<net::HttpTransactionFactory> http_factory);
 
    private:
-    virtual ~MediaRequestContext();
+    ~MediaRequestContext() override;
 
     scoped_ptr<net::HttpTransactionFactory> http_factory_;
   };
@@ -296,7 +290,7 @@ class ProfileIOData {
     void SetJobFactory(scoped_ptr<net::URLRequestJobFactory> job_factory);
 
    private:
-    virtual ~AppRequestContext();
+    ~AppRequestContext() override;
 
     scoped_refptr<net::CookieStore> cookie_store_;
     scoped_ptr<net::HttpTransactionFactory> http_factory_;
@@ -492,19 +486,19 @@ class ProfileIOData {
   class ResourceContext : public content::ResourceContext {
    public:
     explicit ResourceContext(ProfileIOData* io_data);
-    virtual ~ResourceContext();
+    ~ResourceContext() override;
 
     // ResourceContext implementation:
-    virtual net::HostResolver* GetHostResolver() OVERRIDE;
-    virtual net::URLRequestContext* GetRequestContext() OVERRIDE;
-    virtual scoped_ptr<net::ClientCertStore> CreateClientCertStore() OVERRIDE;
-    virtual void CreateKeygenHandler(
+    net::HostResolver* GetHostResolver() override;
+    net::URLRequestContext* GetRequestContext() override;
+    scoped_ptr<net::ClientCertStore> CreateClientCertStore() override;
+    void CreateKeygenHandler(
         uint32 key_size_in_bits,
         const std::string& challenge_string,
         const GURL& url,
         const base::Callback<void(scoped_ptr<net::KeygenHandler>)>& callback)
-        OVERRIDE;
-    virtual SaltCallback GetMediaDeviceIDSalt() OVERRIDE;
+        override;
+    SaltCallback GetMediaDeviceIDSalt() override;
 
    private:
     friend class ProfileIOData;
@@ -614,7 +608,6 @@ class ProfileIOData {
   mutable BooleanPrefMember enable_do_not_track_;
   mutable BooleanPrefMember force_safesearch_;
   mutable BooleanPrefMember safe_browsing_enabled_;
-  mutable BooleanPrefMember data_reduction_proxy_enabled_;
   mutable BooleanPrefMember printing_enabled_;
   mutable BooleanPrefMember sync_disabled_;
   mutable BooleanPrefMember signin_allowed_;

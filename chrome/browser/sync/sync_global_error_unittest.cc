@@ -35,16 +35,14 @@ class FakeLoginUI : public LoginUIService::LoginUI {
  public:
   FakeLoginUI() : focus_ui_call_count_(0) {}
 
-  virtual ~FakeLoginUI() {}
+  ~FakeLoginUI() override {}
 
   int focus_ui_call_count() const { return focus_ui_call_count_; }
 
  private:
   // Overridden from LoginUIService::LoginUI:
-  virtual void FocusUI() OVERRIDE {
-    ++focus_ui_call_count_;
-  }
-  virtual void CloseUI() OVERRIDE {}
+  void FocusUI() override { ++focus_ui_call_count_; }
+  void CloseUI() override {}
 
   int focus_ui_call_count_;
 };
@@ -58,9 +56,9 @@ KeyedService* BuildMockLoginUIService(content::BrowserContext* profile) {
 class SyncGlobalErrorTest : public BrowserWithTestWindowTest {
  public:
   SyncGlobalErrorTest() {}
-  virtual ~SyncGlobalErrorTest() {}
+  ~SyncGlobalErrorTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     profile_.reset(ProfileSyncServiceMock::MakeSignedInTestingProfile());
 
     BrowserWithTestWindowTest::SetUp();

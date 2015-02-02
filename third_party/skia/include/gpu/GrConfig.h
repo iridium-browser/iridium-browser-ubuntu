@@ -33,11 +33,19 @@
  */
 
 #if !defined(GR_CACHE_STATS)
-    #define GR_CACHE_STATS      0
+  #ifdef SK_DEVELOPER
+      #define GR_CACHE_STATS  1
+  #else
+      #define GR_CACHE_STATS  0
+  #endif
 #endif
 
 #if !defined(GR_GPU_STATS)
-#define GR_GPU_STATS      0
+  #ifdef SK_DEVELOPER
+      #define GR_GPU_STATS    1
+  #else
+      #define GR_GPU_STATS    0
+  #endif
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -89,12 +97,6 @@ typedef unsigned __int64 uint64_t;
 ///////////////////////////////////////////////////////////////////////////////
 // postconfig section:
 //
-
-// By now we must have a GR_..._BUILD symbol set to 1, and a decision about
-// debug -vs- release
-//
-
-#define GrPrintf SkDebugf
 
 /**
  *  GR_STRING makes a string of X where X is expanded before conversion to a string
@@ -159,7 +161,7 @@ typedef unsigned __int64 uint64_t;
     #define GR_ALWAYSASSERT(COND)                                        \
         do {                                                             \
             if (!(COND)) {                                               \
-                GrPrintf("%s %s failed\n", GR_FILE_AND_LINE_STR, #COND); \
+                SkDebugf("%s %s failed\n", GR_FILE_AND_LINE_STR, #COND); \
                 GR_ALWAYSBREAK;                                          \
             }                                                            \
         } while (false)

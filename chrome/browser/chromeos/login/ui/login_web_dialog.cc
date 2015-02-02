@@ -49,14 +49,12 @@ LoginWebDialog::LoginWebDialog(content::BrowserContext* browser_context,
                                Delegate* delegate,
                                gfx::NativeWindow parent_window,
                                const base::string16& title,
-                               const GURL& url,
-                               Style style)
+                               const GURL& url)
     : browser_context_(browser_context),
       parent_window_(parent_window),
       delegate_(delegate),
       title_(title),
       url_(url),
-      style_(style),
       is_open_(false) {
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
   width_ = static_cast<int>(kDefaultWidthRatio * screen_bounds.width());
@@ -144,9 +142,9 @@ void LoginWebDialog::OnCloseContents(WebContents* source,
   if (g_web_contents_stack.Pointer()->size() &&
       source == g_web_contents_stack.Pointer()->front()) {
     g_web_contents_stack.Pointer()->pop_front();
-  } else {
-    NOTREACHED();
   }
+  // Else: TODO(pkotwicz): Investigate if the else case should ever be hit.
+  // http://crbug.com/419837
 }
 
 bool LoginWebDialog::ShouldShowDialogTitle() const {

@@ -37,7 +37,6 @@
 #include "core/dom/MessagePort.h"
 #include "core/events/Event.h"
 #include "modules/EventTargetModules.h"
-#include "platform/NotImplemented.h"
 #include "public/platform/WebMessagePortChannel.h"
 #include "public/platform/WebServiceWorkerState.h"
 #include "public/platform/WebString.h"
@@ -45,7 +44,7 @@
 
 namespace blink {
 
-class ServiceWorker::ThenFunction FINAL : public ScriptFunction {
+class ServiceWorker::ThenFunction final : public ScriptFunction {
 public:
     static v8::Handle<v8::Function> createFunction(ScriptState* scriptState, PassRefPtrWillBeRawPtr<ServiceWorker> observer)
     {
@@ -53,7 +52,7 @@ public:
         return self->bindToV8Function();
     }
 
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         visitor->trace(m_observer);
         ScriptFunction::trace(visitor);
@@ -66,7 +65,7 @@ private:
     {
     }
 
-    virtual ScriptValue call(ScriptValue value) OVERRIDE
+    virtual ScriptValue call(ScriptValue value) override
     {
         m_observer->onPromiseResolved();
         return value;
@@ -120,7 +119,6 @@ String ServiceWorker::scriptURL() const
 const AtomicString& ServiceWorker::state() const
 {
     DEFINE_STATIC_LOCAL(AtomicString, unknown, ("unknown", AtomicString::ConstructFromLiteral));
-    DEFINE_STATIC_LOCAL(AtomicString, parsed, ("parsed", AtomicString::ConstructFromLiteral));
     DEFINE_STATIC_LOCAL(AtomicString, installing, ("installing", AtomicString::ConstructFromLiteral));
     DEFINE_STATIC_LOCAL(AtomicString, installed, ("installed", AtomicString::ConstructFromLiteral));
     DEFINE_STATIC_LOCAL(AtomicString, activating, ("activating", AtomicString::ConstructFromLiteral));
@@ -132,8 +130,6 @@ const AtomicString& ServiceWorker::state() const
         // The web platform should never see this internal state
         ASSERT_NOT_REACHED();
         return unknown;
-    case WebServiceWorkerStateParsed:
-        return parsed;
     case WebServiceWorkerStateInstalling:
         return installing;
     case WebServiceWorkerStateInstalled:
@@ -242,8 +238,7 @@ PassRefPtrWillBeRawPtr<ServiceWorker> ServiceWorker::getOrCreate(ExecutionContex
     if (!outerWorker)
         return nullptr;
 
-    WebServiceWorkerProxy* proxy = outerWorker->proxy();
-    ServiceWorker* existingServiceWorker = proxy ? proxy->unwrap() : 0;
+    ServiceWorker* existingServiceWorker = static_cast<ServiceWorker*>(outerWorker->proxy());
     if (existingServiceWorker) {
         ASSERT(existingServiceWorker->executionContext() == executionContext);
         return existingServiceWorker;
@@ -256,7 +251,6 @@ PassRefPtrWillBeRawPtr<ServiceWorker> ServiceWorker::getOrCreate(ExecutionContex
 
 ServiceWorker::ServiceWorker(ExecutionContext* executionContext, PassOwnPtr<WebServiceWorker> worker)
     : AbstractWorker(executionContext)
-    , WebServiceWorkerProxy(this)
     , m_outerWorker(worker)
     , m_proxyState(Initial)
 {

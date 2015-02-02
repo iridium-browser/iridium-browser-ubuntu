@@ -11,7 +11,6 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_provider.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_result.h"
 #include "chrome/common/chrome_switches.h"
@@ -21,6 +20,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "ui/app_list/search_result.h"
 
 using content::BrowserThread;
 using extensions::Manifest;
@@ -97,10 +97,10 @@ ParsedSearchResult kParsedThreeResults[] = {
 class WebstoreProviderTest : public InProcessBrowserTest {
  public:
   WebstoreProviderTest() {}
-  virtual ~WebstoreProviderTest() {}
+  ~WebstoreProviderTest() override {}
 
   // InProcessBrowserTest overrides:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     test_server_.reset(new EmbeddedTestServer);
 
     ASSERT_TRUE(test_server_->InitializeAndWaitUntilReady());
@@ -121,7 +121,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
     webstore_provider_->set_use_throttling(false);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     EXPECT_TRUE(test_server_->ShutdownAndWaitUntilComplete());
     test_server_.reset();
   }
@@ -206,7 +206,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
       }
     }
 
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   void OnSearchResultsFetched() {
@@ -250,7 +250,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreProviderTest, MAYBE_Basic) {
     {"3 result", kThreeResults, "one,two,three", kParsedThreeResults, 3 },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
     if (kTestCases[i].expected_result_titles) {
       RunQuery(kTestCases[i].query, kTestCases[i].mock_server_response);
       ASSERT_EQ(kTestCases[i].expected_result_titles, GetResultTitles())

@@ -44,25 +44,25 @@ const char kTestWebUIUrl[] = "chrome://blah";
 class WebContentsImplTestWebUIControllerFactory
     : public WebUIControllerFactory {
  public:
-  virtual WebUIController* CreateWebUIControllerForURL(
-      WebUI* web_ui, const GURL& url) const OVERRIDE {
+  WebUIController* CreateWebUIControllerForURL(WebUI* web_ui,
+                                               const GURL& url) const override {
     if (!UseWebUI(url))
       return NULL;
     return new WebUIController(web_ui);
   }
 
-  virtual WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
-      const GURL& url) const OVERRIDE {
+  WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
+                             const GURL& url) const override {
     return WebUI::kNoWebUI;
   }
 
-  virtual bool UseWebUIForURL(BrowserContext* browser_context,
-                              const GURL& url) const OVERRIDE {
+  bool UseWebUIForURL(BrowserContext* browser_context,
+                      const GURL& url) const override {
     return UseWebUI(url);
   }
 
-  virtual bool UseWebUIBindingsForURL(BrowserContext* browser_context,
-                                      const GURL& url) const OVERRIDE {
+  bool UseWebUIBindingsForURL(BrowserContext* browser_context,
+                              const GURL& url) const override {
     return UseWebUI(url);
   }
 
@@ -78,10 +78,11 @@ class TestInterstitialPageDelegate : public InterstitialPageDelegate {
  public:
   explicit TestInterstitialPageDelegate(TestInterstitialPage* interstitial_page)
       : interstitial_page_(interstitial_page) {}
-  virtual void CommandReceived(const std::string& command) OVERRIDE;
-  virtual std::string GetHTMLContents() OVERRIDE { return std::string(); }
-  virtual void OnDontProceed() OVERRIDE;
-  virtual void OnProceed() OVERRIDE;
+  void CommandReceived(const std::string& command) override;
+  std::string GetHTMLContents() override { return std::string(); }
+  void OnDontProceed() override;
+  void OnProceed() override;
+
  private:
   TestInterstitialPage* interstitial_page_;
 };
@@ -130,7 +131,7 @@ class TestInterstitialPage : public InterstitialPageImpl {
     *deleted_ = false;
   }
 
-  virtual ~TestInterstitialPage() {
+  ~TestInterstitialPage() override {
     if (deleted_)
       *deleted_ = true;
     if (delegate_)
@@ -186,9 +187,7 @@ class TestInterstitialPage : public InterstitialPageImpl {
   }
 
  protected:
-  virtual WebContentsView* CreateWebContentsView() OVERRIDE {
-    return NULL;
-  }
+  WebContentsView* CreateWebContentsView() override { return NULL; }
 
  private:
   InterstitialState* state_;
@@ -217,13 +216,13 @@ class TestInterstitialPageStateGuard : public TestInterstitialPage::Delegate {
     DCHECK(interstitial_page_);
     interstitial_page_->set_delegate(this);
   }
-  virtual ~TestInterstitialPageStateGuard() {
+  ~TestInterstitialPageStateGuard() override {
     if (interstitial_page_)
       interstitial_page_->ClearStates();
   }
 
-  virtual void TestInterstitialPageDeleted(
-      TestInterstitialPage* interstitial) OVERRIDE {
+  void TestInterstitialPageDeleted(
+      TestInterstitialPage* interstitial) override {
     DCHECK(interstitial_page_ == interstitial);
     interstitial_page_ = NULL;
   }
@@ -237,9 +236,9 @@ class WebContentsImplTestBrowserClient : public TestContentBrowserClient {
   WebContentsImplTestBrowserClient()
       : assign_site_for_url_(false) {}
 
-  virtual ~WebContentsImplTestBrowserClient() {}
+  ~WebContentsImplTestBrowserClient() override {}
 
-  virtual bool ShouldAssignSiteForURL(const GURL& url) OVERRIDE {
+  bool ShouldAssignSiteForURL(const GURL& url) override {
     return assign_site_for_url_;
   }
 
@@ -253,12 +252,12 @@ class WebContentsImplTestBrowserClient : public TestContentBrowserClient {
 
 class WebContentsImplTest : public RenderViewHostImplTestHarness {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     WebUIControllerFactory::RegisterFactory(&factory_);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     WebUIControllerFactory::UnregisterFactoryForTesting(&factory_);
     RenderViewHostImplTestHarness::TearDown();
   }
@@ -272,16 +271,16 @@ class TestWebContentsObserver : public WebContentsObserver {
   explicit TestWebContentsObserver(WebContents* contents)
       : WebContentsObserver(contents) {
   }
-  virtual ~TestWebContentsObserver() {}
+  ~TestWebContentsObserver() override {}
 
-  virtual void DidFinishLoad(RenderFrameHost* render_frame_host,
-                             const GURL& validated_url) OVERRIDE {
+  void DidFinishLoad(RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override {
     last_url_ = validated_url;
   }
-  virtual void DidFailLoad(RenderFrameHost* render_frame_host,
-                           const GURL& validated_url,
-                           int error_code,
-                           const base::string16& error_description) OVERRIDE {
+  void DidFailLoad(RenderFrameHost* render_frame_host,
+                   const GURL& validated_url,
+                   int error_code,
+                   const base::string16& error_description) override {
     last_url_ = validated_url;
   }
 
@@ -298,15 +297,15 @@ class TestWebContentsObserver : public WebContentsObserver {
 class FakeFullscreenDelegate : public WebContentsDelegate {
  public:
   FakeFullscreenDelegate() : fullscreened_contents_(NULL) {}
-  virtual ~FakeFullscreenDelegate() {}
+  ~FakeFullscreenDelegate() override {}
 
-  virtual void ToggleFullscreenModeForTab(WebContents* web_contents,
-                                          bool enter_fullscreen) OVERRIDE {
+  void ToggleFullscreenModeForTab(WebContents* web_contents,
+                                  bool enter_fullscreen) override {
     fullscreened_contents_ = enter_fullscreen ? web_contents : NULL;
   }
 
-  virtual bool IsFullscreenForTabOrPending(const WebContents* web_contents)
-      const OVERRIDE {
+  bool IsFullscreenForTabOrPending(
+      const WebContents* web_contents) const override {
     return fullscreened_contents_ && web_contents == fullscreened_contents_;
   }
 
@@ -320,9 +319,9 @@ class FakeValidationMessageDelegate : public WebContentsDelegate {
  public:
   FakeValidationMessageDelegate()
       : hide_validation_message_was_called_(false) {}
-  virtual ~FakeValidationMessageDelegate() {}
+  ~FakeValidationMessageDelegate() override {}
 
-  virtual void HideValidationMessage(WebContents* web_contents) OVERRIDE {
+  void HideValidationMessage(WebContents* web_contents) override {
     hide_validation_message_was_called_ = true;
   }
 
@@ -478,10 +477,9 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
       url, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   contents()->TestDidNavigate(orig_rfh, 1, url, ui::PAGE_TRANSITION_TYPED);
 
-  // Keep the number of active views in orig_rfh's SiteInstance non-zero so that
-  // orig_rfh doesn't get deleted when it gets swapped out.
-  static_cast<SiteInstanceImpl*>(orig_rfh->GetSiteInstance())->
-      increment_active_view_count();
+  // Keep the number of active frames in orig_rfh's SiteInstance non-zero so
+  // that orig_rfh doesn't get deleted when it gets swapped out.
+  orig_rfh->GetSiteInstance()->increment_active_frame_count();
 
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rfh->GetRenderViewHost(), contents()->GetRenderViewHost());
@@ -502,7 +500,7 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
 
   // Navigations should be suspended in pending_rfh until BeforeUnloadACK.
   EXPECT_TRUE(pending_rfh->are_navigations_suspended());
-  orig_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  orig_rfh->SendBeforeUnloadACK(true);
   EXPECT_FALSE(pending_rfh->are_navigations_suspended());
 
   // DidNavigate from the pending page
@@ -510,11 +508,10 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
       pending_rfh, 1, url2, ui::PAGE_TRANSITION_TYPED);
   SiteInstance* instance2 = contents()->GetSiteInstance();
 
-  // Keep the number of active views in pending_rfh's SiteInstance
+  // Keep the number of active frames in pending_rfh's SiteInstance
   // non-zero so that orig_rfh doesn't get deleted when it gets
   // swapped out.
-  static_cast<SiteInstanceImpl*>(pending_rfh->GetSiteInstance())->
-      increment_active_view_count();
+  pending_rfh->GetSiteInstance()->increment_active_frame_count();
 
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(pending_rfh, contents()->GetMainFrame());
@@ -537,7 +534,7 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
 
   // Navigations should be suspended in goback_rfh until BeforeUnloadACK.
   EXPECT_TRUE(goback_rfh->are_navigations_suspended());
-  pending_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  pending_rfh->SendBeforeUnloadACK(true);
   EXPECT_FALSE(goback_rfh->are_navigations_suspended());
 
   // DidNavigate from the back action
@@ -549,7 +546,7 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
   EXPECT_TRUE(contents()->GetRenderManagerForTesting()->
       IsOnSwappedOutList(pending_rfh));
   EXPECT_EQ(pending_rvh_delete_count, 0);
-  pending_rfh->OnSwappedOut(false);
+  pending_rfh->OnSwappedOut();
 
   // Close contents and ensure RVHs are deleted.
   DeleteContents();
@@ -631,7 +628,7 @@ TEST_F(WebContentsImplTest, NavigateTwoTabsCrossSite) {
   const GURL url2a("http://www.yahoo.com");
   controller().LoadURL(
       url2a, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  orig_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  orig_rfh->SendBeforeUnloadACK(true);
   TestRenderFrameHost* pending_rfh_a = contents()->GetPendingMainFrame();
   contents()->TestDidNavigate(
       pending_rfh_a, 1, url2a, ui::PAGE_TRANSITION_TYPED);
@@ -644,7 +641,7 @@ TEST_F(WebContentsImplTest, NavigateTwoTabsCrossSite) {
                                      ui::PAGE_TRANSITION_TYPED,
                                      std::string());
   TestRenderFrameHost* rfh2 = contents2->GetMainFrame();
-  rfh2->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  rfh2->SendBeforeUnloadACK(true);
   TestRenderFrameHost* pending_rfh_b = contents2->GetPendingMainFrame();
   EXPECT_TRUE(pending_rfh_b != NULL);
   EXPECT_TRUE(contents2->cross_navigation_pending());
@@ -672,8 +669,7 @@ TEST_F(WebContentsImplTest, NavigateFromSitelessUrl) {
   TestRenderFrameHost* orig_rfh = contents()->GetMainFrame();
   int orig_rvh_delete_count = 0;
   orig_rfh->GetRenderViewHost()->set_delete_counter(&orig_rvh_delete_count);
-  SiteInstanceImpl* orig_instance =
-      static_cast<SiteInstanceImpl*>(contents()->GetSiteInstance());
+  SiteInstanceImpl* orig_instance = contents()->GetSiteInstance();
 
   browser_client.set_assign_site_for_url(false);
   // Navigate to an URL that will not assign a new SiteInstance.
@@ -702,11 +698,10 @@ TEST_F(WebContentsImplTest, NavigateFromSitelessUrl) {
   EXPECT_FALSE(contents()->GetPendingMainFrame());
   contents()->TestDidNavigate(orig_rfh, 1, url, ui::PAGE_TRANSITION_TYPED);
 
-  // Keep the number of active views in orig_rfh's SiteInstance
+  // Keep the number of active frames in orig_rfh's SiteInstance
   // non-zero so that orig_rfh doesn't get deleted when it gets
   // swapped out.
-  static_cast<SiteInstanceImpl*>(orig_rfh->GetSiteInstance())->
-      increment_active_view_count();
+  orig_rfh->GetSiteInstance()->increment_active_frame_count();
 
   EXPECT_EQ(orig_instance, contents()->GetSiteInstance());
   EXPECT_TRUE(
@@ -727,7 +722,7 @@ TEST_F(WebContentsImplTest, NavigateFromSitelessUrl) {
 
   // Navigations should be suspended in pending_rvh until BeforeUnloadACK.
   EXPECT_TRUE(pending_rfh->are_navigations_suspended());
-  orig_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  orig_rfh->SendBeforeUnloadACK(true);
   EXPECT_FALSE(pending_rfh->are_navigations_suspended());
 
   // DidNavigate from the pending page.
@@ -745,7 +740,7 @@ TEST_F(WebContentsImplTest, NavigateFromSitelessUrl) {
   EXPECT_TRUE(contents()->GetRenderManagerForTesting()->IsOnSwappedOutList(
       orig_rfh));
   EXPECT_EQ(orig_rvh_delete_count, 0);
-  orig_rfh->OnSwappedOut(false);
+  orig_rfh->OnSwappedOut();
 
   // Close contents and ensure RVHs are deleted.
   DeleteContents();
@@ -759,8 +754,7 @@ TEST_F(WebContentsImplTest, NavigateFromSitelessUrl) {
 TEST_F(WebContentsImplTest, NavigateFromRestoredSitelessUrl) {
   WebContentsImplTestBrowserClient browser_client;
   SetBrowserClientForTesting(&browser_client);
-  SiteInstanceImpl* orig_instance =
-      static_cast<SiteInstanceImpl*>(contents()->GetSiteInstance());
+  SiteInstanceImpl* orig_instance = contents()->GetSiteInstance();
   TestRenderFrameHost* orig_rfh = contents()->GetMainFrame();
 
   // Restore a navigation entry for URL that should not assign site to the
@@ -803,8 +797,7 @@ TEST_F(WebContentsImplTest, NavigateFromRestoredSitelessUrl) {
 TEST_F(WebContentsImplTest, NavigateFromRestoredRegularUrl) {
   WebContentsImplTestBrowserClient browser_client;
   SetBrowserClientForTesting(&browser_client);
-  SiteInstanceImpl* orig_instance =
-      static_cast<SiteInstanceImpl*>(contents()->GetSiteInstance());
+  SiteInstanceImpl* orig_instance = contents()->GetSiteInstance();
   TestRenderFrameHost* orig_rfh = contents()->GetMainFrame();
 
   // Restore a navigation entry for a regular URL ensuring that the embedder
@@ -856,7 +849,7 @@ TEST_F(WebContentsImplTest, FindOpenerRVHWhenPending) {
   const GURL url2("http://www.yahoo.com");
   controller().LoadURL(
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  orig_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  orig_rfh->SendBeforeUnloadACK(true);
   TestRenderFrameHost* pending_rfh = contents()->GetPendingMainFrame();
 
   // While it is still pending, simulate opening a new tab with the first tab
@@ -937,24 +930,22 @@ TEST_F(WebContentsImplTest, CrossSiteUnloadHandlers) {
   const GURL url2("http://www.yahoo.com");
   controller().LoadURL(
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  EXPECT_TRUE(orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_ack());
   base::TimeTicks now = base::TimeTicks::Now();
   orig_rfh->OnMessageReceived(
       FrameHostMsg_BeforeUnload_ACK(0, false, now, now));
-  EXPECT_FALSE(
-      orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_FALSE(orig_rfh->is_waiting_for_beforeunload_ack());
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rfh, contents()->GetMainFrame());
 
   // Navigate again, but simulate an onbeforeunload approval.
   controller().LoadURL(
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  EXPECT_TRUE(orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_ack());
   now = base::TimeTicks::Now();
   orig_rfh->OnMessageReceived(
       FrameHostMsg_BeforeUnload_ACK(0, true, now, now));
-  EXPECT_FALSE(
-      orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_FALSE(orig_rfh->is_waiting_for_beforeunload_ack());
   EXPECT_TRUE(contents()->cross_navigation_pending());
   TestRenderFrameHost* pending_rfh = contents()->GetPendingMainFrame();
 
@@ -989,7 +980,7 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationPreempted) {
   const GURL url2("http://www.yahoo.com");
   controller().LoadURL(
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  EXPECT_TRUE(orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_ack());
   base::TimeTicks now = base::TimeTicks::Now();
   orig_rfh->OnMessageReceived(FrameHostMsg_BeforeUnload_ACK(0, true, now, now));
   EXPECT_TRUE(contents()->cross_navigation_pending());
@@ -998,8 +989,7 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationPreempted) {
   orig_rfh->SendNavigate(2, GURL("http://www.google.com/foo"));
 
   // Verify that the pending navigation is cancelled.
-  EXPECT_FALSE(
-      orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_FALSE(orig_rfh->is_waiting_for_beforeunload_ack());
   SiteInstance* instance2 = contents()->GetSiteInstance();
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rfh, contents()->GetMainFrame());
@@ -1033,7 +1023,7 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationBackPreempted) {
   TestRenderFrameHost* google_rfh = contents()->GetPendingMainFrame();
 
   // Simulate beforeunload approval.
-  EXPECT_TRUE(ntp_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(ntp_rfh->is_waiting_for_beforeunload_ack());
   base::TimeTicks now = base::TimeTicks::Now();
   ntp_rfh->OnMessageReceived(
       FrameHostMsg_BeforeUnload_ACK(0, true, now, now));
@@ -1084,8 +1074,7 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationBackPreempted) {
   EXPECT_EQ(entry1, controller().GetPendingEntry());
 
   // Simulate beforeunload approval.
-  EXPECT_TRUE(
-      google_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(google_rfh->is_waiting_for_beforeunload_ack());
   now = base::TimeTicks::Now();
   google_rfh->OnMessageReceived(
       FrameHostMsg_BeforeUnload_ACK(0, true, now, now));
@@ -1132,15 +1121,14 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationNotPreemptedByFrame) {
   TestRenderFrameHost* child_rfh = orig_rfh->AppendChild("subframe");
   child_rfh->SendNavigateWithTransition(
       1, GURL("http://google.com/frame"), ui::PAGE_TRANSITION_AUTO_SUBFRAME);
-  EXPECT_TRUE(orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_ack());
 
   // Now simulate the onbeforeunload approval and verify the navigation is
   // not canceled.
   base::TimeTicks now = base::TimeTicks::Now();
   orig_rfh->OnMessageReceived(
       FrameHostMsg_BeforeUnload_ACK(0, true, now, now));
-  EXPECT_FALSE(
-      orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_FALSE(orig_rfh->is_waiting_for_beforeunload_ack());
   EXPECT_TRUE(contents()->cross_navigation_pending());
 }
 
@@ -1162,7 +1150,7 @@ TEST_F(WebContentsImplTest, CrossSiteNotPreemptedDuringBeforeUnload) {
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   TestRenderFrameHost* pending_rfh = contents()->GetPendingMainFrame();
   EXPECT_TRUE(contents()->cross_navigation_pending());
-  EXPECT_TRUE(orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_ack());
 
   // Suppose the first navigation tries to commit now, with a
   // FrameMsg_Stop in flight.  This should not cancel the pending navigation,
@@ -1170,8 +1158,7 @@ TEST_F(WebContentsImplTest, CrossSiteNotPreemptedDuringBeforeUnload) {
   orig_rfh->SendNavigate(1, GURL("chrome://blah"));
   EXPECT_TRUE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rfh, contents()->GetMainFrame());
-  EXPECT_FALSE(
-      orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_FALSE(orig_rfh->is_waiting_for_beforeunload_ack());
 
   // The pending navigation should be able to commit successfully.
   contents()->TestDidNavigate(pending_rfh, 1, url2, ui::PAGE_TRANSITION_TYPED);
@@ -1197,14 +1184,14 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationCanceled) {
   const GURL url2("http://www.yahoo.com");
   controller().LoadURL(
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  EXPECT_TRUE(orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_ack());
   base::TimeTicks now = base::TimeTicks::Now();
   orig_rfh->OnMessageReceived(
       FrameHostMsg_BeforeUnload_ACK(0, true, now, now));
   EXPECT_TRUE(contents()->cross_navigation_pending());
 
   // Simulate swap out message when the response arrives.
-  orig_rfh->OnSwappedOut(false);
+  orig_rfh->OnSwappedOut();
 
   // Suppose the navigation doesn't get a chance to commit, and the user
   // navigates in the current RFH's SiteInstance.
@@ -1213,13 +1200,11 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationCanceled) {
 
   // Verify that the pending navigation is cancelled and the renderer is no
   // longer swapped out.
-  EXPECT_FALSE(
-      orig_rfh->GetRenderViewHost()->is_waiting_for_beforeunload_ack());
+  EXPECT_FALSE(orig_rfh->is_waiting_for_beforeunload_ack());
   SiteInstance* instance2 = contents()->GetSiteInstance();
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rfh, contents()->GetMainFrame());
-  EXPECT_EQ(RenderViewHostImpl::STATE_DEFAULT,
-            orig_rfh->GetRenderViewHost()->rvh_state());
+  EXPECT_EQ(RenderFrameHostImpl::STATE_DEFAULT, orig_rfh->rfh_state());
   EXPECT_EQ(instance1, instance2);
   EXPECT_TRUE(contents()->GetPendingMainFrame() == NULL);
 }
@@ -2467,7 +2452,7 @@ class ContentsZoomChangedDelegate : public WebContentsDelegate {
   }
 
   // WebContentsDelegate:
-  virtual void ContentsZoomChange(bool zoom_in) OVERRIDE {
+  void ContentsZoomChange(bool zoom_in) override {
     contents_zoom_changed_call_count_++;
     last_zoom_in_ = zoom_in;
   }

@@ -16,7 +16,7 @@ class TestExtensionRegistryObserver : public ExtensionRegistryObserver {
  public:
   explicit TestExtensionRegistryObserver(ExtensionRegistry* registry,
                                          const std::string& extension_id);
-  virtual ~TestExtensionRegistryObserver();
+  ~TestExtensionRegistryObserver() override;
 
   void WaitForExtensionWillBeInstalled();
   void WaitForExtensionUninstalled();
@@ -27,22 +27,19 @@ class TestExtensionRegistryObserver : public ExtensionRegistryObserver {
   class Waiter;
 
   // ExtensionRegistryObserver.
-  virtual void OnExtensionWillBeInstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      bool is_update,
-      bool from_ephemeral,
-      const std::string& old_name) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
-  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
-                                 const Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE;
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const Extension* extension,
+                              extensions::UninstallReason reason) override;
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const Extension* extension) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
 
   scoped_ptr<Waiter> will_be_installed_waiter_;
   scoped_ptr<Waiter> uninstalled_waiter_;

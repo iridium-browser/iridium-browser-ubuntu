@@ -20,7 +20,7 @@ html:not([subframe]) #sub-frame-error {
 }
 
 h1 {
-  -webkit-margin-before: 0;
+  margin-top: 0;
 }
 
 h2 {
@@ -64,11 +64,6 @@ a {
 
 #content-top {
   margin: 20px;
-}
-
-#help-box-outer {
-  -webkit-transition: height ease-in 218ms;
-  overflow: hidden;
 }
 
 #help-box-inner {
@@ -208,6 +203,7 @@ html[subframe] body {
   left: 0;
   position: absolute;
   top: 0;
+  transition: background-color .2s ease-in-out;
   width: 100%;
 }
 
@@ -215,8 +211,13 @@ html[subframe] body {
   background-color: #EEE;
 }
 
+#sub-frame-error .icon-generic {
+  margin: 0 0 16px;
+}
+
 #sub-frame-error-details {
   margin: 0 10px;
+  text-align: center;
   visibility: hidden;
 }
 
@@ -230,6 +231,16 @@ html[subframe] body {
 @media (max-width: 200px), (max-height: 95px) {
   #sub-frame-error-details {
     display: none;
+  }
+}
+
+/* Adjust icon for small embedded frames in apps. */
+@media (max-height: 100px) {
+  #sub-frame-error .icon-generic {
+    height: auto;
+    margin: 0;
+    padding-top: 0;
+    width: 25px;
   }
 }
 

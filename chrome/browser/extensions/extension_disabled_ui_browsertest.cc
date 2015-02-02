@@ -34,13 +34,14 @@ using extensions::ExtensionPrefs;
 
 class ExtensionDisabledGlobalErrorTest : public ExtensionBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kAppsGalleryUpdateURL,
                                     "http://localhost/autoupdate/updates.xml");
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
+    ExtensionBrowserTest::SetUpOnMainThread();
     EXPECT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
     service_ = extensions::ExtensionSystem::Get(
         browser()->profile())->extension_service();
@@ -243,7 +244,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
 
 // Test that an error appears if an extension gets installed server side.
 IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, RemoteInstall) {
-  static const char* extension_id = "pgdpcfcocojkjfbgpiianjngphoopgmo";
+  static const char extension_id[] = "pgdpcfcocojkjfbgpiianjngphoopgmo";
   ExtensionSyncService* sync_service =
       ExtensionSyncService::Get(browser()->profile());
 

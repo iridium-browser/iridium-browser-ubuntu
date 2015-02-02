@@ -21,7 +21,6 @@
 #include "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
@@ -34,6 +33,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 using content::OpenURLParams;
@@ -54,10 +54,10 @@ class AsyncUninstaller : public extensions::ExtensionUninstallDialog::Delegate {
     extension_uninstall_dialog_->ConfirmUninstall(extension_);
   }
 
-  virtual ~AsyncUninstaller() {}
+  ~AsyncUninstaller() override {}
 
   // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionUninstallAccepted() OVERRIDE {
+  void ExtensionUninstallAccepted() override {
     extensions::ExtensionSystem::Get(profile_)
         ->extension_service()
         ->UninstallExtension(extension_->id(),
@@ -65,7 +65,7 @@ class AsyncUninstaller : public extensions::ExtensionUninstallDialog::Delegate {
                              base::Bind(&base::DoNothing),
                              NULL);
   }
-  virtual void ExtensionUninstallCanceled() OVERRIDE {}
+  void ExtensionUninstallCanceled() override {}
 
  private:
   // The extension that's being uninstalled.
@@ -233,7 +233,7 @@ class AsyncUninstaller : public extensions::ExtensionUninstallDialog::Delegate {
   } else if (actionManager->GetBrowserAction(*extension_) == action_) {
     BrowserActionsController* controller =
         [toolbarController browserActionsController];
-    popupPoint = [controller popupPointForBrowserAction:extension_];
+    popupPoint = [controller popupPointForId:extension_->id()];
   } else {
     NOTREACHED() << "action_ is not a page action or browser action?";
   }

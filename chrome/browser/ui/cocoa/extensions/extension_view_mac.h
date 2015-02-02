@@ -45,7 +45,7 @@ class ExtensionViewMac : public extensions::ExtensionView {
   static const CGFloat kMaxHeight;
 
   ExtensionViewMac(extensions::ExtensionHost* extension_host, Browser* browser);
-  virtual ~ExtensionViewMac();
+  ~ExtensionViewMac() override;
 
   // Sets the container for this view.
   void set_container(Container* container) { container_ = container; }
@@ -54,15 +54,15 @@ class ExtensionViewMac : public extensions::ExtensionView {
   void WindowFrameChanged();
 
   // extensions::ExtensionView:
-  virtual void Init() OVERRIDE;
-  virtual Browser* GetBrowser() OVERRIDE;
-  virtual gfx::NativeView GetNativeView() OVERRIDE;
-  virtual void ResizeDueToAutoResize(const gfx::Size& new_size) OVERRIDE;
-  virtual void RenderViewCreated() OVERRIDE;
-  virtual void HandleKeyboardEvent(
+  void Init() override;
+  Browser* GetBrowser() override;
+  gfx::NativeView GetNativeView() override;
+  void ResizeDueToAutoResize(const gfx::Size& new_size) override;
+  void RenderViewCreated() override;
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) override;
+  void DidStopLoading() override;
 
  private:
   content::RenderViewHost* render_view_host() const;

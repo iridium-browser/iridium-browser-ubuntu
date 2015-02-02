@@ -99,20 +99,20 @@ class AutofillManagerTestDelegateImpl
     : public autofill::AutofillManagerTestDelegate {
  public:
   AutofillManagerTestDelegateImpl() {}
-  virtual ~AutofillManagerTestDelegateImpl() {}
+  ~AutofillManagerTestDelegateImpl() override {}
 
   // autofill::AutofillManagerTestDelegate:
-  virtual void DidPreviewFormData() OVERRIDE {
+  void DidPreviewFormData() override {
     ASSERT_TRUE(loop_runner_->loop_running());
     loop_runner_->Quit();
   }
 
-  virtual void DidFillFormData() OVERRIDE {
+  void DidFillFormData() override {
     ASSERT_TRUE(loop_runner_->loop_running());
     loop_runner_->Quit();
   }
 
-  virtual void DidShowSuggestions() OVERRIDE {
+  void DidShowSuggestions() override {
     ASSERT_TRUE(loop_runner_->loop_running());
     loop_runner_->Quit();
   }
@@ -149,7 +149,7 @@ class WindowedPersonalDataManagerObserver
     infobar_service_->AddObserver(this);
   }
 
-  virtual ~WindowedPersonalDataManagerObserver() {
+  ~WindowedPersonalDataManagerObserver() override {
     while (infobar_service_->infobar_count() > 0) {
       infobar_service_->RemoveInfoBar(infobar_service_->infobar_at(0));
     }
@@ -157,7 +157,7 @@ class WindowedPersonalDataManagerObserver
   }
 
   // PersonalDataManagerObserver:
-  virtual void OnPersonalDataChanged() OVERRIDE {
+  void OnPersonalDataChanged() override {
     if (has_run_message_loop_) {
       base::MessageLoopForUI::current()->Quit();
       has_run_message_loop_ = false;
@@ -165,9 +165,7 @@ class WindowedPersonalDataManagerObserver
     alerted_ = true;
   }
 
-  virtual void OnInsufficientFormData() OVERRIDE {
-    OnPersonalDataChanged();
-  }
+  void OnInsufficientFormData() override { OnPersonalDataChanged(); }
 
 
   void Wait() {
@@ -181,7 +179,7 @@ class WindowedPersonalDataManagerObserver
 
  private:
   // infobars::InfoBarManager::Observer:
-  virtual void OnInfoBarAdded(infobars::InfoBar* infobar) OVERRIDE {
+  void OnInfoBarAdded(infobars::InfoBar* infobar) override {
     infobar_service_->infobar_at(0)->delegate()->AsConfirmInfoBarDelegate()->
         Accept();
   }
@@ -202,10 +200,10 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
       key_press_event_sink_(
           base::Bind(&AutofillInteractiveTest::HandleKeyPressEvent,
                      base::Unretained(this))) {}
-  virtual ~AutofillInteractiveTest() {}
+  ~AutofillInteractiveTest() override {}
 
   // InProcessBrowserTest:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Don't want Keychain coming up on Mac.
     test::DisableSystemServices(browser()->profile()->GetPrefs());
 
@@ -224,7 +222,7 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
     ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(reset_mouse));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // Make sure to close any showing popups prior to tearing down the UI.
     content::WebContents* web_contents = GetWebContents();
     AutofillManager* autofill_manager = ContentAutofillDriver::FromWebContents(
@@ -660,7 +658,15 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, OnDeleteValueAfterAutofill) {
 
 // Test that an input field is not rendered with the yellow autofilled
 // background color when choosing an option from the datalist suggestion list.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, OnSelectOptionFromDatalist) {
+#if defined(OS_MACOSX)
+// Flakily triggers and assert on Mac.
+// http://crbug.com/419868
+#define MAYBE_OnSelectOptionFromDatalist DISABLED_OnSelectOptionFromDatalist
+#else
+#define MAYBE_OnSelectOptionFromDatalist OnSelectOptionFromDatalist
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
+                       MAYBE_OnSelectOptionFromDatalist) {
   // Load the test page.
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(
       browser(),

@@ -201,7 +201,13 @@ WebInspector.ContextSubMenuItem.prototype = {
 WebInspector.ContextMenu = function(event)
 {
     WebInspector.ContextSubMenuItem.call(this, this, "");
+    /** @type {!Array.<!Promise.<!Array.<!WebInspector.ContextMenu.Provider>>>} */
+    this._pendingPromises = [];
+    /** @type {!Array.<!Promise.<!Object>>} */
+    this._pendingTargets = [];
     this._event = event;
+    this._x = event.x;
+    this._y = event.y;
     this._handlers = {};
     this._id = 0;
 }
@@ -218,6 +224,24 @@ WebInspector.ContextMenu.initialize = function()
     }
 }
 
+/**
+ * @param {!Document} doc
+ */
+WebInspector.ContextMenu.installHandler = function(doc)
+{
+    doc.body.addEventListener("contextmenu", handler, false);
+
+    /**
+     * @param {!Event} event
+     */
+    function handler(event)
+    {
+        var contextMenu = new WebInspector.ContextMenu(event);
+        contextMenu.appendApplicableItems(/** @type {!Object} */ (event.target));
+        contextMenu.show();
+    }
+}
+
 WebInspector.ContextMenu.prototype = {
     /**
      * @return {number}
@@ -229,19 +253,51 @@ WebInspector.ContextMenu.prototype = {
 
     show: function()
     {
+        Promise.all(this._pendingPromises).then(populateAndShow.bind(this)).done();
+        WebInspector.ContextMenu._pendingMenu = this;
+
+        /**
+         * @param {!Array.<!Array.<!WebInspector.ContextMenu.Provider>>} appendCallResults
+         * @this {WebInspector.ContextMenu}
+         */
+        function populateAndShow(appendCallResults)
+        {
+            if (WebInspector.ContextMenu._pendingMenu !== this)
+                return;
+            delete WebInspector.ContextMenu._pendingMenu;
+
+            for (var i = 0; i < appendCallResults.length; ++i) {
+                var providers = appendCallResults[i];
+                var target = this._pendingTargets[i];
+
+                for (var j = 0; j < providers.length; ++j) {
+                    var provider = /** @type {!WebInspector.ContextMenu.Provider} */ (providers[j]);
+                    this.appendSeparator();
+                    provider.appendApplicableItems(this._event, this, target);
+                    this.appendSeparator();
+                }
+            }
+
+            this._pendingPromises = [];
+            this._pendingTargets = [];
+            this._innerShow();
+        }
+
+        this._event.consume(true);
+    },
+
+    _innerShow: function()
+    {
         var menuObject = this._buildDescriptor();
 
-        if (menuObject.length) {
-            WebInspector._contextMenu = this;
-            if (WebInspector.ContextMenu._useSoftMenu || InspectorFrontendHost.isHostedMode()) {
-                var softMenu = new WebInspector.SoftContextMenu(menuObject, this._itemSelected.bind(this));
-                softMenu.show(this._event.x, this._event.y);
-            } else {
-                InspectorFrontendHost.showContextMenuAtPoint(this._event.x, this._event.y, menuObject);
-                InspectorFrontendHost.events.addEventListener(InspectorFrontendHostAPI.Events.ContextMenuCleared, this._menuCleared, this);
-                InspectorFrontendHost.events.addEventListener(InspectorFrontendHostAPI.Events.ContextMenuItemSelected, this._onItemSelected, this);
-            }
-            this._event.consume(true);
+        WebInspector._contextMenu = this;
+        if (WebInspector.ContextMenu._useSoftMenu || InspectorFrontendHost.isHostedMode()) {
+            var softMenu = new WebInspector.SoftContextMenu(menuObject, this._itemSelected.bind(this));
+            softMenu.show(this._event.target.ownerDocument, this._x, this._y);
+        } else {
+            InspectorFrontendHost.showContextMenuAtPoint(this._x, this._y, menuObject, this._event.target.ownerDocument);
+            InspectorFrontendHost.events.addEventListener(InspectorFrontendHostAPI.Events.ContextMenuCleared, this._menuCleared, this);
+            InspectorFrontendHost.events.addEventListener(InspectorFrontendHostAPI.Events.ContextMenuItemSelected, this._onItemSelected, this);
         }
     },
 
@@ -295,19 +351,8 @@ WebInspector.ContextMenu.prototype = {
      */
     appendApplicableItems: function(target)
     {
-        self.runtime.extensions(WebInspector.ContextMenu.Provider, target).forEach(processProviders.bind(this));
-
-        /**
-         * @param {!Runtime.Extension} extension
-         * @this {WebInspector.ContextMenu}
-         */
-        function processProviders(extension)
-        {
-            var provider = /** @type {!WebInspector.ContextMenu.Provider} */ (extension.instance());
-            this.appendSeparator();
-            provider.appendApplicableItems(this._event, this, target);
-            this.appendSeparator();
-        }
+        this._pendingPromises.push(self.runtime.instancesPromise(WebInspector.ContextMenu.Provider, target));
+        this._pendingTargets.push(target);
     },
 
     __proto__: WebInspector.ContextSubMenuItem.prototype

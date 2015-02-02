@@ -19,7 +19,6 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/pref_names.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/omnibox/omnibox_field_trial.h"
 #include "components/search/search.h"
@@ -178,17 +177,14 @@ std::string UIThreadSearchTermsData::NTPIsThemedParam() const {
 // VersionInfo.
 std::string UIThreadSearchTermsData::GoogleImageSearchSource() const {
   chrome::VersionInfo version_info;
-  if (version_info.is_valid()) {
-    std::string version(version_info.Name() + " " + version_info.Version());
-    if (version_info.IsOfficialBuild())
-      version += " (Official)";
-    version += " " + version_info.OSType();
-    std::string modifier(version_info.GetVersionStringModifier());
-    if (!modifier.empty())
-      version += " " + modifier;
-    return version;
-  }
-  return "unknown";
+  std::string version(version_info.Name() + " " + version_info.Version());
+  if (version_info.IsOfficialBuild())
+    version += " (Official)";
+  version += " " + version_info.OSType();
+  std::string modifier(version_info.GetVersionStringModifier());
+  if (!modifier.empty())
+    version += " " + modifier;
+  return version;
 }
 
 // static

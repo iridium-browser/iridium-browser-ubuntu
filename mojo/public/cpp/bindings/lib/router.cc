@@ -14,13 +14,11 @@ namespace internal {
 class ResponderThunk : public MessageReceiver {
  public:
   explicit ResponderThunk(const SharedData<Router*>& router)
-      : router_(router) {
-  }
-  virtual ~ResponderThunk() {
-  }
+      : router_(router) {}
+  ~ResponderThunk() override {}
 
   // MessageReceiver implementation:
-  virtual bool Accept(Message* message) MOJO_OVERRIDE {
+  bool Accept(Message* message) override {
     MOJO_DCHECK(message->has_flag(kMessageIsResponse));
 
     bool result = false;
@@ -58,7 +56,7 @@ Router::Router(ScopedMessagePipeHandle message_pipe,
       filters_(filters.Pass()),
       connector_(message_pipe.Pass(), waiter),
       weak_self_(this),
-      incoming_receiver_(NULL),
+      incoming_receiver_(nullptr),
       next_request_id_(0),
       testing_mode_(false) {
   filters_.SetSink(&thunk_);
@@ -66,10 +64,11 @@ Router::Router(ScopedMessagePipeHandle message_pipe,
 }
 
 Router::~Router() {
-  weak_self_.set_value(NULL);
+  weak_self_.set_value(nullptr);
 
   for (ResponderMap::const_iterator i = responders_.begin();
-       i != responders_.end(); ++i) {
+       i != responders_.end();
+       ++i) {
     delete i->second;
   }
 }
@@ -79,8 +78,7 @@ bool Router::Accept(Message* message) {
   return connector_.Accept(message);
 }
 
-bool Router::AcceptWithResponder(Message* message,
-                                 MessageReceiver* responder) {
+bool Router::AcceptWithResponder(Message* message, MessageReceiver* responder) {
   MOJO_DCHECK(message->has_flag(kMessageExpectsResponse));
 
   // Reserve 0 in case we want it to convey special meaning in the future.

@@ -19,7 +19,7 @@
 // to them.
 class MediaStreamInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  virtual ~MediaStreamInfoBarDelegate();
+  ~MediaStreamInfoBarDelegate() override;
 
   // Handles a permission request (in |request|) for |web_contents|.  If this
   // involves prompting the user, creates a media stream infobar and delegate,
@@ -37,16 +37,16 @@ class MediaStreamInfoBarDelegate : public ConfirmInfoBarDelegate {
       scoped_ptr<MediaStreamDevicesController> controller);
 
   // ConfirmInfoBarDelegate:
-  virtual void InfoBarDismissed() OVERRIDE;
-  virtual int GetIconID() const OVERRIDE;
-  virtual Type GetInfoBarType() const OVERRIDE;
-  virtual MediaStreamInfoBarDelegate* AsMediaStreamInfoBarDelegate() OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual base::string16 GetLinkText() const OVERRIDE;
-  virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
+  void InfoBarDismissed() override;
+  int GetIconID() const override;
+  Type GetInfoBarType() const override;
+  MediaStreamInfoBarDelegate* AsMediaStreamInfoBarDelegate() override;
+  base::string16 GetMessageText() const override;
+  base::string16 GetButtonLabel(InfoBarButton button) const override;
+  bool Accept() override;
+  bool Cancel() override;
+  base::string16 GetLinkText() const override;
+  bool LinkClicked(WindowOpenDisposition disposition) override;
 
   scoped_ptr<MediaStreamDevicesController> controller_;
 

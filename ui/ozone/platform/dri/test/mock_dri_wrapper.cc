@@ -7,8 +7,9 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "base/logging.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "ui/ozone/platform/dri/hardware_display_controller.h"
+#include "ui/ozone/platform/dri/crtc_controller.h"
 
 namespace ui {
 
@@ -29,6 +30,7 @@ MockDriWrapper::MockDriWrapper(int fd)
       remove_framebuffer_call_count_(0),
       page_flip_call_count_(0),
       overlay_flip_call_count_(0),
+      handle_events_count_(0),
       set_crtc_expectation_(true),
       add_framebuffer_expectation_(true),
       page_flip_expectation_(true),
@@ -87,7 +89,7 @@ bool MockDriWrapper::PageFlip(uint32_t crtc_id,
                               void* data) {
   page_flip_call_count_++;
   current_framebuffer_ = framebuffer;
-  controllers_.push(static_cast<ui::HardwareDisplayController*>(data));
+  controllers_.push(static_cast<ui::CrtcController*>(data));
   return page_flip_expectation_;
 }
 
@@ -111,6 +113,10 @@ bool MockDriWrapper::SetProperty(uint32_t connector_id,
   return true;
 }
 
+bool MockDriWrapper::GetCapability(uint64_t capability, uint64_t* value) {
+  return true;
+}
+
 ScopedDrmPropertyBlobPtr MockDriWrapper::GetPropertyBlob(
     drmModeConnector* connector,
     const char* name) {
@@ -131,6 +137,7 @@ void MockDriWrapper::HandleEvent(drmEventContext& event) {
   CHECK(!controllers_.empty());
   controllers_.front()->OnPageFlipEvent(0, 0, 0);
   controllers_.pop();
+  handle_events_count_++;
 }
 
 bool MockDriWrapper::CreateDumbBuffer(const SkImageInfo& info,

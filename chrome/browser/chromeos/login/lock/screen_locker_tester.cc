@@ -12,7 +12,6 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/lock/webui_screen_locker.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/login/auth/auth_status_consumer.h"
 #include "chromeos/login/auth/fake_extended_authenticator.h"
 #include "chromeos/login/auth/mock_authenticator.h"
@@ -41,12 +40,12 @@ class LoginAttemptObserver : public chromeos::AuthStatusConsumer {
   void WaitForAttempt();
 
   // Overridden from AuthStatusConsumer:
-  virtual void OnAuthFailure(const chromeos::AuthFailure& error) OVERRIDE {
+  virtual void OnAuthFailure(const chromeos::AuthFailure& error) override {
     LoginAttempted();
   }
 
   virtual void OnAuthSuccess(
-      const chromeos::UserContext& credentials) OVERRIDE {
+      const chromeos::UserContext& credentials) override {
     LoginAttempted();
   }
 
@@ -95,12 +94,12 @@ namespace test {
 class WebUIScreenLockerTester : public ScreenLockerTester {
  public:
   // ScreenLockerTester overrides:
-  virtual void SetPassword(const std::string& password) OVERRIDE;
-  virtual std::string GetPassword() OVERRIDE;
-  virtual void EnterPassword(const std::string& password) OVERRIDE;
-  virtual void EmulateWindowManagerReady() OVERRIDE;
-  virtual views::Widget* GetWidget() const OVERRIDE;
-  virtual views::Widget* GetChildWidget() const OVERRIDE;
+  virtual void SetPassword(const std::string& password) override;
+  virtual std::string GetPassword() override;
+  virtual void EnterPassword(const std::string& password) override;
+  virtual void EmulateWindowManagerReady() override;
+  virtual views::Widget* GetWidget() const override;
+  virtual views::Widget* GetChildWidget() const override;
 
  private:
   friend class chromeos::ScreenLocker;

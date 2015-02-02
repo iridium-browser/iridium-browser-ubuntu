@@ -17,47 +17,42 @@ namespace syncer {
 class FakeSyncScheduler : public SyncScheduler {
  public:
   FakeSyncScheduler();
-  virtual ~FakeSyncScheduler();
+  ~FakeSyncScheduler() override;
 
-  virtual void Start(Mode mode) OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual void ScheduleLocalNudge(
+  void Start(Mode mode) override;
+  void Stop() override;
+  void ScheduleLocalNudge(
       ModelTypeSet types,
-      const tracked_objects::Location& nudge_location) OVERRIDE;
-  virtual void ScheduleLocalRefreshRequest(
+      const tracked_objects::Location& nudge_location) override;
+  void ScheduleLocalRefreshRequest(
       ModelTypeSet types,
-      const tracked_objects::Location& nudge_location) OVERRIDE;
-  virtual void ScheduleInvalidationNudge(
+      const tracked_objects::Location& nudge_location) override;
+  void ScheduleInvalidationNudge(
       syncer::ModelType type,
       scoped_ptr<InvalidationInterface> interface,
-      const tracked_objects::Location& nudge_location) OVERRIDE;
-  virtual void ScheduleConfiguration(
-      const ConfigurationParams& params) OVERRIDE;
-  virtual void ScheduleInitialSyncNudge(syncer::ModelType model_type) OVERRIDE;
-  virtual void SetNotificationsEnabled(bool notifications_enabled) OVERRIDE;
+      const tracked_objects::Location& nudge_location) override;
+  void ScheduleConfiguration(const ConfigurationParams& params) override;
+  void ScheduleInitialSyncNudge(syncer::ModelType model_type) override;
+  void SetNotificationsEnabled(bool notifications_enabled) override;
 
-  virtual void OnCredentialsUpdated() OVERRIDE;
-  virtual void OnConnectionStatusChange() OVERRIDE;
+  void OnCredentialsUpdated() override;
+  void OnConnectionStatusChange() override;
 
   // SyncSession::Delegate implementation.
-  virtual void OnThrottled(
-      const base::TimeDelta& throttle_duration) OVERRIDE;
-  virtual void OnTypesThrottled(
-      ModelTypeSet types,
-      const base::TimeDelta& throttle_duration) OVERRIDE;
-  virtual bool IsCurrentlyThrottled() OVERRIDE;
-  virtual void OnReceivedShortPollIntervalUpdate(
-      const base::TimeDelta& new_interval) OVERRIDE;
-  virtual void OnReceivedLongPollIntervalUpdate(
-      const base::TimeDelta& new_interval) OVERRIDE;
-  virtual void OnReceivedCustomNudgeDelays(
-      const std::map<ModelType, base::TimeDelta>& nudge_delays) OVERRIDE;
-  virtual void OnReceivedClientInvalidationHintBufferSize(int size) OVERRIDE;
-  virtual void OnSyncProtocolError(
-      const SyncProtocolError& error) OVERRIDE;
-  virtual void OnReceivedGuRetryDelay(
-      const base::TimeDelta& delay) OVERRIDE;
-  virtual void OnReceivedMigrationRequest(ModelTypeSet types) OVERRIDE;
+  void OnThrottled(const base::TimeDelta& throttle_duration) override;
+  void OnTypesThrottled(ModelTypeSet types,
+                        const base::TimeDelta& throttle_duration) override;
+  bool IsCurrentlyThrottled() override;
+  void OnReceivedShortPollIntervalUpdate(
+      const base::TimeDelta& new_interval) override;
+  void OnReceivedLongPollIntervalUpdate(
+      const base::TimeDelta& new_interval) override;
+  void OnReceivedCustomNudgeDelays(
+      const std::map<ModelType, base::TimeDelta>& nudge_delays) override;
+  void OnReceivedClientInvalidationHintBufferSize(int size) override;
+  void OnSyncProtocolError(const SyncProtocolError& error) override;
+  void OnReceivedGuRetryDelay(const base::TimeDelta& delay) override;
+  void OnReceivedMigrationRequest(ModelTypeSet types) override;
 };
 
 }  // namespace syncer

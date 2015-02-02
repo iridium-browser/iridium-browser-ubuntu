@@ -20,18 +20,16 @@ class ClipboardX11 : public Clipboard,
                      public base::MessageLoopForIO::Watcher {
  public:
   ClipboardX11();
-  virtual ~ClipboardX11();
+  ~ClipboardX11() override;
 
   // Clipboard interface.
-  virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
-  virtual void InjectClipboardEvent(
-      const protocol::ClipboardEvent& event) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
+  void InjectClipboardEvent(const protocol::ClipboardEvent& event) override;
+  void Stop() override;
 
   // MessageLoopForIO::Watcher interface.
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
-  virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE;
+  void OnFileCanReadWithoutBlocking(int fd) override;
+  void OnFileCanWriteWithoutBlocking(int fd) override;
 
  private:
   void OnClipboardChanged(const std::string& mime_type,
@@ -128,7 +126,7 @@ void ClipboardX11::PumpXEvents() {
 }
 
 scoped_ptr<Clipboard> Clipboard::Create() {
-  return scoped_ptr<Clipboard>(new ClipboardX11());
+  return make_scoped_ptr(new ClipboardX11());
 }
 
 }  // namespace remoting

@@ -17,7 +17,6 @@
 #include "base/time/clock.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
 #include "chrome/browser/notifications/notification.h"
@@ -28,6 +27,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
@@ -72,12 +72,12 @@ class MessageCenterChangeObserver
     message_center::MessageCenter::Get()->AddObserver(this);
   }
 
-  virtual ~MessageCenterChangeObserver() {
+  ~MessageCenterChangeObserver() override {
     message_center::MessageCenter::Get()->RemoveObserver(this);
   }
 
   // NotificationChangeObserver:
-  virtual bool Wait() OVERRIDE {
+  bool Wait() override {
     if (notification_received_)
       return true;
 
@@ -87,18 +87,16 @@ class MessageCenterChangeObserver
   }
 
   // message_center::MessageCenterObserver:
-  virtual void OnNotificationAdded(
-      const std::string& notification_id) OVERRIDE {
+  void OnNotificationAdded(const std::string& notification_id) override {
     OnMessageCenterChanged();
   }
 
-  virtual void OnNotificationRemoved(const std::string& notification_id,
-                                     bool by_user) OVERRIDE {
+  void OnNotificationRemoved(const std::string& notification_id,
+                             bool by_user) override {
     OnMessageCenterChanged();
   }
 
-  virtual void OnNotificationUpdated(
-      const std::string& notification_id) OVERRIDE {
+  void OnNotificationUpdated(const std::string& notification_id) override {
     OnMessageCenterChanged();
   }
 

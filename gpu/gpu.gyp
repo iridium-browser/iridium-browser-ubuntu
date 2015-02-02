@@ -29,6 +29,11 @@
       'sources': [
         '<@(gles2_implementation_source_files)',
       ],
+      'includes': [
+        # Disable LTO due to ELF section name out of range
+        # crbug.com/422251
+        '../build/android/disable_lto.gypi',
+      ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [4267, ],
     },
@@ -56,35 +61,10 @@
     },
     {
       # Library emulates GLES2 using command_buffers.
-      # GN version: //gpu/command_buffer/client:gles2_implementation_client_side_arrays
-      'target_name': 'gles2_implementation_client_side_arrays',
+      'target_name': 'gles2_implementation_no_check',
       'type': '<(component)',
       'defines': [
         'GLES2_IMPL_IMPLEMENTATION',
-        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
-      ],
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../third_party/khronos/khronos.gyp:khronos_headers',
-        '../ui/gl/gl.gyp:gl',
-        '../ui/gfx/gfx.gyp:gfx_geometry',
-        '../ui/gfx/gfx.gyp:gfx',
-        'command_buffer/command_buffer.gyp:gles2_utils',
-        'gles2_cmd_helper',
-      ],
-      'sources': [
-        '<@(gles2_implementation_source_files)',
-      ],
-      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-      'msvs_disabled_warnings': [ 4267, ],
-    },
-    {
-      # Library emulates GLES2 using command_buffers.
-      'target_name': 'gles2_implementation_client_side_arrays_no_check',
-      'type': '<(component)',
-      'defines': [
-        'GLES2_IMPL_IMPLEMENTATION',
-        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
         'GLES2_CONFORMANCE_TESTS=1',
       ],
       'dependencies': [
@@ -136,7 +116,7 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         'command_buffer/command_buffer.gyp:gles2_utils',
         'command_buffer_client',
-        'gles2_implementation_client_side_arrays_no_check',
+        'gles2_implementation_no_check',
       ],
       'sources': [
         '<@(gles2_c_lib_source_files)',
@@ -151,7 +131,7 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '<(angle_path)/src/build_angle.gyp:translator_static',
+        '<(angle_path)/src/angle.gyp:translator_static',
       ],
       'variables': {
         'ANGLE_DIR': '<(angle_path)',
@@ -181,7 +161,7 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '<(angle_path)/src/build_angle.gyp:translator',
+        '<(angle_path)/src/angle.gyp:translator',
         '../ui/gl/gl.gyp:gl',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_geometry',
@@ -192,7 +172,7 @@
         'command_buffer_service',
         'gpu',
         'gpu_unittest_utils',
-        'gles2_implementation_client_side_arrays',
+        'gles2_implementation',
         'gles2_cmd_helper',
         'gles2_c_lib',
       ],
@@ -252,6 +232,7 @@
         'command_buffer/service/gles2_cmd_decoder_unittest_programs.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_textures.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_attribs.cc',
+        'command_buffer/service/gles2_cmd_decoder_unittest_valuebuffer.cc',
         'command_buffer/service/gl_surface_mock.cc',
         'command_buffer/service/gl_surface_mock.h',
         'command_buffer/service/gpu_scheduler_unittest.cc',
@@ -272,6 +253,7 @@
         'command_buffer/service/test_helper.h',
         'command_buffer/service/texture_manager_unittest.cc',
         'command_buffer/service/transfer_buffer_manager_unittest.cc',
+        'command_buffer/service/valuebuffer_manager_unittest.cc',
         'command_buffer/service/vertex_attrib_manager_unittest.cc',
         'command_buffer/service/vertex_array_manager_unittest.cc',
         'command_buffer/service/gpu_tracer_unittest.cc',
@@ -313,7 +295,7 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '<(angle_path)/src/build_angle.gyp:translator',
+        '<(angle_path)/src/angle.gyp:translator',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_test_support',
         '../ui/gfx/gfx.gyp:gfx_geometry',
@@ -324,7 +306,7 @@
         'command_buffer_service',
         'gpu',
         'gpu_unittest_utils',
-        'gles2_implementation_client_side_arrays',
+        'gles2_implementation',
         'gles2_cmd_helper',
         'gles2_c_lib',
         #'gl_unittests',
@@ -368,8 +350,8 @@
         }],
         ['OS == "win"', {
           'dependencies': [
-            '../third_party/angle/src/build_angle.gyp:libEGL',
-            '../third_party/angle/src/build_angle.gyp:libGLESv2',
+            '../third_party/angle/src/angle.gyp:libEGL',
+            '../third_party/angle/src/angle.gyp:libGLESv2',
           ],
         }],
       ],
@@ -479,6 +461,9 @@
           'includes': [
             'command_buffer_service.gypi',
             '../build/android/increase_size_for_speed.gypi',
+            # Disable LTO due to ELF section name out of range
+            # crbug.com/422251
+            '../build/android/disable_lto.gypi',
           ],
           'dependencies': [
             'command_buffer_common',

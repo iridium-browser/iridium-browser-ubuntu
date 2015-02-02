@@ -9,16 +9,20 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/avatar_menu.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_bubble_view.h"
 #include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
-#include "chrome/common/pref_names.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
+#include "grit/theme_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/view_targeter.h"
 #include "ui/views/widget/widget.h"
@@ -88,6 +92,54 @@ void AvatarMenuButton::SetAvatarIcon(const gfx::Image& icon,
   button_icon_ = gfx::ImageSkia();
   is_rectangle_ = is_rectangle;
   SchedulePaint();
+}
+
+// static
+bool AvatarMenuButton::GetAvatarImages(Profile* profile,
+                                       bool should_show_avatar_menu,
+                                       gfx::Image* avatar,
+                                       gfx::Image* taskbar_badge_avatar,
+                                       bool* is_rectangle) {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  if (profile->GetProfileType() == Profile::GUEST_PROFILE) {
+    *avatar = rb.
+        GetImageNamed(profiles::GetPlaceholderAvatarIconResourceID());
+  } else if (profile->GetProfileType() == Profile::INCOGNITO_PROFILE) {
+    *avatar = rb.GetImageNamed(IDR_OTR_ICON);
+    // TODO(nkostylev): Allow this on ChromeOS once the ChromeOS test
+    // environment handles profile directories correctly.
+#if !defined(OS_CHROMEOS)
+    bool is_badge_rectangle = false;
+    // The taskbar badge should be the profile avatar, not the OTR avatar.
+    AvatarMenu::GetImageForMenuButton(profile,
+                                      taskbar_badge_avatar,
+                                      &is_badge_rectangle);
+#endif
+  } else if (should_show_avatar_menu) {
+    ProfileInfoCache& cache =
+        g_browser_process->profile_manager()->GetProfileInfoCache();
+    size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+    if (index == std::string::npos)
+      return false;
+
+    if (switches::IsNewAvatarMenu()) {
+      *avatar = cache.GetAvatarIconOfProfileAtIndex(index);
+      // TODO(noms): Once the code for the old avatar menu button is removed,
+      // this function will only be called for badging the taskbar icon.  The
+      // function can be renamed to something like GetAvatarImageForBadging()
+      // and only needs to return the avatar from
+      // AvatarMenu::GetImageForMenuButton().
+#if !defined(OS_CHROMEOS)
+      bool is_badge_rectangle = false;
+      AvatarMenu::GetImageForMenuButton(profile,
+                                        taskbar_badge_avatar,
+                                        &is_badge_rectangle);
+#endif
+    } else {
+      AvatarMenu::GetImageForMenuButton(profile, avatar, is_rectangle);
+    }
+  }
+  return true;
 }
 
 // views::ViewTargeterDelegate:

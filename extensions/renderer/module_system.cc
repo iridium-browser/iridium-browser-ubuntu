@@ -10,6 +10,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
@@ -72,7 +73,7 @@ class DefaultExceptionHandler : public ModuleSystem::ExceptionHandler {
   // Fatally dumps the debug info from |try_catch| to the console.
   // Make sure this is never used for exceptions that originate in external
   // code!
-  virtual void HandleUncaughtException(const v8::TryCatch& try_catch) OVERRIDE {
+  void HandleUncaughtException(const v8::TryCatch& try_catch) override {
     v8::HandleScope handle_scope(context_->isolate());
     std::string stack_trace = "<stack trace unavailable>";
     if (!try_catch.StackTrace().IsEmpty()) {
@@ -144,6 +145,10 @@ ModuleSystem::ModuleSystem(ScriptContext* context, SourceMap* source_map)
                          v8::External::New(isolate, this));
 
   gin::ModuleRegistry::From(context->v8_context())->AddObserver(this);
+  if (context_->GetRenderFrame()) {
+    context_->GetRenderFrame()->EnsureMojoBuiltinsAreAvailable(
+        context->isolate(), context->v8_context());
+  }
 }
 
 ModuleSystem::~ModuleSystem() { Invalidate(); }
@@ -561,12 +566,18 @@ v8::Handle<v8::String> ModuleSystem::WrapSource(v8::Handle<v8::String> source) {
 void ModuleSystem::Private(const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
   CHECK(args[0]->IsObject());
+  CHECK(!args[0]->IsNull());
   v8::Local<v8::Object> obj = args[0].As<v8::Object>();
   v8::Local<v8::String> privates_key =
       v8::String::NewFromUtf8(GetIsolate(), "privates");
   v8::Local<v8::Value> privates = obj->GetHiddenValue(privates_key);
   if (privates.IsEmpty()) {
     privates = v8::Object::New(args.GetIsolate());
+    if (privates.IsEmpty()) {
+      GetIsolate()->ThrowException(
+          v8::String::NewFromUtf8(GetIsolate(), "Failed to create privates"));
+      return;
+    }
     obj->SetHiddenValue(privates_key, privates);
   }
   args.GetReturnValue().Set(privates);
@@ -614,7 +625,7 @@ v8::Handle<v8::Value> ModuleSystem::LoadModule(const std::string& module_name) {
           GetIsolate(), "requireAsync", v8::String::kInternalizedString)),
       exports,
       // Libraries that we magically expose to every module.
-      console::AsV8Object(),
+      console::AsV8Object(GetIsolate()),
       natives->Get(v8::String::NewFromUtf8(
           GetIsolate(), "privates", v8::String::kInternalizedString)),
       // Each safe builtin. Keep in order with the arguments in WrapSource.

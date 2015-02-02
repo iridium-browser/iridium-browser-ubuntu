@@ -90,7 +90,8 @@ ServiceWorkerRegistration* ServiceWorkerRegistration::take(ScriptPromiseResolver
 
 void ServiceWorkerRegistration::dispose(WebType* registration)
 {
-    delete registration;
+    if (registration && !registration->proxy())
+        delete registration;
 }
 
 String ServiceWorkerRegistration::scope() const
@@ -125,23 +126,19 @@ ServiceWorkerRegistration* ServiceWorkerRegistration::getOrCreate(ExecutionConte
     if (!outerRegistration)
         return 0;
 
-    WebServiceWorkerRegistrationProxy* proxy = outerRegistration->proxy();
-    if (proxy) {
-        ServiceWorkerRegistration* existingRegistration = *proxy;
-        if (existingRegistration) {
-            ASSERT(existingRegistration->executionContext() == executionContext);
-            return existingRegistration;
-        }
+    ServiceWorkerRegistration* existingRegistration = static_cast<ServiceWorkerRegistration*>(outerRegistration->proxy());
+    if (existingRegistration) {
+        ASSERT(existingRegistration->executionContext() == executionContext);
+        return existingRegistration;
     }
 
-    ServiceWorkerRegistration* registration = adoptRefCountedGarbageCollectedWillBeNoop(new ServiceWorkerRegistration(executionContext, adoptPtr(outerRegistration)));
+    ServiceWorkerRegistration* registration = new ServiceWorkerRegistration(executionContext, adoptPtr(outerRegistration));
     registration->suspendIfNeeded();
     return registration;
 }
 
 ServiceWorkerRegistration::ServiceWorkerRegistration(ExecutionContext* executionContext, PassOwnPtr<WebServiceWorkerRegistration> outerRegistration)
     : ActiveDOMObject(executionContext)
-    , WebServiceWorkerRegistrationProxy(this)
     , m_outerRegistration(outerRegistration)
     , m_provider(0)
     , m_stopped(false)
@@ -161,6 +158,7 @@ void ServiceWorkerRegistration::trace(Visitor* visitor)
     visitor->trace(m_waiting);
     visitor->trace(m_active);
     EventTargetWithInlineData::trace(visitor);
+    HeapSupplementable<ServiceWorkerRegistration>::trace(visitor);
 }
 
 bool ServiceWorkerRegistration::hasPendingActivity() const

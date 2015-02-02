@@ -18,6 +18,7 @@
  *            dependentExtensions: Array,
  *            description: string,
  *            detailsUrl: string,
+ *            enableExtensionInfoDialog: boolean,
  *            enable_show_button: boolean,
  *            enabled: boolean,
  *            enabledIncognito: boolean,
@@ -40,11 +41,14 @@
  *            manifestErrors: (Array.<RuntimeError>|undefined),
  *            name: string,
  *            offlineEnabled: boolean,
+ *            optionsOpenInTab: boolean,
+ *            optionsPageHref: string,
  *            optionsUrl: string,
  *            order: number,
  *            packagedApp: boolean,
  *            path: (string|undefined),
  *            prettifiedPath: (string|undefined),
+ *            recommendedInstall: boolean,
  *            runtimeErrors: (Array.<RuntimeError>|undefined),
  *            suspiciousInstall: boolean,
  *            terminated: boolean,
@@ -169,6 +173,8 @@ cr.define('options', function() {
           extension.dependentExtensions.length > 0) {
         node.classList.add('may-not-modify');
         node.classList.add('may-not-remove');
+      } else if (extension.recommendedInstall) {
+        node.classList.add('may-not-remove');
       } else if (extension.suspiciousInstall || extension.corruptInstall) {
         node.classList.add('may-not-modify');
       }
@@ -270,17 +276,28 @@ cr.define('options', function() {
         fileAccess.hidden = false;
       }
 
-      // The 'Options' link.
+      // The 'Options' button or link, depending on its behaviour.
       if (extension.enabled && extension.optionsUrl) {
-        var options = node.querySelector('.options-link');
-        options.addEventListener('click', function(e) {
-          if (!extension.optionsOpenInTab) {
-            this.showEmbeddedExtensionOptions_(extension.id, false);
-          } else {
+        var options, optionsClickListener;
+        if (extension.optionsOpenInTab) {
+          options = node.querySelector('.options-link');
+          // Set an href to get the correct mouse-over appearance (link,
+          // footer) - but the actual link opening is done through chrome.send
+          // with a preventDefault().
+          options.setAttribute('href', extension.optionsPageHref);
+          optionsClickListener = function() {
             chrome.send('extensionSettingsOptions', [extension.id]);
-          }
+          };
+        } else {
+          options = node.querySelector('.options-button');
+          optionsClickListener = function() {
+            this.showEmbeddedExtensionOptions_(extension.id, false);
+          }.bind(this);
+        }
+        options.addEventListener('click', function(e) {
+          optionsClickListener();
           e.preventDefault();
-        }.bind(this));
+        });
         options.hidden = false;
       }
 
@@ -292,7 +309,7 @@ cr.define('options', function() {
       });
 
       // The 'View in Web Store/View Web Site' link.
-      if (extension.homepageUrl) {
+      if (extension.homepageUrl && !extension.enableExtensionInfoDialog) {
         var siteLink = node.querySelector('.site-link');
         siteLink.href = extension.homepageUrl;
         siteLink.textContent = loadTimeData.getString(
@@ -394,7 +411,7 @@ cr.define('options', function() {
       }
 
       // Then the 'managed, cannot uninstall/disable' message.
-      if (extension.managedInstall) {
+      if (extension.managedInstall || extension.recommendedInstall) {
         node.querySelector('.managed-message').hidden = false;
       } else {
         if (extension.suspiciousInstall) {
@@ -515,7 +532,7 @@ cr.define('options', function() {
 
       // Get the extension from the given id.
       var extension = this.data_.extensions.filter(function(extension) {
-        return extension.id == extensionId;
+        return extension.enabled && extension.id == extensionId;
       })[0];
 
       if (!extension)

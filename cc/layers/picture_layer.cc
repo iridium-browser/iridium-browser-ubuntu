@@ -9,7 +9,7 @@
 #include "cc/layers/picture_layer_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
 
@@ -19,7 +19,6 @@ scoped_refptr<PictureLayer> PictureLayer::Create(ContentLayerClient* client) {
 
 PictureLayer::PictureLayer(ContentLayerClient* client)
     : client_(client),
-      pile_(make_scoped_refptr(new PicturePile())),
       instrumentation_object_tracker_(id()),
       update_source_frame_number_(-1),
       can_use_lcd_text_last_frame_(can_use_lcd_text()) {
@@ -29,51 +28,55 @@ PictureLayer::~PictureLayer() {
 }
 
 scoped_ptr<LayerImpl> PictureLayer::CreateLayerImpl(LayerTreeImpl* tree_impl) {
-  return PictureLayerImpl::Create(tree_impl, id()).PassAs<LayerImpl>();
+  return PictureLayerImpl::Create(tree_impl, id());
 }
 
 void PictureLayer::PushPropertiesTo(LayerImpl* base_layer) {
   Layer::PushPropertiesTo(base_layer);
   PictureLayerImpl* layer_impl = static_cast<PictureLayerImpl*>(base_layer);
 
-  if (layer_impl->bounds().IsEmpty()) {
-    // Update may not get called for an empty layer, so resize here instead.
-    // Using layer_impl because either bounds() or paint_properties().bounds
-    // may disagree and either one could have been pushed to layer_impl.
-    pile_->SetEmptyBounds();
-  } else if (update_source_frame_number_ ==
-             layer_tree_host()->source_frame_number()) {
-    // TODO(ernstm): This DCHECK is only valid as long as the pile's tiling_rect
-    // is identical to the layer_rect.
-    // If update called, then pile size must match bounds pushed to impl layer.
-    DCHECK_EQ(layer_impl->bounds().ToString(), pile_->tiling_size().ToString());
+  int source_frame_number = layer_tree_host()->source_frame_number();
+  gfx::Size impl_bounds = layer_impl->bounds();
+  gfx::Size pile_bounds = pile_.tiling_size();
+
+  // If update called, then pile size must match bounds pushed to impl layer.
+  DCHECK_IMPLIES(update_source_frame_number_ == source_frame_number,
+                 impl_bounds == pile_bounds)
+      << " bounds " << impl_bounds.ToString() << " pile "
+      << pile_bounds.ToString();
+
+  if (update_source_frame_number_ != source_frame_number &&
+      pile_bounds != impl_bounds) {
+    // Update may not get called for the layer (if it's not in the viewport
+    // for example, even though it has resized making the pile no longer
+    // valid. In this case just destroy the pile.
+    pile_.SetEmptyBounds();
   }
 
   // Unlike other properties, invalidation must always be set on layer_impl.
   // See PictureLayerImpl::PushPropertiesTo for more details.
   layer_impl->invalidation_.Clear();
   layer_impl->invalidation_.Swap(&pile_invalidation_);
-  layer_impl->UpdatePile(PicturePileImpl::CreateFromOther(pile_.get()));
+  layer_impl->UpdatePile(PicturePileImpl::CreateFromOther(&pile_));
 }
 
 void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
   Layer::SetLayerTreeHost(host);
   if (host) {
-    pile_->SetMinContentsScale(host->settings().minimum_contents_scale);
-    pile_->SetTileGridSize(host->settings().default_tile_size);
-    pile_->set_slow_down_raster_scale_factor(
+    pile_.SetMinContentsScale(host->settings().minimum_contents_scale);
+    pile_.SetTileGridSize(host->settings().default_tile_grid_size);
+    pile_.set_slow_down_raster_scale_factor(
         host->debug_state().slow_down_raster_scale_factor);
-    pile_->set_show_debug_picture_borders(
+    pile_.set_show_debug_picture_borders(
         host->debug_state().show_picture_borders);
   }
 }
 
-void PictureLayer::SetNeedsDisplayRect(const gfx::RectF& layer_rect) {
-  gfx::Rect rect = gfx::ToEnclosedRect(layer_rect);
-  if (!rect.IsEmpty()) {
+void PictureLayer::SetNeedsDisplayRect(const gfx::Rect& layer_rect) {
+  if (!layer_rect.IsEmpty()) {
     // Clamp invalidation to the layer bounds.
-    rect.Intersect(gfx::Rect(bounds()));
-    pending_invalidation_.Union(rect);
+    pending_invalidation_.Union(
+        gfx::IntersectRects(layer_rect, gfx::Rect(bounds())));
   }
   Layer::SetNeedsDisplayRect(layer_rect);
 }
@@ -94,7 +97,7 @@ bool PictureLayer::Update(ResourceUpdateQueue* queue,
   gfx::Size layer_size = paint_properties().bounds;
 
   if (last_updated_visible_content_rect_ == visible_content_rect() &&
-      pile_->tiling_size() == layer_size && pending_invalidation_.IsEmpty()) {
+      pile_.tiling_size() == layer_size && pending_invalidation_.IsEmpty()) {
     // Only early out if the visible content rect of this layer hasn't changed.
     return updated;
   }
@@ -122,16 +125,16 @@ bool PictureLayer::Update(ResourceUpdateQueue* queue,
   // for them.
   DCHECK(client_);
   updated |=
-      pile_->UpdateAndExpandInvalidation(client_,
-                                         &pile_invalidation_,
-                                         SafeOpaqueBackgroundColor(),
-                                         contents_opaque(),
-                                         client_->FillsBoundsCompletely(),
-                                         layer_size,
-                                         visible_layer_rect,
-                                         update_source_frame_number_,
-                                         RecordingMode(),
-                                         rendering_stats_instrumentation());
+      pile_.UpdateAndExpandInvalidation(client_,
+                                        &pile_invalidation_,
+                                        SafeOpaqueBackgroundColor(),
+                                        contents_opaque(),
+                                        client_->FillsBoundsCompletely(),
+                                        layer_size,
+                                        visible_layer_rect,
+                                        update_source_frame_number_,
+                                        Picture::RECORD_NORMALLY,
+                                        rendering_stats_instrumentation());
   last_updated_visible_content_rect_ = visible_content_rect();
 
   if (updated) {
@@ -146,18 +149,7 @@ bool PictureLayer::Update(ResourceUpdateQueue* queue,
 }
 
 void PictureLayer::SetIsMask(bool is_mask) {
-  pile_->set_is_mask(is_mask);
-}
-
-Picture::RecordingMode PictureLayer::RecordingMode() const {
-  switch (layer_tree_host()->settings().recording_mode) {
-    case LayerTreeSettings::RecordNormally:
-      return Picture::RECORD_NORMALLY;
-    case LayerTreeSettings::RecordWithSkRecord:
-      return Picture::RECORD_WITH_SKRECORD;
-  }
-  NOTREACHED();
-  return Picture::RECORD_NORMALLY;
+  pile_.set_is_mask(is_mask);
 }
 
 bool PictureLayer::SupportsLCDText() const {
@@ -184,7 +176,7 @@ skia::RefPtr<SkPicture> PictureLayer::GetPicture() const {
   int height = bounds().height();
 
   SkPictureRecorder recorder;
-  SkCanvas* canvas = recorder.beginRecording(width, height, NULL, 0);
+  SkCanvas* canvas = recorder.beginRecording(width, height, nullptr, 0);
   client_->PaintContents(canvas,
                          gfx::Rect(width, height),
                          ContentLayerClient::GRAPHICS_CONTEXT_ENABLED);
@@ -193,11 +185,11 @@ skia::RefPtr<SkPicture> PictureLayer::GetPicture() const {
 }
 
 bool PictureLayer::IsSuitableForGpuRasterization() const {
-  return pile_->is_suitable_for_gpu_rasterization();
+  return pile_.is_suitable_for_gpu_rasterization();
 }
 
 void PictureLayer::ClearClient() {
-  client_ = NULL;
+  client_ = nullptr;
   UpdateDrawsContent(HasDrawableContent());
 }
 

@@ -51,11 +51,11 @@ HTMLMapElement::~HTMLMapElement()
 bool HTMLMapElement::mapMouseEvent(LayoutPoint location, const LayoutSize& size, HitTestResult& result)
 {
     HTMLAreaElement* defaultArea = 0;
-    for (HTMLAreaElement* area = Traversal<HTMLAreaElement>::firstWithin(*this); area; area = Traversal<HTMLAreaElement>::next(*area, this)) {
-        if (area->isDefault()) {
+    for (HTMLAreaElement& area : Traversal<HTMLAreaElement>::descendantsOf(*this)) {
+        if (area.isDefault()) {
             if (!defaultArea)
-                defaultArea = area;
-        } else if (area->mapMouseEvent(location, size, result)) {
+                defaultArea = &area;
+        } else if (area.mapMouseEvent(location, size, result)) {
             return true;
         }
     }
@@ -81,7 +81,7 @@ HTMLImageElement* HTMLMapElement::imageElement()
             return &imageElement;
     }
 
-    return 0;
+    return nullptr;
 }
 
 void HTMLMapElement::parseAttribute(const QualifiedName& name, const AtomicString& value)

@@ -69,7 +69,6 @@ Nagsa-sign in ka sa isang pinamamahalaang account at nagbibigay sa administrator
 <translation id="7267430310003164111">I-prompt na kunin ang app mula sa Google Play Store.  Pangalan ng app: <ph name="APP_NAME"/>.  Average na rating ng app: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Ini-install...</translation>
 <translation id="3992315671621218278">I-save ang link</translation>
-<translation id="8034522405403831421">Nasa <ph name="SOURCE_LANGUAGE"/> ang pahinang ito. Isalin ito sa <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Mga Setting ng Site</translation>
 <translation id="4195643157523330669">Buksan sa bagong tab</translation>
 <translation id="651048280540227067">I-dismiss ang menu</translation>
@@ -95,6 +94,7 @@ Nagsa-sign in ka sa isang pinamamahalaang account at nagbibigay sa administrator
 <translation id="7947953824732555851">I-accept, mag-sign in</translation>
 <translation id="6333140779060797560">Ibahagi sa pamamagitan ng <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Isara</translation>
+<translation id="5138299137310274655">Nasa <ph name="SOURCE_LANGUAGE"/> ang page na ito. I-translate ito sa <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Palitan ang mga wika</translation>
 <translation id="5032574515228824816">I-prompt</translation>
 <translation id="7961015016161918242">Hindi Kailanman</translation>

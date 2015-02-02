@@ -112,10 +112,10 @@ bool HasAlpha(gfx::ImageSkia& image, views::Widget* widget) {
 class ItemView : public views::View {
  public:
   ItemView(const message_center::NotificationItem& item);
-  virtual ~ItemView();
+  ~ItemView() override;
 
   // Overridden from views::View:
-  virtual void SetVisible(bool visible) OVERRIDE;
+  void SetVisible(bool visible) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ItemView);
@@ -190,12 +190,12 @@ views::View* MakeNotificationImage(const gfx::Image& image, gfx::Size size) {
 class NotificationProgressBar : public views::ProgressBar {
  public:
   NotificationProgressBar();
-  virtual ~NotificationProgressBar();
+  ~NotificationProgressBar() override;
 
  private:
   // Overriden from View
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationProgressBar);
 };

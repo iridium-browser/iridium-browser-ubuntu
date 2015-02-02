@@ -36,29 +36,39 @@
 namespace blink {
 
 class ChromeClient;
+class Document;
 class FrameClient;
 class FrameHost;
 class FrameOwner;
 class HTMLFrameOwnerElement;
 class LocalDOMWindow;
+class KURL;
 class Page;
 class RenderPart;
 class Settings;
 class WebLayer;
 
+struct Referrer;
+
 class Frame : public RefCountedWillBeGarbageCollectedFinalized<Frame> {
 public:
+    virtual ~Frame();
+
+    virtual void trace(Visitor*);
+
     virtual bool isLocalFrame() const { return false; }
     virtual bool isRemoteFrame() const { return false; }
 
-    virtual ~Frame();
-    virtual void trace(Visitor*);
+    // FIXME: This should return a DOMWindow*.
+    virtual LocalDOMWindow* domWindow() const = 0;
 
-    virtual void detach() = 0;
+    virtual void navigate(Document& originDocument, const KURL&, bool lockBackForwardList) = 0;
+
+    virtual void detach();
     void detachChildren();
+    virtual void disconnectOwnerElement();
 
     FrameClient* client() const;
-    void clearClient();
 
     // NOTE: Page is moving out of Blink up into the browser process as
     // part of the site-isolation (out of process iframes) work.
@@ -69,15 +79,9 @@ public:
     bool isMainFrame() const;
     bool isLocalRoot() const;
 
-    virtual void disconnectOwnerElement();
-
     FrameOwner* owner() const;
+    void setOwner(FrameOwner* owner) { m_owner = owner; }
     HTMLFrameOwnerElement* deprecatedLocalOwner() const;
-
-    // FIXME: LocalDOMWindow and Document should both be moved to LocalFrame
-    // after RemoteFrame is complete enough to exist without them.
-    virtual void setDOMWindow(PassRefPtrWillBeRawPtr<LocalDOMWindow>);
-    LocalDOMWindow* domWindow() const;
 
     FrameTree& tree() const;
     ChromeClient& chromeClient() const;
@@ -104,8 +108,6 @@ protected:
     RawPtrWillBeMember<FrameHost> m_host;
     RawPtrWillBeMember<FrameOwner> m_owner;
 
-    RefPtrWillBeMember<LocalDOMWindow> m_domWindow;
-
 private:
     FrameClient* m_client;
     WebLayer* m_remotePlatformLayer;
@@ -114,16 +116,6 @@ private:
 inline FrameClient* Frame::client() const
 {
     return m_client;
-}
-
-inline void Frame::clearClient()
-{
-    m_client = 0;
-}
-
-inline LocalDOMWindow* Frame::domWindow() const
-{
-    return m_domWindow.get();
 }
 
 inline FrameOwner* Frame::owner() const

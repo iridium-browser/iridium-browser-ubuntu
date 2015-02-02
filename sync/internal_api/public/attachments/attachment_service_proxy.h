@@ -48,19 +48,17 @@ class SYNC_EXPORT AttachmentServiceProxy : public AttachmentService {
       const scoped_refptr<base::SequencedTaskRunner>& wrapped_task_runner,
       const base::WeakPtr<syncer::AttachmentService>& wrapped);
 
-  virtual ~AttachmentServiceProxy();
+  ~AttachmentServiceProxy() override;
 
   // AttachmentService implementation.
   //
   // GetStore always returns NULL.
-  virtual AttachmentStore* GetStore() OVERRIDE;
-  virtual void GetOrDownloadAttachments(
-      const AttachmentIdList& attachment_ids,
-      const GetOrDownloadCallback& callback) OVERRIDE;
-  virtual void DropAttachments(const AttachmentIdList& attachment_ids,
-                               const DropCallback& callback) OVERRIDE;
-  virtual void UploadAttachments(
-      const AttachmentIdSet& attachment_ids) OVERRIDE;
+  AttachmentStore* GetStore() override;
+  void GetOrDownloadAttachments(const AttachmentIdList& attachment_ids,
+                                const GetOrDownloadCallback& callback) override;
+  void DropAttachments(const AttachmentIdList& attachment_ids,
+                       const DropCallback& callback) override;
+  void UploadAttachments(const AttachmentIdSet& attachment_ids) override;
 
  protected:
   // Core does the work of proxying calls to AttachmentService methods from one
@@ -83,18 +81,17 @@ class SYNC_EXPORT AttachmentServiceProxy : public AttachmentService {
     Core(const base::WeakPtr<syncer::AttachmentService>& wrapped);
 
     // AttachmentService implementation.
-    virtual AttachmentStore* GetStore() OVERRIDE;
-    virtual void GetOrDownloadAttachments(
+    AttachmentStore* GetStore() override;
+    void GetOrDownloadAttachments(
         const AttachmentIdList& attachment_ids,
-        const GetOrDownloadCallback& callback) OVERRIDE;
-    virtual void DropAttachments(const AttachmentIdList& attachment_ids,
-                                 const DropCallback& callback) OVERRIDE;
-    virtual void UploadAttachments(
-        const AttachmentIdSet& attachment_ids) OVERRIDE;
+        const GetOrDownloadCallback& callback) override;
+    void DropAttachments(const AttachmentIdList& attachment_ids,
+                         const DropCallback& callback) override;
+    void UploadAttachments(const AttachmentIdSet& attachment_ids) override;
 
    protected:
     friend class base::RefCountedThreadSafe<Core>;
-    virtual ~Core();
+    ~Core() override;
 
    private:
     base::WeakPtr<AttachmentService> wrapped_;

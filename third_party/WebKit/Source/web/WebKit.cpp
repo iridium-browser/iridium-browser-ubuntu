@@ -70,14 +70,15 @@ namespace {
 
 class EndOfTaskRunner : public WebThread::TaskObserver {
 public:
-    virtual void willProcessTask() OVERRIDE
+    virtual void willProcessTask() override
     {
         AnimationClock::notifyTaskStart();
     }
-    virtual void didProcessTask() OVERRIDE
+    virtual void didProcessTask() override
     {
         Microtask::performCheckpoint();
         V8GCController::reportDOMMemoryUsageToV8(mainThreadIsolate());
+        V8Initializer::reportRejectedPromises();
     }
 };
 
@@ -100,6 +101,7 @@ void initialize(Platform* platform)
 
     s_isolateInterruptor = new V8IsolateInterruptor(V8PerIsolateData::mainThreadIsolate());
     ThreadState::current()->addInterruptor(s_isolateInterruptor);
+    ThreadState::current()->registerTraceDOMWrappers(V8PerIsolateData::mainThreadIsolate(), V8GCController::traceDOMWrappers);
 
     // currentThread will always be non-null in production, but can be null in Chromium unit tests.
     if (WebThread* currentThread = platform->currentThread()) {
@@ -131,7 +133,7 @@ static void cryptographicallyRandomValues(unsigned char* buffer, size_t length)
 
 static void callOnMainThreadFunction(WTF::MainThreadFunction function, void* context)
 {
-    Scheduler::shared()->postTask(FROM_HERE, bind(function, context));
+    Platform::current()->callOnMainThread(function, context);
 }
 
 void initializeWithoutV8(Platform* platform)
@@ -146,7 +148,6 @@ void initializeWithoutV8(Platform* platform)
     WTF::initialize(currentTimeFunction, monotonicallyIncreasingTimeFunction);
     WTF::initializeMainThread(callOnMainThreadFunction);
     Heap::init();
-    Scheduler::initializeOnMainThread();
 
     ThreadState::attachMainThread();
     // currentThread will always be non-null in production, but can be null in Chromium unit tests.
@@ -205,6 +206,11 @@ void shutdown()
 
     v8::Isolate* isolate = V8PerIsolateData::mainThreadIsolate();
     V8PerIsolateData::willBeDestroyed(isolate);
+
+    // Make sure we stop WorkerThreads before the main thread's ThreadState
+    // and later shutdown steps starts freeing up resources needed during
+    // worker termination.
+    WorkerThread::terminateAndWaitForAllWorkers();
 
     // Detach the main thread before starting the shutdown sequence
     // so that the main thread won't get involved in a GC during the shutdown.

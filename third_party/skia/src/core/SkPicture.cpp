@@ -12,7 +12,6 @@
 #include "SkPicturePlayback.h"
 #include "SkPictureRecord.h"
 #include "SkPictureRecorder.h"
-#include "SkPictureStateTree.h"
 
 #include "SkBitmapDevice.h"
 #include "SkCanvas.h"
@@ -32,7 +31,6 @@
 #include "SkReader32.h"
 #include "SkWriter32.h"
 #include "SkRTree.h"
-#include "SkBBoxHierarchyRecord.h"
 
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
@@ -137,7 +135,8 @@ struct SkPicture::PathCounter {
         : numPaintWithPathEffectUses (0)
         , numFastPathDashEffects (0)
         , numAAConcavePaths (0)
-        , numAAHairlineConcavePaths (0) {
+        , numAAHairlineConcavePaths (0)
+        , numAADFEligibleConcavePaths(0) {
     }
 
     // Recurse into nested pictures.
@@ -147,6 +146,7 @@ struct SkPicture::PathCounter {
         numFastPathDashEffects     += analysis.fNumFastPathDashEffects;
         numAAConcavePaths          += analysis.fNumAAConcavePaths;
         numAAHairlineConcavePaths  += analysis.fNumAAHairlineConcavePaths;
+        numAADFEligibleConcavePaths  += analysis.fNumAADFEligibleConcavePaths;
     }
 
     void checkPaint(const SkPaint* paint) {
@@ -173,9 +173,14 @@ struct SkPicture::PathCounter {
         if (op.paint.isAntiAlias() && !op.path.isConvex()) {
             numAAConcavePaths++;
 
-            if (SkPaint::kStroke_Style == op.paint.getStyle() &&
+            SkPaint::Style paintStyle = op.paint.getStyle();
+            const SkRect& pathBounds = op.path.getBounds();
+            if (SkPaint::kStroke_Style == paintStyle &&
                 0 == op.paint.getStrokeWidth()) {
                 numAAHairlineConcavePaths++;
+            } else if (SkPaint::kFill_Style == paintStyle && pathBounds.width() < 64.f &&
+                       pathBounds.height() < 64.f && !op.path.isVolatile()) {
+                numAADFEligibleConcavePaths++;
             }
         }
     }
@@ -192,6 +197,7 @@ struct SkPicture::PathCounter {
     int numFastPathDashEffects;
     int numAAConcavePaths;
     int numAAHairlineConcavePaths;
+    int numAADFEligibleConcavePaths;
 };
 
 SkPicture::Analysis::Analysis(const SkRecord& record) {
@@ -205,6 +211,7 @@ SkPicture::Analysis::Analysis(const SkRecord& record) {
     fNumFastPathDashEffects     = counter.numFastPathDashEffects;
     fNumAAConcavePaths          = counter.numAAConcavePaths;
     fNumAAHairlineConcavePaths  = counter.numAAHairlineConcavePaths;
+    fNumAADFEligibleConcavePaths  = counter.numAADFEligibleConcavePaths;
 
     fHasText = false;
     TextHunter text;
@@ -229,7 +236,7 @@ bool SkPicture::Analysis::suitableForGpuRasterization(const char** reason,
                                && 0 == sampleCount);
 
     bool ret = suitableForDash &&
-               (fNumAAConcavePaths - fNumAAHairlineConcavePaths)
+               (fNumAAConcavePaths - fNumAAHairlineConcavePaths - fNumAADFEligibleConcavePaths)
                    < kNumAAConcavePathsTol;
 
     if (!ret && reason) {
@@ -239,7 +246,7 @@ bool SkPicture::Analysis::suitableForGpuRasterization(const char** reason,
             } else {
                 *reason = "Too many non dashed path effects.";
             }
-        } else if ((fNumAAConcavePaths - fNumAAHairlineConcavePaths)
+        } else if ((fNumAAConcavePaths - fNumAAHairlineConcavePaths - fNumAADFEligibleConcavePaths)
                     >= kNumAAConcavePathsTol)
             *reason = "Too many anti-aliased concave paths.";
         else
@@ -266,25 +273,18 @@ SkPicture::SkPicture(SkScalar width, SkScalar height,
 
 // Create an SkPictureData-backed SkPicture from an SkRecord.
 // This for compatibility with serialization code only.  This is not cheap.
-static SkPicture* backport(const SkRecord& src, const SkRect& cullRect) {
-    SkPictureRecorder recorder;
-    SkRecordDraw(src,
-                 recorder.DEPRECATED_beginRecording(cullRect.width(), cullRect.height()),
-                 NULL/*bbh*/, NULL/*callback*/);
-    return recorder.endRecording();
+SkPicture* SkPicture::Backport(const SkRecord& src, const SkRect& cullRect) {
+    SkPictureRecord rec(SkISize::Make(cullRect.width(), cullRect.height()), 0/*flags*/);
+    rec.beginRecording();
+        SkRecordDraw(src, &rec, NULL/*bbh*/, NULL/*callback*/);
+    rec.endRecording();
+    return SkNEW_ARGS(SkPicture, (cullRect.width(), cullRect.height(), rec, false/*deepCopyOps*/));
 }
 
 // fRecord OK
 SkPicture::~SkPicture() {
     this->callDeletionListeners();
 }
-
-// fRecord OK
-#ifdef SK_SUPPORT_LEGACY_PICTURE_CLONE
-SkPicture* SkPicture::clone() const {
-    return SkRef(const_cast<SkPicture*>(this));
-}
-#endif//SK_SUPPORT_LEGACY_PICTURE_CLONE
 
 // fRecord OK
 void SkPicture::EXPERIMENTAL_addAccelData(const SkPicture::AccelData* data) const {
@@ -314,32 +314,21 @@ SkPicture::AccelData::Domain SkPicture::AccelData::GenerateDomain() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-uint32_t SkPicture::OperationList::offset(int index) const {
-    SkASSERT(index < fOps.count());
-    return ((SkPictureStateTree::Draw*)fOps[index])->fOffset;
-}
-
-const SkMatrix& SkPicture::OperationList::matrix(int index) const {
-    SkASSERT(index < fOps.count());
-    return *((SkPictureStateTree::Draw*)fOps[index])->fMatrix;
-}
-
 // fRecord OK
 void SkPicture::playback(SkCanvas* canvas, SkDrawPictureCallback* callback) const {
     SkASSERT(canvas);
     SkASSERT(fData.get() || fRecord.get());
 
-    // If the query contains the whole picture, don't bother with the BBH.
-    SkRect clipBounds = { 0, 0, 0, 0 };
-    (void)canvas->getClipBounds(&clipBounds);
-    const bool useBBH = !clipBounds.contains(this->cullRect());
-
     if (fData.get()) {
         SkPicturePlayback playback(this);
-        playback.setUseBBH(useBBH);
         playback.draw(canvas, callback);
     }
     if (fRecord.get()) {
+        // If the query contains the whole picture, don't bother with the BBH.
+        SkRect clipBounds = { 0, 0, 0, 0 };
+        (void)canvas->getClipBounds(&clipBounds);
+        const bool useBBH = !clipBounds.contains(this->cullRect());
+
         SkRecordDraw(*fRecord, canvas, useBBH ? fBBH.get() : NULL, callback);
     }
 }
@@ -530,7 +519,7 @@ void SkPicture::serialize(SkWStream* stream, EncodeBitmap encoder) const {
     // If we're a new-format picture, backport to old format for serialization.
     SkAutoTDelete<SkPicture> oldFormat;
     if (NULL == data && fRecord.get()) {
-        oldFormat.reset(backport(*fRecord, this->cullRect()));
+        oldFormat.reset(Backport(*fRecord, this->cullRect()));
         data = oldFormat->fData.get();
         SkASSERT(data);
     }
@@ -555,7 +544,7 @@ void SkPicture::flatten(SkWriteBuffer& buffer) const {
     // If we're a new-format picture, backport to old format for serialization.
     SkAutoTDelete<SkPicture> oldFormat;
     if (NULL == data && fRecord.get()) {
-        oldFormat.reset(backport(*fRecord, this->cullRect()));
+        oldFormat.reset(Backport(*fRecord, this->cullRect()));
         data = oldFormat->fData.get();
         SkASSERT(data);
     }
@@ -638,9 +627,7 @@ uint32_t SkPicture::uniqueID() const {
 
 
 static SkRecord* optimized(SkRecord* r) {
-#ifdef SK_PICTURE_OPTIMIZE_SK_RECORD
     SkRecordOptimize(r);
-#endif
     return r;
 }
 
@@ -653,7 +640,7 @@ SkPicture::SkPicture(SkScalar width, SkScalar height, SkRecord* record, SkBBoxHi
     , fAnalysis(*fRecord) {
     // TODO: delay as much of this work until just before first playback?
     if (fBBH.get()) {
-        SkRecordFillBounds(*fRecord, fBBH.get());
+        SkRecordFillBounds(this->cullRect(), *fRecord, fBBH.get());
     }
     this->needsNewGenID();
 }

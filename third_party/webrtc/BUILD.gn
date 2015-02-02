@@ -120,6 +120,10 @@ config("common_config") {
     }
   }
 
+  if (cpu_arch == "arm64") {
+    defines += [ "WEBRTC_ARCH_ARM" ]
+  }
+
   if (cpu_arch == "arm") {
     defines += [ "WEBRTC_ARCH_ARM" ]
     if (arm_version == 7) {
@@ -183,7 +187,8 @@ static_library("webrtc") {
     "transport.h",
   ]
 
-  direct_dependent_configs = [ ":common_inherited_config"]
+  configs += [ ":common_config" ]
+  public_configs = [ ":common_inherited_config"]
 
   deps = [
     ":webrtc_common",
@@ -204,10 +209,23 @@ static_library("webrtc") {
     "modules/video_processing",
     "modules/video_render",
     "system_wrappers",
+    "tools",
     "video",
     "video_engine",
     "voice_engine",
   ]
+}
+
+if (!build_with_chromium) {
+  executable("webrtc_tests") {
+    testonly = true
+    deps = [
+      ":webrtc",
+      "modules/video_render:video_render_internal_impl",
+      "modules/video_capture:video_capture_internal_impl",
+      "test",
+    ]
+  }
 }
 
 source_set("webrtc_common") {
@@ -222,5 +240,6 @@ source_set("webrtc_common") {
     configs -= [ "//build/config/clang:find_bad_constructs" ]
   }
 
-  configs += [ ":common_inherited_config"]
+  configs += [ ":common_config" ]
+  public_configs = [ ":common_inherited_config" ]
 }

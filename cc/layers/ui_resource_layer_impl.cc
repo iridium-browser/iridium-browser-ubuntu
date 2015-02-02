@@ -9,8 +9,8 @@
 #include "cc/base/math_util.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/trees/layer_tree_impl.h"
-#include "cc/trees/occlusion_tracker.h"
-#include "ui/gfx/rect_f.h"
+#include "cc/trees/occlusion.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace cc {
 
@@ -29,7 +29,7 @@ UIResourceLayerImpl::~UIResourceLayerImpl() {}
 
 scoped_ptr<LayerImpl> UIResourceLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return UIResourceLayerImpl::Create(tree_impl, id()).PassAs<LayerImpl>();
+  return UIResourceLayerImpl::Create(tree_impl, id());
 }
 
 void UIResourceLayerImpl::PushPropertiesTo(LayerImpl* layer) {
@@ -93,7 +93,7 @@ bool UIResourceLayerImpl::WillDraw(DrawMode draw_mode,
 
 void UIResourceLayerImpl::AppendQuads(
     RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
+    const Occlusion& occlusion_in_content_space,
     AppendQuadsData* append_quads_data) {
   SharedQuadState* shared_quad_state =
       render_pass->CreateAndAppendSharedQuadState();
@@ -122,9 +122,7 @@ void UIResourceLayerImpl::AppendQuads(
   gfx::Rect quad_rect(bounds());
   gfx::Rect opaque_rect(opaque ? quad_rect : gfx::Rect());
   gfx::Rect visible_quad_rect =
-      occlusion_tracker.GetCurrentOcclusionForLayer(
-                            draw_properties().target_space_transform)
-          .GetUnoccludedContentRect(quad_rect);
+      occlusion_in_content_space.GetUnoccludedContentRect(quad_rect);
   if (visible_quad_rect.IsEmpty())
     return;
 

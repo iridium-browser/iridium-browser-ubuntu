@@ -29,10 +29,10 @@ using testing::_;
 class CertificateManagerBrowserTest : public options::OptionsUIBrowserTest {
  public:
   CertificateManagerBrowserTest() {}
-  virtual ~CertificateManagerBrowserTest() {}
+  ~CertificateManagerBrowserTest() override {}
 
  protected:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
 #if defined(OS_CHROMEOS)
     device_policy_test_helper_.MarkAsEnterpriseOwned();
 #endif

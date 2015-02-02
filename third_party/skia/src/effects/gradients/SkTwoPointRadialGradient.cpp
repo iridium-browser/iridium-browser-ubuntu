@@ -411,7 +411,7 @@ public:
     GrGLRadial2Gradient(const GrBackendProcessorFactory& factory, const GrProcessor&);
     virtual ~GrGLRadial2Gradient() { }
 
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -473,7 +473,7 @@ public:
     typedef GrGLRadial2Gradient GLProcessor;
 
 private:
-    virtual bool onIsEqual(const GrProcessor& sBase) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
         const GrRadial2Gradient& s = sBase.cast<GrRadial2Gradient>();
         return (INHERITED::onIsEqual(sBase) &&
                 this->fCenterX1 == s.fCenterX1 &&
@@ -567,7 +567,7 @@ GrGLRadial2Gradient::GrGLRadial2Gradient(const GrBackendProcessorFactory& factor
     fIsDegenerate = data.isDegenerate();
 }
 
-void GrGLRadial2Gradient::emitCode(GrGLProgramBuilder* builder,
+void GrGLRadial2Gradient::emitCode(GrGLFPBuilder* builder,
                                    const GrFragmentProcessor&,
                                    const GrProcessorKey& key,
                                    const char* outputColor,
@@ -596,7 +596,7 @@ void GrGLRadial2Gradient::emitCode(GrGLProgramBuilder* builder,
     builder->getUniformVariable(fParamUni).appendArrayAccess(4, &p4);
     builder->getUniformVariable(fParamUni).appendArrayAccess(5, &p5);
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     // We interpolate the linear component in coords[1].
     SkASSERT(coords[0].getType() == coords[1].getType());
     const char* coords2D;

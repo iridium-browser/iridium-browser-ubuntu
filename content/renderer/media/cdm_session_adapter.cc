@@ -8,9 +8,9 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/stl_util.h"
-#include "content/renderer/media/crypto/content_decryption_module_factory.h"
 #include "content/renderer/media/crypto/key_systems.h"
 #include "content/renderer/media/webcontentdecryptionmodulesession_impl.h"
+#include "media/base/cdm_factory.h"
 #include "media/base/cdm_promise.h"
 #include "media/base/media_keys.h"
 #include "url/gurl.h"
@@ -20,33 +20,23 @@ namespace content {
 const char kMediaEME[] = "Media.EME.";
 const char kDot[] = ".";
 
-CdmSessionAdapter::CdmSessionAdapter() :
-#if defined(ENABLE_BROWSER_CDMS)
-    cdm_id_(0),
-#endif
-    weak_ptr_factory_(this) {}
+CdmSessionAdapter::CdmSessionAdapter() : weak_ptr_factory_(this) {
+}
 
 CdmSessionAdapter::~CdmSessionAdapter() {}
 
-bool CdmSessionAdapter::Initialize(
-#if defined(ENABLE_PEPPER_CDMS)
-    const CreatePepperCdmCB& create_pepper_cdm_cb,
-#elif defined(ENABLE_BROWSER_CDMS)
-    RendererCdmManager* manager,
-#endif  // defined(ENABLE_PEPPER_CDMS)
-    const std::string& key_system,
-    const GURL& security_origin) {
+bool CdmSessionAdapter::Initialize(media::CdmFactory* cdm_factory,
+                                   const std::string& key_system,
+                                   const GURL& security_origin) {
+  // TODO(xhwang): This is why we need to include "key_systems.h". Move
+  // KeySystemNameForUMA out of src/content so we can move CdmSessionAdapter to
+  // src/media.
   key_system_uma_prefix_ = kMediaEME + KeySystemNameForUMA(key_system) + kDot;
+
   base::WeakPtr<CdmSessionAdapter> weak_this = weak_ptr_factory_.GetWeakPtr();
-  media_keys_ = ContentDecryptionModuleFactory::Create(
+  media_keys_ = cdm_factory->Create(
       key_system,
       security_origin,
-#if defined(ENABLE_PEPPER_CDMS)
-      create_pepper_cdm_cb,
-#elif defined(ENABLE_BROWSER_CDMS)
-      manager,
-      &cdm_id_,
-#endif  // defined(ENABLE_PEPPER_CDMS)
       base::Bind(&CdmSessionAdapter::OnSessionMessage, weak_this),
       base::Bind(&CdmSessionAdapter::OnSessionReady, weak_this),
       base::Bind(&CdmSessionAdapter::OnSessionClosed, weak_this),
@@ -99,6 +89,12 @@ void CdmSessionAdapter::InitializeNewSession(
                              promise.Pass());
 }
 
+void CdmSessionAdapter::LoadSession(
+    const std::string& web_session_id,
+    scoped_ptr<media::NewSessionCdmPromise> promise) {
+  media_keys_->LoadSession(web_session_id, promise.Pass());
+}
+
 void CdmSessionAdapter::UpdateSession(
     const std::string& web_session_id,
     const uint8* response,
@@ -136,7 +132,7 @@ const std::string& CdmSessionAdapter::GetKeySystemUMAPrefix() const {
 
 #if defined(ENABLE_BROWSER_CDMS)
 int CdmSessionAdapter::GetCdmId() const {
-  return cdm_id_;
+  return media_keys_->GetCdmId();
 }
 #endif  // defined(ENABLE_BROWSER_CDMS)
 
@@ -170,11 +166,8 @@ void CdmSessionAdapter::OnSessionExpirationUpdate(
 }
 
 void CdmSessionAdapter::OnSessionReady(const std::string& web_session_id) {
-  WebContentDecryptionModuleSessionImpl* session = GetSession(web_session_id);
-  DLOG_IF(WARNING, !session) << __FUNCTION__ << " for unknown session "
-                             << web_session_id;
-  if (session)
-    session->OnSessionReady();
+  // Ready events not used by unprefixed EME.
+  // TODO(jrummell): Remove when prefixed EME removed.
 }
 
 void CdmSessionAdapter::OnSessionClosed(const std::string& web_session_id) {
@@ -190,11 +183,8 @@ void CdmSessionAdapter::OnSessionError(
     media::MediaKeys::Exception exception_code,
     uint32 system_code,
     const std::string& error_message) {
-  WebContentDecryptionModuleSessionImpl* session = GetSession(web_session_id);
-  DLOG_IF(WARNING, !session) << __FUNCTION__ << " for unknown session "
-                             << web_session_id;
-  if (session)
-    session->OnSessionError(exception_code, system_code, error_message);
+  // Error events not used by unprefixed EME.
+  // TODO(jrummell): Remove when prefixed EME removed.
 }
 
 WebContentDecryptionModuleSessionImpl* CdmSessionAdapter::GetSession(

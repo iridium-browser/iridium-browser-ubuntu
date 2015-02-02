@@ -26,7 +26,7 @@ namespace {
 
 class FrameSelectionTest : public ::testing::Test {
 protected:
-    virtual void SetUp() OVERRIDE;
+    virtual void SetUp() override;
 
     DummyPageHolder& dummyPageHolder() const { return *m_dummyPageHolder; }
     HTMLDocument& document() const;
@@ -136,6 +136,27 @@ TEST_F(FrameSelectionTest, PaintCaretShouldNotLayout)
     }
     selection().paintCaret(nullptr, LayoutPoint(), LayoutRect());
     EXPECT_EQ(startCount, layoutCount());
+}
+
+#define EXPECT_EQ_SELECTED_TEXT(text) \
+    EXPECT_EQ(text, WebString(selection().selectedText()).utf8())
+
+TEST_F(FrameSelectionTest, SelectWordAroundPosition)
+{
+    // "Foo Bar  Baz,"
+    RefPtrWillBeRawPtr<Text> text = document().createTextNode("Foo Bar&nbsp;&nbsp;Baz,");
+    document().body()->appendChild(text);
+    // "Fo|o Bar  Baz,"
+    EXPECT_TRUE(selection().selectWordAroundPosition(VisiblePosition(Position(text, 2))));
+    EXPECT_EQ_SELECTED_TEXT("Foo");
+    // "Foo| Bar  Baz,"
+    EXPECT_TRUE(selection().selectWordAroundPosition(VisiblePosition(Position(text, 3))));
+    EXPECT_EQ_SELECTED_TEXT("Foo");
+    // "Foo Bar | Baz,"
+    EXPECT_FALSE(selection().selectWordAroundPosition(VisiblePosition(Position(text, 13))));
+    // "Foo Bar  Baz|,"
+    EXPECT_TRUE(selection().selectWordAroundPosition(VisiblePosition(Position(text, 22))));
+    EXPECT_EQ_SELECTED_TEXT("Baz");
 }
 
 }

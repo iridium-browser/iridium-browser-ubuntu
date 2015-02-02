@@ -115,7 +115,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
   // Creates a TYPE_CUSTOM MessageLoop with the supplied MessagePump, which must
   // be non-NULL.
   explicit MessageLoop(scoped_ptr<base::MessagePump> pump);
-  virtual ~MessageLoop();
+  ~MessageLoop() override;
 
   // Returns the MessageLoop object for the current thread, or null if none.
   static MessageLoop* current();
@@ -194,9 +194,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
   // good).
   //
   // NOTE: This method may be called on any thread.  The object will be deleted
-  // on the thread that executes MessageLoop::Run().  If this is not the same
-  // as the thread that calls PostDelayedTask(FROM_HERE, ), then T MUST inherit
-  // from RefCountedThreadSafe<T>!
+  // on the thread that executes MessageLoop::Run().
   template <class T>
   void DeleteSoon(const tracked_objects::Location& from_here, const T* object) {
     base::subtle::DeleteHelperInternal<T, void>::DeleteViaSequencedTaskRunner(
@@ -223,7 +221,7 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
   // NOTE: This method may be called on any thread.  The object will be
   // released (and thus possibly deleted) on the thread that executes
   // MessageLoop::Run().  If this is not the same as the thread that calls
-  // PostDelayedTask(FROM_HERE, ), then T MUST inherit from
+  // ReleaseSoon(FROM_HERE, ), then T MUST inherit from
   // RefCountedThreadSafe<T>!
   template <class T>
   void ReleaseSoon(const tracked_objects::Location& from_here,
@@ -391,12 +389,22 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
   // Returns true if the message loop is "idle". Provided for testing.
   bool IsIdleForTesting();
 
+  // Wakes up the message pump. Can be called on any thread. The caller is
+  // responsible for synchronizing ScheduleWork() calls.
+  void ScheduleWork(bool was_empty);
+
+  // Returns the TaskAnnotator which is used to add debug information to posted
+  // tasks.
+  debug::TaskAnnotator* task_annotator() { return &task_annotator_; }
+
+  // Runs the specified PendingTask.
+  void RunTask(const PendingTask& pending_task);
+
   //----------------------------------------------------------------------------
  protected:
   scoped_ptr<MessagePump> pump_;
 
  private:
-  friend class internal::IncomingTaskQueue;
   friend class RunLoop;
 
   // Configures various members for the two constructors.
@@ -407,9 +415,6 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
 
   // Called to process any delayed non-nestable tasks.
   bool ProcessNextDelayedNonNestableTask();
-
-  // Runs the specified PendingTask.
-  void RunTask(const PendingTask& pending_task);
 
   // Calls RunTask or queues the pending_task on the deferred task list if it
   // cannot be run right now.  Returns true if the task was run.
@@ -423,17 +428,9 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
   // true if some work was done.
   bool DeletePendingTasks();
 
-  // Returns the TaskAnnotator which is used to add debug information to posted
-  // tasks.
-  debug::TaskAnnotator* task_annotator() { return &task_annotator_; }
-
   // Loads tasks from the incoming queue to |work_queue_| if the latter is
   // empty.
   void ReloadWorkQueue();
-
-  // Wakes up the message pump. Can be called on any thread. The caller is
-  // responsible for synchronizing ScheduleWork() calls.
-  void ScheduleWork(bool was_empty);
 
   // Start recording histogram info about events and action IF it was enabled
   // and IF the statistics recorder can accept a registration of our histogram.
@@ -445,9 +442,9 @@ class BASE_EXPORT MessageLoop : public MessagePump::Delegate {
   void HistogramEvent(int event);
 
   // MessagePump::Delegate methods:
-  virtual bool DoWork() OVERRIDE;
-  virtual bool DoDelayedWork(TimeTicks* next_delayed_work_time) OVERRIDE;
-  virtual bool DoIdleWork() OVERRIDE;
+  bool DoWork() override;
+  bool DoDelayedWork(TimeTicks* next_delayed_work_time) override;
+  bool DoIdleWork() override;
 
   const Type type_;
 
@@ -599,7 +596,7 @@ class BASE_EXPORT MessageLoopForIO : public MessageLoop {
     return loop && loop->type() == MessageLoop::TYPE_IO;
   }
 
-#if !defined(OS_NACL)
+#if !defined(OS_NACL_SFI)
 
 #if defined(OS_WIN)
   typedef MessagePumpForIO::IOHandler IOHandler;
@@ -645,7 +642,7 @@ class BASE_EXPORT MessageLoopForIO : public MessageLoop {
                            FileDescriptorWatcher *controller,
                            Watcher *delegate);
 #endif  // defined(OS_IOS) || defined(OS_POSIX)
-#endif  // !defined(OS_NACL)
+#endif  // !defined(OS_NACL_SFI)
 };
 
 // Do not add any member variables to MessageLoopForIO!  This is important b/c

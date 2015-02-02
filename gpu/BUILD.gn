@@ -19,9 +19,6 @@
 #
 #  gpu.gyp:gles2_implementation =>
 #      //gpu/command_buffer/client:gles2_implementation
-
-#  gpu.gyp:gles2_implementation_client_side_arrays =>
-#      //gpu/command_buffer/client:gles2_implementation_client_side_arrays
 #
 #  gpu.gyp:gpu_config => //gpu/config
 #
@@ -114,15 +111,18 @@ test("gl_tests") {
     "//ui/gl",
     "//gpu/command_buffer/common:gles2_utils",
     "//gpu/command_buffer/client:gles2_c_lib",
-    "//gpu/command_buffer/client:gles2_implementation_client_side_arrays",
+    "//gpu/command_buffer/client:gles2_implementation",
   ]
 
+  libs = []
+
+  if (is_android) {
+    deps += [
+      "//testing/android:native_test_native_code",
+    ]
+    libs += [ "android" ]
+  }
   # TODO(GYP)
-  #     ['OS == "android"', {
-  #       'dependencies': [
-  #         '../testing/android/native_test.gyp:native_test_native_code',
-  #       ],
-  #     }],
   #     ['OS == "win"', {
   #       'dependencies': [
   #         '../third_party/angle/src/build_angle.gyp:libEGL',
@@ -186,6 +186,7 @@ test("gpu_unittests") {
     "command_buffer/service/gles2_cmd_decoder_unittest_programs.cc",
     "command_buffer/service/gles2_cmd_decoder_unittest_textures.cc",
     "command_buffer/service/gles2_cmd_decoder_unittest_attribs.cc",
+    "command_buffer/service/gles2_cmd_decoder_unittest_valuebuffer.cc",
     "command_buffer/service/gl_surface_mock.cc",
     "command_buffer/service/gl_surface_mock.h",
     "command_buffer/service/gpu_scheduler_unittest.cc",
@@ -197,6 +198,7 @@ test("gpu_unittests") {
     "command_buffer/service/mocks.cc",
     "command_buffer/service/mocks.h",
     "command_buffer/service/program_manager_unittest.cc",
+    "command_buffer/service/valuebuffer_manager_unittest.cc",
     "command_buffer/service/query_manager_unittest.cc",
     "command_buffer/service/renderbuffer_manager_unittest.cc",
     "command_buffer/service/program_cache_unittest.cc",
@@ -238,7 +240,7 @@ test("gpu_unittests") {
     "//ui/gl",
     "//gpu/command_buffer/common:gles2_utils",
     "//gpu/command_buffer/client:gles2_c_lib",
-    "//gpu/command_buffer/client:gles2_implementation_client_side_arrays",
+    "//gpu/command_buffer/client:gles2_implementation",
   ]
 }
 

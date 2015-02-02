@@ -7,7 +7,7 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/V8Binding.h"
-#include "bindings/core/v8/custom/V8Uint8ArrayCustom.h"
+#include "bindings/core/v8/V8Uint8Array.h"
 #include "public/platform/WebCryptoKeyAlgorithm.h"
 #include "wtf/Uint8Array.h"
 
@@ -15,7 +15,7 @@ namespace blink {
 
 class DictionaryBuilder : public blink::WebCryptoKeyAlgorithmDictionary {
 public:
-    DictionaryBuilder(v8::Handle<v8::Object> holder, v8::Isolate* isolate)
+    DictionaryBuilder(v8::Local<v8::Object> holder, v8::Isolate* isolate)
         : m_holder(holder)
         , m_isolate(isolate)
         , m_dictionary(Dictionary::createEmpty(isolate))
@@ -43,14 +43,13 @@ public:
 
     virtual void setUint8Array(const char* propertyName, const blink::WebVector<unsigned char>& vector)
     {
-        RefPtr<Uint8Array> uint8Array = Uint8Array::create(vector.data(), vector.size());
-        m_dictionary.set(propertyName, toV8(uint8Array.get(), m_holder, m_isolate));
+        m_dictionary.set(propertyName, toV8(DOMUint8Array::create(vector.data(), vector.size()), m_holder, m_isolate));
     }
 
     const Dictionary& dictionary() const { return m_dictionary; }
 
 private:
-    v8::Handle<v8::Object> m_holder;
+    v8::Local<v8::Object> m_holder;
     v8::Isolate* m_isolate;
     Dictionary m_dictionary;
 };

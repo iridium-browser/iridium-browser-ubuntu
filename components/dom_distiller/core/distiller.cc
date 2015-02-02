@@ -37,10 +37,12 @@ DistillerFactoryImpl::DistillerFactoryImpl(
 
 DistillerFactoryImpl::~DistillerFactoryImpl() {}
 
-scoped_ptr<Distiller> DistillerFactoryImpl::CreateDistiller() {
+scoped_ptr<Distiller> DistillerFactoryImpl::CreateDistillerForUrl(
+    const GURL& unused) {
+  // This default implementation has the same behavior for all URLs.
   scoped_ptr<DistillerImpl> distiller(new DistillerImpl(
       *distiller_url_fetcher_factory_, dom_distiller_options_));
-  return distiller.PassAs<Distiller>();
+  return distiller.Pass();
 }
 
 DistillerImpl::DistilledPageData::DistilledPageData() {}
@@ -161,6 +163,13 @@ void DistillerImpl::OnPageDistillationFinished(
           distiller_result->debug_info().log());
     }
 
+    if (distiller_result->has_text_direction()) {
+      page_data->distilled_page_proto->data.set_text_direction(
+          distiller_result->text_direction());
+    } else {
+      page_data->distilled_page_proto->data.set_text_direction("auto");
+    }
+
     if (distiller_result->has_pagination_info()) {
       proto::PaginationInfo pagination_info =
           distiller_result->pagination_info();
@@ -170,6 +179,8 @@ void DistillerImpl::OnPageDistillationFinished(
           // The pages should be in same origin.
           DCHECK_EQ(next_page_url.GetOrigin(), page_url.GetOrigin());
           AddToDistillationQueue(page_num + 1, next_page_url);
+          page_data->distilled_page_proto->data.mutable_pagination_info()->
+              set_next_page(next_page_url.spec());
         }
       }
 
@@ -178,6 +189,16 @@ void DistillerImpl::OnPageDistillationFinished(
         if (prev_page_url.is_valid()) {
           DCHECK_EQ(prev_page_url.GetOrigin(), page_url.GetOrigin());
           AddToDistillationQueue(page_num - 1, prev_page_url);
+          page_data->distilled_page_proto->data.mutable_pagination_info()->
+              set_prev_page(prev_page_url.spec());
+        }
+      }
+
+      if (pagination_info.has_canonical_page()) {
+        GURL canonical_page_url(pagination_info.canonical_page());
+        if (canonical_page_url.is_valid()) {
+          page_data->distilled_page_proto->data.mutable_pagination_info()->
+              set_canonical_page(canonical_page_url.spec());
         }
       }
     }

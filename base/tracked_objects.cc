@@ -54,18 +54,27 @@ const ThreadData::Status kInitialStartupState =
 // problem with its presence).
 static const bool kAllowAlternateTimeSourceHandling = true;
 
+// Possible states of the profiler timing enabledness.
+enum {
+  UNDEFINED_TIMING,
+  ENABLED_TIMING,
+  DISABLED_TIMING,
+};
+
+// State of the profiler timing enabledness.
+base::subtle::Atomic32 g_profiler_timing_enabled = UNDEFINED_TIMING;
+
+// Returns whether profiler timing is enabled. The default is true, but this may
+// be overridden by a command-line flag. Some platforms may programmatically set
+// this command-line flag to the "off" value if it's not specified.
+// This in turn can be overridden by explicitly calling
+// ThreadData::EnableProfilerTiming, say, based on a field trial.
 inline bool IsProfilerTimingEnabled() {
-  enum {
-    UNDEFINED_TIMING,
-    ENABLED_TIMING,
-    DISABLED_TIMING,
-  };
-  static base::subtle::Atomic32 timing_enabled = UNDEFINED_TIMING;
-  // Reading |timing_enabled| is done without barrier because multiple
-  // initialization is not an issue while the barrier can be relatively costly
-  // given that this method is sometimes called in a tight loop.
+  // Reading |g_profiler_timing_enabled| is done without barrier because
+  // multiple initialization is not an issue while the barrier can be relatively
+  // costly given that this method is sometimes called in a tight loop.
   base::subtle::Atomic32 current_timing_enabled =
-      base::subtle::NoBarrier_Load(&timing_enabled);
+      base::subtle::NoBarrier_Load(&g_profiler_timing_enabled);
   if (current_timing_enabled == UNDEFINED_TIMING) {
     if (!CommandLine::InitializedForCurrentProcess())
       return true;
@@ -75,7 +84,8 @@ inline bool IsProfilerTimingEnabled() {
          switches::kProfilerTimingDisabledValue)
             ? DISABLED_TIMING
             : ENABLED_TIMING;
-    base::subtle::NoBarrier_Store(&timing_enabled, current_timing_enabled);
+    base::subtle::NoBarrier_Store(&g_profiler_timing_enabled,
+                                  current_timing_enabled);
   }
   return current_timing_enabled == ENABLED_TIMING;
 }
@@ -775,6 +785,11 @@ void ThreadData::SetAlternateTimeSource(NowFunction* now_function) {
 }
 
 // static
+void ThreadData::EnableProfilerTiming() {
+  base::subtle::NoBarrier_Store(&g_profiler_timing_enabled, ENABLED_TIMING);
+}
+
+// static
 TrackedTime ThreadData::Now() {
   if (kAllowAlternateTimeSourceHandling && now_function_)
     return TrackedTime::FromMilliseconds((*now_function_)());
@@ -854,16 +869,32 @@ void ThreadData::ShutdownSingleThreadedCleanup(bool leak) {
 
 //------------------------------------------------------------------------------
 TaskStopwatch::TaskStopwatch()
-    : start_time_(ThreadData::Now()),
-      current_thread_data_(ThreadData::Get()),
+    : wallclock_duration_ms_(0),
+      current_thread_data_(NULL),
       excluded_duration_ms_(0),
       parent_(NULL) {
 #if DCHECK_IS_ON
-  state_ = RUNNING;
+  state_ = CREATED;
   child_ = NULL;
 #endif
+}
 
-  wallclock_duration_ms_ = 0;
+TaskStopwatch::~TaskStopwatch() {
+#if DCHECK_IS_ON
+  DCHECK(state_ != RUNNING);
+  DCHECK(child_ == NULL);
+#endif
+}
+
+void TaskStopwatch::Start() {
+#if DCHECK_IS_ON
+  DCHECK(state_ == CREATED);
+  state_ = RUNNING;
+#endif
+
+  start_time_ = ThreadData::Now();
+
+  current_thread_data_ = ThreadData::Get();
   if (!current_thread_data_)
     return;
 
@@ -876,13 +907,6 @@ TaskStopwatch::TaskStopwatch()
   }
 #endif
   current_thread_data_->current_stopwatch_ = this;
-}
-
-TaskStopwatch::~TaskStopwatch() {
-#if DCHECK_IS_ON
-  DCHECK(state_ != RUNNING);
-  DCHECK(child_ == NULL);
-#endif
 }
 
 void TaskStopwatch::Stop() {
@@ -910,12 +934,15 @@ void TaskStopwatch::Stop() {
   DCHECK(parent_->child_ == this);
   parent_->child_ = NULL;
 #endif
-  parent_->excluded_duration_ms_ +=
-      wallclock_duration_ms_;
+  parent_->excluded_duration_ms_ += wallclock_duration_ms_;
   parent_ = NULL;
 }
 
 TrackedTime TaskStopwatch::StartTime() const {
+#if DCHECK_IS_ON
+  DCHECK(state_ != CREATED);
+#endif
+
   return start_time_;
 }
 
@@ -928,6 +955,10 @@ int32 TaskStopwatch::RunDurationMs() const {
 }
 
 ThreadData* TaskStopwatch::GetThreadData() const {
+#if DCHECK_IS_ON
+  DCHECK(state_ != CREATED);
+#endif
+
   return current_thread_data_;
 }
 

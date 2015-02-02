@@ -37,6 +37,7 @@
 #include "core/workers/WorkerLoaderProxy.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
+#include <limits>
 
 namespace blink {
 
@@ -60,25 +61,26 @@ void WorkerLoaderClientBridge::didSendData(unsigned long long bytesSent, unsigne
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidSendData, m_workerClientWrapper, bytesSent, totalBytesToBeSent));
 }
 
-static void workerGlobalScopeDidReceiveResponse(ExecutionContext* context, PassRefPtr<ThreadableLoaderClientWrapper> workerClientWrapper, unsigned long identifier, PassOwnPtr<CrossThreadResourceResponseData> responseData)
+static void workerGlobalScopeDidReceiveResponse(ExecutionContext* context, PassRefPtr<ThreadableLoaderClientWrapper> workerClientWrapper, unsigned long identifier, PassOwnPtr<CrossThreadResourceResponseData> responseData, PassOwnPtr<WebDataConsumerHandle> handle)
 {
     ASSERT_UNUSED(context, context->isWorkerGlobalScope());
     OwnPtr<ResourceResponse> response(ResourceResponse::adopt(responseData));
-    workerClientWrapper->didReceiveResponse(identifier, *response);
+    workerClientWrapper->didReceiveResponse(identifier, *response, handle);
 }
 
-void WorkerLoaderClientBridge::didReceiveResponse(unsigned long identifier, const ResourceResponse& response)
+void WorkerLoaderClientBridge::didReceiveResponse(unsigned long identifier, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
-    m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidReceiveResponse, m_workerClientWrapper, identifier, response));
+    m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidReceiveResponse, m_workerClientWrapper, identifier, response, handle));
 }
 
 static void workerGlobalScopeDidReceiveData(ExecutionContext* context, PassRefPtr<ThreadableLoaderClientWrapper> workerClientWrapper, PassOwnPtr<Vector<char> > vectorData)
 {
     ASSERT_UNUSED(context, context->isWorkerGlobalScope());
+    RELEASE_ASSERT(vectorData->size() <= std::numeric_limits<unsigned>::max());
     workerClientWrapper->didReceiveData(vectorData->data(), vectorData->size());
 }
 
-void WorkerLoaderClientBridge::didReceiveData(const char* data, int dataLength)
+void WorkerLoaderClientBridge::didReceiveData(const char* data, unsigned dataLength)
 {
     OwnPtr<Vector<char> > vector = adoptPtr(new Vector<char>(dataLength)); // needs to be an OwnPtr for usage with createCrossThreadTask.
     memcpy(vector->data(), data, dataLength);

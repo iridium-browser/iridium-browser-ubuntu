@@ -18,33 +18,23 @@
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
 
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
 
-void RemoveWebViewEventListenersOnIOThread(
-    void* profile,
-    const std::string& extension_id,
-    int embedder_process_id,
-    int view_instance_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-  ExtensionWebRequestEventRouter::GetInstance()->RemoveWebViewEventListeners(
-      profile,
-      extension_id,
-      embedder_process_id,
-      view_instance_id);
-}
+namespace extensions {
 
 ChromeWebViewGuestDelegate::ChromeWebViewGuestDelegate(
-    extensions::WebViewGuest* web_view_guest)
+    WebViewGuest* web_view_guest)
     : pending_context_menu_request_id_(0),
       chromevox_injected_(false),
       current_zoom_factor_(1.0),
-      web_view_guest_(web_view_guest) {
+      web_view_guest_(web_view_guest),
+      weak_ptr_factory_(this) {
 }
 
 ChromeWebViewGuestDelegate::~ChromeWebViewGuestDelegate() {
@@ -70,8 +60,7 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
   args->Set(webview::kContextMenuItems, items.release());
   args->SetInteger(webview::kRequestId, request_id);
   web_view_guest()->DispatchEventToEmbedder(
-      new extensions::GuestViewBase::Event(
-          webview::kEventContextMenu, args.Pass()));
+      new GuestViewBase::Event(webview::kEventContextMenu, args.Pass()));
   return true;
 }
 
@@ -88,39 +77,19 @@ void ChromeWebViewGuestDelegate::OnAttachWebViewHelpers(
   ZoomController::CreateForWebContents(contents);
 
   FaviconTabHelper::CreateForWebContents(contents);
-  extensions::ChromeExtensionWebContentsObserver::
-      CreateForWebContents(contents);
+  ChromeExtensionWebContentsObserver::CreateForWebContents(contents);
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   printing::PrintViewManager::CreateForWebContents(contents);
   printing::PrintPreviewMessageHandler::CreateForWebContents(contents);
 #else
   printing::PrintViewManagerBasic::CreateForWebContents(contents);
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
   pdf::PDFWebContentsHelper::CreateForWebContentsWithClient(
       contents,
       scoped_ptr<pdf::PDFWebContentsHelperClient>(
           new ChromePDFWebContentsHelperClient()));
-}
-
-void ChromeWebViewGuestDelegate::OnEmbedderDestroyed() {
-  // TODO(fsamuel): WebRequest event listeners for <webview> should survive
-  // reparenting of a <webview> within a single embedder. Right now, we keep
-  // around the browser state for the listener for the lifetime of the embedder.
-  // Ideally, the lifetime of the listeners should match the lifetime of the
-  // <webview> DOM node. Once http://crbug.com/156219 is resolved we can move
-  // the call to RemoveWebViewEventListenersOnIOThread back to
-  // WebViewGuest::WebContentsDestroyed.
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(
-          &RemoveWebViewEventListenersOnIOThread,
-          web_view_guest()->browser_context(),
-          web_view_guest()->embedder_extension_id(),
-          web_view_guest()->embedder_render_process_id(),
-          web_view_guest()->view_instance_id()));
 }
 
 void ChromeWebViewGuestDelegate::OnDidAttachToEmbedder() {
@@ -143,7 +112,8 @@ void ChromeWebViewGuestDelegate::OnDidCommitProvisionalLoadForFrame(
   ZoomController* zoom_controller =
       ZoomController::FromWebContents(guest_web_contents());
   DCHECK(zoom_controller);
-  current_zoom_factor_ = zoom_controller->GetZoomLevel();
+  current_zoom_factor_ =
+      content::ZoomLevelToZoomFactor(zoom_controller->GetZoomLevel());
   if (is_main_frame)
     chromevox_injected_ = false;
 }
@@ -155,7 +125,7 @@ void ChromeWebViewGuestDelegate::OnDidInitialize() {
   CHECK(accessibility_manager);
   accessibility_subscription_ = accessibility_manager->RegisterCallback(
       base::Bind(&ChromeWebViewGuestDelegate::OnAccessibilityStatusChanged,
-                 base::Unretained(this)));
+                 weak_ptr_factory_.GetWeakPtr()));
 #endif
 }
 
@@ -165,11 +135,23 @@ void ChromeWebViewGuestDelegate::OnDocumentLoadedInFrame(
     InjectChromeVoxIfNeeded(render_frame_host->GetRenderViewHost());
 }
 
+void ChromeWebViewGuestDelegate::OnEmbedderWillBeDestroyed() {
+  content::WebContents* embedder_web_contents =
+      web_view_guest()->embedder_web_contents();
+  if (!embedder_web_contents)
+    return;
+
+  ZoomController* zoom_controller =
+      ZoomController::FromWebContents(embedder_web_contents);
+  if (zoom_controller)
+    zoom_controller->RemoveObserver(this);
+}
+
 void ChromeWebViewGuestDelegate::OnGuestDestroyed() {
   // Clean up custom context menu items for this guest.
-  extensions::MenuManager* menu_manager = extensions::MenuManager::Get(
+  MenuManager* menu_manager = MenuManager::Get(
       Profile::FromBrowserContext(web_view_guest()->browser_context()));
-  menu_manager->RemoveAllContextItems(extensions::MenuItem::ExtensionKey(
+  menu_manager->RemoveAllContextItems(MenuItem::ExtensionKey(
       web_view_guest()->embedder_extension_id(),
       web_view_guest()->view_instance_id()));
 }
@@ -201,8 +183,7 @@ void ChromeWebViewGuestDelegate::OnSetZoom(double zoom_factor) {
   args->SetDouble(webview::kOldZoomFactor, current_zoom_factor_);
   args->SetDouble(webview::kNewZoomFactor, zoom_factor);
   web_view_guest()->DispatchEventToEmbedder(
-      new extensions::GuestViewBase::Event(
-          webview::kEventZoomChange, args.Pass()));
+      new GuestViewBase::Event(webview::kEventZoomChange, args.Pass()));
   current_zoom_factor_ = zoom_factor;
 }
 
@@ -258,3 +239,5 @@ void ChromeWebViewGuestDelegate::OnZoomChanged(
   ZoomController::FromWebContents(guest_web_contents())->
       SetZoomLevel(data.new_zoom_level);
 }
+
+}  // namespace extensions

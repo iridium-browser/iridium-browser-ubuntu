@@ -22,15 +22,15 @@ class AboutUIHTMLSource : public content::URLDataSource {
   AboutUIHTMLSource(const std::string& source_name, Profile* profile);
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
+  std::string GetSource() const override;
+  void StartDataRequest(
       const std::string& path,
       int render_process_id,
       int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
-  virtual bool ShouldAddContentSecurityPolicy() const OVERRIDE;
-  virtual bool ShouldDenyXFrameOptions() const OVERRIDE;
+      const content::URLDataSource::GotDataCallback& callback) override;
+  std::string GetMimeType(const std::string& path) const override;
+  bool ShouldAddContentSecurityPolicy() const override;
+  bool ShouldDenyXFrameOptions() const override;
 
   // Send the response data.
   void FinishDataRequest(
@@ -40,7 +40,7 @@ class AboutUIHTMLSource : public content::URLDataSource {
   Profile* profile() { return profile_; }
 
  private:
-  virtual ~AboutUIHTMLSource();
+  ~AboutUIHTMLSource() override;
 
   std::string source_name_;
   Profile* profile_;
@@ -51,7 +51,7 @@ class AboutUIHTMLSource : public content::URLDataSource {
 class AboutUI : public content::WebUIController {
  public:
   explicit AboutUI(content::WebUI* web_ui, const std::string& host);
-  virtual ~AboutUI() {}
+  ~AboutUI() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AboutUI);

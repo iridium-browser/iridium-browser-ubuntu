@@ -36,7 +36,7 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
   };
 
   explicit HungPagesTableModel(Delegate* delegate);
-  virtual ~HungPagesTableModel();
+  ~HungPagesTableModel() override;
 
   void InitForWebContents(content::WebContents* hung_contents);
 
@@ -48,14 +48,13 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
   content::RenderViewHost* GetRenderViewHost();
 
   // Overridden from ui::TableModel:
-  virtual int RowCount() OVERRIDE;
-  virtual base::string16 GetText(int row, int column_id) OVERRIDE;
-  virtual gfx::ImageSkia GetIcon(int row) OVERRIDE;
-  virtual void SetObserver(ui::TableModelObserver* observer) OVERRIDE;
+  int RowCount() override;
+  base::string16 GetText(int row, int column_id) override;
+  gfx::ImageSkia GetIcon(int row) override;
+  void SetObserver(ui::TableModelObserver* observer) override;
 
   // Overridden from views::TableGrouper:
-  virtual void GetGroupRange(int model_index,
-                             views::GroupRange* range) OVERRIDE;
+  void GetGroupRange(int model_index, views::GroupRange* range) override;
 
  private:
   // Used to track a single WebContents. If the WebContents is destroyed
@@ -70,8 +69,8 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
     }
 
     // WebContentsObserver overrides:
-    virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-    virtual void WebContentsDestroyed() OVERRIDE;
+    void RenderProcessGone(base::TerminationStatus status) override;
+    void WebContentsDestroyed() override;
 
    private:
     HungPagesTableModel* model_;
@@ -116,29 +115,27 @@ class HungRendererDialogView : public views::DialogDelegateView,
   virtual void EndForWebContents(content::WebContents* contents);
 
   // views::DialogDelegateView overrides:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual views::View* CreateExtraView() OVERRIDE;
-  virtual bool Accept(bool window_closing)  OVERRIDE;
-  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
+  base::string16 GetWindowTitle() const override;
+  void WindowClosing() override;
+  int GetDialogButtons() const override;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  views::View* CreateExtraView() override;
+  bool Accept(bool window_closing) override;
+  bool UseNewStyleForThisDialog() const override;
 
   // views::ButtonListener overrides:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // HungPagesTableModel::Delegate overrides:
-  virtual void TabDestroyed() OVERRIDE;
+  void TabDestroyed() override;
 
  protected:
   HungRendererDialogView();
-  virtual ~HungRendererDialogView();
+  ~HungRendererDialogView() override;
 
   // views::View overrides:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
   static HungRendererDialogView* g_instance_;
 

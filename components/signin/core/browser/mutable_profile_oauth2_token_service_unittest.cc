@@ -37,7 +37,7 @@ class MutableProfileOAuth2TokenServiceTest
         start_batch_changes_(0),
         end_batch_changes_(0) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
 #if defined(OS_MACOSX)
     OSCrypt::UseMockKeychain(true);
 #endif
@@ -52,7 +52,7 @@ class MutableProfileOAuth2TokenServiceTest
     oauth2_service_.AddObserver(this);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     oauth2_service_.RemoveObserver(this);
     oauth2_service_.Shutdown();
   }
@@ -65,21 +65,17 @@ class MutableProfileOAuth2TokenServiceTest
   }
 
   // OAuth2TokenService::Observer implementation.
-  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE {
+  void OnRefreshTokenAvailable(const std::string& account_id) override {
     ++token_available_count_;
   }
-  virtual void OnRefreshTokenRevoked(const std::string& account_id) OVERRIDE {
+  void OnRefreshTokenRevoked(const std::string& account_id) override {
     ++token_revoked_count_;
   }
-  virtual void OnRefreshTokensLoaded() OVERRIDE { ++tokens_loaded_count_; }
+  void OnRefreshTokensLoaded() override { ++tokens_loaded_count_; }
 
-  virtual void OnStartBatchChanges() OVERRIDE {
-    ++start_batch_changes_;
-  }
+  void OnStartBatchChanges() override { ++start_batch_changes_; }
 
-  virtual void OnEndBatchChanges() OVERRIDE {
-    ++end_batch_changes_;
-  }
+  void OnEndBatchChanges() override { ++end_batch_changes_; }
 
   void ResetObserverCounts() {
     token_available_count_ = 0;
@@ -367,4 +363,17 @@ TEST_F(MutableProfileOAuth2TokenServiceTest, FetchTransientError) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(GoogleServiceAuthError::AuthErrorNone(),
             oauth2_service_.signin_error_controller()->auth_error());
+}
+
+TEST_F(MutableProfileOAuth2TokenServiceTest, CanonicalizeAccountId) {
+  std::map<std::string, std::string> tokens;
+  tokens["AccountId-user@gmail.com"] = "refresh_token";
+  tokens["AccountId-Foo.Bar@gmail.com"] = "refresh_token";
+  tokens["AccountId-12345"] = "refresh_token";
+
+  oauth2_service_.LoadAllCredentialsIntoMemory(tokens);
+
+  EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("user@gmail.com"));
+  EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("foobar@gmail.com"));
+  EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("12345"));
 }

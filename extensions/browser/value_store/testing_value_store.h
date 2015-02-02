@@ -13,7 +13,7 @@
 class TestingValueStore : public ValueStore {
  public:
   TestingValueStore();
-  virtual ~TestingValueStore();
+  ~TestingValueStore() override;
 
   // Sets the error code for requests. If OK, errors won't be thrown.
   // Defaults to OK.
@@ -28,25 +28,24 @@ class TestingValueStore : public ValueStore {
   int write_count() { return write_count_; }
 
   // ValueStore implementation.
-  virtual size_t GetBytesInUse(const std::string& key) OVERRIDE;
-  virtual size_t GetBytesInUse(const std::vector<std::string>& keys) OVERRIDE;
-  virtual size_t GetBytesInUse() OVERRIDE;
-  virtual ReadResult Get(const std::string& key) OVERRIDE;
-  virtual ReadResult Get(const std::vector<std::string>& keys) OVERRIDE;
-  virtual ReadResult Get() OVERRIDE;
-  virtual WriteResult Set(
-      WriteOptions options,
-      const std::string& key,
-      const base::Value& value) OVERRIDE;
-  virtual WriteResult Set(
-      WriteOptions options, const base::DictionaryValue& values) OVERRIDE;
-  virtual WriteResult Remove(const std::string& key) OVERRIDE;
-  virtual WriteResult Remove(const std::vector<std::string>& keys) OVERRIDE;
-  virtual WriteResult Clear() OVERRIDE;
+  size_t GetBytesInUse(const std::string& key) override;
+  size_t GetBytesInUse(const std::vector<std::string>& keys) override;
+  size_t GetBytesInUse() override;
+  ReadResult Get(const std::string& key) override;
+  ReadResult Get(const std::vector<std::string>& keys) override;
+  ReadResult Get() override;
+  WriteResult Set(WriteOptions options,
+                  const std::string& key,
+                  const base::Value& value) override;
+  WriteResult Set(WriteOptions options,
+                  const base::DictionaryValue& values) override;
+  WriteResult Remove(const std::string& key) override;
+  WriteResult Remove(const std::vector<std::string>& keys) override;
+  WriteResult Clear() override;
   // TestingValueStores can't get corrupted (they're all in-memory), so these
   // just return true.
-  virtual bool Restore() OVERRIDE;
-  virtual bool RestoreKey(const std::string& key) OVERRIDE;
+  bool Restore() override;
+  bool RestoreKey(const std::string& key) override;
 
  private:
   scoped_ptr<ValueStore::Error> TestingError();

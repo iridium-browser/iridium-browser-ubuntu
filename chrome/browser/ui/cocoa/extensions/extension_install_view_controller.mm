@@ -12,7 +12,10 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/bundle_installer.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/chrome_style.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/page_navigator.h"
@@ -186,9 +189,10 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
 @synthesize userCountField = userCountField_;
 @synthesize storeLinkButton = storeLinkButton_;
 
-- (id)initWithNavigator:(content::PageNavigator*)navigator
-               delegate:(ExtensionInstallPrompt::Delegate*)delegate
-                 prompt:(scoped_refptr<ExtensionInstallPrompt::Prompt>)prompt {
+- (id)initWithProfile:(Profile*)profile
+            navigator:(content::PageNavigator*)navigator
+             delegate:(ExtensionInstallPrompt::Delegate*)delegate
+               prompt:(scoped_refptr<ExtensionInstallPrompt::Prompt>)prompt {
   // We use a different XIB in the case of bundle installs, installs with
   // webstore data, or no permission warnings. These are laid out nicely for
   // the data they display.
@@ -198,7 +202,8 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
   } else if (prompt->has_webstore_data()) {
     nibName = @"ExtensionInstallPromptWebstoreData";
   } else if (!prompt->ShouldShowPermissions() &&
-             prompt->GetRetainedFileCount() == 0) {
+             prompt->GetRetainedFileCount() == 0 &&
+             prompt->GetRetainedDeviceCount() == 0) {
     nibName = @"ExtensionInstallPromptNoWarnings";
   } else {
     nibName = @"ExtensionInstallPrompt";
@@ -206,6 +211,7 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
 
   if ((self = [super initWithNibName:nibName
                               bundle:base::mac::FrameworkBundle()])) {
+    profile_ = profile;
     navigator_ = navigator;
     delegate_ = delegate;
     prompt_ = prompt;
@@ -217,9 +223,15 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
 - (IBAction)storeLinkClicked:(id)sender {
   GURL store_url(extension_urls::GetWebstoreItemDetailURLPrefix() +
                  prompt_->extension()->id());
-  navigator_->OpenURL(OpenURLParams(
-      store_url, Referrer(), NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
-      false));
+  OpenURLParams params(store_url, Referrer(), NEW_FOREGROUND_TAB,
+      ui::PAGE_TRANSITION_LINK, false);
+  if (navigator_) {
+    navigator_->OpenURL(params);
+  } else {
+    chrome::ScopedTabbedBrowserDisplayer displayer(
+        profile_, chrome::GetActiveDesktop());
+    displayer.browser()->OpenURL(params);
+  }
 
   delegate_->InstallUIAbort(/*user_initiated=*/true);
 }
@@ -315,8 +327,8 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
     OffsetControlVerticallyToFitContent(itemsField_, &totalOffset);
   }
 
-  // If there are any warnings or retained files, then we have to do
-  // some special layout.
+  // If there are any warnings, retained devices or retained files, then we
+  // have to do some special layout.
   if (prompt_->ShouldShowPermissions() || prompt_->GetRetainedFileCount() > 0) {
     NSSize spacing = [outlineView_ intercellSpacing];
     spacing.width += 2;
@@ -602,8 +614,6 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
   NSString* heading = nil;
   NSString* withheldHeading = nil;
 
-  ExtensionInstallPrompt::DetailsType type =
-      ExtensionInstallPrompt::PERMISSIONS_DETAILS;
   bool hasPermissions = prompt.GetPermissionCount(
       ExtensionInstallPrompt::PermissionsType::ALL_PERMISSIONS);
   CellAttributes warningCellAttributes =
@@ -647,29 +657,54 @@ bool HasAttribute(id item, CellAttributesMask attributeMask) {
   }
 
   if (prompt.GetRetainedFileCount() > 0) {
-    type = ExtensionInstallPrompt::RETAINED_FILES_DETAILS;
+    const ExtensionInstallPrompt::DetailsType type =
+        ExtensionInstallPrompt::RETAINED_FILES_DETAILS;
 
     NSMutableArray* children = [NSMutableArray array];
 
     if (prompt.GetIsShowingDetails(type, 0)) {
       for (size_t i = 0; i < prompt.GetRetainedFileCount(); ++i) {
-        [children addObject:
-            [self buildItemWithTitle:SysUTF16ToNSString(
-                prompt.GetRetainedFile(i))
-                      cellAttributes:kUseBullet
-                            children:nil]];
+        NSString* title = SysUTF16ToNSString(prompt.GetRetainedFile(i));
+        [children addObject:[self buildItemWithTitle:title
+                                      cellAttributes:kUseBullet
+                                            children:nil]];
       }
     }
 
-    [warnings
-        addObject:[self buildItemWithTitle:SysUTF16ToNSString(
-                                               prompt.GetRetainedFilesHeading())
-                            cellAttributes:warningCellAttributes
-                                  children:children]];
+    NSString* title = SysUTF16ToNSString(prompt.GetRetainedFilesHeading());
+    [warnings addObject:[self buildItemWithTitle:title
+                                  cellAttributes:warningCellAttributes
+                                        children:children]];
 
     // Add a row for the link.
     [warnings addObject:
         [self buildDetailToggleItem:type permissionsDetailIndex:0]];
+  }
+
+  if (prompt.GetRetainedDeviceCount() > 0) {
+    const ExtensionInstallPrompt::DetailsType type =
+        ExtensionInstallPrompt::RETAINED_DEVICES_DETAILS;
+
+    NSMutableArray* children = [NSMutableArray array];
+
+    if (prompt.GetIsShowingDetails(type, 0)) {
+      for (size_t i = 0; i < prompt.GetRetainedDeviceCount(); ++i) {
+        NSString* title =
+            SysUTF16ToNSString(prompt.GetRetainedDeviceMessageString(i));
+        [children addObject:[self buildItemWithTitle:title
+                                      cellAttributes:kUseBullet
+                                            children:nil]];
+      }
+    }
+
+    NSString* title = SysUTF16ToNSString(prompt.GetRetainedDevicesHeading());
+    [warnings addObject:[self buildItemWithTitle:title
+                                  cellAttributes:warningCellAttributes
+                                        children:children]];
+
+    // Add a row for the link.
+    [warnings
+        addObject:[self buildDetailToggleItem:type permissionsDetailIndex:0]];
   }
 
   return warnings;

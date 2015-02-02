@@ -74,7 +74,7 @@ class TabStrip : public views::View,
   static const int kNewTabButtonAssetHeight;
 
   explicit TabStrip(TabStripController* controller);
-  virtual ~TabStrip();
+  ~TabStrip() override;
 
   // Add and remove observers to changes within this TabStrip.
   void AddObserver(TabStripObserver* observer);
@@ -149,9 +149,7 @@ class TabStrip : public views::View,
   }
 
   // Returns the Tab at |index|.
-  Tab* tab_at(int index) const {
-    return static_cast<Tab*>(tabs_.view_at(index));
-  }
+  Tab* tab_at(int index) const { return tabs_.view_at(index); }
 
   // Returns the index of the specified tab in the model coordinate system, or
   // -1 if tab is closing or not valid.
@@ -213,54 +211,51 @@ class TabStrip : public views::View,
   void FileSupported(const GURL& url, bool supported);
 
   // TabController overrides:
-  virtual const ui::ListSelectionModel& GetSelectionModel() OVERRIDE;
-  virtual bool SupportsMultipleSelection() OVERRIDE;
-  virtual void SelectTab(Tab* tab) OVERRIDE;
-  virtual void ExtendSelectionTo(Tab* tab) OVERRIDE;
-  virtual void ToggleSelected(Tab* tab) OVERRIDE;
-  virtual void AddSelectionFromAnchorTo(Tab* tab) OVERRIDE;
-  virtual void CloseTab(Tab* tab, CloseTabSource source) OVERRIDE;
-  virtual void ToggleTabAudioMute(Tab* tab) OVERRIDE;
-  virtual void ShowContextMenuForTab(Tab* tab,
-                                     const gfx::Point& p,
-                                     ui::MenuSourceType source_type) OVERRIDE;
-  virtual bool IsActiveTab(const Tab* tab) const OVERRIDE;
-  virtual bool IsTabSelected(const Tab* tab) const OVERRIDE;
-  virtual bool IsTabPinned(const Tab* tab) const OVERRIDE;
-  virtual void MaybeStartDrag(
+  const ui::ListSelectionModel& GetSelectionModel() override;
+  bool SupportsMultipleSelection() override;
+  void SelectTab(Tab* tab) override;
+  void ExtendSelectionTo(Tab* tab) override;
+  void ToggleSelected(Tab* tab) override;
+  void AddSelectionFromAnchorTo(Tab* tab) override;
+  void CloseTab(Tab* tab, CloseTabSource source) override;
+  void ToggleTabAudioMute(Tab* tab) override;
+  void ShowContextMenuForTab(Tab* tab,
+                             const gfx::Point& p,
+                             ui::MenuSourceType source_type) override;
+  bool IsActiveTab(const Tab* tab) const override;
+  bool IsTabSelected(const Tab* tab) const override;
+  bool IsTabPinned(const Tab* tab) const override;
+  void MaybeStartDrag(
       Tab* tab,
       const ui::LocatedEvent& event,
-      const ui::ListSelectionModel& original_selection) OVERRIDE;
-  virtual void ContinueDrag(views::View* view,
-                            const ui::LocatedEvent& event) OVERRIDE;
-  virtual bool EndDrag(EndDragReason reason) OVERRIDE;
-  virtual Tab* GetTabAt(Tab* tab,
-                        const gfx::Point& tab_in_tab_coordinates) OVERRIDE;
-  virtual void OnMouseEventInTab(views::View* source,
-                                 const ui::MouseEvent& event) OVERRIDE;
-  virtual bool ShouldPaintTab(const Tab* tab, gfx::Rect* clip) OVERRIDE;
-  virtual bool IsImmersiveStyle() const OVERRIDE;
-  virtual void UpdateTabAccessibilityState(const Tab* tab,
-                                           ui::AXViewState* state) OVERRIDE;
+      const ui::ListSelectionModel& original_selection) override;
+  void ContinueDrag(views::View* view, const ui::LocatedEvent& event) override;
+  bool EndDrag(EndDragReason reason) override;
+  Tab* GetTabAt(Tab* tab, const gfx::Point& tab_in_tab_coordinates) override;
+  void OnMouseEventInTab(views::View* source,
+                         const ui::MouseEvent& event) override;
+  bool ShouldPaintTab(const Tab* tab, gfx::Rect* clip) override;
+  bool IsImmersiveStyle() const override;
+  void UpdateTabAccessibilityState(const Tab* tab,
+                                   ui::AXViewState* state) override;
 
   // MouseWatcherListener overrides:
-  virtual void MouseMovedOutOfHost() OVERRIDE;
+  void MouseMovedOutOfHost() override;
 
   // views::View overrides:
-  virtual void Layout() OVERRIDE;
-  virtual void PaintChildren(gfx::Canvas* canvas,
-                             const views::CullSet& cull_set) OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  void Layout() override;
+  void PaintChildren(gfx::Canvas* canvas,
+                     const views::CullSet& cull_set) override;
+  const char* GetClassName() const override;
+  gfx::Size GetPreferredSize() const override;
   // NOTE: the drag and drop methods are invoked from FrameView. This is done
   // to allow for a drop region that extends outside the bounds of the TabStrip.
-  virtual void OnDragEntered(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void OnDragExited() OVERRIDE;
-  virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual views::View* GetTooltipHandlerForPoint(
-      const gfx::Point& point) OVERRIDE;
+  void OnDragEntered(const ui::DropTargetEvent& event) override;
+  int OnDragUpdated(const ui::DropTargetEvent& event) override;
+  void OnDragExited() override;
+  int OnPerformDrop(const ui::DropTargetEvent& event) override;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  views::View* GetTooltipHandlerForPoint(const gfx::Point& point) override;
 
   // Returns preferred height in immersive style.
   static int GetImmersiveHeight();
@@ -568,24 +563,22 @@ class TabStrip : public views::View,
   void SetResetToShrinkOnExit(bool value);
 
   // views::ButtonListener implementation:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // View overrides.
-  virtual const views::View* GetViewByID(int id) const OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
+  const views::View* GetViewByID(int id) const override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnMouseCaptureLost() override;
+  void OnMouseMoved(const ui::MouseEvent& event) override;
+  void OnMouseEntered(const ui::MouseEvent& event) override;
 
   // ui::EventHandler overrides.
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // views::ViewTargeterDelegate:
-  virtual views::View* TargetForRect(views::View* root,
-                                     const gfx::Rect& rect) OVERRIDE;
+  views::View* TargetForRect(views::View* root, const gfx::Rect& rect) override;
 
   // -- Member Variables ------------------------------------------------------
 
@@ -596,7 +589,7 @@ class TabStrip : public views::View,
   // |tabs_closing_map_|. When the animation completes the tab is removed from
   // |tabs_closing_map_|. The painting code ensures both sets of tabs are
   // painted, and the event handling code ensures only tabs in |tabs_| are used.
-  views::ViewModel tabs_;
+  views::ViewModelT<Tab> tabs_;
   TabsClosingMap tabs_closing_map_;
 
   scoped_ptr<TabStripController> controller_;

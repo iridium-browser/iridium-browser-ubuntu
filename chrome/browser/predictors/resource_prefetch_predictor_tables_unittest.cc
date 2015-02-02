@@ -20,9 +20,9 @@ namespace predictors {
 class ResourcePrefetchPredictorTablesTest : public testing::Test {
  public:
   ResourcePrefetchPredictorTablesTest();
-  virtual ~ResourcePrefetchPredictorTablesTest();
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  ~ResourcePrefetchPredictorTablesTest() override;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   void TestGetAllData();
@@ -76,7 +76,7 @@ class ResourcePrefetchPredictorTablesTest : public testing::Test {
 class ResourcePrefetchPredictorTablesReopenTest
     : public ResourcePrefetchPredictorTablesTest {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Write data to the table, and then reopen the db.
     ResourcePrefetchPredictorTablesTest::SetUp();
     ResourcePrefetchPredictorTablesTest::TearDown();

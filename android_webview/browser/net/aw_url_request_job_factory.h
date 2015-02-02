@@ -29,13 +29,23 @@ class AwURLRequestJobFactory : public net::URLRequestJobFactory {
                           ProtocolHandler* protocol_handler);
 
   // net::URLRequestJobFactory implementation.
-  virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
+  net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE;
-  virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE;
-  virtual bool IsHandledURL(const GURL& url) const OVERRIDE;
-  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE;
+      net::NetworkDelegate* network_delegate) const override;
+
+  net::URLRequestJob* MaybeInterceptRedirect(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const GURL& location) const override;
+
+  net::URLRequestJob* MaybeInterceptResponse(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override;
+
+  virtual bool IsHandledProtocol(const std::string& scheme) const override;
+  virtual bool IsHandledURL(const GURL& url) const override;
+  virtual bool IsSafeRedirectTarget(const GURL& location) const override;
 
  private:
   // By default calls are forwarded to this factory, to avoid having to

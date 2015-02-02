@@ -21,8 +21,10 @@ class CC_SURFACES_EXPORT SurfaceIdAllocator {
 
   static uint32_t NamespaceForId(SurfaceId id);
 
+  uint32_t id_namespace() const { return id_namespace_; }
+
  private:
-  uint32_t id_namespace_;
+  const uint32_t id_namespace_;
   uint32_t next_id_;
 
   DISALLOW_COPY_AND_ASSIGN(SurfaceIdAllocator);

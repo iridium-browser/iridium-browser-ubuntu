@@ -66,7 +66,6 @@ class TestRunner(base_test_runner.BaseTestRunner):
       additional_flags: A list of additional flags to add to the command line.
     """
     super(TestRunner, self).__init__(device, test_options.tool,
-                                     test_options.push_deps,
                                      test_options.cleanup_test_files)
     self._lighttp_port = constants.LIGHTTPD_RANDOM_PORT_FIRST + shard_index
 
@@ -99,14 +98,15 @@ class TestRunner(base_test_runner.BaseTestRunner):
                       str(self.device))
       return
 
+    host_device_file_tuples = []
     test_data = _GetDataFilesForTestSuite(self.test_pkg.GetApkName())
     if test_data:
       # Make sure SD card is ready.
       self.device.WaitUntilFullyBooted(timeout=20)
-      for p in test_data:
-        self.device.PushChangedFiles(
-            os.path.join(constants.DIR_SOURCE_ROOT, p),
-            os.path.join(self.device.GetExternalStoragePath(), p))
+      host_device_file_tuples += [
+          (os.path.join(constants.DIR_SOURCE_ROOT, p),
+           os.path.join(self.device.GetExternalStoragePath(), p))
+          for p in test_data]
 
     # TODO(frankf): Specify test data in this file as opposed to passing
     # as command-line.
@@ -117,13 +117,15 @@ class TestRunner(base_test_runner.BaseTestRunner):
       host_test_files_path = os.path.join(constants.DIR_SOURCE_ROOT,
                                           host_src)
       if os.path.exists(host_test_files_path):
-        self.device.PushChangedFiles(
+        host_device_file_tuples += [(
             host_test_files_path,
             '%s/%s/%s' % (
                 self.device.GetExternalStoragePath(),
                 TestRunner._DEVICE_DATA_DIR,
-                dst_layer))
-    self.tool.CopyFiles()
+                dst_layer))]
+    if host_device_file_tuples:
+      self.device.PushChangedFiles(host_device_file_tuples)
+    self.tool.CopyFiles(self.device)
     TestRunner._DEVICE_HAS_TEST_FILES[str(self.device)] = True
 
   def _GetInstrumentationArgs(self):
@@ -183,6 +185,9 @@ class TestRunner(base_test_runner.BaseTestRunner):
     self._SetupIndividualTestTimeoutScale(test)
     self.tool.SetupEnvironment()
 
+    if self.flags and self._IsFreTest(test):
+      self.flags.RemoveFlags(['--disable-fre'])
+
     # Make sure the forwarder is still running.
     self._RestartHttpServerForwarderIfNecessary()
 
@@ -193,6 +198,18 @@ class TestRunner(base_test_runner.BaseTestRunner):
           TestRunner._DEVICE_COVERAGE_DIR, coverage_basename)
       self.coverage_host_file = os.path.join(
           self.coverage_dir, coverage_basename)
+
+  def _IsFreTest(self, test):
+    """Determines whether a test is a first run experience test.
+
+    Args:
+      test: The name of the test to be checked.
+
+    Returns:
+      Whether the feature being tested is FirstRunExperience.
+    """
+    freFeature = 'Feature:FirstRunExperience'
+    return freFeature in self.test_pkg.GetTestAnnotations(test)
 
   def _IsPerfTest(self, test):
     """Determines whether a test is a performance test.
@@ -235,6 +252,9 @@ class TestRunner(base_test_runner.BaseTestRunner):
       return
 
     self.TearDownPerfMonitoring(test)
+
+    if self.flags and self._IsFreTest(test):
+      self.flags.AddFlags(['--disable-fre'])
 
     if self.coverage_dir:
       self.device.PullFile(
@@ -355,8 +375,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
 
     cmd = ['am', 'instrument', '-r']
     for k, v in self._GetInstrumentationArgs().iteritems():
-      cmd.extend(['-e', k, "'%s'" % v])
-    cmd.extend(['-e', 'class', "'%s'" % test])
+      cmd.extend(['-e', k, v])
+    cmd.extend(['-e', 'class', test])
     cmd.extend(['-w', instrumentation_path])
     return self.device.RunShellCommand(cmd, timeout=timeout, retries=0)
 
@@ -484,6 +504,9 @@ class TestRunner(base_test_runner.BaseTestRunner):
     timeout = (self._GetIndividualTestTimeoutSecs(test) *
                self._GetIndividualTestTimeoutScale(test) *
                self.tool.GetTimeoutScale())
+    if (self.device.GetProp('ro.build.version.sdk')
+        < constants.ANDROID_SDK_VERSION_CODES.JELLY_BEAN):
+      timeout *= 4
 
     start_ms = 0
     duration_ms = 0

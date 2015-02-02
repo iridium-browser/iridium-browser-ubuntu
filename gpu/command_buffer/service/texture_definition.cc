@@ -29,24 +29,23 @@ class GLImageSync : public gfx::GLImage {
                        const gfx::Size& size);
 
   // Implement GLImage.
-  virtual void Destroy(bool have_context) OVERRIDE;
-  virtual gfx::Size GetSize() OVERRIDE;
-  virtual bool BindTexImage(unsigned target) OVERRIDE;
-  virtual void ReleaseTexImage(unsigned target) OVERRIDE;
-  virtual bool CopyTexImage(unsigned target) OVERRIDE;
-  virtual void WillUseTexImage() OVERRIDE;
-  virtual void WillModifyTexImage() OVERRIDE;
-  virtual void DidModifyTexImage() OVERRIDE;
-  virtual void DidUseTexImage() OVERRIDE;
-  virtual bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                                    int z_order,
-                                    gfx::OverlayTransform transform,
-                                    const gfx::Rect& bounds_rect,
-                                    const gfx::RectF& crop_rect) OVERRIDE;
-  virtual void SetReleaseAfterUse() OVERRIDE;
+  void Destroy(bool have_context) override;
+  gfx::Size GetSize() override;
+  bool BindTexImage(unsigned target) override;
+  void ReleaseTexImage(unsigned target) override;
+  bool CopyTexImage(unsigned target) override;
+  void WillUseTexImage() override;
+  void WillModifyTexImage() override;
+  void DidModifyTexImage() override;
+  void DidUseTexImage() override;
+  bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
+                            int z_order,
+                            gfx::OverlayTransform transform,
+                            const gfx::Rect& bounds_rect,
+                            const gfx::RectF& crop_rect) override;
 
  protected:
-  virtual ~GLImageSync();
+  ~GLImageSync() override;
 
  private:
   scoped_refptr<NativeImageBuffer> buffer_;
@@ -108,10 +107,6 @@ bool GLImageSync::ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
   return false;
 }
 
-void GLImageSync::SetReleaseAfterUse() {
-  NOTREACHED();
-}
-
 #if !defined(OS_MACOSX)
 class NativeImageBufferEGL : public NativeImageBuffer {
  public:
@@ -119,11 +114,11 @@ class NativeImageBufferEGL : public NativeImageBuffer {
 
  private:
   NativeImageBufferEGL(EGLDisplay display, EGLImageKHR image);
-  virtual ~NativeImageBufferEGL();
-  virtual void AddClient(gfx::GLImage* client) OVERRIDE;
-  virtual void RemoveClient(gfx::GLImage* client) OVERRIDE;
-  virtual bool IsClient(gfx::GLImage* client) OVERRIDE;
-  virtual void BindToTexture(GLenum target) OVERRIDE;
+  ~NativeImageBufferEGL() override;
+  void AddClient(gfx::GLImage* client) override;
+  void RemoveClient(gfx::GLImage* client) override;
+  bool IsClient(gfx::GLImage* client) override;
+  void BindToTexture(GLenum target) override;
 
   EGLDisplay egl_display_;
   EGLImageKHR egl_image_;
@@ -236,11 +231,11 @@ class NativeImageBufferStub : public NativeImageBuffer {
   NativeImageBufferStub() : NativeImageBuffer() {}
 
  private:
-  virtual ~NativeImageBufferStub() {}
-  virtual void AddClient(gfx::GLImage* client) OVERRIDE {}
-  virtual void RemoveClient(gfx::GLImage* client) OVERRIDE {}
-  virtual bool IsClient(gfx::GLImage* client) OVERRIDE { return true; }
-  virtual void BindToTexture(GLenum target) OVERRIDE {}
+  ~NativeImageBufferStub() override {}
+  void AddClient(gfx::GLImage* client) override {}
+  void RemoveClient(gfx::GLImage* client) override {}
+  bool IsClient(gfx::GLImage* client) override { return true; }
+  void BindToTexture(GLenum target) override {}
 
   DISALLOW_COPY_AND_ASSIGN(NativeImageBufferStub);
 };
@@ -283,13 +278,23 @@ TextureDefinition::LevelInfo::LevelInfo(GLenum target,
 
 TextureDefinition::LevelInfo::~LevelInfo() {}
 
+TextureDefinition::TextureDefinition()
+    : version_(0),
+      target_(0),
+      min_filter_(0),
+      mag_filter_(0),
+      wrap_s_(0),
+      wrap_t_(0),
+      usage_(0),
+      immutable_(true) {
+}
+
 TextureDefinition::TextureDefinition(
-    GLenum target,
     Texture* texture,
     unsigned int version,
     const scoped_refptr<NativeImageBuffer>& image_buffer)
     : version_(version),
-      target_(target),
+      target_(texture->target()),
       image_buffer_(image_buffer.get()
                         ? image_buffer
                         : NativeImageBuffer::Create(texture->service_id())),
@@ -300,21 +305,22 @@ TextureDefinition::TextureDefinition(
       usage_(texture->usage()),
       immutable_(texture->IsImmutable()) {
   // TODO
-  DCHECK(!texture->level_infos_.empty());
-  DCHECK(!texture->level_infos_[0].empty());
+  DCHECK(!texture->face_infos_.empty());
+  DCHECK(!texture->face_infos_[0].level_infos.empty());
   DCHECK(!texture->NeedsMips());
-  DCHECK(texture->level_infos_[0][0].width);
-  DCHECK(texture->level_infos_[0][0].height);
+  DCHECK(texture->face_infos_[0].level_infos[0].width);
+  DCHECK(texture->face_infos_[0].level_infos[0].height);
 
+  const Texture::FaceInfo& first_face = texture->face_infos_[0];
   scoped_refptr<gfx::GLImage> gl_image(
       new GLImageSync(image_buffer_,
-                      gfx::Size(texture->level_infos_[0][0].width,
-                                texture->level_infos_[0][0].height)));
-  texture->SetLevelImage(NULL, target, 0, gl_image.get());
+                      gfx::Size(first_face.level_infos[0].width,
+                                first_face.level_infos[0].height)));
+  texture->SetLevelImage(NULL, target_, 0, gl_image.get());
 
   // TODO: all levels
   level_infos_.clear();
-  const Texture::LevelInfo& level = texture->level_infos_[0][0];
+  const Texture::LevelInfo& level = first_face.level_infos[0];
   LevelInfo info(level.target,
                  level.internal_format,
                  level.width,
@@ -361,13 +367,13 @@ void TextureDefinition::UpdateTexture(Texture* texture) const {
   // though.
   glFlush();
 
-  texture->level_infos_.resize(1);
+  texture->face_infos_.resize(1);
   for (size_t i = 0; i < level_infos_.size(); i++) {
     const LevelInfo& base_info = level_infos_[i][0];
     const size_t levels_needed = TextureManager::ComputeMipMapCount(
         base_info.target, base_info.width, base_info.height, base_info.depth);
     DCHECK(level_infos_.size() <= levels_needed);
-    texture->level_infos_[0].resize(levels_needed);
+    texture->face_infos_[0].level_infos.resize(levels_needed);
     for (size_t n = 0; n < level_infos_.size(); n++) {
       const LevelInfo& info = level_infos_[i][n];
       texture->SetLevelInfo(NULL,

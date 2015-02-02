@@ -146,6 +146,8 @@ ACCEPTABLE_ARGUMENTS = set([
     'msan_track_origins',
     # colon-separated list of linker flags, e.g. "-lfoo:-Wl,-u,bar".
     'nacl_linkflags',
+    # prefix to add in-front of perf tracking trace labels.
+    'perf_prefix',
     # colon-separated list of pnacl bcld flags, e.g. "-lfoo:-Wl,-u,bar".
     # Not using nacl_linkflags since that gets clobbered in some tests.
     'pnacl_bcldflags',
@@ -261,6 +263,9 @@ def SetUpArgumentBits(env):
   BitFromArgument(env, 'bitcode', default=False,
     desc='We are building bitcode')
 
+  BitFromArgument(env, 'nacl_clang', default=False,
+    desc='Use the native nacl-clang newlib compiler instead of nacl-gcc')
+
   BitFromArgument(env, 'translate_fast', default=False,
     desc='When using pnacl TC (bitcode=1) use accelerated translation step')
 
@@ -367,9 +372,6 @@ def SetUpArgumentBits(env):
     desc='Prevents GDB tests from running.  If GDB is not available, you can '
       'test everything else by specifying this flag.')
 
-  BitFromArgument(env, 'validator_ragel', default=True,
-    desc='Use the R-DFA validator instead of the original validators.')
-
   # TODO(shcherbina): add support for other golden-based tests, not only
   # run_x86_*_validator_testdata_tests.
   BitFromArgument(env, 'regenerate_golden', default=False,
@@ -382,9 +384,6 @@ def SetUpArgumentBits(env):
 
   BitFromArgument(env, 'android', default=False,
                   desc='Build for Android target')
-
-  BitFromArgument(env, 'arm_hard_float', default=True,
-                  desc='Build for hard float ARM ABI')
 
   BitFromArgument(env, 'skip_nonstable_bitcode', default=False,
                   desc='Skip tests involving non-stable bitcode')
@@ -399,14 +398,26 @@ def SetUpArgumentBits(env):
 
   # PNaCl sanity checks
   if not env.Bit('bitcode'):
-    pnacl_only_flags = ('nonsfi_nacl',
+    pnacl_only_flags = ('minsfi',
+                        'nonsfi_nacl',
                         'pnacl_generate_pexe',
+                        'pnacl_unsandboxed',
+                        'skip_nonstable_bitcode',
+                        'translate_fast',
                         'use_sandboxed_translator')
+
     for flag_name in pnacl_only_flags:
       if env.Bit(flag_name):
         raise UserError('The option %r only makes sense when using the '
                         'PNaCl toolchain (i.e. with bitcode=1)'
                         % flag_name)
+  else:
+    pnacl_incompatible_flags = ('nacl_clang',
+                                'nacl_glibc')
+    for flag_name in pnacl_incompatible_flags:
+      if env.Bit(flag_name):
+        raise UserError('The option %r cannot be used when building with '
+                        'PNaCl (i.e. with bitcode=1)' % flag_name)
 
 def CheckArguments():
   for key in ARGUMENTS:
@@ -672,8 +683,10 @@ nacl_glibc_skiplist.update(['%s_irt' % test for test in nacl_glibc_skiplist])
 # TODO(mseaborn): Eventually we should run all of small_tests instead of
 # this whitelist.
 nonsfi_test_whitelist = set([
+    'run_arm_float_abi_test',
     'run_clock_get_test',
     'run_dup_test',
+    'run_exception_test',
     'run_fcntl_test',
     'run_float_test',
     'run_fork_test',
@@ -1192,16 +1205,14 @@ def GetValidator(env, validator):
   if 'TRUSTED_ENV' not in env:
     return None
 
+  # TODO(shyamsundarr): rename ncval_new to ncval.
   if validator is None:
     if env.Bit('build_arm'):
       validator = 'arm-ncval-core'
     elif env.Bit('build_mips32'):
       validator = 'mips-ncval-core'
     else:
-      if env.Bit('validator_ragel'):
-        validator = 'ncval_new'
-      else:
-        validator = 'ncval'
+      validator = 'ncval_new'
 
   trusted_env = env['TRUSTED_ENV']
   return trusted_env.File('${STAGING_DIR}/${PROGPREFIX}%s${PROGSUFFIX}' %
@@ -1240,7 +1251,8 @@ def GetToolchainDir(env, platform_build_dir=None, toolchain_name=None,
   if toolchain_name is None:
     # Fill in default arguments based on environment.
     if is_pnacl is None:
-      is_pnacl = env.Bit('bitcode')
+      # For the purposes of finding the toolchain dir, nacl_clang is PNaCl.
+      is_pnacl = env.Bit('bitcode') or env.Bit('nacl_clang')
       if lib_name is None:
         if is_pnacl or not env.Bit('nacl_glibc'):
           lib_name = 'newlib'
@@ -1609,10 +1621,11 @@ def GetTranslatedNexe(env, pexe):
   # Make sure the pexe doesn't get removed by the fake builders when
   # built_elsewhere=1
   env.Precious(pexe)
+  command = '${TRANSLATECOM}'
   if env.Bit('nonstable_bitcode'):
-    env.Append(TRANSLATEFLAGS=['--allow-llvm-bitcode-input'])
+    command += ' --allow-llvm-bitcode-input'
   node = env.Command(target=nexe_name, source=[pexe_name],
-                     action=[Action('${TRANSLATECOM}', '${TRANSLATECOMSTR}')])
+                     action=[Action(command, '${TRANSLATECOMSTR}')])
   assert len(node) == 1, node
   return node[0]
 
@@ -1778,7 +1791,7 @@ pre_base_env.AddMethod(CommandSelLdrTestNacl)
 TEST_EXTRA_ARGS = ['stdin', 'log_file',
                    'stdout_golden', 'stderr_golden', 'log_golden',
                    'filter_regex', 'filter_inverse', 'filter_group_only',
-                   'osenv', 'arch', 'subarch', 'exit_status', 'track_cmdtime',
+                   'osenv', 'arch', 'subarch', 'exit_status',
                    'num_runs', 'process_output_single',
                    'process_output_combined', 'using_nacl_signal_handler',
                    'declares_exit_status', 'time_warning', 'time_error']
@@ -1805,9 +1818,17 @@ def GetPerfEnvDescription(env):
   This function attempts to gather a string that might inform why a performance
   change has occurred.
   """
+  if env['NACL_BUILD_FAMILY'] == 'TRUSTED':
+    # Trusted tests do not depend on the untrusted toolchain, untrusted libc,
+    # whether or not the IRT is used, etc.
+    description_list = ['trusted',
+                        env['TARGET_PLATFORM'].lower(),
+                        env['TARGET_FULLARCH']]
+    return ARGUMENTS.get('perf_prefix', '') + '_'.join(description_list)
   description_list = [env['TARGET_FULLARCH']]
   # Using a list to keep the order consistent.
-  bit_to_description = [ ('bitcode', ('pnacl', 'nnacl')),
+  bit_to_description = [ ('tests_use_irt', ('with_irt', '')),
+                         ('bitcode', ('pnacl', 'nnacl')),
                          ('translate_fast', ('fast', '')),
                          ('nacl_glibc', ('glibc', 'newlib')),
                          ('nacl_static_link', ('static', 'dynamic')),
@@ -1819,7 +1840,7 @@ def GetPerfEnvDescription(env):
       additional = descr_no
     if additional:
       description_list.append(additional)
-  return '_'.join(description_list)
+  return ARGUMENTS.get('perf_prefix', '') + '_'.join(description_list)
 
 pre_base_env.AddMethod(GetPerfEnvDescription)
 
@@ -2227,7 +2248,6 @@ def MakeBaseTrustedEnv(platform=None):
       'src/shared/srpc/build.scons',
       'src/shared/utils/build.scons',
       'src/third_party/gtest/build.scons',
-      'src/tools/validator_tools/build.scons',
       'src/trusted/cpu_features/build.scons',
       'src/trusted/debug_stub/build.scons',
       'src/trusted/desc/build.scons',
@@ -2247,15 +2267,6 @@ def MakeBaseTrustedEnv(platform=None):
       'src/trusted/threading/build.scons',
       'src/trusted/validator/build.scons',
       'src/trusted/validator/driver/build.scons',
-      'src/trusted/validator/x86/32/build.scons',
-      'src/trusted/validator/x86/64/build.scons',
-      'src/trusted/validator/x86/build.scons',
-      'src/trusted/validator/x86/decoder/build.scons',
-      'src/trusted/validator/x86/decoder/generator/build.scons',
-      'src/trusted/validator/x86/ncval_reg_sfi/build.scons',
-      'src/trusted/validator/x86/ncval_seg_sfi/build.scons',
-      'src/trusted/validator/x86/ncval_seg_sfi/generator/build.scons',
-      'src/trusted/validator/x86/testing/enuminsts/build.scons',
       'src/trusted/validator_arm/build.scons',
       'src/trusted/validator_ragel/build.scons',
       'src/trusted/validator_x86/build.scons',
@@ -2608,10 +2619,6 @@ def which(cmd, paths=os.environ.get('PATH', '').split(os.pathsep)):
 
 def SetUpLinuxEnvArm(env):
   jail = env.GetToolchainDir(toolchain_name='arm_trusted')
-  if env.Bit('arm_hard_float'):
-    arm_abi = 'gnueabihf'
-  else:
-    arm_abi = 'gnueabi'
   if not platform.machine().startswith('arm'):
     # Allow emulation on non-ARM hosts.
     env.Replace(EMULATOR=jail + '/run_under_qemu_arm')
@@ -2622,30 +2629,16 @@ def SetUpLinuxEnvArm(env):
     env.Replace(CC='true', CXX='true', LD='true',
                 AR='true', RANLIB='true', INSTALL=FakeInstall)
   else:
-    arm_suffix = None
-    for suffix in ['', '-4.5', '-4.6']:
-      if which('arm-linux-%s-g++%s' % (arm_abi, suffix)):
-        arm_suffix = suffix
-        break
-    if arm_suffix is None:
-      # This doesn't bail out completely here because we cannot
-      # tell whether scons was run with just --mode=nacl, where
-      # none of these settings will actually be used.
-      print 'NOTE: arm trusted TC is not installed'
-      bad = 'ERROR-missing-arm-trusted-toolchain'
-      env.Replace(CC=bad, CXX=bad, LD=bad)
-      return
-
-    env.Replace(CC='arm-linux-%s-gcc%s' % (arm_abi, arm_suffix),
-                CXX='arm-linux-%s-g++%s' % (arm_abi, arm_suffix),
-                LD='arm-linux-%s-ld%s' % (arm_abi, arm_suffix),
+    env.Replace(CC='arm-linux-gnueabihf-gcc',
+                CXX='arm-linux-gnueabihf-g++',
+                LD='arm-linux-gnueabihf-ld',
                 ASFLAGS=[],
                 # The -rpath-link argument is needed on Ubuntu/Precise to
                 # avoid linker warnings about missing ld.linux.so.3.
                 # TODO(sbc): remove this once we stop supporting Precise
                 # as a build environment.
                 LINKFLAGS=['-Wl,-rpath-link=' + jail +
-                           '/lib/arm-linux-' + arm_abi]
+                           '/lib/arm-linux-gnueabihf']
                 )
     # Note we let the compiler choose whether it's -marm or -mthumb by
     # default.  The hope is this will have the best chance of testing
@@ -2908,6 +2901,8 @@ pre_base_env.Append(
 # independent binaries
 # NOTE: this loads stuff from: site_scons/site_tools/naclsdk.py
 nacl_env = MakeArchSpecificEnv()
+# See comment below about libc++ and libpthread in NONIRT_LIBS.
+using_nacl_libcxx = nacl_env.Bit('bitcode') or nacl_env.Bit('nacl_clang')
 nacl_env = nacl_env.Clone(
     tools = ['naclsdk'],
     NACL_BUILD_FAMILY = 'UNTRUSTED',
@@ -2961,10 +2956,17 @@ nacl_env = nacl_env.Clone(
     # These are settings for in-tree, non-browser tests to use.
     # They use libraries that circumvent the IRT-based implementations
     # in the public libraries.
-    # Note that pthread_private is part of NONIRT_LIBS for PNaCl because
-    # libc++ depends on it.
+    # Note that pthread_private is part of NONIRT_LIBS for clang because
+    # libc++ depends on libpthread. However we can't just add
+    # libpthread_private to the link line because those libs get added before
+    # the standard libs, so the references that come from libc++ itself will
+    # still get satisfied from libpthread instead of libpthread_private (and
+    # that code will crash because it requires the IRT). So put libc++ on the
+    # user link line before libpthread_private to ensure that its references
+    # to libpthread also get satisfied by libpthread_private.
+    # TODO(dschuff): Also remove the hack in pnacl-ld and use this for pnacl.
     NONIRT_LIBS = (['nacl_sys_private'] +
-                   (['pthread_private'] if nacl_env.Bit('bitcode') else [])),
+                   (['c++','pthread_private'] if using_nacl_libcxx else [])),
     PTHREAD_LIBS = ['pthread_private'],
     DYNCODE_LIBS = ['nacl_dyncode_private'],
     EXCEPTION_LIBS = ['nacl_exception_private'],
@@ -3024,13 +3026,24 @@ def AllowInlineAssembly(env):
     # only current ARM toolchain.  One day, we will have an ARM GCC
     # toolchain, and we will no longer need to use inline assembly
     # with PNaCl/Clang at all.
-    if not (env.Bit('target_arm') or env.Bit('target_mips32')):
+    #
+    # For Non-SFI NaCl we use inline assembly in PNaCl/Clang.
+    if not (env.Bit('target_arm') or env.Bit('target_mips32')
+            or env.Bit('nonsfi_nacl')):
       return False
     # Inline assembly does not work in pexes.
     if env.Bit('pnacl_generate_pexe'):
       return False
     env.AddBiasForPNaCl()
     env.PNaClForceNative()
+
+    if env.Bit('target_x86_32'):
+      env.AppendUnique(CCFLAGS=['--target=i686-unknown-nacl'])
+    elif env.Bit('target_x86_64'):
+      env.AppendUnique(CCFLAGS=['--target=x86_64-unknown-nacl'])
+    elif env.Bit('target_arm'):
+      env.AppendUnique(CCFLAGS=['--target=arm-unknown-nacl',
+                                '-mfloat-abi=hard'])
   return True
 
 nacl_env.AddMethod(AllowInlineAssembly)
@@ -3151,6 +3164,15 @@ if nacl_env.Bit('bitcode'):
   # http://code.google.com/p/nativeclient/issues/detail?id=2861
   nacl_env.Append(CCFLAGS=['-Wno-unused-private-field'])
 
+if nacl_env.Bit('nacl_clang'):
+  # third_party/valgrind/nacl_valgrind.h uses asm instead of __asm__
+  # https://code.google.com/p/nativeclient/issues/detail?id=3974
+  # TODO(dschuff): change it to __asm__ and remove this suppression.
+  nacl_env.Append(CCFLAGS=['-Wno-language-extension-token'])
+  # src/untrusted/valgrind/valgrind_interceptors.c uses a non-string-literal
+  # variable for printf.
+  nacl_env.Append(CCFLAGS=['-Wno-format-security'])
+
 # We use a special environment for building the IRT image because it must
 # always use the newlib toolchain, regardless of --nacl_glibc.  We clone
 # it from nacl_env here, before too much other cruft has been added.
@@ -3179,6 +3201,7 @@ target_variant_map = [
     ('nacl_glibc', 'glibc'),
     ('pnacl_generate_pexe', 'pexe'),
     ('nonsfi_nacl', 'nonsfi'),
+    ('nacl_clang', 'clang'),
     ]
 for variant_bit, variant_suffix in target_variant_map:
   if nacl_env.Bit(variant_bit):
@@ -3276,6 +3299,7 @@ irt_only_tests = [
 irt_variant_tests = [
     #### ALPHABETICALLY SORTED ####
     'tests/app_lib/nacl.scons',
+    'tests/benchmark/nacl.scons',
     'tests/bigalloc/nacl.scons',
     'tests/callingconv/nacl.scons',
     'tests/callingconv_ppapi/nacl.scons',
@@ -3368,6 +3392,7 @@ irt_variant_tests = [
     'tests/unittests/shared/platform/nacl.scons',
     'tests/untrusted_check/nacl.scons',
     'tests/unwind_restores_regs/nacl.scons',
+    'tests/validator/nacl.scons',
     #### ALPHABETICALLY SORTED ####
     # NOTE: The following tests are really IRT-only tests, but they
     # are in this category so that they can generate libraries (which
@@ -3648,6 +3673,10 @@ def AddImplicitLibs(env):
       # TODO(mcgrathr): multilib nonsense defeats -B!  figure out a better way.
       if GetTargetPlatform() == 'x86-32':
         implicit_libs.append(os.path.join('32', 'crt1.o'))
+    # libc++ depends on libpthread, and because PPAPI applications always need
+    # threads anyway, nacl-clang just includes -lpthread unconditionally.
+    if using_nacl_libcxx and env['NACL_BUILD_FAMILY'] != 'UNTRUSTED_IRT':
+      implicit_libs += ['libpthread.a']
 
   if implicit_libs != []:
     env['IMPLICIT_LIBS'] = [env.File(os.path.join('${LIB_DIR}', file))

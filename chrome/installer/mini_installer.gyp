@@ -224,6 +224,12 @@
                     '<(PRODUCT_DIR)/icudtl.dat',
                   ],
                 }],
+                ['v8_use_external_startup_data == 1', {
+                  'inputs': [
+                    '<(PRODUCT_DIR)/natives_blob.bin',
+                    '<(PRODUCT_DIR)/snapshot_blob.bin',
+                  ],
+                }],
               ],
               'inputs': [
                 '<(create_installer_archive_py_path)',
@@ -294,7 +300,6 @@
               ],
               'includes': [
                 '../../build/isolate.gypi',
-                'mini_installer_tests.isolate',
               ],
               'sources': [
                 'mini_installer_tests.isolate',

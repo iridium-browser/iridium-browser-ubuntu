@@ -312,15 +312,15 @@ DEF_GPUTEST(ReadPixels, reporter, factory) {
                 if (NULL == context) {
                     continue;
                 }
-                GrTextureDesc desc;
-                desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+                GrSurfaceDesc desc;
+                desc.fFlags = kRenderTarget_GrSurfaceFlag | kNoStencil_GrSurfaceFlag;
                 desc.fWidth = DEV_W;
                 desc.fHeight = DEV_H;
                 desc.fConfig = kSkia8888_GrPixelConfig;
                 desc.fOrigin = 1 == dtype ? kBottomLeft_GrSurfaceOrigin : kTopLeft_GrSurfaceOrigin;
-                GrAutoScratchTexture ast(context, desc, GrContext::kExact_ScratchTexMatch);
-                SkAutoTUnref<GrTexture> tex(ast.detach());
-                surface.reset(SkSurface::NewRenderTargetDirect(tex->asRenderTarget()));
+                SkAutoTUnref<GrTexture> texture(
+                    context->refScratchTexture(desc, GrContext::kExact_ScratchTexMatch));
+                surface.reset(SkSurface::NewRenderTargetDirect(texture->asRenderTarget()));
 #else
                 continue;
 #endif

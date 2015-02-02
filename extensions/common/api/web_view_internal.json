@@ -128,28 +128,6 @@
         ]
       },
       {
-        "name": "captureVisibleRegion",
-        "type": "function",
-        "description": "Captures the visible area of the currently loaded page inside <webview>.",
-        "parameters": [
-          {
-            "type": "integer",
-            "name": "instanceId",
-            "description": "The instance ID of the guest <webview> process."
-          },
-          {
-            "$ref": "extensionTypes.ImageDetails",
-            "name": "options",
-            "optional": true
-          },
-          {
-            "type": "function", "name": "callback", "parameters": [
-              {"type": "string", "name": "dataUrl", "description": "A data URL which encodes an image of the visible area of the captured tab. May be assigned to the 'src' property of an HTML Image element for display."}
-            ]
-          }
-        ]
-      },
-      {
         "name": "setZoom",
         "type": "function",
         "parameters": [
@@ -184,7 +162,7 @@
           {
             "type": "function",
             "name": "callback",
-            "description": "Called after the current zoom factor is retreived.",
+            "description": "Called after the current zoom factor is retrieved.",
             "parameters": [
               {
                 "type": "number",
@@ -294,6 +272,40 @@
         ]
       },
       {
+	"name": "loadDataWithBaseUrl",
+	"type": "function",
+	"description": "Loads a data URL with a specified base URL used for relative links. Optionally, a virtual URL can be provided to be shown to the user instead of the data URL.",
+	"parameters": [
+          {
+            "type": "integer",
+            "name": "instanceId",
+            "description": "The instance ID of the guest <webview> process."
+          },
+          {
+            "type": "string",
+            "name": "dataUrl",
+            "description" : "The data URL to load."
+          },
+          {
+            "type": "string",
+            "name": "baseUrl",
+            "description": "The base URL that will be used for relative links."
+          },
+	  {
+            "type": "string",
+            "name": "virtualUrl",
+            "description": "The URL that will be displayed to the user.",
+	    "optional": true
+          },
+	  {
+            "type": "function",
+            "name": "callback",
+            "description": "Called internally for the purpose of reporting errors to console.error().",
+            "parameters": []
+          }
+        ]
+      },
+      {
         "name": "go",
         "type": "function",
         "parameters": [
@@ -304,6 +316,18 @@
           {
             "type": "integer",
             "name": "relativeIndex"
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": true,
+            "parameters": [
+              {
+                "name": "success",
+                "type": "boolean",
+                "description": "Indicates whether the navigation was successful."
+              }
+            ]
           }
         ]
       },

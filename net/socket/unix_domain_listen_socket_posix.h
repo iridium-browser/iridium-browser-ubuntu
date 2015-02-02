@@ -30,7 +30,7 @@ class NET_EXPORT UnixDomainListenSocket : public StreamListenSocket {
  public:
   typedef UnixDomainServerSocket::AuthCallback AuthCallback;
 
-  virtual ~UnixDomainListenSocket();
+  ~UnixDomainListenSocket() override;
 
   // Note that the returned UnixDomainListenSocket instance does not take
   // ownership of |del|.
@@ -64,7 +64,7 @@ class NET_EXPORT UnixDomainListenSocket : public StreamListenSocket {
       bool use_abstract_namespace);
 
   // StreamListenSocket:
-  virtual void Accept() OVERRIDE;
+  void Accept() override;
 
   AuthCallback auth_callback_;
 
@@ -79,11 +79,11 @@ class NET_EXPORT UnixDomainListenSocketFactory
   UnixDomainListenSocketFactory(
       const std::string& path,
       const UnixDomainListenSocket::AuthCallback& auth_callback);
-  virtual ~UnixDomainListenSocketFactory();
+  ~UnixDomainListenSocketFactory() override;
 
   // StreamListenSocketFactory:
-  virtual scoped_ptr<StreamListenSocket> CreateAndListen(
-      StreamListenSocket::Delegate* delegate) const OVERRIDE;
+  scoped_ptr<StreamListenSocket> CreateAndListen(
+      StreamListenSocket::Delegate* delegate) const override;
 
  protected:
   const std::string path_;
@@ -103,11 +103,11 @@ class NET_EXPORT UnixDomainListenSocketWithAbstractNamespaceFactory
       const std::string& path,
       const std::string& fallback_path,
       const UnixDomainListenSocket::AuthCallback& auth_callback);
-  virtual ~UnixDomainListenSocketWithAbstractNamespaceFactory();
+  ~UnixDomainListenSocketWithAbstractNamespaceFactory() override;
 
   // UnixDomainListenSocketFactory:
-  virtual scoped_ptr<StreamListenSocket> CreateAndListen(
-      StreamListenSocket::Delegate* delegate) const OVERRIDE;
+  scoped_ptr<StreamListenSocket> CreateAndListen(
+      StreamListenSocket::Delegate* delegate) const override;
 
  private:
   std::string fallback_path_;

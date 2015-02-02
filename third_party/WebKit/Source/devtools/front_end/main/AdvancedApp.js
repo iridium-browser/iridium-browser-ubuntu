@@ -5,7 +5,6 @@
 /**
  * @constructor
  * @extends {WebInspector.App}
- * @implements {WebInspector.ToolboxDelegate}
  */
 WebInspector.AdvancedApp = function()
 {
@@ -45,7 +44,11 @@ WebInspector.AdvancedApp.prototype = {
         this._toggleEmulationButton.element.classList.toggle("warning", !!message);
     },
 
-    presentUI: function()
+    /**
+     * @param {!Document} document
+     * @override
+     */
+    presentUI: function(document)
     {
         var rootView = new WebInspector.RootView();
 
@@ -68,7 +71,7 @@ WebInspector.AdvancedApp.prototype = {
 
         WebInspector.inspectorView.showInitialPanel();
         console.timeStamp("AdvancedApp.attachToBody");
-        rootView.attachToBody();
+        rootView.attachToDocument(document);
         this._inspectedPagePlaceholder.update();
     },
 
@@ -83,23 +86,35 @@ WebInspector.AdvancedApp.prototype = {
         if (this._toolboxWindow)
             return;
 
-        // FIXME: Remove toolbox=true and fix the check in DevToolsWindow::WebContentsCreated().
-        var toolbox = (window.location.search ? "&" : "?") + "toolbox=true";
-        var hash = window.location.hash;
-        var url = window.location.href.replace(hash, "") + toolbox + hash;
-        url = url.replace("devtools.html", "toolbox.html");
+        var url = window.location.href.replace("devtools.html", "toolbox.html");
         this._toolboxWindow = window.open(url, undefined);
     },
 
     /**
-     * @param {!WebInspector.ResponsiveDesignView} responsiveDesignView
-     * @param {!WebInspector.InspectedPagePlaceholder} placeholder
+     * @param {!Document} toolboxDocument
      */
-    toolboxLoaded: function(responsiveDesignView, placeholder)
+    toolboxLoaded: function(toolboxDocument)
     {
-        this._toolboxResponsiveDesignView = responsiveDesignView;
-        placeholder.addEventListener(WebInspector.InspectedPagePlaceholder.Events.Update, this._onSetInspectedPageBounds.bind(this, true));
+        WebInspector.initializeUIUtils(toolboxDocument.defaultView);
+        WebInspector.installComponentRootStyles(/** @type {!Element} */ (toolboxDocument.body));
+        WebInspector.ContextMenu.installHandler(toolboxDocument);
+
+        var rootView = new WebInspector.RootView();
+        var inspectedPagePlaceholder = new WebInspector.InspectedPagePlaceholder();
+        inspectedPagePlaceholder.addEventListener(WebInspector.InspectedPagePlaceholder.Events.Update, this._onSetInspectedPageBounds.bind(this, true));
+        this._toolboxResponsiveDesignView = new WebInspector.ResponsiveDesignView(inspectedPagePlaceholder);
+        this._toolboxResponsiveDesignView.show(rootView.element);
+        rootView.attachToDocument(toolboxDocument);
+
         this._updatePageResizer();
+    },
+
+    /**
+     * @return {!InspectorFrontendHostAPI}
+     */
+    inspectorFrontendHost: function()
+    {
+        return window.InspectorFrontendHost;
     },
 
     _updatePageResizer: function()

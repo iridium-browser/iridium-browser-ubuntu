@@ -43,6 +43,33 @@ class PListStringsWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         'Chromium.pfm_description = "Chromium preferen\\"ces";')
     self.assertEquals(output.strip(), expected_output.strip())
 
+  def testEmptyVersion(self):
+    # Test PListStringsWriter in case of empty polices.
+    grd = self.PrepareTest('''
+      {
+        'policy_definitions': [],
+        'placeholders': [],
+        'messages': {
+          'mac_chrome_preferences': {
+            'text': '$1 preferen"ces',
+            'desc': 'blah'
+          }
+        }
+      }''')
+    output = self.GetOutput(
+        grd,
+        'fr',
+        {'_chromium': '1',
+         'mac_bundle_id': 'com.example.Test',
+         'version': '39.0.0.0'},
+        'plist_strings',
+        'en')
+    expected_output = (
+        '/* chromium version: 39.0.0.0 */\n'
+        'Chromium.pfm_title = "Chromium";\n'
+        'Chromium.pfm_description = "Chromium preferen\\"ces";')
+    self.assertEquals(output.strip(), expected_output.strip())
+
   def testMainPolicy(self):
     # Tests a policy group with a single policy of type 'main'.
     grd = self.PrepareTest('''

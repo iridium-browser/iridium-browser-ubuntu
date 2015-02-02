@@ -22,6 +22,9 @@
 #include "ui/display/chromeos/display_configurator.h"
 #include "ui/display/types/display_mode.h"
 #include "ui/display/types/display_snapshot.h"
+#include "ui/events/devices/device_data_manager.h"
+#include "ui/events/devices/input_device_event_observer.h"
+#include "ui/events/devices/touchscreen_device.h"
 #include "ui/gfx/screen.h"
 #include "ui/wm/core/compound_event_filter.h"
 #include "ui/wm/core/cursor_manager.h"
@@ -34,10 +37,52 @@ namespace athena {
 
 namespace {
 
-AthenaEnv* instance = NULL;
+AthenaEnv* instance = nullptr;
 
 // Screen object used during shutdown.
-gfx::Screen* screen_for_shutdown = NULL;
+gfx::Screen* screen_for_shutdown = nullptr;
+
+gfx::Transform GetTouchTransform(const ui::DisplaySnapshot& display,
+                                 const ui::TouchscreenDevice& touchscreen,
+                                 const gfx::SizeF& framebuffer_size) {
+  if (!display.current_mode())
+    return gfx::Transform();
+
+  gfx::SizeF display_size = display.current_mode()->size();
+#if defined(USE_X11)
+  gfx::SizeF touchscreen_size = framebuffer_size;
+#elif defined(USE_OZONE)
+  gfx::SizeF touchscreen_size = touchscreen.size;
+#endif
+
+  if (display_size.IsEmpty() || touchscreen_size.IsEmpty())
+    return gfx::Transform();
+
+  gfx::Transform transform;
+  transform.Scale(display_size.width() / touchscreen_size.width(),
+                  display_size.height() / touchscreen_size.height());
+
+  return transform;
+}
+
+double GetTouchRadiusScale(const ui::DisplaySnapshot& display,
+                           const ui::TouchscreenDevice& touchscreen,
+                           const gfx::SizeF& framebuffer_size) {
+  if (!display.current_mode())
+    return 1;
+
+  gfx::SizeF display_size = display.current_mode()->size();
+#if defined(USE_X11)
+  gfx::SizeF touchscreen_size = framebuffer_size;
+#elif defined(USE_OZONE)
+  gfx::SizeF touchscreen_size = touchscreen.size;
+#endif
+
+  if (display_size.IsEmpty() || touchscreen_size.IsEmpty())
+    return 1;
+
+  return std::sqrt(display_size.GetArea() / touchscreen_size.GetArea());
+}
 
 // TODO(flackr:oshima): Remove this once athena switches to share
 // ash::DisplayManager.
@@ -56,37 +101,30 @@ class ScreenForShutdown : public gfx::Screen {
       : primary_display_(primary_display) {}
 
   // gfx::Screen overrides:
-  virtual bool IsDIPEnabled() OVERRIDE { return true; }
-  virtual gfx::Point GetCursorScreenPoint() OVERRIDE { return gfx::Point(); }
-  virtual gfx::NativeWindow GetWindowUnderCursor() OVERRIDE { return NULL; }
-  virtual gfx::NativeWindow GetWindowAtScreenPoint(
-      const gfx::Point& point) OVERRIDE {
-    return NULL;
+  gfx::Point GetCursorScreenPoint() override { return gfx::Point(); }
+  gfx::NativeWindow GetWindowUnderCursor() override { return NULL; }
+  gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override {
+    return nullptr;
   }
-  virtual int GetNumDisplays() const OVERRIDE { return 1; }
-  virtual std::vector<gfx::Display> GetAllDisplays() const OVERRIDE {
+  int GetNumDisplays() const override { return 1; }
+  std::vector<gfx::Display> GetAllDisplays() const override {
     std::vector<gfx::Display> displays(1, primary_display_);
     return displays;
   }
-  virtual gfx::Display GetDisplayNearestWindow(
-      gfx::NativeView view) const OVERRIDE {
+  gfx::Display GetDisplayNearestWindow(gfx::NativeView view) const override {
     return primary_display_;
   }
-  virtual gfx::Display GetDisplayNearestPoint(
-      const gfx::Point& point) const OVERRIDE {
+  gfx::Display GetDisplayNearestPoint(const gfx::Point& point) const override {
     return primary_display_;
   }
-  virtual gfx::Display GetDisplayMatching(
-      const gfx::Rect& match_rect) const OVERRIDE {
+  gfx::Display GetDisplayMatching(const gfx::Rect& match_rect) const override {
     return primary_display_;
   }
-  virtual gfx::Display GetPrimaryDisplay() const OVERRIDE {
-    return primary_display_;
-  }
-  virtual void AddObserver(gfx::DisplayObserver* observer) OVERRIDE {
+  gfx::Display GetPrimaryDisplay() const override { return primary_display_; }
+  void AddObserver(gfx::DisplayObserver* observer) override {
     NOTREACHED() << "Observer should not be added during shutdown";
   }
-  virtual void RemoveObserver(gfx::DisplayObserver* observer) OVERRIDE {}
+  void RemoveObserver(gfx::DisplayObserver* observer) override {}
 
   const gfx::Display primary_display_;
 
@@ -99,17 +137,17 @@ class AthenaNativeCursorManager : public wm::NativeCursorManager {
  public:
   explicit AthenaNativeCursorManager(aura::WindowTreeHost* host)
       : host_(host), image_cursors_(new ui::ImageCursors) {}
-  virtual ~AthenaNativeCursorManager() {}
+  ~AthenaNativeCursorManager() override {}
 
   // wm::NativeCursorManager overrides.
-  virtual void SetDisplay(const gfx::Display& display,
-                          wm::NativeCursorManagerDelegate* delegate) OVERRIDE {
+  void SetDisplay(const gfx::Display& display,
+                  wm::NativeCursorManagerDelegate* delegate) override {
     if (image_cursors_->SetDisplay(display, display.device_scale_factor()))
       SetCursor(delegate->GetCursor(), delegate);
   }
 
-  virtual void SetCursor(gfx::NativeCursor cursor,
-                         wm::NativeCursorManagerDelegate* delegate) OVERRIDE {
+  void SetCursor(gfx::NativeCursor cursor,
+                 wm::NativeCursorManagerDelegate* delegate) override {
     image_cursors_->SetPlatformCursor(&cursor);
     cursor.set_device_scale_factor(image_cursors_->GetScale());
     delegate->CommitCursor(cursor);
@@ -118,9 +156,8 @@ class AthenaNativeCursorManager : public wm::NativeCursorManager {
       ApplyCursor(cursor);
   }
 
-  virtual void SetVisibility(
-      bool visible,
-      wm::NativeCursorManagerDelegate* delegate) OVERRIDE {
+  void SetVisibility(bool visible,
+                     wm::NativeCursorManagerDelegate* delegate) override {
     delegate->CommitVisibility(visible);
 
     if (visible) {
@@ -132,18 +169,17 @@ class AthenaNativeCursorManager : public wm::NativeCursorManager {
     }
   }
 
-  virtual void SetCursorSet(
-      ui::CursorSetType cursor_set,
-      wm::NativeCursorManagerDelegate* delegate) OVERRIDE {
+  void SetCursorSet(ui::CursorSetType cursor_set,
+                    wm::NativeCursorManagerDelegate* delegate) override {
     image_cursors_->SetCursorSet(cursor_set);
     delegate->CommitCursorSet(cursor_set);
     if (delegate->IsCursorVisible())
       SetCursor(delegate->GetCursor(), delegate);
   }
 
-  virtual void SetMouseEventsEnabled(
+  void SetMouseEventsEnabled(
       bool enabled,
-      wm::NativeCursorManagerDelegate* delegate) OVERRIDE {
+      wm::NativeCursorManagerDelegate* delegate) override {
     delegate->CommitMouseEventsEnabled(enabled);
     SetVisibility(delegate->IsCursorVisible(), delegate);
   }
@@ -161,12 +197,15 @@ class AthenaNativeCursorManager : public wm::NativeCursorManager {
 
 class AthenaEnvImpl : public AthenaEnv,
                       public aura::WindowTreeHostObserver,
-                      public ui::DisplayConfigurator::Observer {
+                      public ui::DisplayConfigurator::Observer,
+                      public ui::InputDeviceEventObserver {
  public:
   AthenaEnvImpl() : display_configurator_(new ui::DisplayConfigurator) {
     display_configurator_->Init(false);
     display_configurator_->ForceInitialConfigure(0);
     display_configurator_->AddObserver(this);
+
+    ui::DeviceDataManager::GetInstance()->AddObserver(this);
 
     gfx::Size screen_size = GetPrimaryDisplaySize();
     if (screen_size.IsEmpty()) {
@@ -190,9 +229,6 @@ class AthenaEnvImpl : public AthenaEnv,
     root_window_event_filter_.reset(new wm::CompoundEventFilter);
     host_->window()->AddPreTargetHandler(root_window_event_filter_.get());
 
-    input_method_filter_.reset(
-        new wm::InputMethodEventFilter(host_->GetAcceleratedWidget()));
-    input_method_filter_->SetInputMethodPropertyInRootWindow(host_->window());
     root_window_event_filter_->AddHandler(input_method_filter_.get());
 
     capture_client_.reset(
@@ -222,8 +258,8 @@ class AthenaEnvImpl : public AthenaEnv,
     instance = this;
   }
 
-  virtual ~AthenaEnvImpl() {
-    instance = NULL;
+  ~AthenaEnvImpl() override {
+    instance = nullptr;
 
     host_->RemoveObserver(this);
     if (input_method_filter_)
@@ -246,6 +282,8 @@ class AthenaEnvImpl : public AthenaEnv,
     screen_.reset();
     aura::Env::DeleteInstance();
 
+    ui::DeviceDataManager::GetInstance()->RemoveObserver(this);
+
     display_configurator_->RemoveObserver(this);
     display_configurator_.reset();
   }
@@ -260,13 +298,13 @@ class AthenaEnvImpl : public AthenaEnv,
   };
 
   // AthenaEnv:
-  virtual aura::WindowTreeHost* GetHost() OVERRIDE { return host_.get(); }
+  aura::WindowTreeHost* GetHost() override { return host_.get(); }
 
-  virtual void SetDisplayWorkAreaInsets(const gfx::Insets& insets) OVERRIDE {
+  void SetDisplayWorkAreaInsets(const gfx::Insets& insets) override {
     screen_->SetWorkAreaInsets(insets);
   }
 
-  virtual void AddTerminatingCallback(const base::Closure& closure) OVERRIDE {
+  void AddTerminatingCallback(const base::Closure& closure) override {
     if (closure.is_null())
       return;
     DCHECK(terminating_callbacks_.end() ==
@@ -276,8 +314,7 @@ class AthenaEnvImpl : public AthenaEnv,
     terminating_callbacks_.push_back(closure);
   }
 
-  virtual void RemoveTerminatingCallback(
-      const base::Closure& closure) OVERRIDE {
+  void RemoveTerminatingCallback(const base::Closure& closure) override {
     std::vector<base::Closure>::iterator iter =
         std::find_if(terminating_callbacks_.begin(),
                      terminating_callbacks_.end(),
@@ -286,7 +323,7 @@ class AthenaEnvImpl : public AthenaEnv,
       terminating_callbacks_.erase(iter);
   }
 
-  virtual void OnTerminating() OVERRIDE {
+  void OnTerminating() override {
     for (std::vector<base::Closure>::iterator iter =
              terminating_callbacks_.begin();
          iter != terminating_callbacks_.end();
@@ -296,15 +333,25 @@ class AthenaEnvImpl : public AthenaEnv,
   }
 
   // ui::DisplayConfigurator::Observer:
-  virtual void OnDisplayModeChanged(const std::vector<
-      ui::DisplayConfigurator::DisplayState>& displays) OVERRIDE {
+  void OnDisplayModeChanged(
+      const std::vector<ui::DisplayConfigurator::DisplayState>& displays)
+      override {
+    MapTouchscreenToDisplay();
+
     gfx::Size size = GetPrimaryDisplaySize();
     if (!size.IsEmpty())
       host_->UpdateRootWindowSize(size);
   }
 
+  // ui::InputDeviceEventObserver:
+  void OnTouchscreenDeviceConfigurationChanged() override {
+    MapTouchscreenToDisplay();
+  }
+
+  void OnKeyboardDeviceConfigurationChanged() override {}
+
   // aura::WindowTreeHostObserver:
-  virtual void OnHostCloseRequested(const aura::WindowTreeHost* host) OVERRIDE {
+  void OnHostCloseRequested(const aura::WindowTreeHost* host) override {
     base::MessageLoopForUI::current()->PostTask(
         FROM_HERE, base::MessageLoop::QuitClosure());
   }
@@ -316,6 +363,29 @@ class AthenaEnvImpl : public AthenaEnv,
       return gfx::Size();
     const ui::DisplayMode* mode = displays[0].display->current_mode();
     return mode ? mode->size() : gfx::Size();
+  }
+
+  void MapTouchscreenToDisplay() const {
+    auto device_manager = ui::DeviceDataManager::GetInstance();
+    auto displays = display_configurator_->cached_displays();
+    auto touchscreens = device_manager->touchscreen_devices();
+
+    if (displays.empty() || touchscreens.empty())
+      return;
+
+    gfx::SizeF framebuffer_size = display_configurator_->framebuffer_size();
+    device_manager->ClearTouchTransformerRecord();
+    device_manager->UpdateTouchInfoForDisplay(
+        displays[0].display->display_id(),
+        touchscreens[0].id,
+        GetTouchTransform(*displays[0].display,
+                          touchscreens[0],
+                          framebuffer_size));
+    device_manager->UpdateTouchRadiusScale(
+        touchscreens[0].id,
+        GetTouchRadiusScale(*displays[0].display,
+                            touchscreens[0],
+                            framebuffer_size));
   }
 
   scoped_ptr<aura::TestScreen> screen_;

@@ -24,16 +24,15 @@ class DispatcherDelegate;
 class ChromeRenderViewTest : public content::RenderViewTest {
  public:
   ChromeRenderViewTest();
-  virtual ~ChromeRenderViewTest();
+  ~ChromeRenderViewTest() override;
 
  protected:
   // testing::Test
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
-  virtual content::ContentClient* CreateContentClient() OVERRIDE;
-  virtual content::ContentBrowserClient* CreateContentBrowserClient() OVERRIDE;
-  virtual content::ContentRendererClient*
-      CreateContentRendererClient() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
+  content::ContentClient* CreateContentClient() override;
+  content::ContentBrowserClient* CreateContentBrowserClient() override;
+  content::ContentRendererClient* CreateContentRendererClient() override;
 
 #if defined(ENABLE_EXTENSIONS)
   scoped_ptr<extensions::DispatcherDelegate> extension_dispatcher_delegate_;

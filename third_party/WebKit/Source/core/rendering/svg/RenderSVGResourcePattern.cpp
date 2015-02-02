@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2006 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ * Copyright 2014 The Chromium Authors. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,21 +20,26 @@
  */
 
 #include "config.h"
-
 #include "core/rendering/svg/RenderSVGResourcePattern.h"
 
 #include "core/dom/ElementTraversal.h"
-#include "core/rendering/svg/SVGRenderSupport.h"
 #include "core/rendering/svg/SVGRenderingContext.h"
 #include "core/svg/SVGFitToViewBox.h"
+#include "core/svg/SVGPatternElement.h"
+#include "platform/graphics/DisplayList.h"
 #include "platform/graphics/GraphicsContext.h"
 
 namespace blink {
 
-const RenderSVGResourceType RenderSVGResourcePattern::s_resourceType = PatternResourceType;
+struct PatternData {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    RefPtr<Pattern> pattern;
+    AffineTransform transform;
+};
 
 RenderSVGResourcePattern::RenderSVGResourcePattern(SVGPatternElement* node)
-    : RenderSVGResourceContainer(node)
+    : RenderSVGResourcePaintServer(node)
     , m_shouldCollectPatternAttributes(true)
 {
 }
@@ -52,78 +58,69 @@ void RenderSVGResourcePattern::removeClientFromCache(RenderObject* client, bool 
     markClientForInvalidation(client, markForInvalidation ? PaintInvalidation : ParentOnlyInvalidation);
 }
 
-PatternData* RenderSVGResourcePattern::buildPattern(RenderObject* object, const SVGPatternElement* patternElement)
+PatternData* RenderSVGResourcePattern::patternForRenderer(const RenderObject& object)
 {
-    ASSERT(object);
-    PatternData* currentData = m_patternMap.get(object);
-    if (currentData && currentData->pattern)
+    ASSERT(!m_shouldCollectPatternAttributes);
+
+    // FIXME: the double hash lookup is needed to guard against paint-time invalidation
+    // (painting animated images may trigger layout invals which delete our map entry).
+    // Hopefully that will be addressed at some point, and then we can optimize the lookup.
+    if (PatternData* currentData = m_patternMap.get(&object))
         return currentData;
 
+    return m_patternMap.set(&object, buildPatternData(object)).storedValue->value.get();
+}
+
+PassOwnPtr<PatternData> RenderSVGResourcePattern::buildPatternData(const RenderObject& object)
+{
     // If we couldn't determine the pattern content element root, stop here.
     if (!m_attributes.patternContentElement())
-        return 0;
+        return nullptr;
 
     // An empty viewBox disables rendering.
     if (m_attributes.hasViewBox() && m_attributes.viewBox().isEmpty())
-        return 0;
+        return nullptr;
 
-    // Compute all necessary transformations to build the tile image & the pattern.
-    FloatRect tileBoundaries;
-    AffineTransform tileImageTransform;
-    if (!buildTileImageTransform(object, m_attributes, patternElement, tileBoundaries, tileImageTransform))
-        return 0;
+    ASSERT(element());
+    // Compute tile metrics.
+    FloatRect clientBoundingBox = object.objectBoundingBox();
+    FloatRect tileBounds = SVGLengthContext::resolveRectangle(element(),
+        m_attributes.patternUnits(), clientBoundingBox,
+        m_attributes.x(), m_attributes.y(), m_attributes.width(), m_attributes.height());
+    if (tileBounds.isEmpty())
+        return nullptr;
 
-    AffineTransform absoluteTransformIgnoringRotation;
-    SVGRenderingContext::calculateDeviceSpaceTransformation(object, absoluteTransformIgnoringRotation);
+    AffineTransform tileTransform;
+    if (m_attributes.hasViewBox()) {
+        if (m_attributes.viewBox().isEmpty())
+            return nullptr;
+        tileTransform = SVGFitToViewBox::viewBoxToViewTransform(m_attributes.viewBox(),
+            m_attributes.preserveAspectRatio(), tileBounds.width(), tileBounds.height());
+    } else {
+        // A viewbox overrides patternContentUnits, per spec.
+        if (m_attributes.patternContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
+            tileTransform.scale(clientBoundingBox.width(), clientBoundingBox.height());
+    }
 
-    // Ignore 2D rotation, as it doesn't affect the size of the tile.
-    SVGRenderingContext::clear2DRotation(absoluteTransformIgnoringRotation);
-    FloatRect absoluteTileBoundaries = absoluteTransformIgnoringRotation.mapRect(tileBoundaries);
-
-    // Scale the tile size to match the scale level of the patternTransform.
-    absoluteTileBoundaries.scale(static_cast<float>(m_attributes.patternTransform().xScale()),
-        static_cast<float>(m_attributes.patternTransform().yScale()));
-
-    // Build tile image.
-    OwnPtr<ImageBuffer> tileImage = createTileImage(m_attributes, tileBoundaries, absoluteTileBoundaries, tileImageTransform);
-    if (!tileImage)
-        return 0;
-
-    RefPtr<Image> copiedImage = tileImage->copyImage(CopyBackingStore);
-    if (!copiedImage)
-        return 0;
-
-    // Build pattern.
     OwnPtr<PatternData> patternData = adoptPtr(new PatternData);
-    patternData->pattern = Pattern::createBitmapPattern(copiedImage);
+    patternData->pattern = Pattern::createDisplayListPattern(asDisplayList(tileBounds, tileTransform));
 
     // Compute pattern space transformation.
-    const IntSize tileImageSize = tileImage->size();
-    patternData->transform.translate(tileBoundaries.x(), tileBoundaries.y());
-    patternData->transform.scale(tileBoundaries.width() / tileImageSize.width(), tileBoundaries.height() / tileImageSize.height());
-
+    patternData->transform.translate(tileBounds.x(), tileBounds.y());
     AffineTransform patternTransform = m_attributes.patternTransform();
     if (!patternTransform.isIdentity())
         patternData->transform = patternTransform * patternData->transform;
 
-    // Various calls above may trigger invalidations in some fringe cases (ImageBuffer allocation
-    // failures in the SVG image cache for example). To avoid having our PatternData deleted by
-    // removeAllClientsFromCache(), we only make it visible in the cache at the very end.
-    return m_patternMap.set(object, patternData.release()).storedValue->value.get();
+    return patternData.release();
 }
 
-bool RenderSVGResourcePattern::applyResource(RenderObject* object, RenderStyle* style, GraphicsContext*& context, unsigned short resourceMode)
+SVGPaintServer RenderSVGResourcePattern::preparePaintServer(const RenderObject& object)
 {
-    ASSERT(object);
-    ASSERT(style);
-    ASSERT(context);
-    ASSERT(resourceMode != ApplyToDefaultMode);
-
     clearInvalidationMask();
 
     SVGPatternElement* patternElement = toSVGPatternElement(element());
     if (!patternElement)
-        return false;
+        return SVGPaintServer::invalid();
 
     if (m_shouldCollectPatternAttributes) {
         patternElement->synchronizeAnimatedSVGAttribute(anyQName());
@@ -135,123 +132,44 @@ bool RenderSVGResourcePattern::applyResource(RenderObject* object, RenderStyle* 
 
     // Spec: When the geometry of the applicable element has no width or height and objectBoundingBox is specified,
     // then the given effect (e.g. a gradient or a filter) will be ignored.
-    FloatRect objectBoundingBox = object->objectBoundingBox();
+    FloatRect objectBoundingBox = object.objectBoundingBox();
     if (m_attributes.patternUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX && objectBoundingBox.isEmpty())
-        return false;
+        return SVGPaintServer::invalid();
 
-    PatternData* patternData = buildPattern(object, patternElement);
+    PatternData* patternData = patternForRenderer(object);
     if (!patternData)
-        return false;
+        return SVGPaintServer::invalid();
 
-    const SVGRenderStyle& svgStyle = style->svgStyle();
+    patternData->pattern->setPatternSpaceTransform(patternData->transform);
 
-    AffineTransform computedPatternSpaceTransform = computeResourceSpaceTransform(object, patternData->transform, svgStyle, resourceMode);
-    patternData->pattern->setPatternSpaceTransform(computedPatternSpaceTransform);
-
-    // Draw pattern
-    context->save();
-
-    if (resourceMode & ApplyToFillMode) {
-        context->setAlphaAsFloat(svgStyle.fillOpacity());
-        context->setFillPattern(patternData->pattern);
-        context->setFillRule(svgStyle.fillRule());
-    } else if (resourceMode & ApplyToStrokeMode) {
-        context->setAlphaAsFloat(svgStyle.strokeOpacity());
-        context->setStrokePattern(patternData->pattern);
-        SVGRenderSupport::applyStrokeStyleToContext(context, style, object);
-    }
-
-    if (resourceMode & ApplyToTextMode) {
-        if (resourceMode & ApplyToFillMode)
-            context->setTextDrawingMode(TextModeFill);
-        else if (resourceMode & ApplyToStrokeMode)
-            context->setTextDrawingMode(TextModeStroke);
-    }
-
-    return true;
+    return SVGPaintServer(patternData->pattern);
 }
 
-void RenderSVGResourcePattern::postApplyResource(RenderObject*, GraphicsContext*& context)
+PassRefPtr<DisplayList> RenderSVGResourcePattern::asDisplayList(const FloatRect& tileBounds,
+    const AffineTransform& tileTransform) const
 {
-    ASSERT(context);
-    context->restore();
-}
+    ASSERT(!m_shouldCollectPatternAttributes);
 
-static inline FloatRect calculatePatternBoundaries(const PatternAttributes& attributes,
-                                                   const FloatRect& objectBoundingBox,
-                                                   const SVGPatternElement* patternElement)
-{
-    ASSERT(patternElement);
-    return SVGLengthContext::resolveRectangle(patternElement, attributes.patternUnits(), objectBoundingBox, attributes.x(), attributes.y(), attributes.width(), attributes.height());
-}
+    AffineTransform contentTransform;
+    if (m_attributes.patternContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
+        contentTransform = tileTransform;
 
-bool RenderSVGResourcePattern::buildTileImageTransform(RenderObject* renderer,
-                                                       const PatternAttributes& attributes,
-                                                       const SVGPatternElement* patternElement,
-                                                       FloatRect& patternBoundaries,
-                                                       AffineTransform& tileImageTransform) const
-{
-    ASSERT(renderer);
-    ASSERT(patternElement);
+    // Draw the content into a DisplayList.
+    GraphicsContext recordingContext(nullptr);
+    recordingContext.beginRecording(FloatRect(FloatPoint(), tileBounds.size()));
+    recordingContext.concatCTM(tileTransform);
 
-    FloatRect objectBoundingBox = renderer->objectBoundingBox();
-    patternBoundaries = calculatePatternBoundaries(attributes, objectBoundingBox, patternElement);
-    if (patternBoundaries.width() <= 0 || patternBoundaries.height() <= 0)
-        return false;
+    ASSERT(m_attributes.patternContentElement());
+    RenderSVGResourceContainer* patternRenderer =
+        toRenderSVGResourceContainer(m_attributes.patternContentElement()->renderer());
+    ASSERT(patternRenderer);
+    ASSERT(!patternRenderer->needsLayout());
 
-    AffineTransform viewBoxCTM = SVGFitToViewBox::viewBoxToViewTransform(attributes.viewBox(), attributes.preserveAspectRatio(), patternBoundaries.width(), patternBoundaries.height());
+    SubtreeContentTransformScope contentTransformScope(contentTransform);
+    for (RenderObject* child = patternRenderer->firstChild(); child; child = child->nextSibling())
+        SVGRenderingContext::renderSubtree(&recordingContext, child);
 
-    // Apply viewBox/objectBoundingBox transformations.
-    if (!viewBoxCTM.isIdentity())
-        tileImageTransform = viewBoxCTM;
-    else if (attributes.patternContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
-        tileImageTransform.scale(objectBoundingBox.width(), objectBoundingBox.height());
-
-    return true;
-}
-
-PassOwnPtr<ImageBuffer> RenderSVGResourcePattern::createTileImage(const PatternAttributes& attributes,
-                                                                  const FloatRect& tileBoundaries,
-                                                                  const FloatRect& absoluteTileBoundaries,
-                                                                  const AffineTransform& tileImageTransform) const
-{
-    FloatRect clampedAbsoluteTileBoundaries = SVGRenderingContext::clampedAbsoluteTargetRect(absoluteTileBoundaries);
-
-    IntSize imageSize(roundedIntSize(clampedAbsoluteTileBoundaries.size()));
-    if (imageSize.isEmpty())
-        return nullptr;
-    OwnPtr<ImageBuffer> tileImage = ImageBuffer::create(imageSize);
-    if (!tileImage)
-        return nullptr;
-
-    GraphicsContext* tileImageContext = tileImage->context();
-    ASSERT(tileImageContext);
-    IntSize unclampedImageSize(roundedIntSize(absoluteTileBoundaries.size()));
-    tileImageContext->scale(unclampedImageSize.width() / absoluteTileBoundaries.width(), unclampedImageSize.height() / absoluteTileBoundaries.height());
-
-    // The image buffer represents the final rendered size, so the content has to be scaled (to avoid pixelation).
-    tileImageContext->scale(
-        clampedAbsoluteTileBoundaries.width() / tileBoundaries.width(),
-        clampedAbsoluteTileBoundaries.height() / tileBoundaries.height());
-
-    // Apply tile image transformations.
-    if (!tileImageTransform.isIdentity())
-        tileImageContext->concatCTM(tileImageTransform);
-
-    AffineTransform contentTransformation;
-    if (attributes.patternContentUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
-        contentTransformation = tileImageTransform;
-
-    // Draw the content into the ImageBuffer.
-    for (SVGElement* element = Traversal<SVGElement>::firstChild(*attributes.patternContentElement()); element; element = Traversal<SVGElement>::nextSibling(*element)) {
-        if (!element->renderer())
-            continue;
-        if (element->renderer()->needsLayout())
-            return nullptr;
-        SVGRenderingContext::renderSubtree(tileImage->context(), element->renderer(), contentTransformation);
-    }
-
-    return tileImage.release();
+    return recordingContext.endRecording();
 }
 
 }

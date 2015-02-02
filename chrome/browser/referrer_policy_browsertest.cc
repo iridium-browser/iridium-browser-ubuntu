@@ -35,9 +35,9 @@ const base::FilePath::CharType kDocRoot[] =
 class ReferrerPolicyTest : public InProcessBrowserTest {
  public:
   ReferrerPolicyTest() {}
-  virtual ~ReferrerPolicyTest() {}
+  ~ReferrerPolicyTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     test_server_.reset(new net::SpawnedTestServer(
                            net::SpawnedTestServer::TYPE_HTTP,
                            net::SpawnedTestServer::kLocalhost,

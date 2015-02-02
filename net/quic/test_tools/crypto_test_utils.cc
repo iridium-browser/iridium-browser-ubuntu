@@ -41,10 +41,9 @@ class CryptoFramerVisitor : public CryptoFramerVisitorInterface {
       : error_(false) {
   }
 
-  virtual void OnError(CryptoFramer* framer) OVERRIDE { error_ = true; }
+  void OnError(CryptoFramer* framer) override { error_ = true; }
 
-  virtual void OnHandshakeMessage(
-      const CryptoHandshakeMessage& message) OVERRIDE {
+  void OnHandshakeMessage(const CryptoHandshakeMessage& message) override {
     messages_.push_back(message);
   }
 
@@ -130,28 +129,27 @@ bool HexChar(char c, uint8* value) {
 }
 
 // A ChannelIDSource that works in asynchronous mode unless the |callback|
-// argument to GetChannelIDKey is NULL.
+// argument to GetChannelIDKey is nullptr.
 class AsyncTestChannelIDSource : public ChannelIDSource,
                                  public CryptoTestUtils::CallbackSource {
  public:
   // Takes ownership of |sync_source|, a synchronous ChannelIDSource.
   explicit AsyncTestChannelIDSource(ChannelIDSource* sync_source)
       : sync_source_(sync_source) {}
-  virtual ~AsyncTestChannelIDSource() {}
+  ~AsyncTestChannelIDSource() override {}
 
   // ChannelIDSource implementation.
-  virtual QuicAsyncStatus GetChannelIDKey(
-      const string& hostname,
-      scoped_ptr<ChannelIDKey>* channel_id_key,
-      ChannelIDSourceCallback* callback) OVERRIDE {
+  QuicAsyncStatus GetChannelIDKey(const string& hostname,
+                                  scoped_ptr<ChannelIDKey>* channel_id_key,
+                                  ChannelIDSourceCallback* callback) override {
     // Synchronous mode.
     if (!callback) {
-      return sync_source_->GetChannelIDKey(hostname, channel_id_key, NULL);
+      return sync_source_->GetChannelIDKey(hostname, channel_id_key, nullptr);
     }
 
     // Asynchronous mode.
     QuicAsyncStatus status =
-        sync_source_->GetChannelIDKey(hostname, &channel_id_key_, NULL);
+        sync_source_->GetChannelIDKey(hostname, &channel_id_key_, nullptr);
     if (status != QUIC_SUCCESS) {
       return QUIC_FAILURE;
     }
@@ -160,7 +158,7 @@ class AsyncTestChannelIDSource : public ChannelIDSource,
   }
 
   // CallbackSource implementation.
-  virtual void RunPendingCallbacks() OVERRIDE {
+  void RunPendingCallbacks() override {
     if (callback_.get()) {
       callback_->Run(&channel_id_key_);
       callback_.reset();
@@ -219,15 +217,13 @@ int CryptoTestUtils::HandshakeWithFakeClient(
   TestClientSession client_session(client_conn, DefaultQuicConfig());
   QuicCryptoClientConfig crypto_config;
 
-  client_session.config()->SetDefaults();
-  crypto_config.SetDefaults();
   if (!options.dont_verify_certs) {
     // TODO(wtc): replace this with ProofVerifierForTesting() when we have
     // a working ProofSourceForTesting().
     crypto_config.SetProofVerifier(FakeProofVerifierForTesting());
   }
   bool is_https = false;
-  AsyncTestChannelIDSource* async_channel_id_source = NULL;
+  AsyncTestChannelIDSource* async_channel_id_source = nullptr;
   if (options.channel_id_enabled) {
     is_https = true;
 
@@ -255,10 +251,8 @@ int CryptoTestUtils::HandshakeWithFakeClient(
 
   if (options.channel_id_enabled) {
     scoped_ptr<ChannelIDKey> channel_id_key;
-    QuicAsyncStatus status =
-        crypto_config.channel_id_source()->GetChannelIDKey(kServerHostname,
-                                                           &channel_id_key,
-                                                           NULL);
+    QuicAsyncStatus status = crypto_config.channel_id_source()->GetChannelIDKey(
+        kServerHostname, &channel_id_key, nullptr);
     EXPECT_EQ(QUIC_SUCCESS, status);
     EXPECT_EQ(channel_id_key->SerializeKey(),
               server->crypto_negotiated_params().channel_id);
@@ -275,7 +269,6 @@ void CryptoTestUtils::SetupCryptoServerConfigForTest(
     QuicRandom* rand,
     QuicConfig* config,
     QuicCryptoServerConfig* crypto_config) {
-  config->SetDefaults();
   QuicCryptoServerConfig::ConfigOptions options;
   options.channel_id_enabled = true;
   scoped_ptr<CryptoHandshakeMessage> scfg(
@@ -288,7 +281,7 @@ void CryptoTestUtils::CommunicateHandshakeMessages(
     QuicCryptoStream* a,
     PacketSavingConnection* b_conn,
     QuicCryptoStream* b) {
-  CommunicateHandshakeMessagesAndRunCallbacks(a_conn, a, b_conn, b, NULL);
+  CommunicateHandshakeMessagesAndRunCallbacks(a_conn, a, b_conn, b, nullptr);
 }
 
 // static
@@ -358,22 +351,22 @@ class MockCommonCertSets : public CommonCertSets {
         index_(index) {
   }
 
-  virtual StringPiece GetCommonHashes() const OVERRIDE {
+  StringPiece GetCommonHashes() const override {
     CHECK(false) << "not implemented";
     return StringPiece();
   }
 
-  virtual StringPiece GetCert(uint64 hash, uint32 index) const OVERRIDE {
+  StringPiece GetCert(uint64 hash, uint32 index) const override {
     if (hash == hash_ && index == index_) {
       return cert_;
     }
     return StringPiece();
   }
 
-  virtual bool MatchCert(StringPiece cert,
-                         StringPiece common_set_hashes,
-                         uint64* out_hash,
-                         uint32* out_index) const OVERRIDE {
+  bool MatchCert(StringPiece cert,
+                 StringPiece common_set_hashes,
+                 uint64* out_hash,
+                 uint32* out_index) const override {
     if (cert != cert_) {
       return false;
     }
@@ -580,7 +573,7 @@ CryptoHandshakeMessage CryptoTestUtils::BuildMessage(const char* message_tag,
 
   for (;;) {
     const char* tagstr = va_arg(ap, const char*);
-    if (tagstr == NULL) {
+    if (tagstr == nullptr) {
       break;
     }
 

@@ -36,6 +36,7 @@ class AudioEncoder {
   CastInitializationStatus InitializationResult() const;
 
   int GetSamplesPerFrame() const;
+  base::TimeDelta GetFrameDuration() const;
 
   void InsertAudio(scoped_ptr<AudioBus> audio_bus,
                    const base::TimeTicks& recorded_time);
@@ -44,6 +45,7 @@ class AudioEncoder {
   class ImplBase;
   class OpusImpl;
   class Pcm16Impl;
+  class AppleAacImpl;
 
   const scoped_refptr<CastEnvironment> cast_environment_;
   scoped_refptr<ImplBase> impl_;

@@ -43,7 +43,7 @@ namespace blink {
     class ResourceRequest;
     class ResourceResponse;
 
-    class ApplicationCacheHost FINAL : public NoBaseWillBeGarbageCollectedFinalized<ApplicationCacheHost>, public WebApplicationCacheHostClient {
+    class ApplicationCacheHost final : public NoBaseWillBeGarbageCollectedFinalized<ApplicationCacheHost>, public WebApplicationCacheHostClient {
         WTF_MAKE_NONCOPYABLE(ApplicationCacheHost);
     public:
         static PassOwnPtrWillBeRawPtr<ApplicationCacheHost> create(DocumentLoader* loader)
@@ -112,7 +112,7 @@ namespace blink {
 
         void willStartLoadingMainResource(ResourceRequest&);
         void didReceiveResponseForMainResource(const ResourceResponse&);
-        void mainResourceDataReceived(const char* data, int length);
+        void mainResourceDataReceived(const char* data, unsigned length);
         void finishedLoadingMainResource();
         void failedLoadingMainResource();
 
@@ -137,10 +137,10 @@ namespace blink {
         explicit ApplicationCacheHost(DocumentLoader*);
 
         // WebApplicationCacheHostClient implementation
-        virtual void didChangeCacheAssociation() OVERRIDE FINAL;
-        virtual void notifyEventListener(WebApplicationCacheHost::EventID) OVERRIDE FINAL;
-        virtual void notifyProgressEventListener(const WebURL&, int progressTotal, int progressDone) OVERRIDE FINAL;
-        virtual void notifyErrorEventListener(WebApplicationCacheHost::ErrorReason, const WebURL&, int status, const WebString& message) OVERRIDE FINAL;
+        virtual void didChangeCacheAssociation() override final;
+        virtual void notifyEventListener(WebApplicationCacheHost::EventID) override final;
+        virtual void notifyProgressEventListener(const WebURL&, int progressTotal, int progressDone) override final;
+        virtual void notifyErrorEventListener(WebApplicationCacheHost::ErrorReason, const WebURL&, int status, const WebString& message) override final;
 
         bool isApplicationCacheEnabled();
         DocumentLoader* documentLoader() const { return m_documentLoader; }

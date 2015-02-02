@@ -31,11 +31,11 @@ class ExtensionBookmarksTest : public testing::Test {
   ExtensionBookmarksTest()
       : client_(NULL), model_(NULL), node_(NULL), node2_(NULL), folder_(NULL) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     profile_.CreateBookmarkModel(false);
     model_ = BookmarkModelFactory::GetForProfile(&profile_);
     client_ = ChromeBookmarkClientFactory::GetForProfile(&profile_);
-    test::WaitForBookmarkModelToLoad(model_);
+    bookmarks::test::WaitForBookmarkModelToLoad(model_);
 
     node_ = model_->AddURL(model_->other_node(), 0, base::ASCIIToUTF16("Digg"),
                            GURL("http://www.reddit.com"));

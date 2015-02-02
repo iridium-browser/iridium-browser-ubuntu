@@ -60,8 +60,8 @@ const QuicByteCount kMaxPacketSize = 1452;
 const QuicByteCount kDefaultTCPMSS = 1460;
 
 // Maximum size of the initial congestion window in packets.
-const size_t kDefaultInitialWindow = 10;
-const uint32 kMaxInitialWindow = 100;
+const QuicPacketCount kDefaultInitialWindow = 10;
+const QuicPacketCount kMaxInitialWindow = 100;
 
 // Default size of initial flow control window, for both stream and session.
 const uint32 kDefaultFlowControlSendWindow = 16 * 1024;  // 16 KB
@@ -70,8 +70,14 @@ const uint32 kDefaultFlowControlSendWindow = 16 * 1024;  // 16 KB
 // algorithms.
 const size_t kMaxTcpCongestionWindow = 200;
 
-// Size of the socket receive buffer in bytes.
+// Default size of the socket receive buffer in bytes.
 const QuicByteCount kDefaultSocketReceiveBuffer = 256 * 1024;
+// Minimum size of the socket receive buffer in bytes.
+// Smaller values are ignored.
+const QuicByteCount kMinSocketReceiveBuffer = 16 * 1024;
+
+// Don't allow a client to suggest an RTT shorter than 10ms.
+const uint32 kMinInitialRoundTripTimeUs = 10 * kNumMicrosPerMilli;
 
 // Don't allow a client to suggest an RTT longer than 15 seconds.
 const uint32 kMaxInitialRoundTripTimeUs = 15 * kNumMicrosPerSecond;
@@ -106,14 +112,20 @@ const QuicStreamId kCryptoStreamId = 1;
 const QuicStreamId kHeadersStreamId = 3;
 
 // Maximum delayed ack time, in ms.
-const int kMaxDelayedAckTimeMs = 25;
+const int64 kMaxDelayedAckTimeMs = 25;
 
-// The default idle timeout before the crypto handshake succeeds.
-const int64 kDefaultInitialTimeoutSecs = 120;  // 2 mins.
+// The timeout before the handshake succeeds.
+const int64 kInitialIdleTimeoutSecs = 5;
+// The default idle timeout.
+const int64 kDefaultIdleTimeoutSecs = 30;
 // The maximum idle timeout that can be negotiated.
 const int64 kMaximumIdleTimeoutSecs = 60 * 10;  // 10 minutes.
 // The default timeout for a connection until the crypto handshake succeeds.
-const int64 kDefaultMaxTimeForCryptoHandshakeSecs = 10;  // 10 secs.
+const int64 kMaxTimeForCryptoHandshakeSecs = 10;  // 10 secs.
+
+// Default limit on the number of undecryptable packets the connection buffers
+// before the CHLO/SHLO arrive.
+const size_t kDefaultMaxUndecryptablePackets = 10;
 
 // Default ping timeout.
 const int64 kPingTimeoutSecs = 15;  // 15 secs.
@@ -124,9 +136,17 @@ const int kMinIntervalBetweenServerConfigUpdatesRTTs = 10;
 // Minimum time between Server Config Updates (SCUP) sent to client.
 const int kMinIntervalBetweenServerConfigUpdatesMs = 1000;
 
-// Multiplier that allows server to accept slightly more streams than
-// negotiated in handshake.
+// Minimum number of packets between Server Config Updates (SCUP).
+const int kMinPacketsBetweenServerConfigUpdates = 100;
+
+// The number of open streams that a server will accept is set to be slightly
+// larger than the negotiated limit. Immediately closing the connection if the
+// client opens slightly too many streams is not ideal: the client may have sent
+// a FIN that was lost, and simultaneously opened a new stream. The number of
+// streams a server accepts is a fixed increment over the negotiated limit, or a
+// percentage increase, whichever is larger.
 const float kMaxStreamsMultiplier = 1.1f;
+const int kMaxStreamsMinimumIncrement = 10;
 
 // We define an unsigned 16-bit floating point value, inspired by IEEE floats
 // (http://en.wikipedia.org/wiki/Half_precision_floating-point_format),
@@ -287,8 +307,6 @@ enum QuicVersion {
   // Special case to indicate unknown/unsupported QUIC version.
   QUIC_VERSION_UNSUPPORTED = 0,
 
-  QUIC_VERSION_16 = 16,  // STOP_WAITING frame.
-  QUIC_VERSION_18 = 18,  // PING frame.
   QUIC_VERSION_19 = 19,  // Connection level flow control.
   QUIC_VERSION_21 = 21,  // Headers/crypto streams are flow controlled.
   QUIC_VERSION_22 = 22,  // Send Server Config Update messages on crypto stream.
@@ -304,10 +322,7 @@ enum QuicVersion {
 // http://sites/quic/adding-and-removing-versions
 static const QuicVersion kSupportedQuicVersions[] = {QUIC_VERSION_23,
                                                      QUIC_VERSION_22,
-                                                     QUIC_VERSION_21,
-                                                     QUIC_VERSION_19,
-                                                     QUIC_VERSION_18,
-                                                     QUIC_VERSION_16};
+                                                     QUIC_VERSION_19};
 
 typedef std::vector<QuicVersion> QuicVersionVector;
 
@@ -384,8 +399,9 @@ enum QuicRstStreamErrorCode {
   QUIC_STREAM_PEER_GOING_AWAY,
   // The stream has been cancelled.
   QUIC_STREAM_CANCELLED,
-  // Sending a RST to allow for proper flow control accounting.
-  QUIC_RST_FLOW_CONTROL_ACCOUNTING,
+  // Closing stream locally, sending a RST to allow for proper flow control
+  // accounting. Sent in response to a RST from the peer.
+  QUIC_RST_ACKNOWLEDGEMENT,
 
   // No error. Used as bound while iterating.
   QUIC_STREAM_LAST_ERROR,
@@ -493,6 +509,10 @@ enum QuicErrorCode {
   QUIC_FLOW_CONTROL_INVALID_WINDOW = 64,
   // The connection has been IP pooled into an existing connection.
   QUIC_CONNECTION_IP_POOLED = 62,
+  // The connection has too many outstanding sent packets.
+  QUIC_TOO_MANY_OUTSTANDING_SENT_PACKETS = 68,
+  // The connection has too many outstanding received packets.
+  QUIC_TOO_MANY_OUTSTANDING_RECEIVED_PACKETS = 69,
 
   // Crypto errors.
 
@@ -550,7 +570,7 @@ enum QuicErrorCode {
   QUIC_VERSION_NEGOTIATION_MISMATCH = 55,
 
   // No error. Used as bound while iterating.
-  QUIC_LAST_ERROR = 68,
+  QUIC_LAST_ERROR = 70,
 };
 
 struct NET_EXPORT_PRIVATE QuicPacketPublicHeader {
@@ -1056,14 +1076,9 @@ struct NET_EXPORT_PRIVATE TransmissionInfo {
   // Constructs a Transmission with a new all_tranmissions set
   // containing |sequence_number|.
   TransmissionInfo(RetransmittableFrames* retransmittable_frames,
-                   QuicSequenceNumberLength sequence_number_length);
-
-  // Constructs a Transmission with the specified |all_tranmissions| set
-  // and inserts |sequence_number| into it.
-  TransmissionInfo(RetransmittableFrames* retransmittable_frames,
                    QuicSequenceNumberLength sequence_number_length,
                    TransmissionType transmission_type,
-                   SequenceNumberList* all_transmissions);
+                   QuicTime sent_time);
 
   RetransmittableFrames* retransmittable_frames;
   QuicSequenceNumberLength sequence_number_length;
@@ -1075,7 +1090,7 @@ struct NET_EXPORT_PRIVATE TransmissionInfo {
   // Reason why this packet was transmitted.
   TransmissionType transmission_type;
   // Stores the sequence numbers of all transmissions of this packet.
-  // Must always be NULL or have multiple elements.
+  // Must always be nullptr or have multiple elements.
   SequenceNumberList* all_transmissions;
   // In flight packets have not been abandoned or lost.
   bool in_flight;

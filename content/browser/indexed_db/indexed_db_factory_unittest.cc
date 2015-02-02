@@ -59,7 +59,7 @@ class MockIDBFactory : public IndexedDBFactoryImpl {
   }
 
  private:
-  virtual ~MockIDBFactory() {}
+  ~MockIDBFactory() override {}
 
   DISALLOW_COPY_AND_ASSIGN(MockIDBFactory);
 };
@@ -204,15 +204,15 @@ class DiskFullFactory : public IndexedDBFactoryImpl {
       : IndexedDBFactoryImpl(context) {}
 
  private:
-  virtual ~DiskFullFactory() {}
-  virtual scoped_refptr<IndexedDBBackingStore> OpenBackingStore(
+  ~DiskFullFactory() override {}
+  scoped_refptr<IndexedDBBackingStore> OpenBackingStore(
       const GURL& origin_url,
       const base::FilePath& data_directory,
       net::URLRequestContext* request_context,
       blink::WebIDBDataLoss* data_loss,
       std::string* data_loss_message,
       bool* disk_full,
-      leveldb::Status* s) OVERRIDE {
+      leveldb::Status* s) override {
     *disk_full = true;
     *s = leveldb::Status::IOError("Disk is full");
     return scoped_refptr<IndexedDBBackingStore>();
@@ -225,14 +225,14 @@ class LookingForQuotaErrorMockCallbacks : public IndexedDBCallbacks {
  public:
   LookingForQuotaErrorMockCallbacks()
       : IndexedDBCallbacks(NULL, 0, 0), error_called_(false) {}
-  virtual void OnError(const IndexedDBDatabaseError& error) OVERRIDE {
+  void OnError(const IndexedDBDatabaseError& error) override {
     error_called_ = true;
     EXPECT_EQ(blink::WebIDBDatabaseExceptionQuotaError, error.code());
   }
   bool error_called() const { return error_called_; }
 
  private:
-  virtual ~LookingForQuotaErrorMockCallbacks() {}
+  ~LookingForQuotaErrorMockCallbacks() override {}
   bool error_called_;
 
   DISALLOW_COPY_AND_ASSIGN(LookingForQuotaErrorMockCallbacks);
@@ -434,21 +434,21 @@ class UpgradeNeededCallbacks : public MockIndexedDBCallbacks {
  public:
   UpgradeNeededCallbacks() {}
 
-  virtual void OnSuccess(scoped_ptr<IndexedDBConnection> connection,
-                         const IndexedDBDatabaseMetadata& metadata) OVERRIDE {
+  void OnSuccess(scoped_ptr<IndexedDBConnection> connection,
+                 const IndexedDBDatabaseMetadata& metadata) override {
     EXPECT_TRUE(connection_.get());
     EXPECT_FALSE(connection.get());
   }
 
-  virtual void OnUpgradeNeeded(
+  void OnUpgradeNeeded(
       int64 old_version,
       scoped_ptr<IndexedDBConnection> connection,
-      const content::IndexedDBDatabaseMetadata& metadata) OVERRIDE {
+      const content::IndexedDBDatabaseMetadata& metadata) override {
     connection_ = connection.Pass();
   }
 
  protected:
-  virtual ~UpgradeNeededCallbacks() {}
+  ~UpgradeNeededCallbacks() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(UpgradeNeededCallbacks);
@@ -458,13 +458,13 @@ class ErrorCallbacks : public MockIndexedDBCallbacks {
  public:
   ErrorCallbacks() : MockIndexedDBCallbacks(false), saw_error_(false) {}
 
-  virtual void OnError(const IndexedDBDatabaseError& error) OVERRIDE {
+  void OnError(const IndexedDBDatabaseError& error) override {
     saw_error_= true;
   }
   bool saw_error() const { return saw_error_; }
 
  private:
-  virtual ~ErrorCallbacks() {}
+  ~ErrorCallbacks() override {}
   bool saw_error_;
 
   DISALLOW_COPY_AND_ASSIGN(ErrorCallbacks);

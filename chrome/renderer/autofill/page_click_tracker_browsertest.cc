@@ -23,9 +23,8 @@ class TestPageClickListener : public PageClickListener {
       : form_control_element_clicked_called_(false),
         was_focused_(false) {}
 
-  virtual void FormControlElementClicked(
-      const blink::WebFormControlElement& element,
-      bool was_focused) OVERRIDE {
+  void FormControlElementClicked(const blink::WebFormControlElement& element,
+                                 bool was_focused) override {
     form_control_element_clicked_called_ = true;
     form_control_element_clicked_ = element;
     was_focused_ = was_focused;
@@ -44,7 +43,7 @@ class TestPageClickListener : public PageClickListener {
 
 class PageClickTrackerTest : public content::RenderViewTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     content::RenderViewTest::SetUp();
 
     // RenderView creates PageClickTracker but it doesn't keep it around.
@@ -67,7 +66,7 @@ class PageClickTrackerTest : public content::RenderViewTest {
     ASSERT_FALSE(textarea_.isNull());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     text_.reset();
     textarea_.reset();
     test_listener_.ClearResults();

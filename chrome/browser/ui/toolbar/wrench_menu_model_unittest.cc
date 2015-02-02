@@ -32,15 +32,15 @@ class MenuError : public GlobalError {
 
   int execute_count() { return execute_count_; }
 
-  virtual bool HasMenuItem() OVERRIDE { return true; }
-  virtual int MenuItemCommandID() OVERRIDE { return command_id_; }
-  virtual base::string16 MenuItemLabel() OVERRIDE { return base::string16(); }
-  virtual void ExecuteMenuItem(Browser* browser) OVERRIDE { execute_count_++; }
+  bool HasMenuItem() override { return true; }
+  int MenuItemCommandID() override { return command_id_; }
+  base::string16 MenuItemLabel() override { return base::string16(); }
+  void ExecuteMenuItem(Browser* browser) override { execute_count_++; }
 
-  virtual bool HasBubbleView() OVERRIDE { return false; }
-  virtual bool HasShownBubbleView() OVERRIDE { return false; }
-  virtual void ShowBubbleView(Browser* browser) OVERRIDE { ADD_FAILURE(); }
-  virtual GlobalErrorBubbleViewBase* GetBubbleView() OVERRIDE { return NULL; }
+  bool HasBubbleView() override { return false; }
+  bool HasShownBubbleView() override { return false; }
+  void ShowBubbleView(Browser* browser) override { ADD_FAILURE(); }
+  GlobalErrorBubbleViewBase* GetBubbleView() override { return NULL; }
 
  private:
   int command_id_;
@@ -55,12 +55,13 @@ class WrenchMenuModelTest : public BrowserWithTestWindowTest,
                             public ui::AcceleratorProvider {
  public:
   // Don't handle accelerators.
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE { return false; }
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override {
+    return false;
+  }
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     prefs_.reset(new TestingPrefServiceSimple());
     chrome::RegisterLocalState(prefs_->registry());
 
@@ -69,7 +70,7 @@ class WrenchMenuModelTest : public BrowserWithTestWindowTest,
     BrowserWithTestWindowTest::SetUp();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     BrowserWithTestWindowTest::TearDown();
     testing_io_thread_state_.reset();
     TestingBrowserProcess::GetGlobal()->SetLocalState(NULL);
@@ -95,19 +96,19 @@ class TestWrenchMenuModel : public WrenchMenuModel {
   }
 
   // Testing overrides to ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
+  bool IsCommandIdChecked(int command_id) const override {
     bool val = WrenchMenuModel::IsCommandIdChecked(command_id);
     if (val)
       checked_count_++;
     return val;
   }
 
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
+  bool IsCommandIdEnabled(int command_id) const override {
     ++enable_count_;
     return true;
   }
 
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {
+  void ExecuteCommand(int command_id, int event_flags) override {
     ++execute_count_;
   }
 
@@ -199,5 +200,5 @@ class EncodingMenuModelTest : public BrowserWithTestWindowTest,
 TEST_F(EncodingMenuModelTest, IsCommandIdCheckedWithNoTabs) {
   EncodingMenuModel model(browser());
   ASSERT_EQ(NULL, browser()->tab_strip_model()->GetActiveWebContents());
-  EXPECT_FALSE(model.IsCommandIdChecked(IDC_ENCODING_ISO88591));
+  EXPECT_FALSE(model.IsCommandIdChecked(IDC_ENCODING_WINDOWS1252));
 }

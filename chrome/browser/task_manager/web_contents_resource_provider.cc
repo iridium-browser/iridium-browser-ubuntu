@@ -40,13 +40,13 @@ class SubframeResource : public RendererResource {
   explicit SubframeResource(WebContents* web_contents,
                             SiteInstance* site_instance,
                             RenderFrameHost* example_rfh);
-  virtual ~SubframeResource() {}
+  ~SubframeResource() override {}
 
   // Resource methods:
-  virtual Type GetType() const OVERRIDE;
-  virtual base::string16 GetTitle() const OVERRIDE;
-  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
-  virtual WebContents* GetWebContents() const OVERRIDE;
+  Type GetType() const override;
+  base::string16 GetTitle() const override;
+  gfx::ImageSkia GetIcon() const override;
+  WebContents* GetWebContents() const override;
 
  private:
   WebContents* web_contents_;
@@ -97,7 +97,7 @@ class TaskManagerWebContentsEntry : public content::WebContentsObserver {
         provider_(provider),
         main_frame_site_instance_(NULL) {}
 
-  virtual ~TaskManagerWebContentsEntry() {
+  ~TaskManagerWebContentsEntry() override {
     for (ResourceMap::iterator j = resources_by_site_instance_.begin();
          j != resources_by_site_instance_.end();) {
       RendererResource* resource = j->second;
@@ -112,27 +112,27 @@ class TaskManagerWebContentsEntry : public content::WebContentsObserver {
   }
 
   // content::WebContentsObserver implementation.
-  virtual void RenderFrameDeleted(RenderFrameHost* render_frame_host) OVERRIDE {
+  void RenderFrameDeleted(RenderFrameHost* render_frame_host) override {
     ClearResourceForFrame(render_frame_host);
   }
 
-  virtual void RenderFrameHostChanged(RenderFrameHost* old_host,
-                                      RenderFrameHost* new_host) OVERRIDE {
+  void RenderFrameHostChanged(RenderFrameHost* old_host,
+                              RenderFrameHost* new_host) override {
     if (old_host)
       ClearResourceForFrame(old_host);
     CreateResourceForFrame(new_host);
   }
 
-  virtual void RenderViewReady() OVERRIDE {
+  void RenderViewReady() override {
     ClearAllResources();
     CreateAllResources();
   }
 
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
+  void RenderProcessGone(base::TerminationStatus status) override {
     ClearAllResources();
   }
 
-  virtual void WebContentsDestroyed() OVERRIDE {
+  void WebContentsDestroyed() override {
     ClearAllResources();
     provider_->DeleteEntry(web_contents(), this);  // Deletes |this|.
   }

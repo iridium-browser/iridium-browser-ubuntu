@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * This variable is checked in SelectFileDialogExtensionBrowserTest.
  * @type {number}
@@ -17,7 +15,7 @@ window.onerror = function() { window.JSErrorCount++; };
 
 // Overrides console.error() to count errors.
 /**
- * @param {...Object} var_args Message to be logged.
+ * @param {...*} var_args Message to be logged.
  */
 console.error = (function() {
   var orig = console.error;
@@ -30,7 +28,7 @@ console.error = (function() {
 // Overrides console.assert() to count errors.
 /**
  * @param {boolean} condition If false, log a message and stack trace.
- * @param {...Object} var_args Objects to.
+ * @param {...*} var_args Objects to.
  */
 console.assert = (function() {
   var orig = console.assert;
@@ -48,7 +46,7 @@ console.assert = (function() {
  *  - Bind this object
  *
  * @param {Object} thisObject Object to be used as this.
- * @return {function} Wrapped function.
+ * @return {Function} Wrapped function.
  */
 Function.prototype.wrap = function(thisObject) {
   var func = this;

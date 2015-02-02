@@ -149,9 +149,7 @@ DisplayInfo DisplayInfo::CreateFromSpecWithID(const std::string& spec,
   float device_scale_factor = 1.0f;
   if (!GetDisplayBounds(main_spec, &bounds_in_native, &device_scale_factor)) {
 #if defined(OS_WIN)
-    if (gfx::IsHighDPIEnabled()) {
-      device_scale_factor = gfx::GetDPIScale();
-    }
+    device_scale_factor = gfx::GetDPIScale();
 #endif
   }
 
@@ -236,6 +234,7 @@ DisplayInfo::DisplayInfo(int64 id,
       overscan_insets_in_dip_(0, 0, 0, 0),
       configured_ui_scale_(1.0f),
       native_(false),
+      is_aspect_preserving_scaling_(false),
       color_profile_(ui::COLOR_PROFILE_STANDARD) {
 }
 

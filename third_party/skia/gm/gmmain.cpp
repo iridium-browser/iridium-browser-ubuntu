@@ -1466,9 +1466,13 @@ DEFINE_bool(pipe, false, "Exercise the SkGPipe replay test pass.");
 DEFINE_string2(readPath, r, "", "Read reference images from this dir, and report "
                "any differences between those and the newly generated ones.");
 DEFINE_bool(replay, false, "Exercise the SkPicture replay test pass.");
-#if SK_SUPPORT_GPU
+
+#ifdef SK_BUILD_FOR_ANDROID
+DEFINE_bool(resetGpuContext, true, "Reset the GrContext prior to running each GM.");
+#else
 DEFINE_bool(resetGpuContext, false, "Reset the GrContext prior to running each GM.");
 #endif
+
 DEFINE_bool(rtree, false, "Exercise the R-Tree variant of SkPicture test pass.");
 DEFINE_bool(serialize, false, "Exercise the SkPicture serialization & deserialization test pass.");
 DEFINE_bool(simulatePipePlaybackFailure, false, "Simulate a rendering failure in pipe mode only.");
@@ -1755,9 +1759,9 @@ ErrorCombination run_multiple_configs(GMMain &gmmain, GM *gm,
             bool grSuccess = false;
             if (gr) {
                 // create a render target to back the device
-                GrTextureDesc desc;
+                GrSurfaceDesc desc;
                 desc.fConfig = kSkia8888_GrPixelConfig;
-                desc.fFlags = kRenderTarget_GrTextureFlagBit;
+                desc.fFlags = kRenderTarget_GrSurfaceFlag;
                 desc.fWidth = gm->getISize().width();
                 desc.fHeight = gm->getISize().height();
                 desc.fSampleCnt = config.fSampleCnt;

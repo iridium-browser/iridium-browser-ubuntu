@@ -73,12 +73,7 @@ void FrameFetchContext::addAdditionalRequestHeaders(Document* document, Resource
             outgoingOrigin = SecurityOrigin::createFromString(outgoingReferrer)->toString();
         }
 
-        outgoingReferrer = SecurityPolicy::generateReferrerHeader(referrerPolicy, request.url(), outgoingReferrer);
-        if (outgoingReferrer.isEmpty())
-            request.clearHTTPReferrer();
-        else
-            request.setHTTPReferrer(Referrer(outgoingReferrer, referrerPolicy));
-
+        request.setHTTPReferrer(SecurityPolicy::generateReferrer(referrerPolicy, request.url(), outgoingReferrer));
         request.addHTTPOriginIfNeeded(AtomicString(outgoingOrigin));
     }
 
@@ -188,12 +183,16 @@ void FrameFetchContext::dispatchDidFinishLoading(DocumentLoader* loader, unsigne
     InspectorInstrumentation::didFinishLoading(m_frame, identifier, ensureLoader(loader), finishTime, encodedDataLength);
 }
 
-void FrameFetchContext::dispatchDidFail(DocumentLoader* loader, unsigned long identifier, const ResourceError& error)
+void FrameFetchContext::dispatchDidFail(DocumentLoader* loader, unsigned long identifier, const ResourceError& error, bool isInternalRequest)
 {
     m_frame->loader().progress().completeProgress(identifier);
+    m_frame->loader().client()->dispatchDidFinishLoading(loader, identifier);
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceFinish", "data", InspectorResourceFinishEvent::data(identifier, 0, true));
     // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::didFailLoading(m_frame, identifier, error);
+    // Notification to FrameConsole should come AFTER InspectorInstrumentation call, DevTools front-end relies on this.
+    if (!isInternalRequest)
+        m_frame->console().didFailLoading(identifier, error);
 }
 
 void FrameFetchContext::sendRemainingDelegateMessages(DocumentLoader* loader, unsigned long identifier, const ResourceResponse& response, int dataLength)

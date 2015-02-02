@@ -6,7 +6,7 @@
 
 #include "athena/home/home_card_constants.h"
 #include "athena/home/public/home_card.h"
-#include "athena/test/athena_test_base.h"
+#include "athena/test/base/athena_test_base.h"
 #include "base/time/time.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
@@ -25,10 +25,10 @@ class HomeCardGestureManagerTest : public test::AthenaTestBase,
         last_y_(0),
         progress_count_(0),
         end_count_(0) {}
-  virtual ~HomeCardGestureManagerTest() {}
+  ~HomeCardGestureManagerTest() override {}
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     test::AthenaTestBase::SetUp();
     gesture_manager_.reset(new HomeCardGestureManager(this, screen_bounds()));
   }
@@ -96,16 +96,15 @@ class HomeCardGestureManagerTest : public test::AthenaTestBase,
   }
 
   // HomeCardGestureManager::Delegate:
-  virtual void OnGestureEnded(HomeCard::State final_state,
-                              bool is_fling) OVERRIDE {
+  void OnGestureEnded(HomeCard::State final_state, bool is_fling) override {
     final_state_ = final_state;
     was_fling_ = is_fling;
     ++end_count_;
   }
 
-  virtual void OnGestureProgressed(HomeCard::State from_state,
-                                   HomeCard::State to_state,
-                                   float progress) OVERRIDE {
+  void OnGestureProgressed(HomeCard::State from_state,
+                           HomeCard::State to_state,
+                           float progress) override {
     last_from_state_ = from_state;
     last_to_state_ = to_state;
     last_progress_ = progress;
@@ -187,8 +186,8 @@ TEST_F(HomeCardGestureManagerTest, StartCentered) {
   EXPECT_EQ(HomeCard::VISIBLE_CENTERED, last_to_state_);
   EXPECT_EQ(1.0f, last_progress_);
 
-  ProcessGestureEvent(ui::ET_GESTURE_SCROLL_UPDATE, 900);
-  ProcessGestureEvent(ui::ET_GESTURE_SCROLL_UPDATE, 910);
+  ProcessGestureEvent(ui::ET_GESTURE_SCROLL_UPDATE, 700);
+  ProcessGestureEvent(ui::ET_GESTURE_SCROLL_UPDATE, 710);
   EXPECT_EQ(2, GetProgressCountAndReset());
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, last_from_state_);
   EXPECT_EQ(HomeCard::VISIBLE_CENTERED, last_to_state_);
@@ -219,13 +218,13 @@ TEST_F(HomeCardGestureManagerTest, StartBottom) {
   EXPECT_EQ(HomeCard::VISIBLE_BOTTOM, final_state_);
 
   // State change for the bigger moves.
-  EXPECT_TRUE(ProcessGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN, 950));
+  EXPECT_TRUE(ProcessGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN, 850));
   ProcessGestureEvent(ui::ET_GESTURE_SCROLL_UPDATE, 1000);
   EXPECT_TRUE(ProcessGestureEvent(ui::ET_GESTURE_SCROLL_END, 1000));
   EXPECT_EQ(1, GetEndCountAndReset());
   EXPECT_EQ(HomeCard::VISIBLE_MINIMIZED, final_state_);
 
-  EXPECT_TRUE(ProcessGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN, 950));
+  EXPECT_TRUE(ProcessGestureEvent(ui::ET_GESTURE_SCROLL_BEGIN, 850));
   ProcessGestureEvent(ui::ET_GESTURE_SCROLL_UPDATE, 300);
   EXPECT_TRUE(ProcessGestureEvent(ui::ET_GESTURE_SCROLL_END, 300));
   EXPECT_EQ(1, GetEndCountAndReset());

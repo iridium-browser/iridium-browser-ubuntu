@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "media/base/media_log.h"
 #include "net/base/net_errors.h"
@@ -19,9 +20,12 @@ namespace {
 // of FFmpeg.
 const int kInitialReadBufferSize = 32768;
 
-// Number of cache misses we allow for a single Read() before signaling an
-// error.
-const int kNumCacheMissRetries = 3;
+// Number of cache misses or read failures we allow for a single Read() before
+// signaling an error.
+const int kLoaderRetries = 3;
+
+// The number of milliseconds to wait before retrying a failed load.
+const int kLoaderFailedRetryDelayMs = 250;
 
 }  // namespace
 
@@ -423,8 +427,19 @@ void BufferedDataSource::ReadCallback(
     // Stop the resource load if it failed.
     loader_->Stop();
 
-    if (status == BufferedResourceLoader::kCacheMiss &&
-        read_op_->retries() < kNumCacheMissRetries) {
+    if (read_op_->retries() < kLoaderRetries) {
+      // Allow some resiliency against sporadic network failures or intentional
+      // cancellations due to a system suspend / resume.  Here we treat failed
+      // reads as a cache miss so long as we haven't exceeded max retries.
+      if (status == BufferedResourceLoader::kFailed) {
+        render_task_runner_->PostDelayedTask(
+            FROM_HERE, base::Bind(&BufferedDataSource::ReadCallback,
+                                  weak_factory_.GetWeakPtr(),
+                                  BufferedResourceLoader::kCacheMiss, 0),
+            base::TimeDelta::FromMilliseconds(kLoaderFailedRetryDelayMs));
+        return;
+      }
+
       read_op_->IncrementRetries();
 
       // Recreate a loader starting from where we last left off until the

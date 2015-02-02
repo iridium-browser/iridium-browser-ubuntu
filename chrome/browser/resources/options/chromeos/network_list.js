@@ -75,7 +75,7 @@ cr.define('options.network', function() {
 
   /**
    * Indicates the current SIM lock type of the cellular device.
-   * @type {boolean}
+   * @type {string}
    * @private
    */
   var cellularSimLockType_ = '';
@@ -146,6 +146,16 @@ cr.define('options.network', function() {
    */
   function sendChromeMetricsAction(action) {
     chrome.send('coreOptionsUserMetricsAction', [action]);
+  }
+
+  /**
+   * @param {string} servicePath The network service path.
+   */
+  function showDetails(servicePath) {
+    // TODO(stevenjb): chrome.networkingPrivate.getManagedProperties
+    // (Note: we will need to provide DetailsInternetPage.initializeDetailsPage
+    // as the callback).
+    chrome.send('getManagedProperties', [servicePath]);
   }
 
   /**
@@ -701,10 +711,11 @@ cr.define('options.network', function() {
      * @private
      */
     createNetworkOptionsCallback_: function(parent, data) {
+      var servicePath = data.servicePath;
       var menuItem = createCallback_(parent,
                                      data,
                                      getNetworkName(data),
-                                     'showDetails',
+                                     showDetails.bind(null, servicePath),
                                      data.iconURL);
       if (data.policyManaged)
         menuItem.appendChild(new ManagedNetworkIndicator());
@@ -756,8 +767,7 @@ cr.define('options.network', function() {
    * @param {!Element} menu Parent menu.
    * @param {Object} data Description of the network.
    * @param {!string} label Display name for the menu item.
-   * @param {?(string|!Function)} command Callback function or name
-   *     of the command for |networkCommand|.
+   * @param {!Function} command Callback function.
    * @param {string=} opt_iconURL Optional URL to an icon for the menu item.
    * @return {!Element} The created menu item.
    * @private
@@ -777,14 +787,7 @@ cr.define('options.network', function() {
     buttonLabel.textContent = label;
     button.appendChild(buttonLabel);
     var callback = null;
-    if (typeof command == 'string') {
-      var type = data.Type;
-      var path = data.servicePath;
-      callback = function() {
-        chrome.send('networkCommand', [type, path, command]);
-        closeMenu_();
-      };
-    } else if (command != null) {
+    if (command != null) {
       if (data) {
         callback = function() {
           (/** @type {Function} */(command))(data);
@@ -961,7 +964,7 @@ cr.define('options.network', function() {
                 entry));
       if (entry.menu)
         return new NetworkMenuItem(entry);
-      return undefined;
+      assertNotReached();
     },
 
     /**
@@ -1001,12 +1004,20 @@ cr.define('options.network', function() {
 
   /**
    * Chrome callback for updating network controls.
-   * @param {{wiredList: Array.<NetworkInfo>, wirelessList: Array.<NetworkInfo>,
-   *     vpnList: Array.<NetworkInfo>, rememberedList: Array.<NetworkInfo>,
-   *     wifiAvailable: boolean, wifiEnabled: boolean, wimaxAvailable: boolean,
-   *     wimaxEnabled: boolean, cellularAvailable: boolean,
-   *     cellularEnabled: boolean, cellularSupportsScan: boolean}} data
-   *     Description of available network devices and their corresponding state.
+   * @param {{cellularAvailable: boolean,
+   *          cellularEnabled: boolean,
+   *          cellularSimAbsent: boolean,
+   *          cellularSimLockType: string,
+   *          cellularSupportsScan: boolean,
+   *          rememberedList: Array.<NetworkInfo>,
+   *          vpnList: Array.<NetworkInfo>,
+   *          wifiAvailable: boolean,
+   *          wifiEnabled: boolean,
+   *          wimaxAvailable: boolean,
+   *          wimaxEnabled: boolean,
+   *          wiredList: Array.<NetworkInfo>,
+   *          wirelessList: Array.<NetworkInfo>}} data Description of available
+   *     network devices and their corresponding state.
    */
   NetworkList.refreshNetworkData = function(data) {
     var networkList = $('network-list');
@@ -1025,7 +1036,7 @@ cr.define('options.network', function() {
       var type = String('Ethernet');
       var path = ethernetConnection.servicePath;
       var ethernetOptions = function() {
-        chrome.send('networkCommand', [type, path, 'showDetails']);
+        showDetails(path);
       };
       networkList.update(
           { key: 'Ethernet',
@@ -1226,7 +1237,7 @@ cr.define('options.network', function() {
         sendChromeMetricsAction('Options_NetworkJoinOtherWifi');
       else if (type == 'VPN')
         sendChromeMetricsAction('Options_NetworkJoinOtherVPN');
-      chrome.send('networkCommand', [type, '', 'add']);
+      chrome.send('addConnection', [type]);
     };
   }
 

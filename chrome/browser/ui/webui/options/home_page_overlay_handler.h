@@ -24,15 +24,15 @@ class HomePageOverlayHandler : public OptionsPageUIHandler,
                                public AutocompleteControllerDelegate {
  public:
   HomePageOverlayHandler();
-  virtual ~HomePageOverlayHandler();
+  ~HomePageOverlayHandler() override;
 
   // OptionsPageUIHandler implementation
-  virtual void GetLocalizedValues(base::DictionaryValue*) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue*) override;
+  void InitializeHandler() override;
+  void RegisterMessages() override;
 
   // AutocompleteControllerDelegate implementation.
-  virtual void OnResultChanged(bool default_match_changed) OVERRIDE;
+  void OnResultChanged(bool default_match_changed) override;
 
  private:
   void RequestAutocompleteSuggestions(const base::ListValue* args);

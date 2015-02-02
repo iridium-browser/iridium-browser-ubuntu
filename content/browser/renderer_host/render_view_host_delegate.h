@@ -155,9 +155,7 @@ class CONTENT_EXPORT RenderViewHostDelegate {
 
   // Notification that the renderer has become unresponsive. The
   // delegate can use this notification to show a warning to the user.
-  virtual void RendererUnresponsive(RenderViewHost* render_view_host,
-                                    bool is_during_before_unload,
-                                    bool is_during_unload) {}
+  virtual void RendererUnresponsive(RenderViewHost* render_view_host) {}
 
   // Notification that a previously unresponsive renderer has become
   // responsive again. The delegate can use this notification to end the
@@ -281,13 +279,6 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // TODO(ajwong): Remove once the main frame RenderFrameHost is no longer
   // created by the RenderViewHost.
   virtual FrameTree* GetFrameTree();
-
-  // Optional state storage for if the Virtual Keyboard has been requested by
-  // this page or not. If it has, this can be used to suppress things like the
-  // link disambiguation dialog, which doesn't interact well with the virtual
-  // keyboard.
-  virtual void SetIsVirtualKeyboardRequested(bool requested) {}
-  virtual bool IsVirtualKeyboardRequested();
 
  protected:
   virtual ~RenderViewHostDelegate() {}

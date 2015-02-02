@@ -57,56 +57,51 @@ class MockPasswordStoreObserver
 
 class FailingBackend : public PasswordStoreX::NativeBackend {
  public:
-  virtual bool Init() OVERRIDE { return true; }
+  bool Init() override { return true; }
 
-  virtual PasswordStoreChangeList AddLogin(const PasswordForm& form) OVERRIDE {
+  PasswordStoreChangeList AddLogin(const PasswordForm& form) override {
     return PasswordStoreChangeList();
   }
-  virtual bool UpdateLogin(const PasswordForm& form,
-                           PasswordStoreChangeList* changes) OVERRIDE {
+  bool UpdateLogin(const PasswordForm& form,
+                   PasswordStoreChangeList* changes) override {
     return false;
   }
-  virtual bool RemoveLogin(const PasswordForm& form) OVERRIDE { return false; }
+  bool RemoveLogin(const PasswordForm& form) override { return false; }
 
-  virtual bool RemoveLoginsCreatedBetween(
+  bool RemoveLoginsCreatedBetween(
       base::Time delete_begin,
       base::Time delete_end,
-      password_manager::PasswordStoreChangeList* changes) OVERRIDE {
+      password_manager::PasswordStoreChangeList* changes) override {
     return false;
   }
 
-  virtual bool RemoveLoginsSyncedBetween(
+  bool RemoveLoginsSyncedBetween(
       base::Time delete_begin,
       base::Time delete_end,
-      password_manager::PasswordStoreChangeList* changes) OVERRIDE {
+      password_manager::PasswordStoreChangeList* changes) override {
     return false;
   }
 
-  virtual bool GetLogins(const PasswordForm& form,
-                         PasswordFormList* forms) OVERRIDE {
+  bool GetLogins(const PasswordForm& form, PasswordFormList* forms) override {
     return false;
   }
 
-  virtual bool GetAutofillableLogins(PasswordFormList* forms) OVERRIDE {
-    return false;
-  }
-  virtual bool GetBlacklistLogins(PasswordFormList* forms) OVERRIDE {
-    return false;
-  }
+  bool GetAutofillableLogins(PasswordFormList* forms) override { return false; }
+  bool GetBlacklistLogins(PasswordFormList* forms) override { return false; }
 };
 
 class MockBackend : public PasswordStoreX::NativeBackend {
  public:
-  virtual bool Init() OVERRIDE { return true; }
+  bool Init() override { return true; }
 
-  virtual PasswordStoreChangeList AddLogin(const PasswordForm& form) OVERRIDE {
+  PasswordStoreChangeList AddLogin(const PasswordForm& form) override {
     all_forms_.push_back(form);
     PasswordStoreChange change(PasswordStoreChange::ADD, form);
     return PasswordStoreChangeList(1, change);
   }
 
-  virtual bool UpdateLogin(const PasswordForm& form,
-                           PasswordStoreChangeList* changes) OVERRIDE {
+  bool UpdateLogin(const PasswordForm& form,
+                   PasswordStoreChangeList* changes) override {
     for (size_t i = 0; i < all_forms_.size(); ++i)
       if (CompareForms(all_forms_[i], form, true)) {
         all_forms_[i] = form;
@@ -116,17 +111,17 @@ class MockBackend : public PasswordStoreX::NativeBackend {
     return true;
   }
 
-  virtual bool RemoveLogin(const PasswordForm& form) OVERRIDE {
+  bool RemoveLogin(const PasswordForm& form) override {
     for (size_t i = 0; i < all_forms_.size(); ++i)
       if (CompareForms(all_forms_[i], form, false))
         erase(i--);
     return true;
   }
 
-  virtual bool RemoveLoginsCreatedBetween(
+  bool RemoveLoginsCreatedBetween(
       base::Time delete_begin,
       base::Time delete_end,
-      password_manager::PasswordStoreChangeList* changes) OVERRIDE {
+      password_manager::PasswordStoreChangeList* changes) override {
     for (size_t i = 0; i < all_forms_.size(); ++i) {
       if (delete_begin <= all_forms_[i].date_created &&
           (delete_end.is_null() || all_forms_[i].date_created < delete_end))
@@ -135,10 +130,10 @@ class MockBackend : public PasswordStoreX::NativeBackend {
     return true;
   }
 
-  virtual bool RemoveLoginsSyncedBetween(
+  bool RemoveLoginsSyncedBetween(
       base::Time delete_begin,
       base::Time delete_end,
-      password_manager::PasswordStoreChangeList* changes) OVERRIDE {
+      password_manager::PasswordStoreChangeList* changes) override {
     DCHECK(changes);
     for (size_t i = 0; i < all_forms_.size(); ++i) {
       if (delete_begin <= all_forms_[i].date_synced &&
@@ -151,22 +146,21 @@ class MockBackend : public PasswordStoreX::NativeBackend {
     return true;
   }
 
-  virtual bool GetLogins(const PasswordForm& form,
-                         PasswordFormList* forms) OVERRIDE {
+  bool GetLogins(const PasswordForm& form, PasswordFormList* forms) override {
     for (size_t i = 0; i < all_forms_.size(); ++i)
       if (all_forms_[i].signon_realm == form.signon_realm)
         forms->push_back(new PasswordForm(all_forms_[i]));
     return true;
   }
 
-  virtual bool GetAutofillableLogins(PasswordFormList* forms) OVERRIDE {
+  bool GetAutofillableLogins(PasswordFormList* forms) override {
     for (size_t i = 0; i < all_forms_.size(); ++i)
       if (!all_forms_[i].blacklisted_by_user)
         forms->push_back(new PasswordForm(all_forms_[i]));
     return true;
   }
 
-  virtual bool GetBlacklistLogins(PasswordFormList* forms) OVERRIDE {
+  bool GetBlacklistLogins(PasswordFormList* forms) override {
     for (size_t i = 0; i < all_forms_.size(); ++i)
       if (all_forms_[i].blacklisted_by_user)
         forms->push_back(new PasswordForm(all_forms_[i]));
@@ -247,16 +241,14 @@ enum BackendType {
 
 class PasswordStoreXTest : public testing::TestWithParam<BackendType> {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     login_db_.reset(new password_manager::LoginDatabase());
     ASSERT_TRUE(login_db_->Init(temp_dir_.path().Append("login_test")));
   }
 
-  virtual void TearDown() {
-    base::RunLoop().RunUntilIdle();
-  }
+  void TearDown() override { base::RunLoop().RunUntilIdle(); }
 
   PasswordStoreX::NativeBackend* GetBackend() {
     switch (GetParam()) {
@@ -285,7 +277,7 @@ TEST_P(PasswordStoreXTest, Notifications) {
                          base::MessageLoopProxy::current(),
                          login_db_.release(),
                          GetBackend()));
-  store->Init(syncer::SyncableService::StartSyncFlare(), "");
+  store->Init(syncer::SyncableService::StartSyncFlare());
 
   password_manager::PasswordFormData form_data = {
       PasswordForm::SCHEME_HTML,       "http://bar.example.com",
@@ -386,7 +378,7 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
                          base::MessageLoopProxy::current(),
                          login_db_.release(),
                          GetBackend()));
-  store->Init(syncer::SyncableService::StartSyncFlare(), "");
+  store->Init(syncer::SyncableService::StartSyncFlare());
 
   MockPasswordStoreConsumer consumer;
 

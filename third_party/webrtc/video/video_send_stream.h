@@ -74,6 +74,8 @@ class VideoSendStream : public webrtc::VideoSendStream,
 
   void SignalNetworkState(Call::NetworkState state);
 
+  int GetPacerQueuingDelayMs() const;
+
  private:
   void ConfigureSsrcs();
   TransportAdapter transport_adapter_;
@@ -93,6 +95,11 @@ class VideoSendStream : public webrtc::VideoSendStream,
 
   int channel_;
   int capture_id_;
+
+  // Used as a workaround to indicate that we should be using the configured
+  // start bitrate initially, instead of the one reported by VideoEngine (which
+  // defaults to too high).
+  bool use_default_bitrate_;
 
   SendStatisticsProxy stats_proxy_;
 };

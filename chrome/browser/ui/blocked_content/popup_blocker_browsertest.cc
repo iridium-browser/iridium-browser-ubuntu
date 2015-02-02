@@ -5,11 +5,9 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -27,6 +25,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_result.h"
 #include "content/public/browser/notification_registrar.h"
@@ -54,14 +53,14 @@ class CountRenderViewHosts : public content::NotificationObserver {
                    content::NOTIFICATION_WEB_CONTENTS_RENDER_VIEW_HOST_CREATED,
                    content::NotificationService::AllSources());
   }
-  virtual ~CountRenderViewHosts() {}
+  ~CountRenderViewHosts() override {}
 
   int GetRenderViewHostCreatedCount() const { return count_; }
 
  private:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     count_++;
   }
 
@@ -81,9 +80,7 @@ class CloseObserver : public content::WebContentsObserver {
     close_loop_.Run();
   }
 
-  virtual void WebContentsDestroyed() OVERRIDE {
-    close_loop_.Quit();
-  }
+  void WebContentsDestroyed() override { close_loop_.Quit(); }
 
  private:
   base::RunLoop close_loop_;
@@ -94,9 +91,9 @@ class CloseObserver : public content::WebContentsObserver {
 class PopupBlockerBrowserTest : public InProcessBrowserTest {
  public:
   PopupBlockerBrowserTest() {}
-  virtual ~PopupBlockerBrowserTest() {}
+  ~PopupBlockerBrowserTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
 
     host_resolver()->AddRule("*", "127.0.0.1");

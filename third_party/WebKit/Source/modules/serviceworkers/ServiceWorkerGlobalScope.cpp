@@ -33,6 +33,7 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8ThrowException.h"
+#include "core/events/Event.h"
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "core/inspector/ScriptCallStack.h"
@@ -46,6 +47,7 @@
 #include "modules/serviceworkers/ServiceWorkerClients.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "modules/serviceworkers/ServiceWorkerThread.h"
+#include "modules/serviceworkers/WaitUntilObserver.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebURL.h"
@@ -55,21 +57,29 @@ namespace blink {
 
 PassRefPtrWillBeRawPtr<ServiceWorkerGlobalScope> ServiceWorkerGlobalScope::create(ServiceWorkerThread* thread, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData)
 {
-    RefPtrWillBeRawPtr<ServiceWorkerGlobalScope> context = adoptRefWillBeNoop(new ServiceWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, monotonicallyIncreasingTime(), startupData->m_workerClients.release()));
+    RefPtrWillBeRawPtr<ServiceWorkerGlobalScope> context = adoptRefWillBeNoop(new ServiceWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, monotonicallyIncreasingTime(), startupData->m_starterOrigin, startupData->m_workerClients.release()));
 
     context->applyContentSecurityPolicyFromString(startupData->m_contentSecurityPolicy, startupData->m_contentSecurityPolicyType);
 
     return context.release();
 }
 
-ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(const KURL& url, const String& userAgent, ServiceWorkerThread* thread, double timeOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
-    : WorkerGlobalScope(url, userAgent, thread, timeOrigin, workerClients)
+ServiceWorkerGlobalScope::ServiceWorkerGlobalScope(const KURL& url, const String& userAgent, ServiceWorkerThread* thread, double timeOrigin, const SecurityOrigin* starterOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
+    : WorkerGlobalScope(url, userAgent, thread, timeOrigin, starterOrigin, workerClients)
     , m_fetchManager(adoptPtr(new FetchManager(this)))
+    , m_didEvaluateScript(false)
+    , m_hadErrorInTopLevelEventHandler(false)
+    , m_eventNestingLevel(0)
 {
 }
 
 ServiceWorkerGlobalScope::~ServiceWorkerGlobalScope()
 {
+}
+
+void ServiceWorkerGlobalScope::didEvaluateWorkerScript()
+{
+    m_didEvaluateScript = true;
 }
 
 void ServiceWorkerGlobalScope::stopFetch()
@@ -79,6 +89,8 @@ void ServiceWorkerGlobalScope::stopFetch()
 
 String ServiceWorkerGlobalScope::scope(ExecutionContext* context)
 {
+    // FIXME: Remove scope from ServiceWorkerGlobalScope.
+    context->addConsoleMessage(ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "ServiceWorkerGlobalScope.scope is deprecated. It will be replaced by ServiceWorkerGlobalScope.registration.scope. https://crbug.com/443881"));
     return ServiceWorkerGlobalScopeClient::from(context)->scope().string();
 }
 
@@ -92,7 +104,7 @@ CacheStorage* ServiceWorkerGlobalScope::caches(ExecutionContext* context)
 ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request* request)
 {
     if (!m_fetchManager)
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError("ServiceWorkerGlobalScope is shutting down.", scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "ServiceWorkerGlobalScope is shutting down."));
     // "Let |r| be the associated request of the result of invoking the initial
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
@@ -100,7 +112,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request*
     Request* r = Request::create(this, request, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), exceptionState.message()));
     }
     return m_fetchManager->fetch(scriptState, r->request());
 }
@@ -108,7 +120,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request*
 ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request* request, const Dictionary& requestInit)
 {
     if (!m_fetchManager)
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError("ServiceWorkerGlobalScope is shutting down.", scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "ServiceWorkerGlobalScope is shutting down."));
     // "Let |r| be the associated request of the result of invoking the initial
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
@@ -116,7 +128,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request*
     Request* r = Request::create(this, request, requestInit, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), exceptionState.message()));
     }
     return m_fetchManager->fetch(scriptState, r->request());
 }
@@ -124,7 +136,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, Request*
 ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const String& urlstring)
 {
     if (!m_fetchManager)
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError("ServiceWorkerGlobalScope is shutting down.", scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "ServiceWorkerGlobalScope is shutting down."));
     // "Let |r| be the associated request of the result of invoking the initial
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
@@ -132,7 +144,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const St
     Request* r = Request::create(this, urlstring, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), exceptionState.message()));
     }
     return m_fetchManager->fetch(scriptState, r->request());
 }
@@ -140,7 +152,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const St
 ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const String& urlstring, const Dictionary& requestInit)
 {
     if (!m_fetchManager)
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError("ServiceWorkerGlobalScope is shutting down.", scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "ServiceWorkerGlobalScope is shutting down."));
     // "Let |r| be the associated request of the result of invoking the initial
     // value of Request as constructor with |input| and |init| as arguments. If
     // this throws an exception, reject |p| with it."
@@ -148,7 +160,7 @@ ScriptPromise ServiceWorkerGlobalScope::fetch(ScriptState* scriptState, const St
     Request* r = Request::create(this, urlstring, requestInit, exceptionState);
     if (exceptionState.hadException()) {
         // FIXME: We should throw the caught error.
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(exceptionState.message(), scriptState->isolate()));
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), exceptionState.message()));
     }
     return m_fetchManager->fetch(scriptState, r->request());
 }
@@ -165,9 +177,43 @@ void ServiceWorkerGlobalScope::close(ExceptionState& exceptionState)
     exceptionState.throwDOMException(InvalidAccessError, "Not supported.");
 }
 
+bool ServiceWorkerGlobalScope::addEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
+{
+    if (m_didEvaluateScript) {
+        if (eventType == EventTypeNames::install) {
+            RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Event handler of 'install' event must be added on the initial evaluation of worker script.");
+            addMessageToWorkerConsole(consoleMessage.release());
+        } else if (eventType == EventTypeNames::activate) {
+            RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(JSMessageSource, WarningMessageLevel, "Event handler of 'activate' event must be added on the initial evaluation of worker script.");
+            addMessageToWorkerConsole(consoleMessage.release());
+        }
+    }
+    return WorkerGlobalScope::addEventListener(eventType, listener, useCapture);
+}
+
 const AtomicString& ServiceWorkerGlobalScope::interfaceName() const
 {
     return EventTargetNames::ServiceWorkerGlobalScope;
+}
+
+bool ServiceWorkerGlobalScope::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
+{
+    m_eventNestingLevel++;
+    bool result = WorkerGlobalScope::dispatchEvent(event.get());
+    if (event->interfaceName() == EventNames::ErrorEvent && m_eventNestingLevel == 2 && !event->defaultPrevented())
+        m_hadErrorInTopLevelEventHandler = true;
+    m_eventNestingLevel--;
+    return result;
+}
+
+void ServiceWorkerGlobalScope::dispatchExtendableEvent(PassRefPtrWillBeRawPtr<Event> event, WaitUntilObserver* observer)
+{
+    ASSERT(m_eventNestingLevel == 0);
+    m_hadErrorInTopLevelEventHandler = false;
+
+    observer->willDispatchEvent();
+    dispatchEvent(event);
+    observer->didDispatchEvent(m_hadErrorInTopLevelEventHandler);
 }
 
 void ServiceWorkerGlobalScope::trace(Visitor* visitor)

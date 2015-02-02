@@ -41,13 +41,15 @@ class HttpPost : public net::URLFetcherDelegate {
   // and the context it provides must be available until the request completes.
   HttpPost(net::URLRequestContextGetter* url_context_getter,
            const std::string& server_host,
+           // TODO(ckehoe): Condense some of these into a struct.
            const std::string& rpc_name,
-           const std::string& tracing_token,
            std::string api_key,  // If blank, we overwrite with a default.
+           const std::string& auth_token,
+           const std::string& tracing_token,
            const google::protobuf::MessageLite& request_proto);
 
   // HTTP requests are cancelled on delete.
-  virtual ~HttpPost();
+  ~HttpPost() override;
 
   // Send an HttpPost request.
   void Start(const ResponseCallback& response_callback);
@@ -60,7 +62,7 @@ class HttpPost : public net::URLFetcherDelegate {
   friend class HttpPostTest;
 
   // Overridden from net::URLFetcherDelegate.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   ResponseCallback response_callback_;
 

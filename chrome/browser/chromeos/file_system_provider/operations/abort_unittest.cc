@@ -36,13 +36,11 @@ class FileSystemProviderOperationsAbortTest : public testing::Test {
   FileSystemProviderOperationsAbortTest() {}
   virtual ~FileSystemProviderOperationsAbortTest() {}
 
-  virtual void SetUp() OVERRIDE {
-    file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* file_system_name */,
-                               false /* writable */,
-                               base::FilePath() /* mount_path */);
+  virtual void SetUp() override {
+    file_system_info_ = ProvidedFileSystemInfo(
+        kExtensionId,
+        MountOptions(kFileSystemId, "" /* display_name */),
+        base::FilePath());
   }
 
   ProvidedFileSystemInfo file_system_info_;

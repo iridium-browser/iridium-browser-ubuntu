@@ -14,6 +14,7 @@
 #include <map>
 #include <vector>
 #include <sstream>
+#include <iterator>
 
 #include "common/debug.h"
 #include "common/mathutil.h"
@@ -192,7 +193,7 @@ bool Display::getConfigAttrib(EGLConfig config, EGLint attribute, EGLint *value)
 
 
 
-EGLSurface Display::createWindowSurface(HWND window, EGLConfig config, const EGLint *attribList)
+EGLSurface Display::createWindowSurface(EGLNativeWindowType window, EGLConfig config, const EGLint *attribList)
 {
     const Config *configuration = mConfigSet.get(config);
     EGLint postSubBufferSupported = EGL_FALSE;
@@ -493,7 +494,7 @@ bool Display::isValidSurface(egl::Surface *surface)
     return mSurfaceSet.find(surface) != mSurfaceSet.end();
 }
 
-bool Display::hasExistingWindowSurface(HWND window)
+bool Display::hasExistingWindowSurface(EGLNativeWindowType window)
 {
     for (SurfaceSet::iterator surface = mSurfaceSet.begin(); surface != mSurfaceSet.end(); surface++)
     {
@@ -551,8 +552,10 @@ void Display::initDisplayExtensionString()
         extensions.push_back("EGL_NV_post_sub_buffer");
     }
 
+#if defined (ANGLE_TEST_CONFIG)
     // TODO: complete support for the EGL_KHR_create_context extension
     extensions.push_back("EGL_KHR_create_context");
+#endif
 
     std::ostringstream stream;
     std::copy(extensions.begin(), extensions.end(), std::ostream_iterator<std::string>(stream, " "));

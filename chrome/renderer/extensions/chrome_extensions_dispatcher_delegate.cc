@@ -95,9 +95,6 @@ void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
     extensions::Dispatcher* dispatcher,
     extensions::ModuleSystem* module_system,
     extensions::ScriptContext* context) {
-#if !defined(ENABLE_EXTENSIONS)
-  return;
-#endif
   module_system->RegisterNativeHandler(
       "app",
       scoped_ptr<NativeHandler>(
@@ -227,7 +224,6 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
                              IDR_CHROME_DIRECT_SETTING_JS);
 
   // Platform app sources that are not API-specific..
-  source_map->RegisterSource("appView", IDR_APP_VIEW_JS);
   source_map->RegisterSource("fileEntryBindingUtil",
                              IDR_FILE_ENTRY_BINDING_UTIL_JS);
   source_map->RegisterSource("extensionOptions", IDR_EXTENSION_OPTIONS_JS);
@@ -239,9 +235,6 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource("chromeWebView", IDR_CHROME_WEB_VIEW_JS);
   source_map->RegisterSource("chromeWebViewExperimental",
                              IDR_CHROME_WEB_VIEW_EXPERIMENTAL_JS);
-  source_map->RegisterSource("webViewRequest",
-                             IDR_WEB_VIEW_REQUEST_CUSTOM_BINDINGS_JS);
-  source_map->RegisterSource("denyAppView", IDR_APP_VIEW_DENY_JS);
   source_map->RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
 }
 
@@ -272,15 +265,7 @@ void ChromeExtensionsDispatcherDelegate::RequireAdditionalModules(
     }
   }
 
-  if (extensions::FeatureSwitch::app_view()->IsEnabled() &&
-      context->GetAvailability("appViewEmbedderInternal").is_available()) {
-    module_system->Require("appView");
-  } else if (context_type == extensions::Feature::BLESSED_EXTENSION_CONTEXT) {
-    module_system->Require("denyAppView");
-  }
-
-  if (extensions::FeatureSwitch::embedded_extension_options()->IsEnabled() &&
-      context->GetAvailability("extensionOptionsInternal").is_available()) {
+  if (context->GetAvailability("extensionOptionsInternal").is_available()) {
     module_system->Require("extensionOptions");
   }
 }

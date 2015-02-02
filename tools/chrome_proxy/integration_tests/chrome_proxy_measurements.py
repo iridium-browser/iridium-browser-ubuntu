@@ -112,6 +112,33 @@ class ChromeProxyBypass(ChromeProxyValidation):
     self._metrics.AddResultsForBypass(tab, results)
 
 
+class ChromeProxyFallback(ChromeProxyValidation):
+  """Correctness measurement for proxy fallback responses."""
+
+  def __init__(self):
+    super(ChromeProxyFallback, self).__init__(restart_after_each_page=True)
+
+  def AddResults(self, tab, results):
+    self._metrics.AddResultsForFallback(tab, results)
+
+
+class ChromeProxyCorsBypass(ChromeProxyValidation):
+  """Correctness measurement for bypass responses for CORS requests."""
+
+  def __init__(self):
+    super(ChromeProxyCorsBypass, self).__init__(restart_after_each_page=True)
+
+  def ValidateAndMeasurePage(self, page, tab, results):
+    # The test page sets window.xhrRequestCompleted to true when the XHR fetch
+    # finishes.
+    tab.WaitForJavaScriptExpression('window.xhrRequestCompleted', 15000)
+    super(ChromeProxyCorsBypass,
+          self).ValidateAndMeasurePage(page, tab, results)
+
+  def AddResults(self, tab, results):
+    self._metrics.AddResultsForCorsBypass(tab, results)
+
+
 class ChromeProxyBlockOnce(ChromeProxyValidation):
   """Correctness measurement for block-once responses."""
 
@@ -146,7 +173,8 @@ _TEST_SERVER_DEFAULT_URL = 'http://' + _TEST_SERVER + '/default'
 #
 # The test server allow request to override response status, headers, and
 # body through query parameters. See GetResponseOverrideURL.
-def GetResponseOverrideURL(url, respStatus=0, respHeader="", respBody=""):
+def GetResponseOverrideURL(url=_TEST_SERVER_DEFAULT_URL, respStatus=0,
+                           respHeader="", respBody=""):
   """ Compose the request URL with query parameters to override
   the chromeproxy-test server response.
   """
@@ -184,7 +212,6 @@ class ChromeProxyHTTPFallbackProbeURL(ChromeProxyValidation):
     # Use the test server probe URL which returns the response
     # body as specified by respBody.
     probe_url = GetResponseOverrideURL(
-        _TEST_SERVER_DEFAULT_URL,
         respBody='not OK')
     options.AppendExtraBrowserArgs(
         '--data-reduction-proxy-probe-url=%s' % probe_url)
@@ -203,7 +230,8 @@ class ChromeProxyHTTPFallbackViaHeader(ChromeProxyValidation):
   """
 
   def __init__(self):
-    super(ChromeProxyHTTPFallbackViaHeader, self).__init__()
+    super(ChromeProxyHTTPFallbackViaHeader, self).__init__(
+        restart_after_each_page=True)
 
   def CustomizeBrowserOptions(self, options):
     super(ChromeProxyHTTPFallbackViaHeader,
@@ -241,6 +269,94 @@ class ChromeProxyClientVersion(ChromeProxyValidation):
 
   def AddResults(self, tab, results):
     self._metrics.AddResultsForClientVersion(tab, results)
+
+
+class ChromeProxyClientType(ChromeProxyValidation):
+  """Correctness measurement for Chrome-Proxy header client type directives."""
+
+  def __init__(self):
+    super(ChromeProxyClientType, self).__init__(restart_after_each_page=True)
+    self._chrome_proxy_client_type = None
+
+  def AddResults(self, tab, results):
+    # Get the Chrome-Proxy client type from the first page in the page set, so
+    # that the client type value can be used to determine which of the later
+    # pages in the page set should be bypassed.
+    if not self._chrome_proxy_client_type:
+      client_type = self._metrics.GetClientTypeFromRequests(tab)
+      if client_type:
+        self._chrome_proxy_client_type = client_type
+
+    self._metrics.AddResultsForClientType(tab,
+                                          results,
+                                          self._chrome_proxy_client_type,
+                                          self._page.bypass_for_client_type)
+
+
+class ChromeProxyHTTPToDirectFallback(ChromeProxyValidation):
+  """Correctness measurement for HTTP proxy fallback to direct."""
+
+  def __init__(self):
+    super(ChromeProxyHTTPToDirectFallback, self).__init__(
+        restart_after_each_page=True)
+
+  def WillNavigateToPage(self, page, tab):
+    super(ChromeProxyHTTPToDirectFallback, self).WillNavigateToPage(page, tab)
+    # In order to have this test run starting from the HTTP fallback proxy,
+    # the startup URL is set such that it will trigger a proxy fallback.
+    # Verify that this is true before beginning the test proper.
+    proxies = [
+        self._metrics.effective_proxies['proxy'],
+        self._metrics.effective_proxies['fallback'],
+        self._metrics.effective_proxies['direct']]
+    bad_proxies = [self._metrics.effective_proxies['proxy']]
+    self._metrics.VerifyProxyInfo(tab, proxies, bad_proxies)
+
+  def AddResults(self, tab, results):
+    self._metrics.AddResultsForHTTPToDirectFallback(tab, results)
+
+
+class ChromeProxyExplicitBypass(ChromeProxyValidation):
+  """Correctness measurement for explicit proxy bypasses.
+
+  In this test, the configured proxy is the chromeproxy-test server which
+  will send back a response without the expected Via header. Chrome is
+  expected to use the fallback proxy and add the configured proxy to the
+  bad proxy list.
+  """
+
+  def __init__(self):
+    super(ChromeProxyExplicitBypass, self).__init__(
+        restart_after_each_page=True)
+
+  def CustomizeBrowserOptions(self, options):
+    super(ChromeProxyExplicitBypass,
+          self).CustomizeBrowserOptions(options)
+    options.AppendExtraBrowserArgs('--ignore-certificate-errors')
+    options.AppendExtraBrowserArgs(
+        '--spdy-proxy-auth-origin=http://%s' % _TEST_SERVER)
+    options.AppendExtraBrowserArgs(
+        '--spdy-proxy-auth-value=%s' % _FAKE_PROXY_AUTH_VALUE)
+
+  def AddResults(self, tab, results):
+    bad_proxies = [{
+        'proxy': _TEST_SERVER + ':80',
+        'retry_seconds_low': self._page.bypass_seconds_low,
+        'retry_seconds_high': self._page.bypass_seconds_high
+    }]
+    if self._page.num_bypassed_proxies == 2:
+      bad_proxies.append({
+          'proxy': self._metrics.effective_proxies['fallback'],
+          'retry_seconds_low': self._page.bypass_seconds_low,
+          'retry_seconds_high': self._page.bypass_seconds_high
+      })
+    else:
+      # Even if the test page only causes the primary proxy to be bypassed,
+      # Chrome will attempt to fetch the favicon for the test server through
+      # the data reduction proxy, which will cause a "block=0" bypass.
+      bad_proxies.append({'proxy': self._metrics.effective_proxies['fallback']})
+
+    self._metrics.AddResultsForExplicitBypass(tab, results, bad_proxies)
 
 
 class ChromeProxySmoke(ChromeProxyValidation):

@@ -41,6 +41,8 @@
 #include "wtf/RetainPtr.h"
 #include "wtf/text/WTFString.h"
 
+class SkImage;
+
 namespace blink {
 
 class FloatPoint;
@@ -69,6 +71,8 @@ public:
     virtual bool isBitmapImage() const { return false; }
     virtual bool currentFrameKnownToBeOpaque() = 0;
 
+    virtual PassRefPtr<SkImage> skImage();
+
     // Derived classes should override this if they can assure that the current
     // image frame contains only resources from its own security origin.
     virtual bool currentFrameHasSingleSecurityOrigin() const { return false; }
@@ -80,6 +84,10 @@ public:
     virtual bool usesContainerSize() const { return false; }
     virtual bool hasRelativeWidth() const { return false; }
     virtual bool hasRelativeHeight() const { return false; }
+
+    // Computes (extracts) the intrinsic dimensions and ratio from the Image. The intrinsic ratio
+    // will be the 'viewport' of the image. (Same as the dimensions for a raster image. For SVG
+    // images it can be the dimensions defined by the 'viewBox'.)
     virtual void computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio);
 
     virtual IntSize size() const = 0;

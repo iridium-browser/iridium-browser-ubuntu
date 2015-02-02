@@ -118,6 +118,16 @@ LengthPoint animatableValueToLengthPoint(const AnimatableValue* value, const Sty
         animatableValueToLength(animatableLengthPoint->y(), state, range));
 }
 
+TransformOrigin animatableValueToTransformOrigin(const AnimatableValue* value, const StyleResolverState& state, ValueRange range = ValueRangeAll)
+{
+    const AnimatableLengthPoint3D* animatableLengthPoint3D = toAnimatableLengthPoint3D(value);
+    return TransformOrigin(
+        animatableValueToLength(animatableLengthPoint3D->x(), state),
+        animatableValueToLength(animatableLengthPoint3D->y(), state),
+        clampTo<float>(toAnimatableDouble(animatableLengthPoint3D->z())->toDouble())
+    );
+}
+
 LengthSize animatableValueToLengthSize(const AnimatableValue* value, const StyleResolverState& state, ValueRange range)
 {
     const AnimatableLengthSize* animatableLengthSize = toAnimatableLengthSize(value);
@@ -560,12 +570,9 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
     case CSSPropertyPerspective:
         style->setPerspective(clampTo<float>(toAnimatableDouble(value)->toDouble()));
         return;
-    case CSSPropertyPerspectiveOrigin: {
-        const AnimatableLengthPoint* animatableLengthPoint = toAnimatableLengthPoint(value);
-        style->setPerspectiveOriginX(animatableValueToLength(animatableLengthPoint->x(), state));
-        style->setPerspectiveOriginY(animatableValueToLength(animatableLengthPoint->y(), state));
+    case CSSPropertyPerspectiveOrigin:
+        style->setPerspectiveOrigin(animatableValueToLengthPoint(value, state));
         return;
-    }
     case CSSPropertyShapeOutside:
         style->setShapeOutside(toAnimatableShapeValue(value)->shapeValue());
         return;
@@ -585,13 +592,9 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         style->setTransform(operations.size() ? operations : TransformOperations(true));
         return;
     }
-    case CSSPropertyTransformOrigin: {
-        const AnimatableLengthPoint3D* animatableLengthPoint3D = toAnimatableLengthPoint3D(value);
-        style->setTransformOriginX(animatableValueToLength(animatableLengthPoint3D->x(), state));
-        style->setTransformOriginY(animatableValueToLength(animatableLengthPoint3D->y(), state));
-        style->setTransformOriginZ(clampTo<float>(toAnimatableDouble(animatableLengthPoint3D->z())->toDouble()));
+    case CSSPropertyTransformOrigin:
+        style->setTransformOrigin(animatableValueToTransformOrigin(value, state));
         return;
-    }
     case CSSPropertyWidows:
         style->setWidows(animatableValueRoundClampTo<unsigned short>(value, 1));
         return;

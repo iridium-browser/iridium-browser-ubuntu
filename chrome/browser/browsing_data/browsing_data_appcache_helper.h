@@ -76,11 +76,11 @@ class CannedBrowsingDataAppCacheHelper : public BrowsingDataAppCacheHelper {
   const OriginAppCacheInfoMap& GetOriginAppCacheInfoMap() const;
 
   // BrowsingDataAppCacheHelper methods.
-  virtual void StartFetching(const base::Closure& completion_callback) OVERRIDE;
-  virtual void DeleteAppCacheGroup(const GURL& manifest_url) OVERRIDE;
+  void StartFetching(const base::Closure& completion_callback) override;
+  void DeleteAppCacheGroup(const GURL& manifest_url) override;
 
  private:
-  virtual ~CannedBrowsingDataAppCacheHelper();
+  ~CannedBrowsingDataAppCacheHelper() override;
 
   DISALLOW_COPY_AND_ASSIGN(CannedBrowsingDataAppCacheHelper);
 };

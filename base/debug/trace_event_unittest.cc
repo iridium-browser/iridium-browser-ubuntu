@@ -125,7 +125,7 @@ class TraceEventTestFixture : public testing::Test {
                    base::Unretained(flush_complete_event)));
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     const char* name = PlatformThread::GetName();
     old_thread_name_ = name ? strdup(name) : NULL;
 
@@ -136,7 +136,7 @@ class TraceEventTestFixture : public testing::Test {
     trace_buffer_.SetOutputCallback(json_output_.GetCallback());
     event_watch_notification_ = 0;
   }
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     if (TraceLog::GetInstance())
       EXPECT_FALSE(TraceLog::GetInstance()->IsEnabled());
     PlatformThread::SetName(old_thread_name_ ? old_thread_name_ : "");
@@ -252,7 +252,6 @@ DictionaryValue* TraceEventTestFixture::FindMatchingTraceEntry(
 }
 
 void TraceEventTestFixture::DropTracedMetadataRecords() {
-
   scoped_ptr<ListValue> old_trace_parsed(trace_parsed_.DeepCopy());
   size_t old_trace_parsed_size = old_trace_parsed->GetSize();
   trace_parsed_.Clear();
@@ -266,7 +265,7 @@ void TraceEventTestFixture::DropTracedMetadataRecords() {
     }
     DictionaryValue* dict = static_cast<DictionaryValue*>(value);
     std::string tmp;
-    if(dict->GetString("ph", &tmp) && tmp == "M")
+    if (dict->GetString("ph", &tmp) && tmp == "M")
       continue;
 
     trace_parsed_.Append(value->DeepCopy());
@@ -377,7 +376,7 @@ std::vector<const DictionaryValue*> FindTraceEntries(
   return hits;
 }
 
-const char* kControlCharacters = "\001\002\003\n\r";
+const char kControlCharacters[] = "\001\002\003\n\r";
 
 void TraceWithAllMacroVariants(WaitableEvent* task_complete_event) {
   {
@@ -478,7 +477,7 @@ void TraceWithAllMacroVariants(WaitableEvent* task_complete_event) {
 
     TRACE_EVENT1(kControlCharacters, kControlCharacters,
                  kControlCharacters, kControlCharacters);
-  } // Scope close causes TRACE_EVENT0 etc to send their END events.
+  }  // Scope close causes TRACE_EVENT0 etc to send their END events.
 
   if (task_complete_event)
     task_complete_event->Signal();
@@ -996,11 +995,11 @@ class AfterStateChangeEnabledStateObserver
   virtual ~AfterStateChangeEnabledStateObserver() {}
 
   // TraceLog::EnabledStateObserver overrides:
-  virtual void OnTraceLogEnabled() OVERRIDE {
+  void OnTraceLogEnabled() override {
     EXPECT_TRUE(TraceLog::GetInstance()->IsEnabled());
   }
 
-  virtual void OnTraceLogDisabled() OVERRIDE {
+  void OnTraceLogDisabled() override {
     EXPECT_FALSE(TraceLog::GetInstance()->IsEnabled());
   }
 };
@@ -1029,9 +1028,9 @@ class SelfRemovingEnabledStateObserver
   virtual ~SelfRemovingEnabledStateObserver() {}
 
   // TraceLog::EnabledStateObserver overrides:
-  virtual void OnTraceLogEnabled() OVERRIDE {}
+  void OnTraceLogEnabled() override {}
 
-  virtual void OnTraceLogDisabled() OVERRIDE {
+  void OnTraceLogDisabled() override {
     TraceLog::GetInstance()->RemoveEnabledStateObserver(this);
   }
 };
@@ -1300,12 +1299,12 @@ TEST_F(TraceEventTestFixture, AsyncBeginEndEvents) {
   BeginTrace();
 
   unsigned long long id = 0xfeedbeeffeedbeefull;
-  TRACE_EVENT_ASYNC_BEGIN0( "cat", "name1", id);
-  TRACE_EVENT_ASYNC_STEP_INTO0( "cat", "name1", id, "step1");
+  TRACE_EVENT_ASYNC_BEGIN0("cat", "name1", id);
+  TRACE_EVENT_ASYNC_STEP_INTO0("cat", "name1", id, "step1");
   TRACE_EVENT_ASYNC_END0("cat", "name1", id);
-  TRACE_EVENT_BEGIN0( "cat", "name2");
-  TRACE_EVENT_ASYNC_BEGIN0( "cat", "name3", 0);
-  TRACE_EVENT_ASYNC_STEP_PAST0( "cat", "name3", 0, "step2");
+  TRACE_EVENT_BEGIN0("cat", "name2");
+  TRACE_EVENT_ASYNC_BEGIN0("cat", "name3", 0);
+  TRACE_EVENT_ASYNC_STEP_PAST0("cat", "name3", 0, "step2");
 
   EndTraceAndFlush();
 
@@ -1332,13 +1331,13 @@ TEST_F(TraceEventTestFixture, AsyncBeginEndPointerMangling) {
 
   TraceLog::GetInstance()->SetProcessID(100);
   BeginTrace();
-  TRACE_EVENT_ASYNC_BEGIN0( "cat", "name1", ptr);
-  TRACE_EVENT_ASYNC_BEGIN0( "cat", "name2", ptr);
+  TRACE_EVENT_ASYNC_BEGIN0("cat", "name1", ptr);
+  TRACE_EVENT_ASYNC_BEGIN0("cat", "name2", ptr);
   EndTraceAndFlush();
 
   TraceLog::GetInstance()->SetProcessID(200);
   BeginTrace();
-  TRACE_EVENT_ASYNC_END0( "cat", "name1", ptr);
+  TRACE_EVENT_ASYNC_END0("cat", "name1", ptr);
   EndTraceAndFlush();
 
   DictionaryValue* async_begin = FindNamePhase("name1", "S");
@@ -1490,32 +1489,32 @@ TEST_F(TraceEventTestFixture, DataCapturedManyThreads) {
 TEST_F(TraceEventTestFixture, ThreadNames) {
   // Create threads before we enable tracing to make sure
   // that tracelog still captures them.
-  const int num_threads = 4;
-  const int num_events = 10;
-  Thread* threads[num_threads];
-  PlatformThreadId thread_ids[num_threads];
-  for (int i = 0; i < num_threads; i++)
+  const int kNumThreads = 4;
+  const int kNumEvents = 10;
+  Thread* threads[kNumThreads];
+  PlatformThreadId thread_ids[kNumThreads];
+  for (int i = 0; i < kNumThreads; i++)
     threads[i] = new Thread(StringPrintf("Thread %d", i));
 
   // Enable tracing.
   BeginTrace();
 
   // Now run some trace code on these threads.
-  WaitableEvent* task_complete_events[num_threads];
-  for (int i = 0; i < num_threads; i++) {
+  WaitableEvent* task_complete_events[kNumThreads];
+  for (int i = 0; i < kNumThreads; i++) {
     task_complete_events[i] = new WaitableEvent(false, false);
     threads[i]->Start();
     thread_ids[i] = threads[i]->thread_id();
     threads[i]->message_loop()->PostTask(
         FROM_HERE, base::Bind(&TraceManyInstantEvents,
-                              i, num_events, task_complete_events[i]));
+                              i, kNumEvents, task_complete_events[i]));
   }
-  for (int i = 0; i < num_threads; i++) {
+  for (int i = 0; i < kNumThreads; i++) {
     task_complete_events[i]->Wait();
   }
 
   // Shut things down.
-  for (int i = 0; i < num_threads; i++) {
+  for (int i = 0; i < kNumThreads; i++) {
     threads[i]->Stop();
     delete threads[i];
     delete task_complete_events[i];
@@ -1538,7 +1537,7 @@ TEST_F(TraceEventTestFixture, ThreadNames) {
     EXPECT_TRUE(item->GetInteger("tid", &tmp_int));
 
     // See if this thread name is one of the threads we just created
-    for (int j = 0; j < num_threads; j++) {
+    for (int j = 0; j < kNumThreads; j++) {
       if(static_cast<int>(thread_ids[j]) != tmp_int)
         continue;
 
@@ -1919,12 +1918,12 @@ class MyData : public ConvertableToTraceFormat {
  public:
   MyData() {}
 
-  virtual void AppendAsTraceFormat(std::string* out) const OVERRIDE {
+  void AppendAsTraceFormat(std::string* out) const override {
     out->append("{\"foo\":1}");
   }
 
  private:
-  virtual ~MyData() {}
+  ~MyData() override {}
   DISALLOW_COPY_AND_ASSIGN(MyData);
 };
 
@@ -2203,12 +2202,12 @@ TEST_F(TraceEventTestFixture, PrimitiveArgs) {
 
 class TraceEventCallbackTest : public TraceEventTestFixture {
  public:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     TraceEventTestFixture::SetUp();
     ASSERT_EQ(NULL, s_instance);
     s_instance = this;
   }
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     TraceLog::GetInstance()->SetDisabled();
     ASSERT_TRUE(!!s_instance);
     s_instance = NULL;
@@ -2969,7 +2968,7 @@ TEST_F(TraceEventTestFixture, ConfigureSyntheticDelays) {
 }
 
 TEST_F(TraceEventTestFixture, BadSyntheticDelayConfigurations) {
-  const char* configs[] = {
+  const char* const configs[] = {
     "",
     "DELAY(",
     "DELAY(;",

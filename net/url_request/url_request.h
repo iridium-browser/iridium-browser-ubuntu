@@ -48,6 +48,7 @@ class AppCacheInterceptor;
 
 namespace net {
 
+class ChunkedUploadDataStream;
 class CookieOptions;
 class HostPortPair;
 class IOBuffer;
@@ -277,7 +278,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
   // If destroyed after Start() has been called but while IO is pending,
   // then the request will be effectively canceled and the delegate
   // will not have any more of its methods called.
-  virtual ~URLRequest();
+  ~URLRequest() override;
 
   // Changes the default cookie policy from allowing all cookies to blocking all
   // cookies. Embedders that want to implement a more flexible policy should
@@ -791,6 +792,10 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe),
 
   scoped_refptr<URLRequestJob> job_;
   scoped_ptr<UploadDataStream> upload_data_stream_;
+  // TODO(mmenke):  Make whether or not an upload is chunked transparent to the
+  // URLRequest.
+  ChunkedUploadDataStream* upload_chunked_data_stream_;
+
   std::vector<GURL> url_chain_;
   GURL first_party_for_cookies_;
   GURL delegate_redirect_url_;

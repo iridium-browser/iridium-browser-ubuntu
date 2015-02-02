@@ -46,6 +46,7 @@
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/CompositingReasons.h"
+#include "platform/graphics/PaintInvalidationReason.h"
 #include "platform/transforms/TransformationMatrix.h"
 
 namespace blink {
@@ -103,23 +104,6 @@ enum MapCoordinatesMode {
     TraverseDocumentBoundaries = 1 << 3,
 };
 typedef unsigned MapCoordinatesFlags;
-
-enum InvalidationReason {
-    InvalidationNone,
-    InvalidationIncremental,
-    InvalidationFull,
-    InvalidationBorderFitLines,
-    InvalidationBorderBoxChange,
-    InvalidationBoundsChange,
-    InvalidationLocationChange,
-    InvalidationBecameVisible,
-    InvalidationBecameInvisible,
-    InvalidationScroll,
-    InvalidationSelection,
-    InvalidationLayer,
-    InvalidationRendererRemoval,
-    InvalidationPaintRectangle
-};
 
 const int caretWidth = 1;
 
@@ -264,8 +248,6 @@ public:
 
 #endif
 
-    bool skipInvalidationWhenLaidOutChildren() const;
-
     // FIXME: This could be used when changing the size of a renderer without children to skip some invalidations.
     bool rendererHasNoBoxEffect() const
     {
@@ -323,6 +305,8 @@ private:
     // or from Parent element.
     PassRefPtr<RenderStyle> getUncachedPseudoStyleFromParentOrShadowHost() const;
 
+    bool skipInvalidationWhenLaidOutChildren() const;
+
 public:
 #ifndef NDEBUG
     void showTreeForThis() const;
@@ -349,60 +333,62 @@ public:
     bool isPseudoElement() const { return node() && node()->isPseudoElement(); }
 
     virtual bool isBoxModelObject() const { return false; }
-    virtual bool isBR() const { return false; }
-    virtual bool isCanvas() const { return false; }
-    virtual bool isCounter() const { return false; }
-    virtual bool isDetailsMarker() const { return false; }
-    virtual bool isEmbeddedObject() const { return false; }
-    virtual bool isFieldset() const { return false; }
-    virtual bool isFileUploadControl() const { return false; }
-    virtual bool isFrame() const { return false; }
-    virtual bool isFrameSet() const { return false; }
+    bool isBR() const { return isOfType(RenderObjectBr); }
+    bool isCanvas() const { return isOfType(RenderObjectCanvas); }
+    bool isCounter() const { return isOfType(RenderObjectCounter); }
+    bool isDetailsMarker() const { return isOfType(RenderObjectDetailsMarker); }
+    bool isEmbeddedObject() const { return isOfType(RenderObjectEmbeddedObject); }
+    bool isFieldset() const { return isOfType(RenderObjectFieldset); }
+    bool isFileUploadControl() const { return isOfType(RenderObjectFileUploadControl); }
+    bool isFrame() const { return isOfType(RenderObjectFrame); }
+    bool isFrameSet() const { return isOfType(RenderObjectFrameSet); }
+    bool isListBox() const { return isOfType(RenderObjectListBox); }
+    bool isListItem() const { return isOfType(RenderObjectListItem); }
+    bool isListMarker() const { return isOfType(RenderObjectListMarker); }
+    bool isMedia() const { return isOfType(RenderObjectMedia); }
+    bool isMenuList() const { return isOfType(RenderObjectMenuList); }
+    bool isMeter() const { return isOfType(RenderObjectMeter); }
+    bool isProgress() const { return isOfType(RenderObjectProgress); }
+    bool isQuote() const { return isOfType(RenderObjectQuote); }
+    bool isRenderButton() const { return isOfType(RenderObjectRenderButton); }
+    bool isRenderFullScreen() const { return isOfType(RenderObjectRenderFullScreen); }
+    bool isRenderFullScreenPlaceholder() const { return isOfType(RenderObjectRenderFullScreenPlaceholder); }
+    bool isRenderGrid() const { return isOfType(RenderObjectRenderGrid); }
+    bool isRenderIFrame() const { return isOfType(RenderObjectRenderIFrame); }
+    bool isRenderImage() const { return isOfType(RenderObjectRenderImage); }
+    bool isRenderMultiColumnSet() const { return isOfType(RenderObjectRenderMultiColumnSet); }
+    bool isRenderMultiColumnSpannerSet() const { return isOfType(RenderObjectRenderMultiColumnSpannerSet); }
+    bool isRenderRegion() const { return isOfType(RenderObjectRenderRegion); }
+    bool isRenderScrollbarPart() const { return isOfType(RenderObjectRenderScrollbarPart); }
+    bool isRenderTableCol() const { return isOfType(RenderObjectRenderTableCol); }
+    bool isRenderView() const { return isOfType(RenderObjectRenderView); }
+    bool isReplica() const { return isOfType(RenderObjectReplica); }
+    bool isRuby() const { return isOfType(RenderObjectRuby); }
+    bool isRubyBase() const { return isOfType(RenderObjectRubyBase); }
+    bool isRubyRun() const { return isOfType(RenderObjectRubyRun); }
+    bool isRubyText() const { return isOfType(RenderObjectRubyText); }
+    bool isSlider() const { return isOfType(RenderObjectSlider); }
+    bool isSliderThumb() const { return isOfType(RenderObjectSliderThumb); }
+    bool isTable() const { return isOfType(RenderObjectTable); }
+    bool isTableCaption() const { return isOfType(RenderObjectTableCaption); }
+    bool isTableCell() const { return isOfType(RenderObjectTableCell); }
+    bool isTableRow() const { return isOfType(RenderObjectTableRow); }
+    bool isTableSection() const { return isOfType(RenderObjectTableSection); }
+    bool isTextArea() const { return isOfType(RenderObjectTextArea); }
+    bool isTextControl() const { return isOfType(RenderObjectTextControl); }
+    bool isTextField() const { return isOfType(RenderObjectTextField); }
+    bool isVideo() const { return isOfType(RenderObjectVideo); }
+    bool isWidget() const { return isOfType(RenderObjectWidget); }
+
     virtual bool isImage() const { return false; }
+
     virtual bool isInlineBlockOrInlineTable() const { return false; }
     virtual bool isLayerModelObject() const { return false; }
-    virtual bool isListBox() const { return false; }
-    virtual bool isListItem() const { return false; }
-    virtual bool isListMarker() const { return false; }
-    virtual bool isMarquee() const { return false; }
-    virtual bool isMedia() const { return false; }
-    virtual bool isMenuList() const { return false; }
-    virtual bool isMeter() const { return false; }
-    virtual bool isProgress() const { return false; }
-    virtual bool isQuote() const { return false; }
     virtual bool isRenderBlock() const { return false; }
     virtual bool isRenderBlockFlow() const { return false; }
-    virtual bool isRenderButton() const { return false; }
     virtual bool isRenderFlowThread() const { return false; }
-    virtual bool isRenderFullScreen() const { return false; }
-    virtual bool isRenderFullScreenPlaceholder() const { return false; }
-    virtual bool isRenderGrid() const { return false; }
-    virtual bool isRenderIFrame() const { return false; }
-    virtual bool isRenderImage() const { return false; }
     virtual bool isRenderInline() const { return false; }
-    virtual bool isRenderMultiColumnSet() const { return false; }
     virtual bool isRenderPart() const { return false; }
-    virtual bool isRenderRegion() const { return false; }
-    virtual bool isRenderScrollbarPart() const { return false; }
-    virtual bool isRenderTableCol() const { return false; }
-    virtual bool isRenderView() const { return false; }
-    virtual bool isReplica() const { return false; }
-    virtual bool isRuby() const { return false; }
-    virtual bool isRubyBase() const { return false; }
-    virtual bool isRubyRun() const { return false; }
-    virtual bool isRubyText() const { return false; }
-    virtual bool isSlider() const { return false; }
-    virtual bool isSliderThumb() const { return false; }
-    virtual bool isTable() const { return false; }
-    virtual bool isTableCaption() const { return false; }
-    virtual bool isTableCell() const { return false; }
-    virtual bool isTableRow() const { return false; }
-    virtual bool isTableSection() const { return false; }
-    virtual bool isTextArea() const { return false; }
-    virtual bool isTextControl() const { return false; }
-    virtual bool isTextField() const { return false; }
-    virtual bool isVideo() const { return false; }
-    virtual bool isWidget() const { return false; }
 
     bool isDocumentElement() const { return document().documentElement() == m_node; }
     // isBody is called from RenderBox::styleWillChange and is thus quite hot.
@@ -458,23 +444,23 @@ public:
 
     // FIXME: Until all SVG renders can be subclasses of RenderSVGModelObject we have
     // to add SVG renderer methods to RenderObject with an ASSERT_NOT_REACHED() default implementation.
-    virtual bool isSVG() const { return false; }
-    virtual bool isSVGRoot() const { return false; }
-    virtual bool isSVGContainer() const { return false; }
-    virtual bool isSVGTransformableContainer() const { return false; }
-    virtual bool isSVGViewportContainer() const { return false; }
-    virtual bool isSVGGradientStop() const { return false; }
-    virtual bool isSVGHiddenContainer() const { return false; }
-    virtual bool isSVGShape() const { return false; }
-    virtual bool isSVGText() const { return false; }
-    virtual bool isSVGTextPath() const { return false; }
-    virtual bool isSVGInline() const { return false; }
-    virtual bool isSVGInlineText() const { return false; }
-    virtual bool isSVGImage() const { return false; }
-    virtual bool isSVGForeignObject() const { return false; }
-    virtual bool isSVGResourceContainer() const { return false; }
-    virtual bool isSVGResourceFilter() const { return false; }
-    virtual bool isSVGResourceFilterPrimitive() const { return false; }
+    bool isSVG() const { return isOfType(RenderObjectSVG); }
+    bool isSVGRoot() const { return isOfType(RenderObjectSVGRoot); }
+    bool isSVGContainer() const { return isOfType(RenderObjectSVGContainer); }
+    bool isSVGTransformableContainer() const { return isOfType(RenderObjectSVGTransformableContainer); }
+    bool isSVGViewportContainer() const { return isOfType(RenderObjectSVGViewportContainer); }
+    bool isSVGGradientStop() const { return isOfType(RenderObjectSVGGradientStop); }
+    bool isSVGHiddenContainer() const { return isOfType(RenderObjectSVGHiddenContainer); }
+    bool isSVGShape() const { return isOfType(RenderObjectSVGShape); }
+    bool isSVGText() const { return isOfType(RenderObjectSVGText); }
+    bool isSVGTextPath() const { return isOfType(RenderObjectSVGTextPath); }
+    bool isSVGInline() const { return isOfType(RenderObjectSVGInline); }
+    bool isSVGInlineText() const { return isOfType(RenderObjectSVGInlineText); }
+    bool isSVGImage() const { return isOfType(RenderObjectSVGImage); }
+    bool isSVGForeignObject() const { return isOfType(RenderObjectSVGForeignObject); }
+    bool isSVGResourceContainer() const { return isOfType(RenderObjectSVGResourceContainer); }
+    bool isSVGResourceFilter() const { return isOfType(RenderObjectSVGResourceFilter); }
+    bool isSVGResourceFilterPrimitive() const { return isOfType(RenderObjectSVGResourceFilterPrimitive); }
 
     // FIXME: Those belong into a SVG specific base-class for all renderers (see above)
     // Unfortunately we don't have such a class yet, because it's not possible for all renderers
@@ -522,7 +508,7 @@ public:
         // RenderBlock::createAnonymousBlock(). This includes creating an anonymous
         // RenderBlock having a BLOCK or BOX display. Other classes such as RenderTextFragment
         // are not RenderBlocks and will return false. See https://bugs.webkit.org/show_bug.cgi?id=56709.
-        return isAnonymous() && (style()->display() == BLOCK || style()->display() == BOX) && style()->styleType() == NOPSEUDO && isRenderBlock() && !isListMarker() && !isRenderFlowThread()
+        return isAnonymous() && (style()->display() == BLOCK || style()->display() == BOX) && style()->styleType() == NOPSEUDO && isRenderBlock() && !isListMarker() && !isRenderFlowThread() && !isRenderMultiColumnSet()
             && !isRenderFullScreen()
             && !isRenderFullScreenPlaceholder();
     }
@@ -544,6 +530,11 @@ public:
     bool isDragging() const { return m_bitfields.isDragging(); }
     bool isReplaced() const { return m_bitfields.isReplaced(); } // a "replaced" element (see CSS)
     bool isHorizontalWritingMode() const { return m_bitfields.horizontalWritingMode(); }
+    bool hasFlippedBlocksWritingMode() const
+    {
+        return document().containsAnyRareWritingMode()
+            && style()->slowIsFlippedBlocksWritingMode();
+    }
 
     bool hasLayer() const { return m_bitfields.hasLayer(); }
 
@@ -598,7 +589,7 @@ public:
     bool hasOverflowClip() const { return m_bitfields.hasOverflowClip(); }
     bool hasClipOrOverflowClip() const { return hasClip() || hasOverflowClip(); }
 
-    bool hasTransform() const { return m_bitfields.hasTransform(); }
+    bool hasTransformRelatedProperty() const { return m_bitfields.hasTransformRelatedProperty(); }
     bool hasMask() const { return style() && style()->hasMask(); }
     bool hasClipPath() const { return style() && style()->clipPath(); }
     bool hasHiddenBackface() const { return style() && style()->backfaceVisibility() == BackfaceVisibilityHidden; }
@@ -633,7 +624,7 @@ public:
         return isPseudoElement() ? 0 : node();
     }
 
-    // FIXME: Why does RenderWidget need this?
+    // FIXME: Why does RenderPart need this? crbug.com/422457
     void clearNode() { m_node = nullptr; }
 
     // Returns the styled node that caused the generation of this renderer.
@@ -695,7 +686,7 @@ public:
     void setHorizontalWritingMode(bool hasHorizontalWritingMode) { m_bitfields.setHorizontalWritingMode(hasHorizontalWritingMode); }
     void setHasOverflowClip(bool hasOverflowClip) { m_bitfields.setHasOverflowClip(hasOverflowClip); }
     void setHasLayer(bool hasLayer) { m_bitfields.setHasLayer(hasLayer); }
-    void setHasTransform(bool hasTransform) { m_bitfields.setHasTransform(hasTransform); }
+    void setHasTransformRelatedProperty(bool hasTransform) { m_bitfields.setHasTransformRelatedProperty(hasTransform); }
     void setHasReflection(bool hasReflection) { m_bitfields.setHasReflection(hasReflection); }
 
     void scheduleRelayout();
@@ -755,7 +746,7 @@ public:
 
     bool canContainFixedPositionObjects() const
     {
-        return isRenderView() || (hasTransform() && isRenderBlock()) || isSVGForeignObject();
+        return isRenderView() || (hasTransformRelatedProperty() && isRenderBlock()) || isSVGForeignObject();
     }
 
     // Convert the given local point to absolute coordinates
@@ -833,9 +824,6 @@ public:
 
     void getTextDecorations(unsigned decorations, AppliedTextDecoration& underline, AppliedTextDecoration& overline, AppliedTextDecoration& linethrough, bool quirksMode = false, bool firstlineStyle = false);
 
-    void setHadPaintInvalidation();
-    bool hadPaintInvalidation() const;
-
     // Return the RenderLayerModelObject in the container chain which is responsible for painting this object, or 0
     // if painting is root-relative. This is the container that should be passed to the 'forPaintInvalidation'
     // methods.
@@ -859,10 +847,12 @@ public:
     // as the local coordinate space of |paintInvalidationContainer| in the presence of layer squashing.
     // If |paintInvalidationContainer| is 0, invalidate paints via the view.
     // FIXME: |paintInvalidationContainer| should never be 0. See crbug.com/363699.
-    void invalidatePaintUsingContainer(const RenderLayerModelObject* paintInvalidationContainer, const LayoutRect&, InvalidationReason) const;
+    void invalidatePaintUsingContainer(const RenderLayerModelObject* paintInvalidationContainer, const LayoutRect&, PaintInvalidationReason) const;
 
     // Invalidate the paint of a specific subrectangle within a given object. The rect |r| is in the object's coordinate space.
     void invalidatePaintRectangle(const LayoutRect&) const;
+
+    void invalidateSelectionIfNeeded(const RenderLayerModelObject&, PaintInvalidationReason);
 
     // Walk the tree after layout issuing paint invalidations for renderers that have changed or moved, updating bounds that have changed, and clearing paint invalidation state.
     virtual void invalidateTreeIfNeeded(const PaintInvalidationState&);
@@ -872,11 +862,9 @@ public:
 
     void invalidatePaintIncludingNonCompositingDescendants();
 
-    bool checkForPaintInvalidation() const;
-
     // Returns the rect that should have paint invalidated whenever this object changes. The rect is in the view's
     // coordinate space. This method deals with outlines and overflow.
-    LayoutRect absoluteClippedOverflowRect() const;
+    virtual LayoutRect absoluteClippedOverflowRect() const;
     IntRect pixelSnappedAbsoluteClippedOverflowRect() const;
     virtual LayoutRect clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const;
     virtual LayoutRect rectWithOutlineForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, LayoutUnit outlineWidth, const PaintInvalidationState* = 0) const;
@@ -965,9 +953,9 @@ public:
     virtual int previousOffsetForBackwardDeletion(int current) const;
     virtual int nextOffset(int current) const;
 
-    virtual void imageChanged(ImageResource*, const IntRect* = 0) OVERRIDE FINAL;
+    virtual void imageChanged(ImageResource*, const IntRect* = 0) override final;
     virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) { }
-    virtual bool willRenderImage(ImageResource*) OVERRIDE FINAL;
+    virtual bool willRenderImage(ImageResource*) override final;
 
     void selectionStartEnd(int& spos, int& epos) const;
 
@@ -1015,35 +1003,17 @@ public:
     const LayoutPoint& previousPositionFromPaintInvalidationBacking() const { return m_previousPositionFromPaintInvalidationBacking; }
     void setPreviousPositionFromPaintInvalidationBacking(const LayoutPoint& positionFromPaintInvalidationBacking) { m_previousPositionFromPaintInvalidationBacking = positionFromPaintInvalidationBacking; }
 
-    bool shouldDoFullPaintInvalidation() const { return m_bitfields.shouldDoFullPaintInvalidation(); }
-    void setShouldDoFullPaintInvalidation(bool, MarkingBehavior = MarkContainingBlockChain);
+    bool shouldDoFullPaintInvalidation() const { return m_bitfields.fullPaintInvalidationReason() != PaintInvalidationNone; }
+    void setShouldDoFullPaintInvalidation(PaintInvalidationReason = PaintInvalidationFull);
+    void clearShouldDoFullPaintInvalidation() { m_bitfields.setFullPaintInvalidationReason(PaintInvalidationNone); }
 
     bool shouldInvalidateOverflowForPaint() const { return m_bitfields.shouldInvalidateOverflowForPaint(); }
 
-    bool shouldDoFullPaintInvalidationIfSelfPaintingLayer() const { return m_bitfields.shouldDoFullPaintInvalidationIfSelfPaintingLayer(); }
-    void setShouldDoFullPaintInvalidationIfSelfPaintingLayer(bool b)
-    {
-        m_bitfields.setShouldDoFullPaintInvalidationIfSelfPaintingLayer(b);
-
-        if (b)
-            markContainingBlockChainForPaintInvalidation();
-    }
-
-    bool onlyNeededPositionedMovementLayout() const { return m_bitfields.onlyNeededPositionedMovementLayout(); }
-    void setOnlyNeededPositionedMovementLayout(bool b) { m_bitfields.setOnlyNeededPositionedMovementLayout(b); }
-
     virtual void clearPaintInvalidationState(const PaintInvalidationState&);
 
-    // layoutDidGetCalled indicates whether this render object was re-laid-out
-    // since the last call to setLayoutDidGetCalled(false) on this object.
-    bool layoutDidGetCalled() const { return m_bitfields.layoutDidGetCalled(); }
-    void setLayoutDidGetCalled(bool b)
-    {
-        m_bitfields.setLayoutDidGetCalled(b);
-
-        if (b)
-            markContainingBlockChainForPaintInvalidation();
-    }
+    // Indicates whether this render object was re-laid-out since the last frame.
+    // The flag will be cleared during invalidateTreeIfNeeded.
+    bool layoutDidGetCalledSinceLastFrame() const { return m_bitfields.layoutDidGetCalledSinceLastFrame(); }
 
     bool mayNeedPaintInvalidation() const { return m_bitfields.mayNeedPaintInvalidation(); }
     void setMayNeedPaintInvalidation(bool b)
@@ -1055,20 +1025,31 @@ public:
             markContainingBlockChainForPaintInvalidation();
     }
 
+    bool shouldInvalidateSelection() const { return m_bitfields.shouldInvalidateSelection(); }
+    void setShouldInvalidateSelection()
+    {
+        if (!canUpdateSelectionOnRootLineBoxes())
+            return;
+
+        m_bitfields.setShouldInvalidateSelection(true);
+        markContainingBlockChainForPaintInvalidation();
+    }
+    void clearShouldInvalidateSelection() { m_bitfields.setShouldInvalidateSelection(false); }
+
     bool neededLayoutBecauseOfChildren() const { return m_bitfields.neededLayoutBecauseOfChildren(); }
     void setNeededLayoutBecauseOfChildren(bool b) { m_bitfields.setNeededLayoutBecauseOfChildren(b); }
 
-    bool shouldCheckForPaintInvalidation(const PaintInvalidationState& paintInvalidationState)
+    bool shouldCheckForPaintInvalidation(const PaintInvalidationState& paintInvalidationState) const
     {
         return paintInvalidationState.forceCheckForPaintInvalidation() || shouldCheckForPaintInvalidationRegardlessOfPaintInvalidationState();
     }
 
-    bool shouldCheckForPaintInvalidationRegardlessOfPaintInvalidationState()
+    bool shouldCheckForPaintInvalidationRegardlessOfPaintInvalidationState() const
     {
-        return layoutDidGetCalled() || mayNeedPaintInvalidation() || shouldDoFullPaintInvalidation() || shouldDoFullPaintInvalidationIfSelfPaintingLayer();
+        return layoutDidGetCalledSinceLastFrame() || mayNeedPaintInvalidation() || shouldDoFullPaintInvalidation() || shouldInvalidateSelection();
     }
 
-    bool supportsPaintInvalidationStateCachedOffsets() const { return !hasColumns() && !hasTransform() && !hasReflection() && !style()->isFlippedBlocksWritingMode(); }
+    bool supportsPaintInvalidationStateCachedOffsets() const { return !hasColumns() && !hasTransformRelatedProperty() && !hasReflection() && !style()->slowIsFlippedBlocksWritingMode(); }
 
     void setNeedsOverflowRecalcAfterStyleChange();
     void markContainingBlocksForOverflowRecalc();
@@ -1076,6 +1057,77 @@ public:
     virtual LayoutRect viewRect() const;
 
 protected:
+    enum RenderObjectType {
+        RenderObjectBr,
+        RenderObjectCanvas,
+        RenderObjectFieldset,
+        RenderObjectCounter,
+        RenderObjectDetailsMarker,
+        RenderObjectEmbeddedObject,
+        RenderObjectFileUploadControl,
+        RenderObjectFrame,
+        RenderObjectFrameSet,
+        RenderObjectListBox,
+        RenderObjectListItem,
+        RenderObjectListMarker,
+        RenderObjectMedia,
+        RenderObjectMenuList,
+        RenderObjectMeter,
+        RenderObjectProgress,
+        RenderObjectQuote,
+        RenderObjectRenderButton,
+        RenderObjectRenderFlowThread,
+        RenderObjectRenderFullScreen,
+        RenderObjectRenderFullScreenPlaceholder,
+        RenderObjectRenderGrid,
+        RenderObjectRenderIFrame,
+        RenderObjectRenderImage,
+        RenderObjectRenderInline,
+        RenderObjectRenderMultiColumnSet,
+        RenderObjectRenderMultiColumnSpannerSet,
+        RenderObjectRenderPart,
+        RenderObjectRenderRegion,
+        RenderObjectRenderScrollbarPart,
+        RenderObjectRenderTableCol,
+        RenderObjectRenderView,
+        RenderObjectReplica,
+        RenderObjectRuby,
+        RenderObjectRubyBase,
+        RenderObjectRubyRun,
+        RenderObjectRubyText,
+        RenderObjectSlider,
+        RenderObjectSliderThumb,
+        RenderObjectTable,
+        RenderObjectTableCaption,
+        RenderObjectTableCell,
+        RenderObjectTableRow,
+        RenderObjectTableSection,
+        RenderObjectTextArea,
+        RenderObjectTextControl,
+        RenderObjectTextField,
+        RenderObjectVideo,
+        RenderObjectWidget,
+
+        RenderObjectSVG, /* Keep by itself? */
+        RenderObjectSVGRoot,
+        RenderObjectSVGContainer,
+        RenderObjectSVGTransformableContainer,
+        RenderObjectSVGViewportContainer,
+        RenderObjectSVGHiddenContainer,
+        RenderObjectSVGGradientStop,
+        RenderObjectSVGShape,
+        RenderObjectSVGText,
+        RenderObjectSVGTextPath,
+        RenderObjectSVGInline,
+        RenderObjectSVGInlineText,
+        RenderObjectSVGImage,
+        RenderObjectSVGForeignObject,
+        RenderObjectSVGResourceContainer,
+        RenderObjectSVGResourceFilter,
+        RenderObjectSVGResourceFilterPrimitive,
+    };
+    virtual bool isOfType(RenderObjectType type) const { return false; }
+
     inline bool layerCreationAllowedForSubtree() const;
 
     // Overrides should call the superclass at the end. m_style will be 0 the first time
@@ -1115,33 +1167,43 @@ protected:
     // of this renderer within the current layer that should be used for each result.
     virtual void computeSelfHitTestRects(Vector<LayoutRect>&, const LayoutPoint& layerOffset) const { };
 
-    virtual InvalidationReason getPaintInvalidationReason(const RenderLayerModelObject& paintInvalidationContainer,
+    virtual PaintInvalidationReason paintInvalidationReason(const RenderLayerModelObject& paintInvalidationContainer,
         const LayoutRect& oldPaintInvalidationRect, const LayoutPoint& oldPositionFromPaintInvalidationBacking,
-        const LayoutRect& newPaintInvalidationRect, const LayoutPoint& newPositionFromPaintInvalidationBacking);
+        const LayoutRect& newPaintInvalidationRect, const LayoutPoint& newPositionFromPaintInvalidationBacking) const;
     virtual void incrementallyInvalidatePaint(const RenderLayerModelObject& paintInvalidationContainer, const LayoutRect& oldBounds, const LayoutRect& newBounds, const LayoutPoint& positionFromPaintInvalidationBacking);
-    void fullyInvalidatePaint(const RenderLayerModelObject& paintInvalidationContainer, InvalidationReason, const LayoutRect& oldBounds, const LayoutRect& newBounds);
+    void fullyInvalidatePaint(const RenderLayerModelObject& paintInvalidationContainer, PaintInvalidationReason, const LayoutRect& oldBounds, const LayoutRect& newBounds);
 
 #if ENABLE(ASSERT)
     virtual bool paintInvalidationStateIsDirty() const
     {
-        return layoutDidGetCalled() || shouldDoFullPaintInvalidation() || shouldDoFullPaintInvalidationIfSelfPaintingLayer()
-            || onlyNeededPositionedMovementLayout() || neededLayoutBecauseOfChildren() || mayNeedPaintInvalidation();
+        return neededLayoutBecauseOfChildren() || shouldCheckForPaintInvalidationRegardlessOfPaintInvalidationState();
     }
 #endif
 
     virtual void invalidatePaintOfSubtreesIfNeeded(const PaintInvalidationState& childPaintInvalidationState);
-    virtual InvalidationReason invalidatePaintIfNeeded(const PaintInvalidationState&, const RenderLayerModelObject& paintInvalidationContainer);
+    virtual PaintInvalidationReason invalidatePaintIfNeeded(const PaintInvalidationState&, const RenderLayerModelObject& paintInvalidationContainer);
 
 private:
+    void setLayoutDidGetCalledSinceLastFrame()
+    {
+        m_bitfields.setLayoutDidGetCalledSinceLastFrame(true);
+
+        // Make sure our parent is marked as needing invalidation.
+        // This would be unneeded if we allowed sub-tree invalidation (akin to sub-tree layouts).
+        markContainingBlockChainForPaintInvalidation();
+    }
+    void clearLayoutDidGetCalledSinceLastFrame() { m_bitfields.setLayoutDidGetCalledSinceLastFrame(false); }
+
     void invalidatePaintIncludingNonCompositingDescendantsInternal(const RenderLayerModelObject* repaintContainer);
+
+    LayoutRect previousSelectionRectForPaintInvalidation() const;
+    void setPreviousSelectionRectForPaintInvalidation(const LayoutRect&);
 
     const RenderLayerModelObject* enclosingCompositedContainer() const;
 
     RenderFlowThread* locateFlowThreadContainingBlock() const;
     void removeFromRenderFlowThread();
     void removeFromRenderFlowThreadRecursive(RenderFlowThread*);
-
-    bool hasImmediateNonWhitespaceTextChildOrPropertiesDependentOnColor() const;
 
     RenderStyle* cachedFirstLineStyle() const;
     StyleDifference adjustStyleDifference(StyleDifference) const;
@@ -1153,7 +1215,6 @@ private:
 #if ENABLE(ASSERT)
     void checkBlockPositionedObjectsNeedLayout();
 #endif
-    const char* invalidationReasonToString(InvalidationReason) const;
 
     void markContainingBlockChainForPaintInvalidation()
     {
@@ -1198,13 +1259,11 @@ private:
     public:
         RenderObjectBitfields(Node* node)
             : m_selfNeedsLayout(false)
-            , m_shouldDoFullPaintInvalidation(false)
             , m_shouldInvalidateOverflowForPaint(false)
-            , m_shouldDoFullPaintInvalidationIfSelfPaintingLayer(false)
             // FIXME: We should remove mayNeedPaintInvalidation once we are able to
             // use the other layout flags to detect the same cases. crbug.com/370118
             , m_mayNeedPaintInvalidation(false)
-            , m_onlyNeededPositionedMovementLayout(false)
+            , m_shouldInvalidateSelection(false)
             , m_neededLayoutBecauseOfChildren(false)
             , m_needsPositionedMovementLayout(false)
             , m_normalChildNeedsLayout(false)
@@ -1223,12 +1282,12 @@ private:
             , m_isDragging(false)
             , m_hasLayer(false)
             , m_hasOverflowClip(false)
-            , m_hasTransform(false)
+            , m_hasTransformRelatedProperty(false)
             , m_hasReflection(false)
             , m_hasCounterNodeMap(false)
             , m_everHadLayout(false)
             , m_ancestorLineBoxDirty(false)
-            , m_layoutDidGetCalled(false)
+            , m_layoutDidGetCalledSinceLastFrame(false)
             , m_hasPendingResourceUpdate(false)
             , m_childrenInline(false)
             , m_hasColumns(false)
@@ -1237,16 +1296,15 @@ private:
             , m_selectionState(SelectionNone)
             , m_flowThreadState(NotInsideFlowThread)
             , m_boxDecorationBackgroundState(NoBoxDecorationBackground)
+            , m_fullPaintInvalidationReason(PaintInvalidationNone)
         {
         }
 
-        // 32 bits have been used in the first word, and 11 in the second.
+        // 32 bits have been used in the first word, and 14 in the second.
         ADD_BOOLEAN_BITFIELD(selfNeedsLayout, SelfNeedsLayout);
-        ADD_BOOLEAN_BITFIELD(shouldDoFullPaintInvalidation, ShouldDoFullPaintInvalidation);
         ADD_BOOLEAN_BITFIELD(shouldInvalidateOverflowForPaint, ShouldInvalidateOverflowForPaint);
-        ADD_BOOLEAN_BITFIELD(shouldDoFullPaintInvalidationIfSelfPaintingLayer, ShouldDoFullPaintInvalidationIfSelfPaintingLayer);
         ADD_BOOLEAN_BITFIELD(mayNeedPaintInvalidation, MayNeedPaintInvalidation);
-        ADD_BOOLEAN_BITFIELD(onlyNeededPositionedMovementLayout, OnlyNeededPositionedMovementLayout);
+        ADD_BOOLEAN_BITFIELD(shouldInvalidateSelection, ShouldInvalidateSelection);
         ADD_BOOLEAN_BITFIELD(neededLayoutBecauseOfChildren, NeededLayoutBecauseOfChildren);
         ADD_BOOLEAN_BITFIELD(needsPositionedMovementLayout, NeedsPositionedMovementLayout);
         ADD_BOOLEAN_BITFIELD(normalChildNeedsLayout, NormalChildNeedsLayout);
@@ -1267,14 +1325,14 @@ private:
 
         ADD_BOOLEAN_BITFIELD(hasLayer, HasLayer);
         ADD_BOOLEAN_BITFIELD(hasOverflowClip, HasOverflowClip); // Set in the case of overflow:auto/scroll/hidden
-        ADD_BOOLEAN_BITFIELD(hasTransform, HasTransform);
+        ADD_BOOLEAN_BITFIELD(hasTransformRelatedProperty, HasTransformRelatedProperty);
         ADD_BOOLEAN_BITFIELD(hasReflection, HasReflection);
 
         ADD_BOOLEAN_BITFIELD(hasCounterNodeMap, HasCounterNodeMap);
         ADD_BOOLEAN_BITFIELD(everHadLayout, EverHadLayout);
         ADD_BOOLEAN_BITFIELD(ancestorLineBoxDirty, AncestorLineBoxDirty);
 
-        ADD_BOOLEAN_BITFIELD(layoutDidGetCalled, LayoutDidGetCalled);
+        ADD_BOOLEAN_BITFIELD(layoutDidGetCalledSinceLastFrame, LayoutDidGetCalledSinceLastFrame);
 
         ADD_BOOLEAN_BITFIELD(hasPendingResourceUpdate, HasPendingResourceUpdate);
 
@@ -1290,6 +1348,7 @@ private:
         unsigned m_selectionState : 3; // SelectionState
         unsigned m_flowThreadState : 2; // FlowThreadState
         unsigned m_boxDecorationBackgroundState : 2; // BoxDecorationBackgroundState
+        unsigned m_fullPaintInvalidationReason : 5; // PaintInvalidationReason
 
     public:
         bool isOutOfFlowPositioned() const { return m_positionedState == IsOutOfFlowPositioned; }
@@ -1311,6 +1370,9 @@ private:
 
         ALWAYS_INLINE BoxDecorationBackgroundState boxDecorationBackgroundState() const { return static_cast<BoxDecorationBackgroundState>(m_boxDecorationBackgroundState); }
         ALWAYS_INLINE void setBoxDecorationBackgroundState(BoxDecorationBackgroundState s) { m_boxDecorationBackgroundState = s; }
+
+        PaintInvalidationReason fullPaintInvalidationReason() const { return static_cast<PaintInvalidationReason>(m_fullPaintInvalidationReason); }
+        void setFullPaintInvalidationReason(PaintInvalidationReason reason) { m_fullPaintInvalidationReason = reason; }
     };
 
 #undef ADD_BOOLEAN_BITFIELD
@@ -1332,7 +1394,7 @@ private:
     // Store state between styleWillChange and styleDidChange
     static bool s_affectsParentBlock;
 
-    // This stores the paint invalidation rect from the previous layout.
+    // This stores the paint invalidation rect from the previous frame.
     LayoutRect m_previousPaintInvalidationRect;
 
     // This stores the position in the paint invalidation backing's coordinate.
@@ -1408,14 +1470,13 @@ inline void RenderObject::setNeedsLayout(MarkingBehavior markParents, SubtreeLay
 inline void RenderObject::setNeedsLayoutAndFullPaintInvalidation(MarkingBehavior markParents, SubtreeLayoutScope* layouter)
 {
     setNeedsLayout(markParents, layouter);
-    setShouldDoFullPaintInvalidation(true);
+    setShouldDoFullPaintInvalidation();
 }
 
 inline void RenderObject::clearNeedsLayout()
 {
-    setOnlyNeededPositionedMovementLayout(needsPositionedMovementLayoutOnly());
     setNeededLayoutBecauseOfChildren(needsLayoutBecauseOfChildren());
-    setLayoutDidGetCalled(true);
+    setLayoutDidGetCalledSinceLastFrame();
     setSelfNeedsLayout(false);
     setEverHadLayout(true);
     setPosChildNeedsLayout(false);
@@ -1539,7 +1600,7 @@ inline void adjustFloatRectForAbsoluteZoom(FloatRect& rect, RenderObject& render
         rect.scale(1 / zoom, 1 / zoom);
 }
 
-inline double adjustScrollForAbsoluteZoom(int value, RenderObject& renderer)
+inline double adjustScrollForAbsoluteZoom(double value, RenderObject& renderer)
 {
     ASSERT(renderer.style());
     return adjustScrollForAbsoluteZoom(value, *renderer.style());

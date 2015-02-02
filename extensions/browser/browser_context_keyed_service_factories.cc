@@ -5,6 +5,7 @@
 #include "extensions/browser/browser_context_keyed_service_factories.h"
 
 #include "extensions/browser/api/api_resource_manager.h"
+#include "extensions/browser/api/management/management_api.h"
 #include "extensions/browser/api/runtime/runtime_api.h"
 #include "extensions/browser/api/serial/serial_connection.h"
 #include "extensions/browser/api/socket/socket.h"
@@ -16,6 +17,7 @@
 #include "extensions/browser/api/storage/storage_frontend.h"
 #include "extensions/browser/api/system_info/system_info_api.h"
 #include "extensions/browser/extension_prefs_factory.h"
+#include "extensions/browser/process_manager_factory.h"
 #include "extensions/browser/renderer_startup_helper.h"
 
 namespace extensions {
@@ -30,7 +32,9 @@ void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   core_api::TCPServerSocketEventDispatcher::GetFactoryInstance();
   core_api::TCPSocketEventDispatcher::GetFactoryInstance();
   core_api::UDPSocketEventDispatcher::GetFactoryInstance();
+  extensions::ManagementAPI::GetFactoryInstance();
   ExtensionPrefsFactory::GetInstance();
+  ProcessManagerFactory::GetInstance();
   RendererStartupHelperFactory::GetInstance();
   RuntimeAPI::GetFactoryInstance();
   StorageFrontend::GetFactoryInstance();

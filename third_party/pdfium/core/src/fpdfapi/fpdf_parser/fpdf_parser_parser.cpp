@@ -1007,7 +1007,15 @@ FX_BOOL CPDF_Parser::LoadCrossRefV5(FX_FILESIZE pos, FX_FILESIZE& prev, FX_BOOL 
         return FALSE;
     }
     if (m_pDocument) {
-        m_pDocument->InsertIndirectObject(pStream->m_ObjNum, pStream);
+        CPDF_Dictionary * pDict = m_pDocument->GetRoot();
+        if (!pDict || pDict->GetObjNum() != pStream->m_ObjNum) {
+            m_pDocument->InsertIndirectObject(pStream->m_ObjNum, pStream);
+        } else {
+            if (pStream->GetType() == PDFOBJ_STREAM) {
+                pStream->Release();
+            }
+            return FALSE;
+        }
     }
     if (pStream->GetType() != PDFOBJ_STREAM) {
         return FALSE;
@@ -2435,16 +2443,13 @@ CPDF_Stream* CPDF_SyntaxParser::ReadStream(CPDF_Dictionary* pDict, PARSE_CONTEXT
         pContext->m_DataStart = m_Pos;
     }
 
-    base::CheckedNumeric<FX_FILESIZE> pos = m_Pos;
-    pos += len;
-    if (pos.IsValid() && pos.ValueOrDie() < m_FileLen) {
-        m_Pos = pos.ValueOrDie();
-    } else {
-        return NULL;
-    }
-
     CPDF_CryptoHandler* pCryptoHandler = objnum == (FX_DWORD)m_MetadataObjnum ? NULL : m_pCryptoHandler;
     if (pCryptoHandler == NULL) {
+        base::CheckedNumeric<FX_FILESIZE> pos = m_Pos;
+        pos += len;
+        if (pos.IsValid() && pos.ValueOrDie() < m_FileLen) {
+            m_Pos = pos.ValueOrDie();
+        }
         GetNextWord();
         if (m_WordSize < 9 || FXSYS_memcmp32(m_WordBuffer, "endstream", 9)) {
             m_Pos = StreamStartPos;
@@ -2475,8 +2480,8 @@ CPDF_Stream* CPDF_SyntaxParser::ReadStream(CPDF_Dictionary* pDict, PARSE_CONTEXT
                 }
             }
         }
+        m_Pos = StreamStartPos;
     }
-    m_Pos = StreamStartPos;
     CPDF_Stream* pStream;
 #if defined(_FPDFAPI_MINI_) && !defined(_FXCORE_FEATURE_ALL_)
     pStream = FX_NEW CPDF_Stream(m_pFileAccess, pCryptoHandler, m_HeaderOffset + m_Pos, len, pDict, gennum);

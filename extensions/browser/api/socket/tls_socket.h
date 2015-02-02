@@ -39,50 +39,50 @@ class TLSSocket : public ResumableTCPSocket {
   TLSSocket(scoped_ptr<net::StreamSocket> tls_socket,
             const std::string& owner_extension_id);
 
-  virtual ~TLSSocket();
+  ~TLSSocket() override;
 
   // Most of these methods either fail or forward the method call on to the
   // inner net::StreamSocket. The remaining few do actual TLS work.
 
   // Fails.
-  virtual void Connect(const std::string& address,
-                       int port,
-                       const CompletionCallback& callback) OVERRIDE;
+  void Connect(const std::string& address,
+               int port,
+               const CompletionCallback& callback) override;
   // Forwards.
-  virtual void Disconnect() OVERRIDE;
+  void Disconnect() override;
 
   // Attempts to read |count| bytes of decrypted data from the TLS socket,
   // invoking |callback| with the actual number of bytes read, or a network
   // error code if an error occurred.
-  virtual void Read(int count, const ReadCompletionCallback& callback) OVERRIDE;
+  void Read(int count, const ReadCompletionCallback& callback) override;
 
   // Fails. This should have been called on the TCP socket before secure() was
   // invoked.
-  virtual bool SetKeepAlive(bool enable, int delay) OVERRIDE;
+  bool SetKeepAlive(bool enable, int delay) override;
 
   // Fails. This should have been called on the TCP socket before secure() was
   // invoked.
-  virtual bool SetNoDelay(bool no_delay) OVERRIDE;
+  bool SetNoDelay(bool no_delay) override;
 
   // Fails. TLSSocket is only a client.
-  virtual int Listen(const std::string& address,
-                     int port,
-                     int backlog,
-                     std::string* error_msg) OVERRIDE;
+  int Listen(const std::string& address,
+             int port,
+             int backlog,
+             std::string* error_msg) override;
 
   // Fails. TLSSocket is only a client.
-  virtual void Accept(const AcceptCompletionCallback& callback) OVERRIDE;
+  void Accept(const AcceptCompletionCallback& callback) override;
 
   // Forwards.
-  virtual bool IsConnected() OVERRIDE;
+  bool IsConnected() override;
 
   // Forwards.
-  virtual bool GetPeerAddress(net::IPEndPoint* address) OVERRIDE;
+  bool GetPeerAddress(net::IPEndPoint* address) override;
   // Forwards.
-  virtual bool GetLocalAddress(net::IPEndPoint* address) OVERRIDE;
+  bool GetLocalAddress(net::IPEndPoint* address) override;
 
   // Returns TYPE_TLS.
-  virtual SocketType GetSocketType() const OVERRIDE;
+  SocketType GetSocketType() const override;
 
   // Convert |socket| to a TLS socket. |socket| must be an open TCP client
   // socket. |socket| must not have a pending read. UpgradeSocketToTLS() must
@@ -102,9 +102,9 @@ class TLSSocket : public ResumableTCPSocket {
       const SecureCallback& callback);
 
  private:
-  virtual int WriteImpl(net::IOBuffer* io_buffer,
-                        int io_buffer_size,
-                        const net::CompletionCallback& callback) OVERRIDE;
+  int WriteImpl(net::IOBuffer* io_buffer,
+                int io_buffer_size,
+                const net::CompletionCallback& callback) override;
 
   void OnReadComplete(const scoped_refptr<net::IOBuffer>& io_buffer,
                       int result);

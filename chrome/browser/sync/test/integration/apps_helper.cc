@@ -146,46 +146,42 @@ class AppsMatchChecker : public StatusChangeChecker,
                          public content::NotificationObserver {
  public:
   explicit AppsMatchChecker(const std::vector<Profile*>& profiles);
-  virtual ~AppsMatchChecker();
+  ~AppsMatchChecker() override;
 
   // StatusChangeChecker implementation.
-  virtual std::string GetDebugMessage() const OVERRIDE;
-  virtual bool IsExitConditionSatisfied() OVERRIDE;
+  std::string GetDebugMessage() const override;
+  bool IsExitConditionSatisfied() override;
 
   // extensions::ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
+  void OnExtensionLoaded(content::BrowserContext* context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
       content::BrowserContext* context,
       const extensions::Extension* extenion,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
-  virtual void OnExtensionInstalled(content::BrowserContext* browser_context,
-                                    const extensions::Extension* extension,
-                                    bool is_update) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionInstalled(content::BrowserContext* browser_context,
+                            const extensions::Extension* extension,
+                            bool is_update) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
 
   // extensions::ExtensionPrefsObserver implementation.
-  virtual void OnExtensionDisableReasonsChanged(const std::string& extension_id,
-                                                int disabled_reasons) OVERRIDE;
-  virtual void OnExtensionRegistered(const std::string& extension_id,
-                                     const base::Time& install_time,
-                                     bool is_enabled) OVERRIDE;
-  virtual void OnExtensionPrefsLoaded(
-      const std::string& extension_id,
-      const extensions::ExtensionPrefs* prefs) OVERRIDE;
-  virtual void OnExtensionPrefsDeleted(
-      const std::string& extension_id) OVERRIDE;
-  virtual void OnExtensionStateChanged(const std::string& extension_id,
-                                       bool state) OVERRIDE;
+  void OnExtensionDisableReasonsChanged(const std::string& extension_id,
+                                        int disabled_reasons) override;
+  void OnExtensionRegistered(const std::string& extension_id,
+                             const base::Time& install_time,
+                             bool is_enabled) override;
+  void OnExtensionPrefsLoaded(const std::string& extension_id,
+                              const extensions::ExtensionPrefs* prefs) override;
+  void OnExtensionPrefsDeleted(const std::string& extension_id) override;
+  void OnExtensionStateChanged(const std::string& extension_id,
+                               bool state) override;
 
   // Implementation of content::NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   void Wait();
 

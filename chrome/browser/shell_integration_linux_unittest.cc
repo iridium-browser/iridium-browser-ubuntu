@@ -43,7 +43,7 @@ class MockEnvironment : public base::Environment {
     variables_[name] = value;
   }
 
-  virtual bool GetVar(const char* variable_name, std::string* result) OVERRIDE {
+  bool GetVar(const char* variable_name, std::string* result) override {
     if (ContainsKey(variables_, variable_name)) {
       *result = variables_[variable_name];
       return true;
@@ -52,13 +52,13 @@ class MockEnvironment : public base::Environment {
     return false;
   }
 
-  virtual bool SetVar(const char* variable_name,
-                      const std::string& new_value) OVERRIDE {
+  bool SetVar(const char* variable_name,
+              const std::string& new_value) override {
     ADD_FAILURE();
     return false;
   }
 
-  virtual bool UnSetVar(const char* variable_name) OVERRIDE {
+  bool UnSetVar(const char* variable_name) override {
     ADD_FAILURE();
     return false;
   }
@@ -417,7 +417,7 @@ TEST(ShellIntegrationTest, GetWebShortcutFilename) {
     { FPL("http___foo_.desktop"), "http://foo/bar/././../baz/././../" },
     { FPL("http___.._.desktop"), "http://../../../../" },
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); i++) {
+  for (size_t i = 0; i < arraysize(test_cases); i++) {
     EXPECT_EQ(std::string(chrome::kBrowserProcessExecutableName) + "-" +
               test_cases[i].path,
               GetWebShortcutFilename(GURL(test_cases[i].url)).value()) <<
@@ -556,7 +556,7 @@ TEST(ShellIntegrationTest, GetDesktopFileContents) {
     },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); i++) {
+  for (size_t i = 0; i < arraysize(test_cases); i++) {
     SCOPED_TRACE(i);
     EXPECT_EQ(
         test_cases[i].expected_output,
@@ -631,7 +631,7 @@ TEST(ShellIntegrationTest, GetDirectoryFileContents) {
     },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); i++) {
+  for (size_t i = 0; i < arraysize(test_cases); i++) {
     SCOPED_TRACE(i);
     EXPECT_EQ(test_cases[i].expected_output,
               GetDirectoryFileContents(base::ASCIIToUTF16(test_cases[i].title),

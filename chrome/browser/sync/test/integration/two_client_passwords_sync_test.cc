@@ -35,21 +35,12 @@ static const char* kValidPassphrase = "passphrase!";
 class TwoClientPasswordsSyncTest : public SyncTest {
  public:
   TwoClientPasswordsSyncTest() : SyncTest(TWO_CLIENT) {}
-  virtual ~TwoClientPasswordsSyncTest() {}
+  ~TwoClientPasswordsSyncTest() override {}
 
-  virtual bool TestUsesSelfNotifications() OVERRIDE { return false; }
+  bool TestUsesSelfNotifications() override { return false; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TwoClientPasswordsSyncTest);
-};
-
-class LegacyTwoClientPasswordsSyncTest : public SyncTest {
- public:
-  LegacyTwoClientPasswordsSyncTest() : SyncTest(TWO_CLIENT_LEGACY) {}
-  virtual ~LegacyTwoClientPasswordsSyncTest() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(LegacyTwoClientPasswordsSyncTest);
 };
 
 // TCM ID - 3732277

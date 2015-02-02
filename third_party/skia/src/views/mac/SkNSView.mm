@@ -118,10 +118,15 @@ SK_COMPILE_ASSERT(SK_SUPPORT_GPU, not_implemented_for_non_gpu_build);
 }
 
 - (void)dealloc {
-    delete fWind;
+    [self freeNativeWind];
     self.fGLContext = nil;
     self.fTitle = nil;
     [super dealloc];
+}
+
+- (void)freeNativeWind {
+    delete fWind;
+    fWind = nil;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -381,6 +386,7 @@ CGLContextObj createGLContext(int msaaSampleCount) {
         andGetInfo:(SkOSWindow::AttachmentInfo*) info {
     if (nil == fGLContext) {
         CGLContextObj ctx = createGLContext(sampleCount);
+        SkASSERT(ctx);
         fGLContext = [[NSOpenGLContext alloc] initWithCGLContextObj:ctx];
         CGLReleaseContext(ctx);
         if (NULL == fGLContext) {

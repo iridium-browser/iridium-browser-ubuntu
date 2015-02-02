@@ -91,7 +91,7 @@ static void npObjectInvokeImpl(const v8::FunctionCallbackInfo<v8::Value>& info, 
         // The holder object is not a subtype of HTMLPlugInElement, it must be an NPObject which has three
         // internal fields.
         if (info.Holder()->InternalFieldCount() != npObjectInternalFieldCount) {
-            V8ThrowException::throwReferenceError("NPMethod called on non-NPObject", info.GetIsolate());
+            V8ThrowException::throwReferenceError(info.GetIsolate(), "NPMethod called on non-NPObject");
             return;
         }
 
@@ -100,7 +100,7 @@ static void npObjectInvokeImpl(const v8::FunctionCallbackInfo<v8::Value>& info, 
 
     // Verify that our wrapper wasn't using a NPObject which has already been deleted.
     if (!npObject || !_NPN_IsAlive(npObject)) {
-        V8ThrowException::throwReferenceError("NPObject deleted", isolate);
+        V8ThrowException::throwReferenceError(isolate, "NPObject deleted");
         return;
     }
 
@@ -109,7 +109,7 @@ static void npObjectInvokeImpl(const v8::FunctionCallbackInfo<v8::Value>& info, 
     OwnPtr<NPVariant[]> npArgs = adoptArrayPtr(new NPVariant[numArgs]);
 
     for (int i = 0; i < numArgs; i++)
-        convertV8ObjectToNPVariant(info[i], npObject, &npArgs[i], isolate);
+        convertV8ObjectToNPVariant(isolate, info[i], npObject, &npArgs[i]);
 
     NPVariant result;
     VOID_TO_NPVARIANT(result);
@@ -136,7 +136,7 @@ static void npObjectInvokeImpl(const v8::FunctionCallbackInfo<v8::Value>& info, 
     }
 
     if (!retval)
-        V8ThrowException::throwGeneralError("Error calling method on NPObject.", isolate);
+        V8ThrowException::throwGeneralError(isolate, "Error calling method on NPObject.");
 
     for (int i = 0; i < numArgs; i++)
         _NPN_ReleaseVariantValue(&npArgs[i]);
@@ -144,7 +144,7 @@ static void npObjectInvokeImpl(const v8::FunctionCallbackInfo<v8::Value>& info, 
     // Unwrap return values.
     v8::Handle<v8::Value> returnValue;
     if (_NPN_IsAlive(npObject))
-        returnValue = convertNPVariantToV8Object(&result, npObject, isolate);
+        returnValue = convertNPVariantToV8Object(isolate, &result, npObject);
     _NPN_ReleaseVariantValue(&result);
 
     v8SetReturnValue(info, returnValue);
@@ -240,12 +240,12 @@ static v8::Handle<v8::Value> npObjectGetProperty(v8::Local<v8::Object> self, NPI
     // Verify that our wrapper wasn't using a NPObject which
     // has already been deleted.
     if (!npObject || !_NPN_IsAlive(npObject))
-        return V8ThrowException::throwReferenceError("NPObject deleted", isolate);
+        return V8ThrowException::throwReferenceError(isolate, "NPObject deleted");
 
 
     if (npObject->_class->hasProperty && npObject->_class->getProperty && npObject->_class->hasProperty(npObject, identifier)) {
         if (!_NPN_IsAlive(npObject))
-            return V8ThrowException::throwReferenceError("NPObject deleted", isolate);
+            return V8ThrowException::throwReferenceError(isolate, "NPObject deleted");
 
         NPVariant result;
         VOID_TO_NPVARIANT(result);
@@ -254,18 +254,18 @@ static v8::Handle<v8::Value> npObjectGetProperty(v8::Local<v8::Object> self, NPI
 
         v8::Handle<v8::Value> returnValue;
         if (_NPN_IsAlive(npObject))
-            returnValue = convertNPVariantToV8Object(&result, npObject, isolate);
+            returnValue = convertNPVariantToV8Object(isolate, &result, npObject);
         _NPN_ReleaseVariantValue(&result);
         return returnValue;
 
     }
 
     if (!_NPN_IsAlive(npObject))
-        return V8ThrowException::throwReferenceError("NPObject deleted", isolate);
+        return V8ThrowException::throwReferenceError(isolate, "NPObject deleted");
 
     if (key->IsString() && npObject->_class->hasMethod && npObject->_class->hasMethod(npObject, identifier)) {
         if (!_NPN_IsAlive(npObject))
-            return V8ThrowException::throwReferenceError("NPObject deleted", isolate);
+            return V8ThrowException::throwReferenceError(isolate, "NPObject deleted");
 
         PrivateIdentifier* id = static_cast<PrivateIdentifier*>(identifier);
         v8::Local<v8::FunctionTemplate> functionTemplate = V8NPTemplateMap::sharedInstance(isolate).get(id);
@@ -322,17 +322,17 @@ static v8::Handle<v8::Value> npObjectSetProperty(v8::Local<v8::Object> self, NPI
 
     // Verify that our wrapper wasn't using a NPObject which has already been deleted.
     if (!npObject || !_NPN_IsAlive(npObject)) {
-        V8ThrowException::throwReferenceError("NPObject deleted", isolate);
+        V8ThrowException::throwReferenceError(isolate, "NPObject deleted");
         return value; // Intercepted, but an exception was thrown.
     }
 
     if (npObject->_class->hasProperty && npObject->_class->setProperty && npObject->_class->hasProperty(npObject, identifier)) {
         if (!_NPN_IsAlive(npObject))
-            return V8ThrowException::throwReferenceError("NPObject deleted", isolate);
+            return V8ThrowException::throwReferenceError(isolate, "NPObject deleted");
 
         NPVariant npValue;
         VOID_TO_NPVARIANT(npValue);
-        convertV8ObjectToNPVariant(value, npObject, &npValue, isolate);
+        convertV8ObjectToNPVariant(isolate, value, npObject, &npValue);
         bool success = npObject->_class->setProperty(npObject, identifier, &npValue);
         _NPN_ReleaseVariantValue(&npValue);
         if (success)
@@ -374,7 +374,7 @@ void npObjectPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& info,
     // Verify that our wrapper wasn't using a NPObject which
     // has already been deleted.
     if (!npObject || !_NPN_IsAlive(npObject)) {
-        V8ThrowException::throwReferenceError("NPObject deleted", info.GetIsolate());
+        V8ThrowException::throwReferenceError(info.GetIsolate(), "NPObject deleted");
         return;
     }
 
@@ -433,7 +433,7 @@ inline void DOMWrapperMap<NPObject>::PersistentValueMapTraits::Dispose(
         _NPN_ReleaseObject(npObject);
 }
 
-v8::Local<v8::Object> createV8ObjectForNPObject(NPObject* object, NPObject* root, v8::Isolate* isolate)
+v8::Local<v8::Object> createV8ObjectForNPObject(v8::Isolate* isolate, NPObject* object, NPObject* root)
 {
     static v8::Eternal<v8::FunctionTemplate> npObjectDesc;
 

@@ -6,6 +6,8 @@
 #define CC_TEST_TEST_IN_PROCESS_CONTEXT_PROVIDER_H_
 
 #include "cc/output/context_provider.h"
+#include "cc/test/test_gpu_memory_buffer_manager.h"
+#include "cc/test/test_image_factory.h"
 #include "skia/ext/refptr.h"
 
 class GrContext;
@@ -17,31 +19,36 @@ class GLInProcessContext;
 namespace cc {
 
 scoped_ptr<gpu::GLInProcessContext> CreateTestInProcessContext();
+scoped_ptr<gpu::GLInProcessContext> CreateTestInProcessContext(
+    TestGpuMemoryBufferManager* gpu_memory_buffer_manager,
+    TestImageFactory* image_factory);
 
 class TestInProcessContextProvider : public ContextProvider {
  public:
   TestInProcessContextProvider();
 
-  virtual bool BindToCurrentThread() OVERRIDE;
-  virtual gpu::gles2::GLES2Interface* ContextGL() OVERRIDE;
-  virtual gpu::ContextSupport* ContextSupport() OVERRIDE;
-  virtual class GrContext* GrContext() OVERRIDE;
-  virtual Capabilities ContextCapabilities() OVERRIDE;
-  virtual bool IsContextLost() OVERRIDE;
-  virtual void VerifyContexts() OVERRIDE;
-  virtual void DeleteCachedResources() OVERRIDE;
-  virtual bool DestroyedOnMainThread() OVERRIDE;
-  virtual void SetLostContextCallback(
-      const LostContextCallback& lost_context_callback) OVERRIDE;
-  virtual void SetMemoryPolicyChangedCallback(
+  bool BindToCurrentThread() override;
+  gpu::gles2::GLES2Interface* ContextGL() override;
+  gpu::ContextSupport* ContextSupport() override;
+  class GrContext* GrContext() override;
+  Capabilities ContextCapabilities() override;
+  bool IsContextLost() override;
+  void VerifyContexts() override;
+  void DeleteCachedResources() override;
+  bool DestroyedOnMainThread() override;
+  void SetLostContextCallback(
+      const LostContextCallback& lost_context_callback) override;
+  void SetMemoryPolicyChangedCallback(
       const MemoryPolicyChangedCallback& memory_policy_changed_callback)
-      OVERRIDE;
+      override;
 
  protected:
   friend class base::RefCountedThreadSafe<TestInProcessContextProvider>;
-  virtual ~TestInProcessContextProvider();
+  ~TestInProcessContextProvider() override;
 
  private:
+  TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
+  TestImageFactory image_factory_;
   scoped_ptr<gpu::GLInProcessContext> context_;
   skia::RefPtr<class GrContext> gr_context_;
 };

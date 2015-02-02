@@ -53,8 +53,13 @@ WebInspector.CompilerScriptMapping = function(debuggerModel, workspace, networkW
     this._sourceMapForScriptId = {};
     /** @type {!Map.<!WebInspector.SourceMap, !WebInspector.Script>} */
     this._scriptForSourceMap = new Map();
-    /** @type {!StringMap.<!WebInspector.SourceMap>} */
-    this._sourceMapForURL = new StringMap();
+    /** @type {!Map.<string, !WebInspector.SourceMap>} */
+    this._sourceMapForURL = new Map();
+    /** @type {!Map.<string, !WebInspector.UISourceCode>} */
+    this._stubUISourceCodes = new Map();
+
+    this._stubProjectID = "compiler-script-project";
+    this._stubProjectDelegate = new WebInspector.ContentProviderBasedProjectDelegate(this._workspace, this._stubProjectID, WebInspector.projectTypes.Service);
     debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.GlobalObjectCleared, this._debuggerReset, this);
 }
 
@@ -66,6 +71,11 @@ WebInspector.CompilerScriptMapping.prototype = {
     rawLocationToUILocation: function(rawLocation)
     {
         var debuggerModelLocation = /** @type {!WebInspector.DebuggerModel.Location} */ (rawLocation);
+
+        var stubUISourceCode = this._stubUISourceCodes.get(debuggerModelLocation.scriptId);
+        if (stubUISourceCode)
+            return new WebInspector.UILocation(stubUISourceCode, 0, 0);
+
         var sourceMap = this._sourceMapForScriptId[debuggerModelLocation.scriptId];
         if (!sourceMap)
             return null;
@@ -89,6 +99,8 @@ WebInspector.CompilerScriptMapping.prototype = {
      */
     uiLocationToRawLocation: function(uiSourceCode, lineNumber, columnNumber)
     {
+        if (uiSourceCode.project().type() === WebInspector.projectTypes.Service)
+            return null;
         if (!uiSourceCode.url)
             return null;
         var sourceMap = this._sourceMapForURL.get(uiSourceCode.url);
@@ -109,8 +121,11 @@ WebInspector.CompilerScriptMapping.prototype = {
      */
     addScript: function(script)
     {
-        this._debuggerWorkspaceBinding.pushSourceMapping(script, this);
-        script.addEventListener(WebInspector.Script.Events.SourceMapURLAdded, this._sourceMapURLAdded.bind(this));
+        if (!script.sourceMapURL) {
+            script.addEventListener(WebInspector.Script.Events.SourceMapURLAdded, this._sourceMapURLAdded.bind(this));
+            return;
+        }
+
         this._processScript(script);
     },
 
@@ -120,6 +135,8 @@ WebInspector.CompilerScriptMapping.prototype = {
     _sourceMapURLAdded: function(event)
     {
         var script = /** @type {!WebInspector.Script} */ (event.target);
+        if (!script.sourceMapURL)
+            return;
         this._processScript(script);
     },
 
@@ -128,7 +145,18 @@ WebInspector.CompilerScriptMapping.prototype = {
      */
     _processScript: function(script)
     {
-        this.loadSourceMapForScript(script, sourceMapLoaded.bind(this));
+        // Create stub UISourceCode for the time source mapping is being loaded.
+        var url = script.sourceURL;
+        var splitURL = WebInspector.ParsedURL.splitURLIntoPathComponents(url);
+        var projectName = splitURL[0];
+        var parentPath = splitURL.slice(1, -1).join("/");
+        var name = splitURL.peekLast() || "";
+        var uiSourceCodePath = this._stubProjectDelegate.addContentProvider(parentPath, name, url, url, new WebInspector.StaticContentProvider(WebInspector.resourceTypes.Script, "\n\n\n\n\n// Please wait a bit.\n// Compiled script is not shown while source map is being loaded!", url));
+        var stubUISourceCode = /** @type {!WebInspector.UISourceCode} */ (this._workspace.uiSourceCode(this._stubProjectID, uiSourceCodePath));
+        this._stubUISourceCodes.set(script.scriptId, stubUISourceCode);
+
+        this._debuggerWorkspaceBinding.pushSourceMapping(script, this);
+        this._loadSourceMapForScript(script, sourceMapLoaded.bind(this));
 
         /**
          * @param {?WebInspector.SourceMap} sourceMap
@@ -136,8 +164,13 @@ WebInspector.CompilerScriptMapping.prototype = {
          */
         function sourceMapLoaded(sourceMap)
         {
-            if (!sourceMap)
+            this._stubUISourceCodes.delete(script.scriptId);
+            this._stubProjectDelegate.removeFile(uiSourceCodePath);
+
+            if (!sourceMap) {
+                this._debuggerWorkspaceBinding.updateLocations(script);
                 return;
+            }
 
             if (this._scriptForSourceMap.get(sourceMap)) {
                 this._sourceMapForScriptId[script.scriptId] = sourceMap;
@@ -233,20 +266,20 @@ WebInspector.CompilerScriptMapping.prototype = {
      * @param {!WebInspector.Script} script
      * @param {function(?WebInspector.SourceMap)} callback
      */
-    loadSourceMapForScript: function(script, callback)
+    _loadSourceMapForScript: function(script, callback)
     {
         // script.sourceURL can be a random string, but is generally an absolute path -> complete it to inspected page url for
         // relative links.
-        if (!script.sourceMapURL) {
-            callback(null);
-            return;
-        }
         var scriptURL = WebInspector.ParsedURL.completeURL(script.target().resourceTreeModel.inspectedPageURL(), script.sourceURL);
         if (!scriptURL) {
             callback(null);
             return;
         }
-        var sourceMapURL = WebInspector.ParsedURL.completeURL(scriptURL, script.sourceMapURL);
+
+        console.assert(script.sourceMapURL);
+        var scriptSourceMapURL = /** @type {string} */ (script.sourceMapURL);
+
+        var sourceMapURL = WebInspector.ParsedURL.completeURL(scriptURL, scriptSourceMapURL);
         if (!sourceMapURL) {
             callback(null);
             return;
@@ -301,7 +334,7 @@ WebInspector.CompilerScriptMapping.prototype = {
             this._unbindUISourceCode(uiSourceCode);
         }
 
-        this._sourceMapForURL.keys().forEach(unbindUISourceCodeForURL.bind(this));
+        this._sourceMapForURL.keysArray().forEach(unbindUISourceCodeForURL.bind(this));
 
         this._sourceMapForSourceMapURL = {};
         this._pendingSourceMapLoadingCallbacks = {};

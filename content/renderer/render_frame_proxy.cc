@@ -16,6 +16,7 @@
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
+#include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
 namespace content {
@@ -117,10 +118,6 @@ RenderFrameProxy::~RenderFrameProxy() {
 
   RenderThread::Get()->RemoveRoute(routing_id_);
   g_routing_id_proxy_map.Get().erase(routing_id_);
-
-  // TODO(nick): Call close unconditionally when web_frame() is always remote.
-  if (web_frame()->isWebRemoteFrame())
-    web_frame()->close();
 }
 
 void RenderFrameProxy::Init(blink::WebRemoteFrame* web_frame,
@@ -174,13 +171,8 @@ bool RenderFrameProxy::Send(IPC::Message* message) {
 }
 
 void RenderFrameProxy::OnDeleteProxy() {
-  RenderFrameImpl* render_frame =
-      RenderFrameImpl::FromRoutingID(frame_routing_id_);
-
-  if (render_frame)
-    render_frame->set_render_frame_proxy(NULL);
-
-  delete this;
+  DCHECK(web_frame_->isWebRemoteFrame());
+  web_frame_->detach();
 }
 
 void RenderFrameProxy::OnChildFrameProcessGone() {
@@ -227,6 +219,14 @@ void RenderFrameProxy::OnDisownOpener() {
 
   if (web_frame_->opener())
     web_frame_->setOpener(NULL);
+}
+
+void RenderFrameProxy::frameDetached() {
+  if (web_frame_->parent())
+    web_frame_->parent()->removeChild(web_frame_);
+
+  web_frame_->close();
+  delete this;
 }
 
 void RenderFrameProxy::postMessageEvent(
@@ -276,6 +276,25 @@ void RenderFrameProxy::initializeChildFrame(
     float scale_factor) {
   Send(new FrameHostMsg_InitializeChildFrame(
       routing_id_, frame_rect, scale_factor));
+}
+
+void RenderFrameProxy::navigate(const blink::WebURLRequest& request,
+                                bool should_replace_current_entry) {
+  FrameHostMsg_OpenURL_Params params;
+  params.url = request.url();
+  params.referrer = Referrer(
+      GURL(request.httpHeaderField(blink::WebString::fromUTF8("Referer"))),
+      request.referrerPolicy());
+  params.disposition = CURRENT_TAB;
+  params.should_replace_current_entry = should_replace_current_entry;
+  params.user_gesture =
+      blink::WebUserGestureIndicator::isProcessingUserGesture();
+  blink::WebUserGestureIndicator::consumeUserGesture();
+  Send(new FrameHostMsg_OpenURL(routing_id_, params));
+}
+
+void RenderFrameProxy::forwardInputEvent(const blink::WebInputEvent* event) {
+  Send(new FrameHostMsg_ForwardInputEvent(routing_id_, event));
 }
 
 }  // namespace

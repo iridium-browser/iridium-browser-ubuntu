@@ -7,13 +7,12 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/webplugininfo.h"
@@ -35,12 +34,12 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
  public:
   ExtensionContentSettingsApiTest() : profile_(NULL) {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kDisablePluginsDiscovery);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
 
     // The browser might get closed later (and therefore be destroyed), so we
@@ -53,7 +52,7 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
     g_browser_process->AddRefModule();
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // ReleaseBrowserProcessModule() needs to be called in a message loop, so we
     // post a task to do it, then run the message loop.
     base::MessageLoop::current()->PostTask(
@@ -215,8 +214,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionContentSettingsApiTest,
       FILE_PATH_LITERAL("/plugins/foo.plugin");
   base::FilePath::CharType kBarPath[] =
       FILE_PATH_LITERAL("/plugins/bar.plugin");
-  const char* kFooName = "Foo Plugin";
-  const char* kBarName = "Bar Plugin";
+  const char kFooName[] = "Foo Plugin";
+  const char kBarName[] = "Bar Plugin";
 
   content::PluginService::GetInstance()->RegisterInternalPlugin(
       content::WebPluginInfo(base::ASCIIToUTF16(kFooName),

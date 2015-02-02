@@ -98,11 +98,18 @@ class CrashReporterClient {
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS)
   // Returns a textual description of the product type and version to include
-  // in the crash report.
-  virtual void GetProductNameAndVersion(std::string* product_name,
-                                        std::string* version);
+  // in the crash report. Neither out parameter should be set to NULL.
+  virtual void GetProductNameAndVersion(const char** product_name,
+                                        const char** version);
 
   virtual base::FilePath GetReporterLogFilename();
+
+  // Custom crash minidump handler after the minidump is generated.
+  // Returns true if the minidump is handled (client); otherwise, return false
+  // to fallback to default handler.
+  // WARNING: this handler runs in a compromised context. It may not call into
+  // libc nor allocate memory normally.
+  virtual bool HandleCrashDump(const char* crashdump_filename);
 #endif
 
   // The location where minidump files should be written. Returns true if

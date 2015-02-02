@@ -37,6 +37,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLVideoElement.h"
 #include "core/html/MediaController.h"
+#include "core/html/TimeRanges.h"
 #include "core/html/shadow/MediaControls.h"
 #include "core/html/track/TextTrack.h"
 #include "core/html/track/vtt/VTTRegionList.h"
@@ -418,10 +419,12 @@ void MediaControlTimelineElement::defaultEventHandler(Event* event)
     if (event->type() == EventTypeNames::input) {
         // FIXME: This will need to take the timeline offset into consideration
         // once that concept is supported, see https://crbug.com/312699
-        if (mediaElement().controller())
-            mediaElement().controller()->setCurrentTime(time);
-        else
+        if (mediaElement().controller()) {
+            if (mediaElement().controller()->seekable()->contain(time))
+                mediaElement().controller()->setCurrentTime(time);
+        } else if (mediaElement().seekable()->contain(time)) {
             mediaElement().setCurrentTime(time, IGNORE_EXCEPTION);
+        }
     }
 
     RenderSlider* slider = toRenderSlider(renderer());
@@ -567,6 +570,7 @@ void MediaControlFullscreenButtonElement::setIsFullscreen(bool isFullscreen)
 MediaControlCastButtonElement::MediaControlCastButtonElement(MediaControls& mediaControls, bool isOverlayButton)
     : MediaControlInputElement(mediaControls, MediaCastOnButton), m_isOverlayButton(isOverlayButton)
 {
+    setIsPlayingRemotely(false);
 }
 
 PassRefPtrWillBeRawPtr<MediaControlCastButtonElement> MediaControlCastButtonElement::create(MediaControls& mediaControls, bool isOverlayButton)
@@ -598,7 +602,19 @@ const AtomicString& MediaControlCastButtonElement::shadowPseudoId() const
 
 void MediaControlCastButtonElement::setIsPlayingRemotely(bool isPlayingRemotely)
 {
-    setDisplayType(isPlayingRemotely ? MediaCastOnButton : MediaCastOffButton);
+    if (isPlayingRemotely) {
+        if (m_isOverlayButton) {
+            setDisplayType(MediaOverlayCastOnButton);
+        } else {
+            setDisplayType(MediaCastOnButton);
+        }
+    } else {
+        if (m_isOverlayButton) {
+            setDisplayType(MediaOverlayCastOffButton);
+        } else {
+            setDisplayType(MediaCastOffButton);
+        }
+    }
 }
 
 bool MediaControlCastButtonElement::keepEventInNode(Event* event)

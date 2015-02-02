@@ -11,7 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "remoting/test/fake_network_dispatcher.h"
-#include "third_party/libjingle/source/talk/p2p/base/packetsocketfactory.h"
+#include "third_party/webrtc/p2p/base/packetsocketfactory.h"
 
 namespace remoting {
 
@@ -23,7 +23,7 @@ class FakePacketSocketFactory : public rtc::PacketSocketFactory,
  public:
   // |dispatcher| must outlive the factory.
   explicit FakePacketSocketFactory(FakeNetworkDispatcher* dispatcher);
-  virtual ~FakePacketSocketFactory();
+  ~FakePacketSocketFactory() override;
 
   void OnSocketDestroyed(int port);
 
@@ -50,29 +50,30 @@ class FakePacketSocketFactory : public rtc::PacketSocketFactory,
   }
 
   // rtc::PacketSocketFactory interface.
-  virtual rtc::AsyncPacketSocket* CreateUdpSocket(
+  rtc::AsyncPacketSocket* CreateUdpSocket(
       const rtc::SocketAddress& local_address,
-      int min_port, int max_port) OVERRIDE;
-  virtual rtc::AsyncPacketSocket* CreateServerTcpSocket(
+      uint16 min_port,
+      uint16 max_port) override;
+  rtc::AsyncPacketSocket* CreateServerTcpSocket(
       const rtc::SocketAddress& local_address,
-      int min_port, int max_port,
-      int opts) OVERRIDE;
-  virtual rtc::AsyncPacketSocket* CreateClientTcpSocket(
+      uint16 min_port,
+      uint16 max_port,
+      int opts) override;
+  rtc::AsyncPacketSocket* CreateClientTcpSocket(
       const rtc::SocketAddress& local_address,
       const rtc::SocketAddress& remote_address,
       const rtc::ProxyInfo& proxy_info,
       const std::string& user_agent,
-      int opts) OVERRIDE;
-  virtual rtc::AsyncResolverInterface* CreateAsyncResolver() OVERRIDE;
+      int opts) override;
+  rtc::AsyncResolverInterface* CreateAsyncResolver() override;
 
   // FakeNetworkDispatcher::Node interface.
-  virtual const scoped_refptr<base::SingleThreadTaskRunner>& GetThread()
-      const OVERRIDE;
-  virtual const rtc::IPAddress& GetAddress() const OVERRIDE;
-  virtual void ReceivePacket(const rtc::SocketAddress& from,
-                             const rtc::SocketAddress& to,
-                             const scoped_refptr<net::IOBuffer>& data,
-                             int data_size) OVERRIDE;
+  const scoped_refptr<base::SingleThreadTaskRunner>& GetThread() const override;
+  const rtc::IPAddress& GetAddress() const override;
+  void ReceivePacket(const rtc::SocketAddress& from,
+                     const rtc::SocketAddress& to,
+                     const scoped_refptr<net::IOBuffer>& data,
+                     int data_size) override;
 
  private:
   struct PendingPacket {

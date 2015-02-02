@@ -6,11 +6,9 @@
 
 #include <vector>
 
-#include "ash/ash_switches.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/launch.h"
@@ -47,6 +45,10 @@
 #include "ui/wm/core/wm_core_switches.h"
 #include "url/gurl.h"
 
+#if !defined(USE_ATHENA)
+#include "ash/ash_switches.h"
+#endif
+
 using content::BrowserThread;
 
 namespace chromeos {
@@ -69,9 +71,10 @@ std::string DeriveCommandLine(const GURL& start_url,
                               CommandLine* command_line) {
   DCHECK_NE(&base_command_line, command_line);
 
-  static const char* kForwardSwitches[] = {
+  static const char* const kForwardSwitches[] = {
     ::switches::kDisableAccelerated2dCanvas,
     ::switches::kDisableAcceleratedVideoDecode,
+    ::switches::kDisableCastStreamingHWEncoding,
     ::switches::kDisableDelegatedRenderer,
     ::switches::kDisableDistanceFieldText,
     ::switches::kDisableGpu,
@@ -82,6 +85,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableImplSidePainting,
     ::switches::kDisableLowResTiling,
     ::switches::kDisableMediaSource,
+    ::switches::kDisableOneCopy,
     ::switches::kDisablePreferCompositingToLCDText,
     ::switches::kDisablePrefixedEncryptedMedia,
     ::switches::kDisablePanelFitting,
@@ -90,7 +94,6 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableThreadedScrolling,
     ::switches::kDisableTouchDragDrop,
     ::switches::kDisableTouchEditing,
-    ::switches::kDisableZeroCopy,
     ::switches::kEnableAcceleratedJpegDecoding,
     ::switches::kEnableBeginFrameScheduling,
     ::switches::kEnablePreferCompositingToLCDText,
@@ -99,15 +102,17 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kEnableDisplayList2dCanvas,
     ::switches::kEnableEncryptedMedia,
     ::switches::kDisableGpuSandbox,
-    ::switches::kDisableDeferredFilters,
     ::switches::kEnableContainerCulling,
+    ::switches::kEnableTextBlobs,
     ::switches::kEnableDistanceFieldText,
     ::switches::kEnableGpuRasterization,
+    ::switches::kEnableImageColorProfiles,
     ::switches::kEnableImplSidePainting,
     ::switches::kEnableLogging,
     ::switches::kEnableLowResTiling,
     ::switches::kEnableOneCopy,
     ::switches::kEnablePinch,
+    ::switches::kEnablePluginPlaceholderShadowDom,
     ::switches::kEnableTouchDragDrop,
     ::switches::kEnableTouchEditing,
     ::switches::kEnableViewport,
@@ -128,10 +133,11 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kPpapiFlashVersion,
     ::switches::kPpapiInProcess,
     ::switches::kRendererStartupDialog,
+    ::switches::kRootLayerScrolls,
     ::switches::kEnableShareGroupAsyncTextureUpload,
     ::switches::kTabCaptureUpscaleQuality,
     ::switches::kTabCaptureDownscaleQuality,
-#if defined(USE_XI2_MT)
+#if defined(USE_XI2_MT) || defined(USE_OZONE)
     ::switches::kTouchCalibration,
 #endif
     ::switches::kTouchDevices,
@@ -162,6 +168,7 @@ std::string DeriveCommandLine(const GURL& start_url,
 #endif
     app_list::switches::kDisableSyncAppList,
     app_list::switches::kEnableSyncAppList,
+#if !defined(USE_ATHENA)
     ash::switches::kAshDefaultWallpaperLarge,
     ash::switches::kAshDefaultWallpaperSmall,
     ash::switches::kAshGuestWallpaperLarge,
@@ -169,13 +176,13 @@ std::string DeriveCommandLine(const GURL& start_url,
     ash::switches::kAshHostWindowBounds,
     ash::switches::kAshTouchHud,
     ash::switches::kAuraLegacyPowerButton,
+#endif
     // Please keep these in alphabetical order. Non-UI Compositor switches
     // here should also be added to
     // content/browser/renderer_host/render_process_host_impl.cc.
     cc::switches::kCompositeToMailbox,
     cc::switches::kDisableCompositedAntialiasing,
     cc::switches::kDisableMainFrameBeforeActivation,
-    cc::switches::kDisableMainFrameBeforeDraw,
     cc::switches::kDisablePinchVirtualViewport,
     cc::switches::kDisableThreadedAnimation,
     cc::switches::kEnableGpuBenchmarking,

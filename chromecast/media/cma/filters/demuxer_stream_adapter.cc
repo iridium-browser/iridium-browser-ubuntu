@@ -30,7 +30,7 @@ class DummyMediaTaskRunner : public MediaTaskRunner {
   virtual bool PostMediaTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task,
-      base::TimeDelta timestamp) OVERRIDE;
+      base::TimeDelta timestamp) override;
 
  private:
   virtual ~DummyMediaTaskRunner();
@@ -68,8 +68,8 @@ DemuxerStreamAdapter::DemuxerStreamAdapter(
       demuxer_stream_(demuxer_stream),
       is_pending_read_(false),
       is_pending_demuxer_read_(false),
-      weak_factory_(this),
-      weak_this_(weak_factory_.GetWeakPtr()) {
+      weak_factory_(this) {
+  weak_this_ = weak_factory_.GetWeakPtr();
   ResetMediaTaskRunner();
   thread_checker_.DetachFromThread();
 }

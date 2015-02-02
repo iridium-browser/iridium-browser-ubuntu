@@ -29,7 +29,7 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
                          public base::SupportsUserData::Data {
  public:
   explicit GuestViewManager(content::BrowserContext* context);
-  virtual ~GuestViewManager();
+  ~GuestViewManager() override;
 
   static GuestViewManager* FromBrowserContext(content::BrowserContext* context);
 
@@ -72,18 +72,19 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   content::WebContents* CreateGuestWithWebContentsParams(
       const std::string& view_type,
       const std::string& embedder_extension_id,
-      int embedder_render_process_id,
+      content::WebContents* embedder_web_contents,
       const content::WebContents::CreateParams& create_params);
 
   content::SiteInstance* GetGuestSiteInstance(
       const GURL& guest_site);
 
   // BrowserPluginGuestManager implementation.
-  virtual content::WebContents* GetGuestByInstanceID(
+  content::WebContents* GetGuestByInstanceID(
       content::WebContents* embedder_web_contents,
-      int element_instance_id) OVERRIDE;
-  virtual bool ForEachGuest(content::WebContents* embedder_web_contents,
-                            const GuestCallback& callback) OVERRIDE;
+      int element_instance_id) override;
+  bool ForEachGuest(content::WebContents* embedder_web_contents,
+                    const GuestCallback& callback) override;
+
  protected:
   friend class GuestViewBase;
   FRIEND_TEST_ALL_PREFIXES(GuestViewManagerTest, AddRemove);

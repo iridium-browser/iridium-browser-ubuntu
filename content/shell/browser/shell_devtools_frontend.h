@@ -15,9 +15,6 @@
 
 namespace content {
 
-GURL GetDevToolsPathAsURL(const std::string& settings,
-                          const std::string& frontend_url);
-
 class RenderViewHost;
 class Shell;
 class WebContents;
@@ -27,9 +24,7 @@ class ShellDevToolsFrontend : public WebContentsObserver,
                               public DevToolsAgentHostClient {
  public:
   static ShellDevToolsFrontend* Show(WebContents* inspected_contents);
-  static ShellDevToolsFrontend* Show(WebContents* inspected_contents,
-                                     const std::string& settings,
-                                     const std::string& frontend_url);
+
   void Activate();
   void Focus();
   void InspectElementAt(int x, int y);
@@ -37,27 +32,25 @@ class ShellDevToolsFrontend : public WebContentsObserver,
 
   Shell* frontend_shell() const { return frontend_shell_; }
 
- private:
+ protected:
   ShellDevToolsFrontend(Shell* frontend_shell, DevToolsAgentHost* agent_host);
-  virtual ~ShellDevToolsFrontend();
+  ~ShellDevToolsFrontend() override;
 
+ private:
   // WebContentsObserver overrides
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DocumentOnLoadCompletedInMainFrame() OVERRIDE;
-  virtual void WebContentsDestroyed() OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
+  void RenderViewCreated(RenderViewHost* render_view_host) override;
+  void DocumentOnLoadCompletedInMainFrame() override;
+  void WebContentsDestroyed() override;
 
   // content::DevToolsFrontendHost::Delegate implementation.
-  virtual void HandleMessageFromDevToolsFrontend(
-      const std::string& message) OVERRIDE;
-  virtual void HandleMessageFromDevToolsFrontendToBackend(
-      const std::string& message) OVERRIDE;
+  void HandleMessageFromDevToolsFrontend(const std::string& message) override;
+  void HandleMessageFromDevToolsFrontendToBackend(
+      const std::string& message) override;
 
   // content::DevToolsAgentHostClient implementation.
-  virtual void DispatchProtocolMessage(
-      DevToolsAgentHost* agent_host, const std::string& message) OVERRIDE;
-  virtual void AgentHostClosed(
-      DevToolsAgentHost* agent_host, bool replaced) OVERRIDE;
+  void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
+                               const std::string& message) override;
+  void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override;
 
   Shell* frontend_shell_;
   scoped_refptr<DevToolsAgentHost> agent_host_;

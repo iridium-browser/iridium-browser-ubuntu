@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "components/pdf/browser/pdf_web_contents_helper_client.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -21,22 +21,21 @@ class PDFPasswordDialogViews : public views::DialogDelegate {
   PDFPasswordDialogViews(content::WebContents* web_contents,
                          const base::string16& prompt,
                          const pdf::PasswordDialogClosedCallback& callback);
-  virtual ~PDFPasswordDialogViews();
+  ~PDFPasswordDialogViews() override;
 
   // views::DialogDelegate:
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
+  base::string16 GetWindowTitle() const override;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool Cancel() override;
+  bool Accept() override;
 
   // views::WidgetDelegate:
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
+  views::View* GetInitiallyFocusedView() override;
+  views::View* GetContentsView() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
+  void DeleteDelegate() override;
+  ui::ModalType GetModalType() const override;
 
  private:
   // The message box view whose commands we handle.

@@ -5,17 +5,18 @@
 #include "chrome/browser/chromeos/login/screens/base_screen.h"
 
 #include "base/logging.h"
-#include "chrome/browser/chromeos/login/screens/screen_observer.h"
+#include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
 
 namespace chromeos {
 
-BaseScreen::BaseScreen() {
+BaseScreen::BaseScreen(BaseScreenDelegate* base_screen_delegate)
+    : base_screen_delegate_(base_screen_delegate) {
 }
 
 BaseScreen::~BaseScreen() {
 }
 
-void BaseScreen::Initialize(ScreenContext* context) {
+void BaseScreen::Initialize(::login::ScreenContext* context) {
 }
 
 void BaseScreen::OnShow() {
@@ -43,7 +44,7 @@ void BaseScreen::Finish(const std::string& outcome) {
 
 }
 
-void BaseScreen::SetContext(ScreenContext* context) {
+void BaseScreen::SetContext(::login::ScreenContext* context) {
 }
 
 void BaseScreen::OnButtonPressed(const std::string& button_id) {

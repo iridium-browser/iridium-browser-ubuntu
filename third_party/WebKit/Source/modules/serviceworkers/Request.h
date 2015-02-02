@@ -12,18 +12,16 @@
 #include "modules/serviceworkers/Headers.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
+#include "public/platform/WebURLRequest.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class RequestInit;
-struct ResourceLoaderOptions;
-class ResourceRequest;
-struct ThreadableLoaderOptions;
 class WebServiceWorkerRequest;
 
-class Request FINAL : public Body {
+class Request final : public Body {
     DEFINE_WRAPPERTYPEINFO();
 public:
     virtual ~Request() { }
@@ -48,21 +46,22 @@ public:
 
     Request* clone() const;
 
-    void populateWebServiceWorkerRequest(WebServiceWorkerRequest&);
+    void populateWebServiceWorkerRequest(WebServiceWorkerRequest&) const;
 
     void setBodyBlobHandle(PassRefPtr<BlobDataHandle>);
+    bool hasBody() const { return m_request->blobDataHandle(); }
 
-    virtual void trace(Visitor*)  OVERRIDE;
+    virtual void trace(Visitor*)  override;
 
 private:
     explicit Request(const Request&);
     Request(ExecutionContext*, FetchRequestData*);
     Request(ExecutionContext*, const WebServiceWorkerRequest&);
 
-    static Request* createRequestWithRequestData(ExecutionContext*, FetchRequestData*, const RequestInit&, FetchRequestData::Mode, FetchRequestData::Credentials, ExceptionState&);
+    static Request* createRequestWithRequestData(ExecutionContext*, FetchRequestData*, const RequestInit&, WebURLRequest::FetchRequestMode, WebURLRequest::FetchCredentialsMode, ExceptionState&);
     void clearHeaderList();
 
-    virtual PassRefPtr<BlobDataHandle> blobDataHandle() OVERRIDE;
+    virtual PassRefPtr<BlobDataHandle> blobDataHandle() override;
 
     const Member<FetchRequestData> m_request;
     const Member<Headers> m_headers;

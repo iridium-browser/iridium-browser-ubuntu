@@ -15,13 +15,12 @@ namespace ash {
 class EventClientImpl : public aura::client::EventClient {
  public:
   EventClientImpl();
-  virtual ~EventClientImpl();
+  ~EventClientImpl() override;
 
  private:
   // Overridden from aura::client::EventClient:
-  virtual bool CanProcessEventsWithinSubtree(
-      const aura::Window* window) const OVERRIDE;
-  virtual ui::EventTarget* GetToplevelEventTarget() OVERRIDE;
+  bool CanProcessEventsWithinSubtree(const aura::Window* window) const override;
+  ui::EventTarget* GetToplevelEventTarget() override;
 
   DISALLOW_COPY_AND_ASSIGN(EventClientImpl);
 };

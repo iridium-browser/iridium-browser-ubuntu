@@ -61,9 +61,9 @@ class BlobURLRequestJobTest : public testing::Test {
     MockProtocolHandler(BlobURLRequestJobTest* test) : test_(test) {}
 
     // net::URLRequestJobFactory::ProtocolHandler override.
-    virtual net::URLRequestJob* MaybeCreateJob(
+    net::URLRequestJob* MaybeCreateJob(
         net::URLRequest* request,
-        net::NetworkDelegate* network_delegate) const OVERRIDE {
+        net::NetworkDelegate* network_delegate) const override {
       return new BlobURLRequestJob(request,
                                    network_delegate,
                                    test_->blob_data_.get(),
@@ -79,7 +79,7 @@ class BlobURLRequestJobTest : public testing::Test {
       : blob_data_(new BlobData()),
         expected_status_code_(0) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     temp_file1_ = temp_dir_.path().AppendASCII("BlobFile1.dat");
@@ -103,8 +103,7 @@ class BlobURLRequestJobTest : public testing::Test {
     url_request_context_.set_job_factory(&url_request_job_factory_);
   }
 
-  virtual void TearDown() {
-  }
+  void TearDown() override {}
 
   void SetUpFileSystem() {
     // Prepare file system.

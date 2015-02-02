@@ -29,11 +29,14 @@
 #include "ash/system/chromeos/session/last_window_closed_observer.h"
 #include "ash/system/chromeos/session/logout_button_observer.h"
 #include "ash/system/chromeos/session/session_length_limit_observer.h"
+#include "ash/system/chromeos/virtual_keyboard/virtual_keyboard_observer.h"
 #include "ash/system/tray/media_security/media_capture_observer.h"
 #include "base/time/time.h"
 #endif
 
 namespace ash {
+
+struct UpdateInfo;
 
 #if defined(OS_CHROMEOS)
 class NetworkStateNotifier;
@@ -100,10 +103,13 @@ class ASH_EXPORT SystemTrayNotifier {
 
   void AddLastWindowClosedObserver(LastWindowClosedObserver* observer);
   void RemoveLastWindowClosedObserver(LastWindowClosedObserver* observer);
+
+  void AddVirtualKeyboardObserver(VirtualKeyboardObserver* observer);
+  void RemoveVirtualKeyboardObserver(VirtualKeyboardObserver* observer);
 #endif
 
   void NotifyAccessibilityModeChanged(
-      AccessibilityNotificationVisibility notify);
+      ui::AccessibilityNotificationVisibility notify);
   void NotifyAudioOutputVolumeChanged();
   void NotifyAudioOutputMuteChanged();
   void NotifyAudioNodesChanged();
@@ -121,7 +127,7 @@ class ASH_EXPORT SystemTrayNotifier {
                            const std::string& cur_locale,
                            const std::string& from_locale,
                            const std::string& to_locale);
-  void NotifyUpdateRecommended(UpdateObserver::UpdateSeverity severity);
+  void NotifyUpdateRecommended(const UpdateInfo& info);
   void NotifyUserUpdate();
   void NotifyUserAddedToSession();
 #if defined(OS_CHROMEOS)
@@ -140,10 +146,7 @@ class ASH_EXPORT SystemTrayNotifier {
                               const base::string16& helper_name);
   void NotifyScreenShareStop();
   void NotifyLastWindowClosed();
-
-  NetworkStateNotifier* network_state_notifier() {
-    return network_state_notifier_.get();
-  }
+  void NotifyVirtualKeyboardSuppressionChanged(bool suppressed);
 #endif
 
  private:
@@ -167,7 +170,7 @@ class ASH_EXPORT SystemTrayNotifier {
   ObserverList<ScreenCaptureObserver> screen_capture_observers_;
   ObserverList<ScreenShareObserver> screen_share_observers_;
   ObserverList<LastWindowClosedObserver> last_window_closed_observers_;
-  scoped_ptr<NetworkStateNotifier> network_state_notifier_;
+  ObserverList<VirtualKeyboardObserver> virtual_keyboard_observers_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(SystemTrayNotifier);

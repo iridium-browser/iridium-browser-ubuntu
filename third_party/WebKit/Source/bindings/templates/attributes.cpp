@@ -85,7 +85,7 @@ const v8::PropertyCallbackInfo<v8::Value>& info
     {% endif %}
     {# v8SetReturnValue #}
     {% if attribute.is_keep_alive_for_gc %}
-    if ({{attribute.cpp_value}} && DOMDataStore::setReturnValueFromWrapper{{world_suffix}}<V8{{attribute.idl_type}}>(info.GetReturnValue(), {{attribute.cpp_value}}.get()))
+    if ({{attribute.cpp_value}} && DOMDataStore::setReturnValue{{world_suffix}}(info.GetReturnValue(), {{attribute.cpp_value}}.get()))
         return;
     v8::Handle<v8::Value> wrapper = toV8({{attribute.cpp_value}}.get(), holder, info.GetIsolate());
     if (!wrapper.IsEmpty()) {
@@ -95,6 +95,10 @@ const v8::PropertyCallbackInfo<v8::Value>& info
     {% elif world_suffix %}
     {{attribute.v8_set_return_value_for_main_world}};
     {% else %}
+    {% if attribute.use_output_parameter_for_result %}
+    {{attribute.cpp_type}} result;
+    {{attribute.cpp_value}};
+    {% endif %}
     {{attribute.v8_set_return_value}};
     {% endif %}
 }
@@ -147,10 +151,10 @@ v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info
 {
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     {% if attribute.deprecate_as %}
-    UseCounter::countDeprecation(callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.deprecate_as}});
+    UseCounter::countDeprecationIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.deprecate_as}});
     {% endif %}
     {% if attribute.measure_as %}
-    UseCounter::count(callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.measure_as}});
+    UseCounter::countIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.measure_as}});
     {% endif %}
     {% if world_suffix in attribute.activity_logging_world_list_for_getter %}
     ScriptState* scriptState = ScriptState::from(info.GetIsolate()->GetCurrentContext());
@@ -165,7 +169,7 @@ v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info
     {% if attribute.has_custom_getter %}
     {{v8_class}}::{{attribute.name}}AttributeGetterCustom(info);
     {% else %}
-    {{cpp_class}}V8Internal::{{attribute.name}}AttributeGetter{{world_suffix}}(info);
+    {{cpp_class_or_partial}}V8Internal::{{attribute.name}}AttributeGetter{{world_suffix}}(info);
     {% endif %}
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
@@ -180,12 +184,12 @@ static void {{attribute.name}}ConstructorGetterCallback{{world_suffix}}(v8::Loca
 {
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMGetter");
     {% if attribute.deprecate_as %}
-    UseCounter::countDeprecation(callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.deprecate_as}});
+    UseCounter::countDeprecationIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.deprecate_as}});
     {% endif %}
     {% if attribute.measure_as %}
-    UseCounter::count(callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.measure_as}});
+    UseCounter::countIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.measure_as}});
     {% endif %}
-    {{cpp_class}}V8Internal::{{cpp_class}}ConstructorGetter{{world_suffix}}(property, info);
+    {{cpp_class_or_partial}}V8Internal::{{cpp_class}}ConstructorGetter{{world_suffix}}(property, info);
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 {% endfilter %}
@@ -223,6 +227,9 @@ v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info
         return;
     }
     {% endif %}
+    {% if attribute.use_output_parameter_for_result %}
+    {{attribute.cpp_type}} cppValue;
+    {% endif %}
     {# impl #}
     {% if attribute.put_forwards %}
     {{cpp_class}}* proxyImpl = {{v8_class}}::toImpl(holder);
@@ -240,7 +247,7 @@ v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info
     {% if attribute.idl_type != 'EventHandler' %}
     {{attribute.v8_value_to_local_cpp_value}};
     {% elif not is_node %}{# EventHandler hack #}
-    moveEventListenerToNewWrapper(holder, {{attribute.event_handler_getter_expression}}, v8Value, {{v8_class}}::eventListenerCacheIndex, info.GetIsolate());
+    moveEventListenerToNewWrapper(info.GetIsolate(), holder, {{attribute.event_handler_getter_expression}}, v8Value, {{v8_class}}::eventListenerCacheIndex);
     {% endif %}
     {# Type checking, possibly throw a TypeError, per:
        http://www.w3.org/TR/WebIDL/#es-type-mapping #}
@@ -300,10 +307,10 @@ v8::Local<v8::String>, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackI
     {% endif %}
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMSetter");
     {% if attribute.deprecate_as %}
-    UseCounter::countDeprecation(callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.deprecate_as}});
+    UseCounter::countDeprecationIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.deprecate_as}});
     {% endif %}
     {% if attribute.measure_as %}
-    UseCounter::count(callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.measure_as}});
+    UseCounter::countIfNotPrivateScript(info.GetIsolate(), callingExecutionContext(info.GetIsolate()), UseCounter::{{attribute.measure_as}});
     {% endif %}
     {% if world_suffix in attribute.activity_logging_world_list_for_setter %}
     ScriptState* scriptState = ScriptState::from(info.GetIsolate()->GetCurrentContext());
@@ -322,7 +329,7 @@ v8::Local<v8::String>, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackI
     {% if attribute.has_custom_setter %}
     {{v8_class}}::{{attribute.name}}AttributeSetterCustom(v8Value, info);
     {% else %}
-    {{cpp_class}}V8Internal::{{attribute.name}}AttributeSetter{{world_suffix}}(v8Value, info);
+    {{cpp_class_or_partial}}V8Internal::{{attribute.name}}AttributeSetter{{world_suffix}}(v8Value, info);
     {% endif %}
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
@@ -389,20 +396,20 @@ bool {{v8_class}}::PrivateScript::{{attribute.name}}AttributeSetter(LocalFrame* 
 {% macro attribute_configuration(attribute) %}
 {% set getter_callback =
        '%sV8Internal::%sAttributeGetterCallback' %
-            (cpp_class, attribute.name)
+            (cpp_class_or_partial, attribute.name)
        if not attribute.constructor_type else
        ('%sV8Internal::%sConstructorGetterCallback' %
-            (cpp_class, attribute.name)
+            (cpp_class_or_partial, attribute.name)
         if attribute.needs_constructor_getter_callback else
-       '{0}V8Internal::{0}ConstructorGetter'.format(cpp_class)) %}
+       '%sV8Internal::%sConstructorGetter' % (cpp_class_or_partial, cpp_class)) %}
 {% set getter_callback_for_main_world =
        '%sV8Internal::%sAttributeGetterCallbackForMainWorld' %
-            (cpp_class, attribute.name)
+            (cpp_class_or_partial, attribute.name)
        if attribute.is_per_world_bindings else '0' %}
 {% set setter_callback = attribute.setter_callback %}
 {% set setter_callback_for_main_world =
        '%sV8Internal::%sAttributeSetterCallbackForMainWorld' %
-           (cpp_class, attribute.name)
+           (cpp_class_or_partial, attribute.name)
        if attribute.is_per_world_bindings and
           (not attribute.is_read_only or attribute.put_forwards) else '0' %}
 {% set wrapper_type_info =

@@ -1,12 +1,9 @@
 Name: libyuv
 URL: http://code.google.com/p/libyuv/
-Version: 1038
+Version: 1130
 License: BSD
 License File: LICENSE
 
 Description:
 libyuv is an open source project that includes
 YUV conversion and scaling functionality.
-
-Changes:
-Patch r1067 into r1038 to disable mips dsp2 code on iso r6.

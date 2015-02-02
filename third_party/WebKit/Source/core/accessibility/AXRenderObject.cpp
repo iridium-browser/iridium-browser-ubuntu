@@ -33,7 +33,7 @@
 #include "core/InputTypeNames.h"
 #include "core/accessibility/AXImageMapLink.h"
 #include "core/accessibility/AXInlineTextBox.h"
-#include "core/accessibility/AXObjectCache.h"
+#include "core/accessibility/AXObjectCacheImpl.h"
 #include "core/accessibility/AXSVGRoot.h"
 #include "core/accessibility/AXSpinButton.h"
 #include "core/accessibility/AXTable.h"
@@ -63,10 +63,10 @@
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderListMarker.h"
 #include "core/rendering/RenderMenuList.h"
+#include "core/rendering/RenderPart.h"
 #include "core/rendering/RenderTextControlSingleLine.h"
 #include "core/rendering/RenderTextFragment.h"
 #include "core/rendering/RenderView.h"
-#include "core/rendering/RenderWidget.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "core/svg/SVGSVGElement.h"
 #include "core/svg/graphics/SVGImage.h"
@@ -239,7 +239,7 @@ bool AXRenderObject::shouldNotifyActiveDescendant() const
 
 ScrollableArea* AXRenderObject::getScrollableAreaIfScrollable() const
 {
-    // If the parent is a scroll view, then this object isn't really scrollable, the parent ScrollView should handle the scrolling.
+    // If the parent is a FrameView, then this object isn't really scrollable; the parent should handle the scrolling.
     if (parentObject() && parentObject()->isAXScrollView())
         return 0;
 
@@ -272,7 +272,7 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
             return ImageMapRole;
         return LinkRole;
     }
-    if (cssBox && cssBox->isListItem())
+    if ((cssBox && cssBox->isListItem()) || isHTMLLIElement(node))
         return ListItemRole;
     if (m_renderer->isListMarker())
         return ListMarkerRole;
@@ -313,14 +313,34 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
     if (isHTMLInputElement(node)) {
         HTMLInputElement& input = toHTMLInputElement(*node);
         const AtomicString& type = input.type();
-        if (type == InputTypeNames::checkbox)
+        if (type == InputTypeNames::button) {
+            if ((node->parentNode() && isHTMLMenuElement(node->parentNode())) || (parentObject() && parentObject()->roleValue() == MenuRole))
+                return MenuItemRole;
+            return buttonRoleType();
+        }
+        if (type == InputTypeNames::checkbox) {
+            if ((node->parentNode() && isHTMLMenuElement(node->parentNode())) || (parentObject() && parentObject()->roleValue() == MenuRole))
+                return MenuItemCheckBoxRole;
             return CheckBoxRole;
-        if (type == InputTypeNames::radio)
+        }
+        if (type == InputTypeNames::date)
+            return DateRole;
+        if (type == InputTypeNames::datetime
+            || type == InputTypeNames::datetime_local
+            || type == InputTypeNames::month
+            || type == InputTypeNames::week)
+            return DateTimeRole;
+        if (type == InputTypeNames::radio) {
+            if ((node->parentNode() && isHTMLMenuElement(node->parentNode())) || (parentObject() && parentObject()->roleValue() == MenuRole))
+                return MenuItemRadioRole;
             return RadioButtonRole;
+        }
         if (input.isTextButton())
             return buttonRoleType();
         if (type == InputTypeNames::color)
             return ColorWellRole;
+        if (type == InputTypeNames::time)
+            return TimeRole;
     }
 
     if (isFileUploadButton())
@@ -340,6 +360,9 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
     if (node && node->hasTagName(ddTag))
         return DescriptionListDetailRole;
 
+    if (node && node->hasTagName(dlTag))
+        return DescriptionListRole;
+
     if (node && node->hasTagName(dtTag))
         return DescriptionListTermRole;
 
@@ -353,6 +376,9 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
     if (m_renderer->isHR())
         return HorizontalRuleRole;
 
+    if (isHTMLOutputElement(node))
+        return StatusRole;
+
     if (isHTMLParagraphElement(node))
         return ParagraphRole;
 
@@ -362,11 +388,17 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
     if (isHTMLDivElement(node))
         return DivRole;
 
+    if (isHTMLMeterElement(node))
+        return MeterRole;
+
     if (isHTMLFormElement(node))
         return FormRole;
 
     if (node && node->hasTagName(articleTag))
         return ArticleRole;
+
+    if (node && node->hasTagName(blockquoteTag))
+        return BlockquoteRole;
 
     if (node && node->hasTagName(mainTag))
         return MainRole;
@@ -376,6 +408,9 @@ AccessibilityRole AXRenderObject::determineAccessibilityRole()
 
     if (node && node->hasTagName(asideTag))
         return ComplementaryRole;
+
+    if (node && node->hasTagName(preTag))
+        return PreRole;
 
     if (node && node->hasTagName(sectionTag))
         return RegionRole;
@@ -450,9 +485,9 @@ bool AXRenderObject::isAttachment() const
     if (!renderer)
         return false;
     // Widgets are the replaced elements that we represent to AX as attachments
-    bool isWidget = renderer->isWidget();
-    ASSERT(!isWidget || (renderer->isReplaced() && !isImage()));
-    return isWidget;
+    bool isRenderPart = renderer->isRenderPart();
+    ASSERT(!isRenderPart || (renderer->isReplaced() && !isImage()));
+    return isRenderPart;
 }
 
 bool AXRenderObject::isFileUploadButton() const
@@ -681,6 +716,9 @@ bool AXRenderObject::computeAccessibilityIsIgnored() const
     if (roleValue() == ListItemRole)
         return false;
 
+    if (roleValue() == BlockquoteRole)
+        return false;
+
     if (roleValue() == DialogRole)
         return false;
 
@@ -691,6 +729,9 @@ bool AXRenderObject::computeAccessibilityIsIgnored() const
         return false;
 
     if (roleValue() == DetailsRole)
+        return false;
+
+    if (roleValue() == MeterRole)
         return false;
 
     // if this element has aria attributes on it, it should not be ignored.
@@ -805,7 +846,7 @@ AccessibilityOrientation AXRenderObject::orientation() const
 
 String AXRenderObject::text() const
 {
-    if (isPasswordField())
+    if (isPasswordFieldAndShouldHideValue())
         return String();
 
     return AXNodeObject::text();
@@ -816,7 +857,7 @@ int AXRenderObject::textLength() const
     if (!isTextControl())
         return -1;
 
-    if (isPasswordField())
+    if (isPasswordFieldAndShouldHideValue())
         return -1; // need to return something distinct from 0
 
     return text().length();
@@ -839,6 +880,19 @@ KURL AXRenderObject::url() const
         return toHTMLInputElement(m_renderer->node())->src();
 
     return KURL();
+}
+
+//
+// Load inline text boxes.
+//
+
+void AXRenderObject::loadInlineTextBoxes()
+{
+    if (!renderer() || !renderer()->isText())
+        return;
+
+    clearChildren();
+    addInlineTextBoxChildren(true);
 }
 
 //
@@ -875,7 +929,7 @@ String AXRenderObject::stringValue() const
     if (!m_renderer)
         return String();
 
-    if (isPasswordField())
+    if (isPasswordFieldAndShouldHideValue())
         return String();
 
     RenderBoxModelObject* cssBox = renderBoxModelObject();
@@ -920,6 +974,24 @@ String AXRenderObject::stringValue() const
 
     if (m_renderer->isFileUploadControl())
         return toRenderFileUploadControl(m_renderer)->fileTextValue();
+
+     // Handle other HTML input elements that aren't text controls, like date and time
+     // controls, by returning the string value, with the exception of checkboxes
+     // and radio buttons (which would return "on").
+     if (node() && isHTMLInputElement(node())) {
+         HTMLInputElement* input = toHTMLInputElement(node());
+         if (input->type() != InputTypeNames::checkbox && input->type() != InputTypeNames::radio)
+             return input->value();
+    }
+
+    // Handle other HTML input elements that aren't text controls, like date and time
+    // controls, by returning the string value, with the exception of checkboxes
+    // and radio buttons (which would return "on").
+    if (node() && isHTMLInputElement(node())) {
+        HTMLInputElement* input = toHTMLInputElement(node());
+        if (input->type() != InputTypeNames::checkbox && input->type() != InputTypeNames::radio)
+            return input->value();
+    }
 
     // FIXME: We might need to implement a value here for more types
     // FIXME: It would be better not to advertise a value at all for the types for which we don't implement one;
@@ -966,7 +1038,7 @@ void AXRenderObject::accessibilityChildrenFromAttribute(QualifiedName attr, Acce
     WillBeHeapVector<RawPtrWillBeMember<Element> > elements;
     elementsFromAttribute(elements, attr);
 
-    AXObjectCache* cache = axObjectCache();
+    AXObjectCacheImpl* cache = axObjectCache();
     unsigned count = elements.size();
     for (unsigned k = 0; k < count; ++k) {
         Element* element = elements[k];
@@ -1085,7 +1157,7 @@ bool AXRenderObject::supportsARIAOwns() const
 // ARIA live-region features.
 //
 
-const AtomicString& AXRenderObject::ariaLiveRegionStatus() const
+const AtomicString& AXRenderObject::liveRegionStatus() const
 {
     DEFINE_STATIC_LOCAL(const AtomicString, liveRegionStatusAssertive, ("assertive", AtomicString::ConstructFromLiteral));
     DEFINE_STATIC_LOCAL(const AtomicString, liveRegionStatusPolite, ("polite", AtomicString::ConstructFromLiteral));
@@ -1112,7 +1184,7 @@ const AtomicString& AXRenderObject::ariaLiveRegionStatus() const
     return liveRegionStatus;
 }
 
-const AtomicString& AXRenderObject::ariaLiveRegionRelevant() const
+const AtomicString& AXRenderObject::liveRegionRelevant() const
 {
     DEFINE_STATIC_LOCAL(const AtomicString, defaultLiveRegionRelevant, ("additions text", AtomicString::ConstructFromLiteral));
     const AtomicString& relevant = getAttribute(aria_relevantAttr);
@@ -1124,12 +1196,12 @@ const AtomicString& AXRenderObject::ariaLiveRegionRelevant() const
     return relevant;
 }
 
-bool AXRenderObject::ariaLiveRegionAtomic() const
+bool AXRenderObject::liveRegionAtomic() const
 {
     return elementAttributeValue(aria_atomicAttr);
 }
 
-bool AXRenderObject::ariaLiveRegionBusy() const
+bool AXRenderObject::liveRegionBusy() const
 {
     return elementAttributeValue(aria_busyAttr);
 }
@@ -1292,7 +1364,9 @@ AXObject* AXRenderObject::accessibilityHitTest(const IntPoint& point) const
         return 0;
 
     Node* node = hitTestResult.innerNode();
-    if (node->isInShadowTree())
+
+    // Allow the hit test to return media control buttons.
+    if (node->isInShadowTree() && (!isHTMLInputElement(*node) || !node->isMediaControlElement()))
         node = node->shadowHost();
 
     if (isHTMLAreaElement(node))
@@ -1305,7 +1379,7 @@ AXObject* AXRenderObject::accessibilityHitTest(const IntPoint& point) const
     if (!obj)
         return 0;
 
-    AXObject* result = obj->document().axObjectCache()->getOrCreate(obj);
+    AXObject* result = toAXObjectCacheImpl(obj->document().axObjectCache())->getOrCreate(obj);
     result->updateChildrenIfNecessary();
 
     // Allow the element to perform any hit-testing it might need to do to reach non-render children.
@@ -1337,7 +1411,7 @@ AXObject* AXRenderObject::elementAccessibilityHitTest(const IntPoint& point) con
 // High-level accessibility tree access.
 //
 
-AXObject* AXRenderObject::parentObject() const
+AXObject* AXRenderObject::computeParent() const
 {
     if (!m_renderer)
         return 0;
@@ -1363,13 +1437,30 @@ AXObject* AXRenderObject::parentObject() const
     return 0;
 }
 
-AXObject* AXRenderObject::parentObjectIfExists() const
+AXObject* AXRenderObject::computeParentIfExists() const
 {
+    if (!m_renderer)
+        return 0;
+
+    if (ariaRoleAttribute() == MenuBarRole)
+        return axObjectCache()->get(m_renderer->parent());
+
+    // menuButton and its corresponding menu are DOM siblings, but Accessibility needs them to be parent/child
+    if (ariaRoleAttribute() == MenuRole) {
+        AXObject* parent = menuButtonForMenu();
+        if (parent)
+            return parent;
+    }
+
+    RenderObject* parentObj = renderParentObject();
+    if (parentObj)
+        return axObjectCache()->get(parentObj);
+
     // WebArea's parent should be the scroll view containing it.
     if (isWebArea())
         return axObjectCache()->get(m_renderer->frame()->view());
 
-    return axObjectCache()->get(renderParentObject());
+    return 0;
 }
 
 //
@@ -1454,7 +1545,12 @@ void AXRenderObject::addChildren()
     addTextFieldChildren();
     addCanvasChildren();
     addRemoteSVGChildren();
-    addInlineTextBoxChildren();
+    addInlineTextBoxChildren(false);
+
+    for (unsigned i = 0; i < m_children.size(); ++i) {
+        if (!m_children[i].get()->cachedParentObject())
+            m_children[i].get()->setParent(this);
+    }
 }
 
 bool AXRenderObject::canHaveChildren() const
@@ -1537,7 +1633,7 @@ Element* AXRenderObject::anchorElement() const
     if (!m_renderer)
         return 0;
 
-    AXObjectCache* cache = axObjectCache();
+    AXObjectCacheImpl* cache = axObjectCache();
     RenderObject* currRenderer;
 
     // Search up the render tree for a RenderObject with a DOM node. Defer to an earlier continuation, though.
@@ -1568,7 +1664,7 @@ Widget* AXRenderObject::widgetForAttachmentView() const
 {
     if (!isAttachment())
         return 0;
-    return toRenderWidget(m_renderer)->widget();
+    return toRenderPart(m_renderer)->widget();
 }
 
 //
@@ -1580,7 +1676,7 @@ AXObject::PlainTextRange AXRenderObject::selectedTextRange() const
     if (!isTextControl())
         return PlainTextRange();
 
-    if (isPasswordField())
+    if (isPasswordFieldAndShouldHideValue())
         return PlainTextRange();
 
     AccessibilityRole ariaRole = ariaRoleAttribute();
@@ -1663,7 +1759,7 @@ void AXRenderObject::handleActiveDescendantChanged()
     AXRenderObject* activedescendant = toAXRenderObject(activeDescendant());
 
     if (activedescendant && shouldNotifyActiveDescendant())
-        doc.axObjectCache()->postNotification(m_renderer, AXObjectCache::AXActiveDescendantChanged, true);
+        toAXObjectCacheImpl(doc.axObjectCache())->postNotification(m_renderer, AXObjectCacheImpl::AXActiveDescendantChanged, true);
 }
 
 void AXRenderObject::handleAriaExpandedChanged()
@@ -1693,11 +1789,20 @@ void AXRenderObject::handleAriaExpandedChanged()
 
     // Post that the row count changed.
     if (containerParent)
-        axObjectCache()->postNotification(containerParent, document(), AXObjectCache::AXRowCountChanged, true);
+        axObjectCache()->postNotification(containerParent, document(), AXObjectCacheImpl::AXRowCountChanged, true);
 
     // Post that the specific row either collapsed or expanded.
-    if (roleValue() == RowRole || roleValue() == TreeItemRole)
-        axObjectCache()->postNotification(this, document(), isExpanded() ? AXObjectCache::AXRowExpanded : AXObjectCache::AXRowCollapsed, true);
+    AccessibilityExpanded expanded = isExpanded();
+    if (!expanded)
+        return;
+
+    if (roleValue() == RowRole || roleValue() == TreeItemRole) {
+        AXObjectCacheImpl::AXNotification notification = AXObjectCacheImpl::AXRowExpanded;
+        if (expanded == ExpandedCollapsed)
+            notification = AXObjectCacheImpl::AXRowCollapsed;
+
+        axObjectCache()->postNotification(this, document(), notification, true);
+    }
 }
 
 void AXRenderObject::textChanged()
@@ -1783,10 +1888,10 @@ int AXRenderObject::indexForVisiblePosition(const VisiblePosition& pos) const
     return TextIterator::rangeLength(range.get());
 }
 
-void AXRenderObject::addInlineTextBoxChildren()
+void AXRenderObject::addInlineTextBoxChildren(bool force)
 {
     Settings* settings = document()->settings();
-    if (!settings || !settings->inlineTextBoxAccessibilityEnabled())
+    if (!force && (!settings || !settings->inlineTextBoxAccessibilityEnabled()))
         return;
 
     if (!renderer() || !renderer()->isText())
@@ -1795,7 +1900,7 @@ void AXRenderObject::addInlineTextBoxChildren()
     if (renderer()->needsLayout()) {
         // If a RenderText needs layout, its inline text boxes are either
         // nonexistent or invalid, so defer until the layout happens and
-        // the renderer calls AXObjectCache::inlineTextBoxesUpdated.
+        // the renderer calls AXObjectCacheImpl::inlineTextBoxesUpdated.
         return;
     }
 
@@ -2065,7 +2170,7 @@ AXSVGRoot* AXRenderObject::remoteSVGRootElement() const
     if (!rendererRoot)
         return 0;
 
-    AXObject* rootSVGObject = doc->axObjectCache()->getOrCreate(rendererRoot);
+    AXObject* rootSVGObject = toAXObjectCacheImpl(doc->axObjectCache())->getOrCreate(rendererRoot);
 
     // In order to connect the AX hierarchy from the SVG root element from the loaded resource
     // the parent must be set, because there's no other way to get back to who created the image.
@@ -2178,11 +2283,11 @@ void AXRenderObject::addImageMapChildren()
     if (!map)
         return;
 
-    for (HTMLAreaElement* area = Traversal<HTMLAreaElement>::firstWithin(*map); area; area = Traversal<HTMLAreaElement>::next(*area, map)) {
+    for (HTMLAreaElement& area : Traversal<HTMLAreaElement>::descendantsOf(*map)) {
         // add an <area> element for this child if it has a link
-        if (area->isLink()) {
+        if (area.isLink()) {
             AXImageMapLink* areaObject = toAXImageMapLink(axObjectCache()->getOrCreate(ImageMapLinkRole));
-            areaObject->setHTMLAreaElement(area);
+            areaObject->setHTMLAreaElement(&area);
             areaObject->setHTMLMapElement(map);
             areaObject->setParent(this);
             if (!areaObject->accessibilityIsIgnored())

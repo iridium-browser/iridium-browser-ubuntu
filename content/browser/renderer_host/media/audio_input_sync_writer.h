@@ -32,14 +32,14 @@ class AudioInputSyncWriter : public media::AudioInputController::SyncWriter {
                                 int shared_memory_segment_count,
                                 const media::AudioParameters& params);
 
-  virtual ~AudioInputSyncWriter();
+  ~AudioInputSyncWriter() override;
 
   // media::AudioInputController::SyncWriter implementation.
-  virtual void UpdateRecordedBytes(uint32 bytes) OVERRIDE;
-  virtual void Write(const media::AudioBus* data,
-                     double volume,
-                     bool key_pressed) OVERRIDE;
-  virtual void Close() OVERRIDE;
+  void UpdateRecordedBytes(uint32 bytes) override;
+  void Write(const media::AudioBus* data,
+             double volume,
+             bool key_pressed) override;
+  void Close() override;
 
   bool Init();
   bool PrepareForeignSocket(base::ProcessHandle process_handle,

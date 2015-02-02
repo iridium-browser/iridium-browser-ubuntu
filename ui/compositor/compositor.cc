@@ -20,6 +20,7 @@
 #include "cc/layers/layer.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/context_provider.h"
+#include "cc/surfaces/surface_id_allocator.h"
 #include "cc/trees/layer_tree_host.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/compositor/compositor_observer.h"
@@ -62,18 +63,13 @@ void CompositorLock::CancelLock() {
   compositor_ = NULL;
 }
 
-}  // namespace ui
-
-namespace {}  // namespace
-
-namespace ui {
-
 Compositor::Compositor(gfx::AcceleratedWidget widget,
                        ui::ContextFactory* context_factory,
                        scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : context_factory_(context_factory),
       root_layer_(NULL),
       widget_(widget),
+      surface_id_allocator_(context_factory->CreateSurfaceIdAllocator()),
       compositor_thread_loop_(context_factory->GetCompositorMessageLoop()),
       task_runner_(task_runner),
       vsync_manager_(new CompositorVSyncManager()),
@@ -87,7 +83,7 @@ Compositor::Compositor(gfx::AcceleratedWidget widget,
       draw_on_compositing_end_(false),
       swap_state_(SWAP_NONE),
       layer_animator_collection_(this),
-      schedule_draw_factory_(this) {
+      weak_ptr_factory_(this) {
   root_web_layer_ = cc::Layer::Create();
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -97,7 +93,6 @@ Compositor::Compositor(gfx::AcceleratedWidget widget,
       context_factory_->DoesCreateTestContexts()
       ? kTestRefreshRate
       : kDefaultRefreshRate;
-  settings.main_frame_before_draw_enabled = false;
   settings.main_frame_before_activation_enabled = false;
   settings.throttle_frame_production =
       !command_line->HasSwitch(switches::kDisableGpuVsync);
@@ -107,6 +102,9 @@ Compositor::Compositor(gfx::AcceleratedWidget widget,
 #endif
 #if defined(OS_CHROMEOS)
   settings.per_tile_painting_enabled = true;
+#endif
+#if defined(OS_WIN)
+  settings.disable_hi_res_timer_tasks_on_battery = true;
 #endif
 
   // These flags should be mirrored by renderer versions in content/renderer/.
@@ -143,6 +141,7 @@ Compositor::Compositor(gfx::AcceleratedWidget widget,
     host_ = cc::LayerTreeHost::CreateThreaded(
         this,
         context_factory_->GetSharedBitmapManager(),
+        context_factory_->GetGpuMemoryBufferManager(),
         settings,
         task_runner_,
         compositor_thread_loop_);
@@ -151,12 +150,14 @@ Compositor::Compositor(gfx::AcceleratedWidget widget,
         this,
         this,
         context_factory_->GetSharedBitmapManager(),
+        context_factory_->GetGpuMemoryBufferManager(),
         settings,
         task_runner_);
   }
   UMA_HISTOGRAM_TIMES("GPU.CreateBrowserCompositor",
                       base::TimeTicks::Now() - before_create);
   host_->SetRootLayer(root_web_layer_);
+  host_->set_surface_id_namespace(surface_id_allocator_->id_namespace());
   host_->SetLayerTreeHostClientReady();
 }
 
@@ -176,6 +177,11 @@ Compositor::~Compositor() {
   context_factory_->RemoveCompositor(this);
 }
 
+void Compositor::SetOutputSurface(
+    scoped_ptr<cc::OutputSurface> output_surface) {
+  host_->SetOutputSurface(output_surface.Pass());
+}
+
 void Compositor::ScheduleDraw() {
   if (compositor_thread_loop_.get()) {
     host_->SetNeedsCommit();
@@ -183,7 +189,7 @@ void Compositor::ScheduleDraw() {
     defer_draw_scheduling_ = true;
     task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&Compositor::Draw, schedule_draw_factory_.GetWeakPtr()));
+        base::Bind(&Compositor::Draw, weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -342,8 +348,8 @@ void Compositor::Layout() {
 }
 
 void Compositor::RequestNewOutputSurface(bool fallback) {
-  host_->SetOutputSurface(
-      context_factory_->CreateOutputSurface(this, fallback));
+  context_factory_->CreateOutputSurface(weak_ptr_factory_.GetWeakPtr(),
+                                        fallback);
 }
 
 void Compositor::DidCommit() {

@@ -990,7 +990,7 @@ var isWebGLContext = function(ctx) {
 };
 
 /**
- * Checks that a portion of a canvas is 1 color.
+ * Checks that a portion of a canvas or the currently attached framebuffer is 1 color.
  * @param {!WebGLRenderingContext|CanvasRenderingContext2D} gl The
  *         WebGLRenderingContext or 2D context to use.
  * @param {number} x left corner of region to check.
@@ -1014,7 +1014,7 @@ var checkCanvasRectColor = function(gl, x, y, width, height, color, opt_errorRan
     var xr = clipToRange(x, width, 0, gl.canvas.width);
     var yr = clipToRange(y, height, 0, gl.canvas.height);
     if (!xr.extent || !yr.extent) {
-      logFn("checking rect: effective width or heigh is zero");
+      logFn("checking rect: effective width or height is zero");
       sameFn();
       return;
     }
@@ -1052,7 +1052,7 @@ var checkCanvasRectColor = function(gl, x, y, width, height, color, opt_errorRan
 };
 
 /**
- * Checks that a portion of a canvas is 1 color.
+ * Checks that a portion of a canvas or the currently attached framebuffer is 1 color.
  * @param {!WebGLRenderingContext|CanvasRenderingContext2D} gl The
  *         WebGLRenderingContext or 2D context to use.
  * @param {number} x left corner of region to check.
@@ -1081,7 +1081,7 @@ var checkCanvasRect = function(gl, x, y, width, height, color, opt_msg, opt_erro
 };
 
 /**
- * Checks that an entire canvas is 1 color.
+ * Checks that an entire canvas or the currently attached framebuffer is 1 color.
  * @param {!WebGLRenderingContext|CanvasRenderingContext2D} gl The
  *         WebGLRenderingContext or 2D context to use.
  * @param {!Array.<number>} color The color expected. A 4 element array where
@@ -2182,6 +2182,41 @@ var addShaderSources = function(
   }
 };
 
+/**
+ * Sends shader information to the server to be dumped into text files
+ * when tests are run from within the test-runner harness.
+ * @param {WebGLRenderingContext} gl The WebGLRenderingContext to use.
+ * @param {string} url URL of current.
+ * @param {string} passMsg Test description.
+ * @param {object} vInfo Object containing vertex shader information.
+ * @param {object} fInfo Object containing fragment shader information.
+ */
+var dumpShadersInfo = function(gl, url, passMsg, vInfo, fInfo) {
+  var shaderInfo = {};
+  shaderInfo.url = url;
+  shaderInfo.testDescription = passMsg;
+  shaderInfo.vLabel = vInfo.label;
+  shaderInfo.vShouldCompile = vInfo.shaderSuccess;
+  shaderInfo.vSource = vInfo.source;
+  shaderInfo.fLabel = fInfo.label;
+  shaderInfo.fShouldCompile = fInfo.shaderSuccess;
+  shaderInfo.fSource = fInfo.source;
+  shaderInfo.vTranslatedSource = null;
+  shaderInfo.fTranslatedSource = null;
+  var debugShaders = gl.getExtension('WEBGL_debug_shaders');
+  if (debugShaders) {
+    if (vInfo.shader)
+      shaderInfo.vTranslatedSource = debugShaders.getTranslatedShaderSource(vInfo.shader);
+    if (fInfo.shader)
+      shaderInfo.fTranslatedSource = debugShaders.getTranslatedShaderSource(fInfo.shader);
+  }
+
+  var dumpShaderInfoRequest = new XMLHttpRequest();
+  dumpShaderInfoRequest.open('POST', "/dumpShaderInfo", true);
+  dumpShaderInfoRequest.setRequestHeader("Content-Type", "text/plain");
+  dumpShaderInfoRequest.send(JSON.stringify(shaderInfo));
+};
+
 // Add your prefix here.
 var browserPrefixes = [
   "",
@@ -2445,13 +2480,11 @@ var setupFullscreen = function(buttonId, fullscreenId, callback) {
 };
 
 /**
- * Waits for the browser to composite the canvas associated with
- * the WebGL context passed in.
- * @param {WebGLRenderingContext} gl The WebGLRenderingContext to use.
+ * Waits for the browser to composite the web page.
  * @param {function()} callback A function to call after compositing has taken
  *        place.
  */
-var waitForComposite = function(gl, callback) {
+var waitForComposite = function(callback) {
   var frames = 5;
   var countDown = function() {
     if (frames == 0) {
@@ -2629,6 +2662,7 @@ return {
   drawIndexedQuad: drawIndexedQuad,
   drawUByteColorQuad: drawUByteColorQuad,
   drawFloatColorQuad: drawFloatColorQuad,
+  dumpShadersInfo: dumpShadersInfo,
   endsWith: endsWith,
   fillTexture: fillTexture,
   getBytesPerComponent: getBytesPerComponent,

@@ -9,7 +9,6 @@
   'variables': {
     'common_sources': [
       'gio.c',
-      'gio_mem.c',
       'gprintf.c',
     ],
   },
@@ -33,6 +32,7 @@
         'build_newlib': 1,
         'build_pnacl_newlib': 1,
         'build_irt': 1,
+        'build_nonsfi_helper': 1,
         'sources': ['<@(common_sources)']
       },
       'dependencies': [

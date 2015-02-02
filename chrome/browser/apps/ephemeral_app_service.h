@@ -35,7 +35,7 @@ class EphemeralAppService : public KeyedService,
   static EphemeralAppService* Get(Profile* profile);
 
   explicit EphemeralAppService(Profile* profile);
-  virtual ~EphemeralAppService();
+  ~EphemeralAppService() override;
 
   // Clears the ephemeral app cache. Removes all idle ephemeral apps.
   void ClearCachedApps();
@@ -61,25 +61,23 @@ class EphemeralAppService : public KeyedService,
   typedef std::multimap<base::Time, std::string> LaunchTimeAppMap;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // extensions::ExtensionRegistryObserver.
-  virtual void OnExtensionWillBeInstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      bool is_update,
-      bool from_ephemeral,
-      const std::string& old_name) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const extensions::Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
 
   // apps::AppLifetimeMonitor::Observer implementation.
-  virtual void OnAppStop(Profile* profile, const std::string& app_id) OVERRIDE;
-  virtual void OnChromeTerminating() OVERRIDE;
+  void OnAppStop(Profile* profile, const std::string& app_id) override;
+  void OnChromeTerminating() override;
 
   void Init();
   void InitEphemeralAppCount();

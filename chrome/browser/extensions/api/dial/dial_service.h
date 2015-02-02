@@ -102,13 +102,13 @@ class DialServiceImpl : public DialService,
                         public base::SupportsWeakPtr<DialServiceImpl> {
  public:
   explicit DialServiceImpl(net::NetLog* net_log);
-  virtual ~DialServiceImpl();
+  ~DialServiceImpl() override;
 
   // DialService implementation
-  virtual bool Discover() OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual bool HasObserver(Observer* observer) OVERRIDE;
+  bool Discover() override;
+  void AddObserver(Observer* observer) override;
+  void RemoveObserver(Observer* observer) override;
+  bool HasObserver(Observer* observer) override;
 
  private:
   // Represents a socket binding to a single network interface.

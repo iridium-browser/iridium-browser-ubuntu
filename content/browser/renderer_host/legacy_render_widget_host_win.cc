@@ -36,7 +36,7 @@ LegacyRenderWidgetHostHWND* LegacyRenderWidgetHostHWND::Create(
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableLegacyIntermediateWindow) ||
       (!GetWindowEventTarget(parent) && parent != ::GetDesktopWindow()))
-    return NULL;
+    return nullptr;
 
   LegacyRenderWidgetHostHWND* legacy_window_instance =
       new LegacyRenderWidgetHostHWND(parent);

@@ -6,8 +6,6 @@
     'SK_SUPPORT_GPU=<(skia_gpu)',
     'SK_SUPPORT_OPENCL=<(skia_opencl)',
     'SK_FORCE_DISTANCEFIELD_FONTS=<(skia_force_distancefield_fonts)',
-    'SK_PICTURE_USE_SK_RECORD',
-    'SK_PICTURE_OPTIMIZE_SK_RECORD',
   ],
   'conditions' : [
     ['skia_pic', {
@@ -508,6 +506,9 @@
           'GCC_ENABLE_SUPPLEMENTAL_SSE3_INSTRUCTIONS': 'YES',  # -mssse3
           'GCC_SYMBOLS_PRIVATE_EXTERN':                'NO',   # -fvisibility=hidden
           'GCC_INLINES_ARE_PRIVATE_EXTERN':            'NO',   # -fvisibility-inlines-hidden
+          'GCC_CW_ASM_SYNTAX':                         'NO',   # remove -fasm-blocks
+          'GCC_ENABLE_PASCAL_STRINGS':                 'NO',   # remove -mpascal-strings
+          'GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO':     'NO',   # -Wno-invalid-offsetof
           'WARNING_CFLAGS': [
             '-Wall',
             '-Wextra',
@@ -552,6 +553,7 @@
           'IPHONEOS_DEPLOYMENT_TARGET': '<(ios_sdk_version)',
           'SDKROOT': 'iphoneos',
           'TARGETED_DEVICE_FAMILY': '1,2',
+          'GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO': 'NO',   # -Wno-invalid-offsetof
           'OTHER_CPLUSPLUSFLAGS': [
             '-fvisibility=hidden',
             '-fvisibility-inlines-hidden',

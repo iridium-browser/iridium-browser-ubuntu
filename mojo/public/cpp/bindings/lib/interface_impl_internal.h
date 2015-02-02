@@ -30,8 +30,8 @@ class InterfaceImplState : public ErrorHandler {
   typedef typename Interface::Client Client;
 
   explicit InterfaceImplState(InterfaceImplBase<Interface>* instance)
-      : router_(NULL),
-        proxy_(NULL),
+      : router_(nullptr),
+        proxy_(nullptr),
         instance_bound_to_pipe_(false)
 #ifndef NDEBUG
         ,
@@ -48,7 +48,7 @@ class InterfaceImplState : public ErrorHandler {
 #endif
     delete proxy_;
     if (router_) {
-      router_->set_error_handler(NULL);
+      router_->set_error_handler(nullptr);
       delete router_;
     }
   }
@@ -96,7 +96,7 @@ class InterfaceImplState : public ErrorHandler {
     return static_cast<InterfaceImplBase<Interface>*>(stub_.sink());
   }
 
-  virtual void OnConnectionError() MOJO_OVERRIDE {
+  virtual void OnConnectionError() override {
     // If the the instance is not bound to the pipe, the instance might choose
     // to delete itself in the OnConnectionError handler, which would in turn
     // delete this.  Save the error behavior before invoking the error handler

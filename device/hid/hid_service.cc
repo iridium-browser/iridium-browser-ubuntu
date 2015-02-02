@@ -30,11 +30,11 @@ class HidService::Destroyer : public base::MessageLoop::DestructionObserver {
  public:
   explicit Destroyer(HidService* hid_service)
       : hid_service_(hid_service) {}
-  virtual ~Destroyer() {}
+  ~Destroyer() override {}
 
  private:
   // base::MessageLoop::DestructionObserver implementation.
-  virtual void WillDestroyCurrentMessageLoop() OVERRIDE {
+  void WillDestroyCurrentMessageLoop() override {
     base::MessageLoop::current()->RemoveDestructionObserver(this);
     delete hid_service_;
     delete this;
@@ -55,12 +55,19 @@ HidService* HidService::GetInstance(
 #elif defined(OS_WIN)
     g_service = new HidServiceWin();
 #endif
-    if (g_service != NULL) {
+    if (g_service != nullptr) {
       Destroyer* destroyer = new Destroyer(g_service);
       base::MessageLoop::current()->AddDestructionObserver(destroyer);
     }
   }
   return g_service;
+}
+
+void HidService::SetInstanceForTest(HidService* instance) {
+  DCHECK(!g_service);
+  g_service = instance;
+  Destroyer* destroyer = new Destroyer(g_service);
+  base::MessageLoop::current()->AddDestructionObserver(destroyer);
 }
 
 HidService::~HidService() {

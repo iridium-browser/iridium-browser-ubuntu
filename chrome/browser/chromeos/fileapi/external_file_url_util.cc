@@ -13,10 +13,10 @@
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
 #include "storage/browser/fileapi/file_system_url.h"
 
@@ -24,27 +24,27 @@ using content::BrowserThread;
 
 namespace chromeos {
 
+bool IsExternalFileURLType(storage::FileSystemType type) {
+  return type == storage::kFileSystemTypeDrive ||
+         type == storage::kFileSystemTypeDeviceMediaAsFileStorage ||
+         type == storage::kFileSystemTypeProvided;
+}
+
 GURL FileSystemURLToExternalFileURL(
     const storage::FileSystemURL& file_system_url) {
-  if (file_system_url.mount_type() != storage::kFileSystemTypeExternal)
+  if (file_system_url.mount_type() != storage::kFileSystemTypeExternal ||
+      !IsExternalFileURLType(file_system_url.type())) {
     return GURL();
-
-  switch (file_system_url.type()) {
-    case storage::kFileSystemTypeDrive:
-    case storage::kFileSystemTypeDeviceMediaAsFileStorage:
-    case storage::kFileSystemTypeProvided:
-      return GURL(base::StringPrintf(
-          "%s:%s",
-          chrome::kExternalFileScheme,
-          file_system_url.virtual_path().AsUTF8Unsafe().c_str()));
-
-    default:
-      return GURL();
   }
+
+  return GURL(base::StringPrintf(
+      "%s:%s",
+      content::kExternalFileScheme,
+      file_system_url.virtual_path().AsUTF8Unsafe().c_str()));
 }
 
 base::FilePath ExternalFileURLToVirtualPath(const GURL& url) {
-  if (!url.is_valid() || url.scheme() != chrome::kExternalFileScheme)
+  if (!url.is_valid() || url.scheme() != content::kExternalFileScheme)
     return base::FilePath();
   const std::string path_string =
       net::UnescapeURLComponent(url.GetContent(), net::UnescapeRule::NORMAL);

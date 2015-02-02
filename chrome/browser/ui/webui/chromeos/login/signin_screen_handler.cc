@@ -7,8 +7,9 @@
 #include <algorithm>
 #include <vector>
 
+#include "ash/shell.h"
+#include "ash/wm/lock_state_controller.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/debug/trace_event.h"
 #include "base/location.h"
 #include "base/logging.h"
@@ -29,6 +30,7 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
+#include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
@@ -36,7 +38,6 @@
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/consumer_management_service.h"
@@ -46,7 +47,6 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
-#include "chrome/browser/ui/webui/chromeos/login/authenticated_user_email_retriever.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/native_window_delegate.h"
@@ -72,13 +72,11 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/webui/web_ui_util.h"
 
-#if defined(USE_AURA)
-#include "ash/shell.h"
-#include "ash/wm/lock_state_controller.h"
+#if !defined(USE_ATHENA)
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #endif
 
 namespace {
@@ -255,6 +253,7 @@ SigninScreenHandler::SigninScreenHandler(
                              ->CapsLockIsEnabled()),
       gaia_screen_handler_(gaia_screen_handler),
       oobe_ui_observer_added_(false),
+      histogram_helper_(new ErrorScreensHistogramHelper("Signin")),
       weak_factory_(this) {
   DCHECK(network_state_informer_.get());
   DCHECK(error_screen_actor_);
@@ -315,7 +314,6 @@ SigninScreenHandler::~SigninScreenHandler() {
 void SigninScreenHandler::DeclareLocalizedValues(
     LocalizedValuesBuilder* builder) {
   builder->Add("passwordHint", IDS_LOGIN_POD_EMPTY_PASSWORD_TEXT);
-  builder->Add("signingIn", IDS_LOGIN_POD_SIGNING_IN);
   builder->Add("podMenuButtonAccessibleName",
                IDS_LOGIN_POD_MENU_BUTTON_ACCESSIBLE_NAME);
   builder->Add("podMenuRemoveItemAccessibleName",
@@ -432,6 +430,7 @@ void SigninScreenHandler::Show(const LoginScreenContext& context) {
   }
   gaia_screen_handler_->PopulateEmail(email);
   ShowImpl();
+  histogram_helper_->OnScreenShow();
 }
 
 void SigninScreenHandler::ShowRetailModeLoginSpinner() {
@@ -689,6 +688,7 @@ void SigninScreenHandler::SetupAndShowOfflineMessage(
     params.SetString("lastNetworkType", network_type);
     error_screen_actor_->SetUIState(ErrorScreen::UI_STATE_SIGNIN);
     error_screen_actor_->Show(OobeUI::SCREEN_GAIA_SIGNIN, &params);
+    histogram_helper_->OnErrorShow(error_screen_actor_->error_state());
   }
 }
 
@@ -699,6 +699,7 @@ void SigninScreenHandler::HideOfflineMessage(
     return;
 
   error_screen_actor_->Hide();
+  histogram_helper_->OnErrorHide();
 
   // Forces a reload for Gaia screen on hiding error message.
   if (IsGaiaVisible() || IsGaiaHiddenByError())
@@ -745,6 +746,8 @@ void SigninScreenHandler::RegisterMessages() {
   AddCallback("removeUser", &SigninScreenHandler::HandleRemoveUser);
   AddCallback("toggleEnrollmentScreen",
               &SigninScreenHandler::HandleToggleEnrollmentScreen);
+  AddCallback("switchToEmbeddedSignin",
+              &SigninScreenHandler::HandleSwitchToEmbeddedSignin);
   AddCallback("toggleKioskEnableScreen",
               &SigninScreenHandler::HandleToggleKioskEnableScreen);
   AddCallback("createAccount", &SigninScreenHandler::HandleCreateAccount);
@@ -771,8 +774,6 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleUpdateOfflineLogin);
   AddCallback("focusPod", &SigninScreenHandler::HandleFocusPod);
   AddCallback("hardlockPod", &SigninScreenHandler::HandleHardlockPod);
-  AddCallback("retrieveAuthenticatedUserEmail",
-              &SigninScreenHandler::HandleRetrieveAuthenticatedUserEmail);
   AddCallback("getPublicSessionKeyboardLayouts",
               &SigninScreenHandler::HandleGetPublicSessionKeyboardLayouts);
   AddCallback("cancelConsumerManagementEnrollment",
@@ -1023,10 +1024,6 @@ void SigninScreenHandler::AttemptEasySignin(const std::string& user_email,
   user_context.SetKey(Key(secret));
   user_context.GetKey()->SetLabel(key_label);
 
-  // TODO(tbarzic): Handle empty secret. The delegate will end up ignoring login
-  // attempt if the key is not set, and the UI will remain disabled.
-  DCHECK(!secret.empty());
-
   delegate_->Login(user_context, SigninSpecifics());
 }
 
@@ -1151,7 +1148,12 @@ void SigninScreenHandler::HandleOfflineLogin(const base::ListValue* args) {
 }
 
 void SigninScreenHandler::HandleShutdownSystem() {
+#if defined(USE_ATHENA)
+  chromeos::DBusThreadManager::Get()->
+      GetPowerManagerClient()->RequestShutdown();
+#else
   ash::Shell::GetInstance()->lock_state_controller()->RequestShutdown();
+#endif
 }
 
 void SigninScreenHandler::HandleLoadWallpaper(const std::string& email) {
@@ -1315,6 +1317,9 @@ void SigninScreenHandler::HandleLoginUIStateChanged(const std::string& source,
   VLOG(0) << "Login WebUI >> active: " << new_value << ", "
             << "source: " << source;
 
+  if (source == "gaia-signin" && !new_value)
+    gaia_screen_handler_->CancelEmbeddedSignin();
+
   if (!KioskAppManager::Get()->GetAutoLaunchApp().empty() &&
       KioskAppManager::Get()->IsAutoLaunchRequested()) {
     VLOG(0) << "Showing auto-launch warning";
@@ -1371,17 +1376,6 @@ void SigninScreenHandler::HandleHardlockPod(const std::string& user_id) {
   service->SetHardlockState(EasyUnlockScreenlockStateHandler::USER_HARDLOCK);
 }
 
-void SigninScreenHandler::HandleRetrieveAuthenticatedUserEmail(
-    double attempt_token) {
-  // TODO(antrim) : move GaiaSigninScreen dependency to GaiaSigninScreen.
-  email_retriever_.reset(new AuthenticatedUserEmailRetriever(
-      base::Bind(&SigninScreenHandler::CallJS<double, std::string>,
-                 base::Unretained(this),
-                 "login.GaiaSigninScreen.setAuthenticatedUserEmail",
-                 attempt_token),
-      Profile::FromWebUI(web_ui())->GetRequestContext()));
-}
-
 void SigninScreenHandler::HandleGetPublicSessionKeyboardLayouts(
     const std::string& user_id,
     const std::string& locale) {
@@ -1424,10 +1418,19 @@ void SigninScreenHandler::HandleCancelConsumerManagementEnrollment() {
 }
 
 void SigninScreenHandler::HandleGetTouchViewState() {
+#if defined(USE_ATHENA)
+  // Login UI should treat athena builds as if it's TouchView mode.
+  CallJS("login.AccountPickerScreen.setTouchViewState", true);
+#else
   if (max_mode_delegate_) {
     CallJS("login.AccountPickerScreen.setTouchViewState",
            max_mode_delegate_->IsMaximizeModeEnabled());
   }
+#endif
+}
+
+void SigninScreenHandler::HandleSwitchToEmbeddedSignin() {
+  gaia_screen_handler_->SwitchToEmbeddedSignin();
 }
 
 bool SigninScreenHandler::AllWhitelistedUsersPresent() {

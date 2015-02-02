@@ -192,7 +192,7 @@ struct OffHeapCollectionTraceTrait;
 
 template<typename T>
 struct ObjectAliveTrait {
-    static bool isAlive(Visitor*, T*);
+    static bool isHeapObjectAlive(Visitor*, T*);
 };
 
 // Visitor is used to traverse the Blink object graph. Used for the
@@ -406,7 +406,7 @@ public:
         // always 'alive'.
         if (!obj)
             return true;
-        return ObjectAliveTrait<T>::isAlive(this, obj);
+        return ObjectAliveTrait<T>::isHeapObjectAlive(this, obj);
     }
     template<typename T> inline bool isAlive(const Member<T>& member)
     {
@@ -542,7 +542,7 @@ template<typename T, bool = NeedsAdjustAndMark<T>::value> class DefaultObjectAli
 template<typename T>
 class DefaultObjectAliveTrait<T, false> {
 public:
-    static bool isAlive(Visitor* visitor, T* obj)
+    static bool isHeapObjectAlive(Visitor* visitor, T* obj)
     {
         return visitor->isMarked(obj);
     }
@@ -551,15 +551,15 @@ public:
 template<typename T>
 class DefaultObjectAliveTrait<T, true> {
 public:
-    static bool isAlive(Visitor* visitor, T* obj)
+    static bool isHeapObjectAlive(Visitor* visitor, T* obj)
     {
-        return obj->isAlive(visitor);
+        return obj->isHeapObjectAlive(visitor);
     }
 };
 
-template<typename T> bool ObjectAliveTrait<T>::isAlive(Visitor* visitor, T* obj)
+template<typename T> bool ObjectAliveTrait<T>::isHeapObjectAlive(Visitor* visitor, T* obj)
 {
-    return DefaultObjectAliveTrait<T>::isAlive(visitor, obj);
+    return DefaultObjectAliveTrait<T>::isHeapObjectAlive(visitor, obj);
 }
 
 // The GarbageCollectedMixin interface and helper macro
@@ -585,20 +585,20 @@ template<typename T> bool ObjectAliveTrait<T>::isAlive(Visitor* visitor, T* obj)
 
 class PLATFORM_EXPORT GarbageCollectedMixin {
 public:
-    virtual void adjustAndMark(Visitor*) const { };
-    virtual bool isAlive(Visitor*) const { return true; };
+    virtual void adjustAndMark(Visitor*) const = 0;
+    virtual bool isHeapObjectAlive(Visitor*) const = 0;
     virtual void trace(Visitor*) { }
 };
 
 #define USING_GARBAGE_COLLECTED_MIXIN(TYPE) \
 public: \
-    virtual void adjustAndMark(blink::Visitor* visitor) const OVERRIDE    \
+    virtual void adjustAndMark(blink::Visitor* visitor) const override    \
     { \
         typedef WTF::IsSubclassOfTemplate<typename WTF::RemoveConst<TYPE>::Type, blink::GarbageCollected> IsSubclassOfGarbageCollected; \
         COMPILE_ASSERT(IsSubclassOfGarbageCollected::value, OnlyGarbageCollectedObjectsCanHaveGarbageCollectedMixins); \
         visitor->mark(static_cast<const TYPE*>(this), &blink::TraceTrait<TYPE>::trace); \
     } \
-    virtual bool isAlive(blink::Visitor* visitor) const OVERRIDE  \
+    virtual bool isHeapObjectAlive(blink::Visitor* visitor) const override  \
     { \
         return visitor->isAlive(this); \
     } \

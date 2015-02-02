@@ -1,7 +1,7 @@
 #include "DMGpuGMTask.h"
 #include "DMUtil.h"
 #include "DMWriteTask.h"
-#include "SkCommandLineFlags.h"
+#include "SkCommonFlags.h"
 #include "SkSurface.h"
 #include "SkTLS.h"
 
@@ -22,6 +22,8 @@ GpuGMTask::GpuGMTask(const char* config,
     , fSampleCount(sampleCount)
     {}
 
+static bool gAlreadyWarned[GrContextFactory::kGLContextTypeCnt][kGrGLStandardCnt];
+
 void GpuGMTask::draw(GrContextFactory* grFactory) {
     SkImageInfo info = SkImageInfo::Make(SkScalarCeilToInt(fGM->width()),
                                          SkScalarCeilToInt(fGM->height()),
@@ -30,7 +32,11 @@ void GpuGMTask::draw(GrContextFactory* grFactory) {
     SkAutoTUnref<SkSurface> surface(NewGpuSurface(grFactory, fContextType, fGpuAPI, info,
                                                   fSampleCount));
     if (!surface) {
-        this->fail("Could not create context for the config and the api.");
+        if (!gAlreadyWarned[fContextType][fGpuAPI]) {
+            SkDebugf("FYI: couldn't create GPU context, type %d API %d.  Will skip.\n",
+                     fContextType, fGpuAPI);
+            gAlreadyWarned[fContextType][fGpuAPI] = true;
+        }
         return;
     }
     SkCanvas* canvas = surface->getCanvas();
@@ -39,6 +45,11 @@ void GpuGMTask::draw(GrContextFactory* grFactory) {
     canvas->concat(fGM->getInitialTransform());
     fGM->draw(canvas);
     canvas->flush();
+#if GR_CACHE_STATS && SK_SUPPORT_GPU
+    if (FLAGS_veryVerbose) {
+        grFactory->get(fContextType)->printCacheStats();
+    }
+#endif
 
     SkBitmap bitmap;
     bitmap.setInfo(info);

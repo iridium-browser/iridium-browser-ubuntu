@@ -5,13 +5,12 @@
 WebInspector.OverridesUI = {}
 
 /**
- * @param {!Document} document
  * @param {!function(!function(string))=} titleProvider
  * @return {!Element}
  */
-WebInspector.OverridesUI.createDeviceSelect = function(document, titleProvider)
+WebInspector.OverridesUI.createDeviceSelect = function(titleProvider)
 {
-    var p = document.createElement("p");
+    var p = createElement("p");
 
     var deviceSelectElement = p.createChild("select");
     deviceSelectElement.addEventListener("change", deviceSelected, false);
@@ -154,13 +153,12 @@ WebInspector.OverridesUI.createDeviceSelect = function(document, titleProvider)
 }
 
 /**
- * @param {!Document} document
  * @return {!Element}
  */
-WebInspector.OverridesUI.createNetworkConditionsSelect = function(document)
+WebInspector.OverridesUI.createNetworkConditionsSelect = function()
 {
     var networkConditionsSetting = WebInspector.overridesSupport.settings.networkConditions;
-    var conditionsSelectElement = document.createElement("select");
+    var conditionsSelectElement = createElement("select");
     var presets = WebInspector.OverridesUI._networkConditionsPresets;
     for (var i = 0; i < presets.length; ++i) {
         var preset = presets[i];
@@ -219,22 +217,21 @@ WebInspector.OverridesUI.createNetworkConditionsSelect = function(document)
 }
 
 /**
- * @param {!Document} document
  * @return {{select: !Element, input: !Element}}
  */
-WebInspector.OverridesUI.createUserAgentSelectAndInput = function(document)
+WebInspector.OverridesUI.createUserAgentSelectAndInput = function()
 {
     var userAgentSetting = WebInspector.overridesSupport.settings.userAgent;
     const noOverride = {title: WebInspector.UIString("No override"), value: ""};
     const customOverride = {title: WebInspector.UIString("Other"), value: "Other"};
     var userAgents = [noOverride].concat(WebInspector.OverridesUI._userAgents).concat([customOverride]);
 
-    var userAgentSelectElement = document.createElement("select");
+    var userAgentSelectElement = createElement("select");
     for (var i = 0; i < userAgents.length; ++i)
         userAgentSelectElement.add(new Option(userAgents[i].title, userAgents[i].value));
     userAgentSelectElement.selectedIndex = 0;
 
-    var otherUserAgentElement = document.createElement("input");
+    var otherUserAgentElement = createElement("input");
     otherUserAgentElement.type = "text";
     otherUserAgentElement.value = userAgentSetting.get();
     otherUserAgentElement.title = userAgentSetting.get();

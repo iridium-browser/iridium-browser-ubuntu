@@ -205,28 +205,24 @@ class TestCameraListener
       : completed_(false),
         removed_(false),
         last_error_(base::File::FILE_ERROR_INVALID_URL) {}
-  virtual ~TestCameraListener() {}
+  ~TestCameraListener() override {}
 
-  virtual void ItemAdded(const std::string& name,
-                         const base::File::Info& info) OVERRIDE {
+  void ItemAdded(const std::string& name,
+                 const base::File::Info& info) override {
     items_.push_back(name);
   }
 
-  virtual void NoMoreItems() OVERRIDE {
-    completed_ = true;
-  }
+  void NoMoreItems() override { completed_ = true; }
 
-  virtual void DownloadedFile(const std::string& name,
-                              base::File::Error error) OVERRIDE {
+  void DownloadedFile(const std::string& name,
+                      base::File::Error error) override {
     EXPECT_TRUE(content::BrowserThread::CurrentlyOn(
         content::BrowserThread::UI));
     downloads_.push_back(name);
     last_error_ = error;
   }
 
-  virtual void DeviceRemoved() OVERRIDE {
-    removed_ = true;
-  }
+  void DeviceRemoved() override { removed_ = true; }
 
   std::vector<std::string> items() const { return items_; }
   std::vector<std::string> downloads() const { return downloads_; }
@@ -244,11 +240,11 @@ class TestCameraListener
 
 class ImageCaptureDeviceManagerTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     monitor_ = TestStorageMonitor::CreateAndInstall();
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     TestStorageMonitor::Destroy();
   }
 

@@ -5,12 +5,15 @@
 #ifndef CC_SURFACES_SURFACE_FACTORY_H_
 #define CC_SURFACES_SURFACE_FACTORY_H_
 
+#include <set>
+
 #include "base/callback_forward.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_resource_holder.h"
+#include "cc/surfaces/surface_sequence.h"
 #include "cc/surfaces/surfaces_export.h"
 
 namespace gfx {
@@ -37,6 +40,7 @@ class CC_SURFACES_EXPORT SurfaceFactory
 
   void Create(SurfaceId surface_id, const gfx::Size& size);
   void Destroy(SurfaceId surface_id);
+  void DestroyAll();
   // A frame can only be submitted to a surface created by this factory,
   // although the frame may reference surfaces created by other factories.
   // The callback is called the first time this frame is used to draw.
@@ -51,6 +55,8 @@ class CC_SURFACES_EXPORT SurfaceFactory
   void ReceiveFromChild(const TransferableResourceArray& resources);
   void RefResources(const TransferableResourceArray& resources);
   void UnrefResources(const ReturnedResourceArray& resources);
+
+  SurfaceManager* manager() { return manager_; }
 
  private:
   SurfaceManager* manager_;

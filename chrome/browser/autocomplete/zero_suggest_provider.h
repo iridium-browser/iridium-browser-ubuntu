@@ -57,31 +57,30 @@ class ZeroSuggestProvider : public BaseSearchProvider,
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // AutocompleteProvider:
-  virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes) OVERRIDE;
-  virtual void Stop(bool clear_cached_results) OVERRIDE;
-  virtual void DeleteMatch(const AutocompleteMatch& match) OVERRIDE;
-  virtual void AddProviderInfo(ProvidersInfo* provider_info) const OVERRIDE;
+  void Start(const AutocompleteInput& input, bool minimal_changes) override;
+  void Stop(bool clear_cached_results) override;
+  void DeleteMatch(const AutocompleteMatch& match) override;
+  void AddProviderInfo(ProvidersInfo* provider_info) const override;
 
   // Sets |field_trial_triggered_| to false.
-  virtual void ResetSession() OVERRIDE;
+  void ResetSession() override;
 
  private:
   ZeroSuggestProvider(AutocompleteProviderListener* listener,
                       TemplateURLService* template_url_service,
                       Profile* profile);
 
-  virtual ~ZeroSuggestProvider();
+  ~ZeroSuggestProvider() override;
 
   // BaseSearchProvider:
-  virtual const TemplateURL* GetTemplateURL(bool is_keyword) const OVERRIDE;
-  virtual const AutocompleteInput GetInput(bool is_keyword) const OVERRIDE;
-  virtual bool ShouldAppendExtraParams(
-      const SearchSuggestionParser::SuggestResult& result) const OVERRIDE;
-  virtual void RecordDeletionResult(bool success) OVERRIDE;
+  const TemplateURL* GetTemplateURL(bool is_keyword) const override;
+  const AutocompleteInput GetInput(bool is_keyword) const override;
+  bool ShouldAppendExtraParams(
+      const SearchSuggestionParser::SuggestResult& result) const override;
+  void RecordDeletionResult(bool success) override;
 
   // net::URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // Optionally, cache the received |json_data| and return true if we want
   // to stop processing results at this point. The |parsed_data| is the parsed
@@ -120,10 +119,11 @@ class ZeroSuggestProvider : public BaseSearchProvider,
   // Returns the relevance score for the verbatim result.
   int GetVerbatimRelevance() const;
 
-  // Whether we can show zero suggest on |current_page_url| without
-  // sending |current_page_url| as a parameter to the server at |suggest_url|.
-  bool CanShowZeroSuggestWithoutSendingURL(const GURL& suggest_url,
-                                           const GURL& current_page_url) const;
+  // Whether we can show zero suggest without sending |current_page_url| to
+  // |suggest_url| search provider. Also checks that other conditions for
+  // non-contextual zero suggest are satisfied.
+  bool ShouldShowNonContextualZeroSuggest(const GURL& suggest_url,
+                                          const GURL& current_page_url) const;
 
   // Checks whether we have a set of zero suggest results cached, and if so
   // populates |matches_| with cached results.
@@ -156,6 +156,9 @@ class ZeroSuggestProvider : public BaseSearchProvider,
   bool results_from_cache_;
 
   history::MostVisitedURLList most_visited_urls_;
+
+  // Whether we are waiting for a most visited visited urls callback to run.
+  bool waiting_for_most_visited_urls_request_;
 
   // For callbacks that may be run after destruction.
   base::WeakPtrFactory<ZeroSuggestProvider> weak_ptr_factory_;

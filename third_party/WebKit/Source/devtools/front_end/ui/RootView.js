@@ -12,24 +12,30 @@ WebInspector.RootView = function()
     this.markAsRoot();
     this.element.classList.add("root-view");
     this.element.setAttribute("spellcheck", false);
-    window.addEventListener("resize", this.doResize.bind(this), false);
 }
 
 WebInspector.RootView.prototype = {
-    attachToBody: function()
+    /**
+     * @param {!Document} document
+     */
+    attachToDocument: function(document)
     {
+        document.defaultView.addEventListener("resize", this.doResize.bind(this), false);
+        this._window = document.defaultView;
         this.doResize();
         this.show(document.body);
     },
 
     doResize: function()
     {
-        var size = this.constraints().minimum;
-        var zoom = WebInspector.zoomManager.zoomFactor();
-        var right = Math.min(0, window.innerWidth - size.width / zoom);
-        this.element.style.marginRight = right + "px";
-        var bottom = Math.min(0, window.innerHeight - size.height / zoom);
-        this.element.style.marginBottom = bottom + "px";
+        if (this._window) {
+            var size = this.constraints().minimum;
+            var zoom = WebInspector.zoomManager.zoomFactor();
+            var right = Math.min(0, this._window.innerWidth - size.width / zoom);
+            this.element.style.marginRight = right + "px";
+            var bottom = Math.min(0, this._window.innerHeight - size.height / zoom);
+            this.element.style.marginBottom = bottom + "px";
+        }
         WebInspector.VBox.prototype.doResize.call(this);
     },
 

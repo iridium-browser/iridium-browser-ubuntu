@@ -10,14 +10,16 @@ elseif(UNIX)
 	enable_language(ASM)
 else()
 	if (CMAKE_CL_64)
-		message("Using masm")
-		set(PERLASM_STYLE masm)
+		message("Using nasm")
+		set(PERLASM_STYLE nasm)
 	else()
 		message("Using win32n")
 		set(PERLASM_STYLE win32n)
 	endif()
+
+	# On Windows, we use the NASM output, specifically built with Yasm.
 	set(ASM_EXT asm)
-	enable_language(ASM_MASM)
+	enable_language(ASM_NASM)
 endif()
 
 function(perlasm dest src)
@@ -27,9 +29,10 @@ function(perlasm dest src)
 		DEPENDS
 		${src}
 		${PROJECT_SOURCE_DIR}/crypto/perlasm/x86_64-xlate.pl
+		${PROJECT_SOURCE_DIR}/crypto/perlasm/x86asm.pl
 		${PROJECT_SOURCE_DIR}/crypto/perlasm/x86gas.pl
-		${PROJECT_SOURCE_DIR}/crypto/perlasm/x86asm.pl
-		${PROJECT_SOURCE_DIR}/crypto/perlasm/x86asm.pl
+		${PROJECT_SOURCE_DIR}/crypto/perlasm/x86masm.pl
+		${PROJECT_SOURCE_DIR}/crypto/perlasm/x86nasm.pl
 		WORKING_DIRECTORY .
 	)
 endfunction()

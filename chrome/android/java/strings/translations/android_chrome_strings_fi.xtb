@@ -69,7 +69,6 @@ Olet kirjautumassa hallinnoituun tiliin, jonka hallinnoijalla on oikeus muokata 
 <translation id="7267430310003164111">Kehote hankkia sovellus Google Play Kaupasta. Sovelluksen nimi: <ph name="APP_NAME"/>. Sovelluksen keskimääräinen arvio: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Asennetaan...</translation>
 <translation id="3992315671621218278">Tallenna linkki</translation>
-<translation id="8034522405403831421">Sivu on kirjoitettu kielellä <ph name="SOURCE_LANGUAGE"/>. Haluatko kääntää sen kielelle <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Sivuston asetukset</translation>
 <translation id="4195643157523330669">Avaa uudessa välilehdessä</translation>
 <translation id="651048280540227067">Piilota valikko</translation>
@@ -95,6 +94,7 @@ Olet kirjautumassa hallinnoituun tiliin, jonka hallinnoijalla on oikeus muokata 
 <translation id="7947953824732555851">Hyväksy ja kirjaudu sisään</translation>
 <translation id="6333140779060797560">Jaa sovelluksella <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Sulje</translation>
+<translation id="5138299137310274655">Sivu on kirjoitettu kielellä <ph name="SOURCE_LANGUAGE"/>. Haluatko kääntää sen kielelle <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Vaihda kieltä</translation>
 <translation id="5032574515228824816">Kehote</translation>
 <translation id="7961015016161918242">Ei koskaan</translation>

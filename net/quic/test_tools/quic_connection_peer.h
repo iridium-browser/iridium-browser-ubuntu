@@ -119,6 +119,11 @@ class QuicConnectionPeer {
   static void SetSupportedVersions(QuicConnection* connection,
                                    QuicVersionVector versions);
 
+  static QuicPacketHeader* GetLastHeader(QuicConnection* connection);
+
+  static void SetSequenceNumberOfLastSentPacket(
+      QuicConnection* connection, QuicPacketSequenceNumber number);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);
 };

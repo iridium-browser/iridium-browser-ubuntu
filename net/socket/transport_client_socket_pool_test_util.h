@@ -67,26 +67,26 @@ class MockTransportClientSocketFactory : public ClientSocketFactory {
   };
 
   explicit MockTransportClientSocketFactory(NetLog* net_log);
-  virtual ~MockTransportClientSocketFactory();
+  ~MockTransportClientSocketFactory() override;
 
-  virtual scoped_ptr<DatagramClientSocket> CreateDatagramClientSocket(
+  scoped_ptr<DatagramClientSocket> CreateDatagramClientSocket(
       DatagramSocket::BindType bind_type,
       const RandIntCallback& rand_int_cb,
       NetLog* net_log,
-      const NetLog::Source& source) OVERRIDE;
+      const NetLog::Source& source) override;
 
-  virtual scoped_ptr<StreamSocket> CreateTransportClientSocket(
+  scoped_ptr<StreamSocket> CreateTransportClientSocket(
       const AddressList& addresses,
       NetLog* /* net_log */,
-      const NetLog::Source& /* source */) OVERRIDE;
+      const NetLog::Source& /* source */) override;
 
-  virtual scoped_ptr<SSLClientSocket> CreateSSLClientSocket(
+  scoped_ptr<SSLClientSocket> CreateSSLClientSocket(
       scoped_ptr<ClientSocketHandle> transport_socket,
       const HostPortPair& host_and_port,
       const SSLConfig& ssl_config,
-      const SSLClientSocketContext& context) OVERRIDE;
+      const SSLClientSocketContext& context) override;
 
-  virtual void ClearSSLSessionCache() OVERRIDE;
+  void ClearSSLSessionCache() override;
 
   int allocation_count() const { return allocation_count_; }
 

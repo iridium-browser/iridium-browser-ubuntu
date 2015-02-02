@@ -173,7 +173,7 @@ bool IsPinchVirtualViewportEnabled() {
   if (command_line.HasSwitch(cc::switches::kEnablePinchVirtualViewport))
     return true;
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
   return true;
 #else
   return false;
@@ -200,13 +200,10 @@ bool IsImplSidePaintingEnabled() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
 
-  if (command_line.HasSwitch(switches::kDisableImplSidePainting))
+  if (command_line.HasSwitch(switches::kEnableImplSidePainting))
+    return true;
+  else if (command_line.HasSwitch(switches::kDisableImplSidePainting))
     return false;
-  else if (command_line.HasSwitch(switches::kEnableImplSidePainting))
-    return true;
-  else if (command_line.HasSwitch(
-      switches::kEnableBleedingEdgeRenderingFastPaths))
-    return true;
 
   return true;
 }

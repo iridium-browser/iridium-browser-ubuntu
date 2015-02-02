@@ -564,7 +564,7 @@ translator-all() {
   driver-install-translator
 
   if ${PNACL_PRUNE}; then
-    sdk-clean newlib
+    sdk-clean
   fi
 }
 
@@ -1833,6 +1833,7 @@ llvm-sb-configure() {
   # getrusage (stub is in libnacl), but we can't actually compile code
   # that uses ::getrusage because it's not in headers:
   # https://code.google.com/p/nativeclient/issues/detail?id=3657
+  # Similar with getrlimit/setrlimit where struct rlimit isn't defined.
   RunWithLog \
       ${LLVM_SB_LOG_PREFIX}.configure \
       env -i \
@@ -1850,7 +1851,9 @@ llvm-sb-configure() {
         --enable-optimized \
         --target=${CROSS_TARGET_ARM} \
         llvm_cv_link_use_export_dynamic=no \
-        ac_cv_func_getrusage=no
+        ac_cv_func_getrusage=no \
+        ac_cv_func_getrlimit=no \
+        ac_cv_func_setrlimit=no
   spopd
 }
 
@@ -1900,17 +1903,19 @@ llvm-sb-install() {
     # Translate twice to get both nexes.
     arches="i686 x86_64"
   fi
-  translate-sb-tool ${toolname} "${arches}"
+  local have_segment_gap="false"
+  translate-sb-tool ${toolname} "${arches}" "${have_segment_gap}"
   install-sb-tool ${toolname} "${arches}"
   spopd
 }
 
-# translate-sb-tool <toolname> <arches>
+# translate-sb-tool <toolname> <arches> <have_segment_gap>
 #
 # Translate <toolname>.pexe to <toolname>.<arch>.nexe in the current directory.
 translate-sb-tool() {
   local toolname=$1
   local arches=$2
+  local have_segment_gap=$3
   local pexe="${toolname}.pexe"
   if ${PNACL_PRUNE}; then
     # Only strip debug, to preserve symbol names for testing. This is okay
@@ -1933,8 +1938,12 @@ translate-sb-tool() {
     # helps reduce the size a bit. If you want to use --gc-sections to test out:
     # http://code.google.com/p/nativeclient/issues/detail?id=1591
     # you will need to do a build without these flags.
-    "${PNACL_TRANSLATE}" -ffunction-sections -fdata-sections --gc-sections \
-      --allow-llvm-bitcode-input --noirt -arch ${tarch} "${pexe}" -o "${nexe}" &
+    local translate_flags="-ffunction-sections -fdata-sections --gc-sections \
+      --allow-llvm-bitcode-input -arch ${tarch} "
+    if ! ${have_segment_gap}; then
+      translate_flags+="--noirt "
+    fi
+    "${PNACL_TRANSLATE}" ${translate_flags} "${pexe}" -o "${nexe}" &
     QueueLastProcess
   done
   StepBanner "TRANSLATE" "Waiting for translation processes to finish"
@@ -2100,6 +2109,8 @@ binutils-gold-sb-configure() {
   # Removed -Werror until upstream gold no longer has problems with new clang
   # warnings. http://code.google.com/p/nativeclient/issues/detail?id=2861
   # TODO(sehr,robertm): remove this when gold no longer has these.
+  # Disable readv. We have a stub for it, but not the accompanying headers
+  # in newlib, like sys/uio.h to actually compile with it.
   RunWithLog "${log_prefix}".configure \
     env -i \
     PATH="/usr/bin:/bin" \
@@ -2110,6 +2121,7 @@ binutils-gold-sb-configure() {
     ac_cv_header_sys_mman_h=no \
     ac_cv_func_mmap=no \
     ac_cv_func_mallinfo=no \
+    ac_cv_func_readv=no \
     ac_cv_prog_cc_g=no \
     ac_cv_prog_cxx_g=no \
     ${srcdir}/gold/configure --prefix="${installbin}" \
@@ -2180,7 +2192,8 @@ binutils-gold-sb-install() {
   if [[ "${arch}" == "universal" ]]; then
     arches="${SBTC_ARCHES_ALL}"
   fi
-  translate-sb-tool ld "${arches}"
+  local have_segment_gap=true
+  translate-sb-tool ld "${arches}" ${have_segment_gap}
   install-sb-tool ld "${arches}"
   spopd
 }
@@ -2540,7 +2553,7 @@ sdk-setup() {
   fi
   SDK_IS_SETUP=true
 
-  SDK_INSTALL_ROOT="${INSTALL_ROOT}/sdk"
+  SDK_INSTALL_ROOT="${INSTALL_ROOT}/le32-nacl"
   SDK_INSTALL_LIB="${SDK_INSTALL_ROOT}/lib"
   SDK_INSTALL_INCLUDE="${SDK_INSTALL_ROOT}/include"
 }
@@ -2551,14 +2564,14 @@ sdk() {
   sdk-clean
   sdk-headers
   sdk-libs
-  sdk-verify
 }
 
 #+ sdk-clean             - Clean sdk stuff
 sdk-clean() {
   sdk-setup "$@"
   StepBanner "SDK" "Clean"
-  rm -rf "${SDK_INSTALL_ROOT}"
+  rm -rf "${SDK_INSTALL_LIB}"/{libnacl*.a,libpthread.a,libnosys.a}
+  rm -rf "${SDK_INSTALL_INCLUDE}"/{irt*.h,pthread.h,semaphore.h,nacl}
 
   # clean scons obj dirs
   rm -rf "${SCONS_OUT}"/nacl-*-pnacl*
@@ -2634,14 +2647,6 @@ sdk-private-libs() {
   cp "${outdir}"/lib*_private.a \
      "${outdir}"/lib{platform,imc,imc_syscalls,srpc,gio}.a "${SDK_INSTALL_LIB}"
   spopd
-}
-
-sdk-verify() {
-  sdk-setup "$@"
-  StepBanner "SDK" "Verify"
-
-  # Verify bitcode libraries
-  verify-bitcode-dir "${SDK_INSTALL_LIB}"
 }
 
 newlib-nacl-headers-clean() {

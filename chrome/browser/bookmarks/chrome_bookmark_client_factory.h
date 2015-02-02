@@ -26,14 +26,14 @@ class ChromeBookmarkClientFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<ChromeBookmarkClientFactory>;
 
   ChromeBookmarkClientFactory();
-  virtual ~ChromeBookmarkClientFactory();
+  ~ChromeBookmarkClientFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBookmarkClientFactory);
 };

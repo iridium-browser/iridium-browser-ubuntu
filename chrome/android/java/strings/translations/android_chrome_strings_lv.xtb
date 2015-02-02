@@ -69,7 +69,6 @@ Jūs pierakstāties, izmantojot pārvaldītu kontu, un ļaujat šī konta admini
 <translation id="7267430310003164111">Aicinājums iegūt lietotni Google Play veikalā. Lietotnes nosaukums: <ph name="APP_NAME"/>. Lietotnes vidējais vērtējums: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Notiek instalēšana...</translation>
 <translation id="3992315671621218278">Saglabāt saiti</translation>
-<translation id="8034522405403831421">Šī lapas saturs ir šādā valodā: <ph name="SOURCE_LANGUAGE"/>. Vai tulkot šādā valodā: <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Vietnes iestatījumi</translation>
 <translation id="4195643157523330669">Atvērt jaunā cilnē</translation>
 <translation id="651048280540227067">Nerādīt izvēlni</translation>
@@ -95,6 +94,7 @@ Jūs pierakstāties, izmantojot pārvaldītu kontu, un ļaujat šī konta admini
 <translation id="7947953824732555851">Pieņemt un pierakst.</translation>
 <translation id="6333140779060797560">Kopīgot, izmantojot <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Aizvērt</translation>
+<translation id="5138299137310274655">Šī lapas saturs ir šādā valodā: <ph name="SOURCE_LANGUAGE"/>. Vai tulkot to šādā valodā: <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Mainīt valodas</translation>
 <translation id="5032574515228824816">Uzvedne</translation>
 <translation id="7961015016161918242">Nekad</translation>

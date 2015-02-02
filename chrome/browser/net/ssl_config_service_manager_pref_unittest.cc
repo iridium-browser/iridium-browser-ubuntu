@@ -10,12 +10,12 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/testing_pref_store.h"
 #include "base/values.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/prefs/pref_service_mock_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/ssl/ssl_config_service.h"
@@ -127,7 +127,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, BadDisabledCipherSuites) {
 }
 
 // Test that without command-line settings for minimum and maximum SSL versions,
-// SSL 3.0 ~ kDefaultSSLVersionMax are enabled.
+// TLS 1.0 ~ kDefaultSSLVersionMax are enabled.
 TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
   scoped_refptr<TestingPrefStore> local_state_store(new TestingPrefStore());
 
@@ -148,7 +148,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
   config_service->GetSSLConfig(&ssl_config);
   // The default value in the absence of command-line options is that
   // SSL 3.0 ~ kDefaultSSLVersionMax are enabled.
-  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_SSL3, ssl_config.version_min);
+  EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1, ssl_config.version_min);
   EXPECT_EQ(net::kDefaultSSLVersionMax, ssl_config.version_max);
 
   // The settings should not be added to the local_state.

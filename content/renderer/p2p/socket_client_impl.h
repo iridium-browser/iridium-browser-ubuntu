@@ -40,25 +40,25 @@ class P2PSocketClientImpl : public P2PSocketClient {
                     P2PSocketClientDelegate* delegate);
 
   // Send the |data| to the |address|.
-  virtual void Send(const net::IPEndPoint& address,
-                    const std::vector<char>& data) OVERRIDE;
+  void Send(const net::IPEndPoint& address,
+            const std::vector<char>& data) override;
 
   // Send the |data| to the |address| using Differentiated Services Code Point
   // |dscp|.
-  virtual void SendWithDscp(const net::IPEndPoint& address,
-                            const std::vector<char>& data,
-                            const rtc::PacketOptions& options) OVERRIDE;
+  void SendWithDscp(const net::IPEndPoint& address,
+                    const std::vector<char>& data,
+                    const rtc::PacketOptions& options) override;
 
   // Setting socket options.
-  virtual void SetOption(P2PSocketOption option, int value) OVERRIDE;
+  void SetOption(P2PSocketOption option, int value) override;
 
   // Must be called before the socket is destroyed. The delegate may
   // not be called after |closed_task| is executed.
-  virtual void Close() OVERRIDE;
+  void Close() override;
 
-  virtual int GetSocketID() const OVERRIDE;
+  int GetSocketID() const override;
 
-  virtual void SetDelegate(P2PSocketClientDelegate* delegate) OVERRIDE;
+  void SetDelegate(P2PSocketClientDelegate* delegate) override;
 
  private:
   enum State {
@@ -71,7 +71,7 @@ class P2PSocketClientImpl : public P2PSocketClient {
 
   friend class P2PSocketDispatcher;
 
-  virtual ~P2PSocketClientImpl();
+  ~P2PSocketClientImpl() override;
 
   // Message handlers that run on IPC thread.
   void OnSocketCreated(const net::IPEndPoint& local_address,

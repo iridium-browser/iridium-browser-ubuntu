@@ -45,17 +45,12 @@ class SyncNotificationDelegate : public NotificationDelegate {
                            Profile* profile);
 
   // NotificationDelegate:
-  virtual void Display() OVERRIDE;
-  virtual void Error() OVERRIDE;
-  virtual void Close(bool by_user) OVERRIDE;
-  virtual bool HasClickedListener() OVERRIDE;
-  virtual void Click() OVERRIDE;
-  virtual void ButtonClick(int button_index) OVERRIDE;
-  virtual std::string id() const OVERRIDE;
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
+  void Click() override;
+  void ButtonClick(int button_index) override;
+  std::string id() const override;
 
  protected:
-  virtual ~SyncNotificationDelegate();
+  ~SyncNotificationDelegate() override;
 
  private:
   void ShowSyncSetup();
@@ -77,20 +72,6 @@ SyncNotificationDelegate::SyncNotificationDelegate(
 
 SyncNotificationDelegate::~SyncNotificationDelegate() {
 }
-
-void SyncNotificationDelegate::Display() {
-}
-
-void SyncNotificationDelegate::Error() {
-}
-
-void SyncNotificationDelegate::Close(bool by_user) {
-}
-
-bool SyncNotificationDelegate::HasClickedListener() {
-  return false;
-}
-
 void SyncNotificationDelegate::Click() {
   ShowSyncSetup();
 }
@@ -101,10 +82,6 @@ void SyncNotificationDelegate::ButtonClick(int button_index) {
 
 std::string SyncNotificationDelegate::id() const {
   return id_;
-}
-
-content::WebContents* SyncNotificationDelegate::GetWebContents() const {
-  return NULL;
 }
 
 void SyncNotificationDelegate::ShowSyncSetup() {
@@ -151,7 +128,8 @@ void SyncErrorNotifier::OnErrorChanged() {
     return;
 
   if (!error_controller_->HasError()) {
-    g_browser_process->notification_ui_manager()->CancelById(notification_id_);
+    g_browser_process->notification_ui_manager()->CancelById(
+        notification_id_, NotificationUIManager::GetProfileID(profile_));
     return;
   }
 
@@ -169,7 +147,8 @@ void SyncErrorNotifier::OnErrorChanged() {
 #endif
 
   // Keep the existing notification if there is one.
-  if (notification_ui_manager->FindById(notification_id_))
+  if (notification_ui_manager->FindById(
+          notification_id_, NotificationUIManager::GetProfileID(profile_)))
     return;
 
   // Add an accept button to launch the sync setup settings subpage.

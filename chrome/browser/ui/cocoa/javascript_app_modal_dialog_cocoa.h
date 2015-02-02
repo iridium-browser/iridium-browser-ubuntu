@@ -5,11 +5,10 @@
 #ifndef CHROME_BROWSER_UI_COCOA_JAVASCRIPT_APP_MODAL_DIALOG_COCOA_H_
 #define CHROME_BROWSER_UI_COCOA_JAVASCRIPT_APP_MODAL_DIALOG_COCOA_H_
 
-#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
-
 #include "base/logging.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
+#include "components/app_modal_dialogs/native_app_modal_dialog.h"
 
 #if __OBJC__
 @class NSAlert;
@@ -25,12 +24,12 @@ class JavaScriptAppModalDialogCocoa : public NativeAppModalDialog {
   virtual ~JavaScriptAppModalDialogCocoa();
 
   // Overridden from NativeAppModalDialog:
-  virtual int GetAppModalDialogButtons() const OVERRIDE;
-  virtual void ShowAppModalDialog() OVERRIDE;
-  virtual void ActivateAppModalDialog() OVERRIDE;
-  virtual void CloseAppModalDialog() OVERRIDE;
-  virtual void AcceptAppModalDialog() OVERRIDE;
-  virtual void CancelAppModalDialog() OVERRIDE;
+  int GetAppModalDialogButtons() const override;
+  void ShowAppModalDialog() override;
+  void ActivateAppModalDialog() override;
+  void CloseAppModalDialog() override;
+  void AcceptAppModalDialog() override;
+  void CancelAppModalDialog() override;
 
   JavaScriptAppModalDialog* dialog() const { return dialog_.get(); }
 

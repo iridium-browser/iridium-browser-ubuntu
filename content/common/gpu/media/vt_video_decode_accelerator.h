@@ -33,21 +33,21 @@ class VTVideoDecodeAccelerator
     : public media::VideoDecodeAccelerator,
       public base::NonThreadSafe {
  public:
-  explicit VTVideoDecodeAccelerator(CGLContextObj cgl_context);
-  virtual ~VTVideoDecodeAccelerator();
+  explicit VTVideoDecodeAccelerator(
+      CGLContextObj cgl_context,
+      const base::Callback<bool(void)>& make_context_current);
+  ~VTVideoDecodeAccelerator() override;
 
   // VideoDecodeAccelerator implementation.
-  virtual bool Initialize(
-      media::VideoCodecProfile profile,
-      Client* client) OVERRIDE;
-  virtual void Decode(const media::BitstreamBuffer& bitstream) OVERRIDE;
-  virtual void AssignPictureBuffers(
-      const std::vector<media::PictureBuffer>& pictures) OVERRIDE;
-  virtual void ReusePictureBuffer(int32_t picture_id) OVERRIDE;
-  virtual void Flush() OVERRIDE;
-  virtual void Reset() OVERRIDE;
-  virtual void Destroy() OVERRIDE;
-  virtual bool CanDecodeOnIOThread() OVERRIDE;
+  bool Initialize(media::VideoCodecProfile profile, Client* client) override;
+  void Decode(const media::BitstreamBuffer& bitstream) override;
+  void AssignPictureBuffers(
+      const std::vector<media::PictureBuffer>& pictures) override;
+  void ReusePictureBuffer(int32_t picture_id) override;
+  void Flush() override;
+  void Reset() override;
+  void Destroy() override;
+  bool CanDecodeOnIOThread() override;
 
   // Called by OutputThunk() when VideoToolbox finishes decoding a frame.
   void Output(
@@ -83,19 +83,33 @@ class VTVideoDecodeAccelerator
   };
 
   // Methods for interacting with VideoToolbox. Run on |decoder_thread_|.
-  void ConfigureDecoder(
+  bool ConfigureDecoder(
       const std::vector<const uint8_t*>& nalu_data_ptrs,
       const std::vector<size_t>& nalu_data_sizes);
-  void DecodeTask(const media::BitstreamBuffer);
+  void DecodeTask(const media::BitstreamBuffer&);
   void FlushTask();
+  void DropBitstream(int32_t bitstream_id);
 
   // Methods for interacting with |client_|. Run on |gpu_task_runner_|.
   void OutputTask(DecodedFrame frame);
-  void SizeChangedTask(gfx::Size coded_size);
+  void NotifyError(Error error);
 
   // Send decoded frames up to and including |up_to_bitstream_id|, and return
   // the last sent |bitstream_id|.
   int32_t SendPictures(int32_t up_to_bitstream_id);
+
+  // Internal helper for SendPictures(): Drop frames with no image data up to
+  // a particular bitstream ID, so that if there is still a frame in the queue
+  // when this function returns, it is guaranteed to have image data, and thus
+  // it is time to set up the GPU context. Returns the last bitstream ID that
+  // was dropped, or |last_sent_bitstream_id| if no frames were dropped.
+  int32_t ProcessDroppedFrames(
+      int32_t last_sent_bitstream_id,
+      int32_t up_to_bitstream_id);
+
+  // Internal helper for SendPictures(): Check if the next frame has a size
+  // different from the current picture buffers, and request new ones if so.
+  void ProcessSizeChangeIfNeeded();
 
   // Since VideoToolbox has no reset feature (only flush), and the VDA API
   // allows Decode() and Flush() calls during a reset operation, it's possible
@@ -121,17 +135,34 @@ class VTVideoDecodeAccelerator
   // GPU thread state.
   //
   CGLContextObj cgl_context_;
+  base::Callback<bool(void)> make_context_current_;
   media::VideoDecodeAccelerator::Client* client_;
-  gfx::Size texture_size_;
+
+  // client_->NotifyError() called.
+  bool has_error_;
+
+  // Size of assigned picture buffers.
+  gfx::Size picture_size_;
+
+  // Queue of actions so that we can quickly discover what the next action will
+  // be; this is useful because we are dropping all frames when the next action
+  // is ACTION_RESET or ACTION_DESTROY.
   std::queue<PendingAction> pending_actions_;
+
+  // Queue of bitstreams that have not yet been decoded. This is mostly needed
+  // to be sure we free them all in Destroy().
   std::queue<int32_t> pending_bitstream_ids_;
 
-  // Texture IDs of pictures.
-  // TODO(sandersd): A single map of structs holding picture data.
+  // All picture buffers assigned to us. Used to check if reused picture buffers
+  // should be added back to the available list or released. (They are not
+  // released immediately because we need the reuse event to free the binding.)
+  std::set<int32_t> assigned_picture_ids_;
+
+  // Texture IDs of assigned pictures.
   std::map<int32_t, uint32_t> texture_ids_;
 
   // Pictures ready to be rendered to.
-  std::queue<int32_t> available_picture_ids_;
+  std::vector<int32_t> available_picture_ids_;
 
   // Decoded frames ready to render.
   std::queue<DecodedFrame> decoded_frames_;
@@ -146,7 +177,10 @@ class VTVideoDecodeAccelerator
   base::ScopedCFTypeRef<CMFormatDescriptionRef> format_;
   base::ScopedCFTypeRef<VTDecompressionSessionRef> session_;
   media::H264Parser parser_;
-  gfx::Size coded_size_;
+
+  std::vector<uint8_t> last_sps_;
+  std::vector<uint8_t> last_spsext_;
+  std::vector<uint8_t> last_pps_;
 
   //
   // Shared state (set up and torn down on GPU thread).

@@ -8,6 +8,7 @@
 #include <map>
 
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/apps/drive/drive_app_uninstall_sync_service.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
@@ -36,10 +37,12 @@ namespace app_list {
 class AppListFolderItem;
 class AppListItem;
 class AppListModel;
+class ModelPrefUpdater;
 
 // Keyed Service that owns, stores, and syncs an AppListModel for a profile.
 class AppListSyncableService : public syncer::SyncableService,
                                public KeyedService,
+                               public DriveAppUninstallSyncService,
                                public content::NotificationObserver {
  public:
   struct SyncItem {
@@ -50,7 +53,6 @@ class AppListSyncableService : public syncer::SyncableService,
     sync_pb::AppListSpecifics::AppListItemType item_type;
     std::string item_name;
     std::string parent_id;
-    syncer::StringOrdinal page_ordinal;
     syncer::StringOrdinal item_ordinal;
 
     std::string ToString() const;
@@ -60,7 +62,7 @@ class AppListSyncableService : public syncer::SyncableService,
   AppListSyncableService(Profile* profile,
                          extensions::ExtensionSystem* extension_system);
 
-  virtual ~AppListSyncableService();
+  ~AppListSyncableService() override;
 
   // Adds |item| to |sync_items_| and |model_|. If a sync item already exists,
   // updates the existing sync item instead.
@@ -87,29 +89,32 @@ class AppListSyncableService : public syncer::SyncableService,
   void ResetDriveAppProviderForTest();
 
   // syncer::SyncableService
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
  private:
   class ModelObserver;
   typedef std::map<std::string, SyncItem*> SyncItemMap;
 
   // KeyedService
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
+
+  // DriveAppUninstallSyncService
+  void TrackUninstalledDriveApp(const std::string& drive_app_id) override;
+  void UntrackUninstalledDriveApp(const std::string& drive_app_id) override;
 
   // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Builds the model once ExtensionService is ready.
   void BuildModel();
@@ -197,6 +202,7 @@ class AppListSyncableService : public syncer::SyncableService,
   content::NotificationRegistrar registrar_;
   scoped_ptr<AppListModel> model_;
   scoped_ptr<ModelObserver> model_observer_;
+  scoped_ptr<ModelPrefUpdater> model_pref_updater_;
   scoped_ptr<ExtensionAppModelBuilder> apps_builder_;
   scoped_ptr<syncer::SyncChangeProcessor> sync_processor_;
   scoped_ptr<syncer::SyncErrorFactory> sync_error_handler_;

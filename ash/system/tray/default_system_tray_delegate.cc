@@ -19,15 +19,15 @@ namespace {
 class DefaultVolumnControlDelegate : public VolumeControlDelegate {
  public:
   DefaultVolumnControlDelegate() {}
-  virtual ~DefaultVolumnControlDelegate() {}
+  ~DefaultVolumnControlDelegate() override {}
 
-  virtual bool HandleVolumeMute(const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleVolumeMute(const ui::Accelerator& accelerator) override {
     return true;
   }
-  virtual bool HandleVolumeDown(const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleVolumeDown(const ui::Accelerator& accelerator) override {
     return true;
   }
-  virtual bool HandleVolumeUp(const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleVolumeUp(const ui::Accelerator& accelerator) override {
     return true;
   }
 
@@ -72,7 +72,9 @@ const base::string16 DefaultSystemTrayDelegate::GetEnterpriseMessage() const {
 
 const std::string
 DefaultSystemTrayDelegate::GetSupervisedUserManager() const {
-  return std::string();
+  if (!IsUserSupervised())
+    return std::string();
+  return "manager@chrome.com";
 }
 
 const base::string16
@@ -87,11 +89,14 @@ const base::string16 DefaultSystemTrayDelegate::GetSupervisedUserMessage()
 }
 
 bool DefaultSystemTrayDelegate::IsUserSupervised() const {
-  return false;
+  return GetUserLoginStatus() == ash::user::LOGGED_IN_SUPERVISED;
 }
 
-bool DefaultSystemTrayDelegate::SystemShouldUpgrade() const {
-  return true;
+void DefaultSystemTrayDelegate::GetSystemUpdateInfo(UpdateInfo* info) const {
+  DCHECK(info);
+  info->severity = UpdateInfo::UPDATE_NORMAL;
+  info->update_required = true;
+  info->factory_reset_required = false;
 }
 
 base::HourClockType DefaultSystemTrayDelegate::GetHourClockType() const {
@@ -206,14 +211,6 @@ void DefaultSystemTrayDelegate::SwitchIME(const std::string& ime_id) {
 void DefaultSystemTrayDelegate::ActivateIMEProperty(const std::string& key) {
 }
 
-void DefaultSystemTrayDelegate::ShowNetworkConfigure(
-    const std::string& network_id) {
-}
-
-bool DefaultSystemTrayDelegate::EnrollNetwork(const std::string& network_id) {
-  return true;
-}
-
 void DefaultSystemTrayDelegate::ManageBluetoothDevices() {
 }
 
@@ -223,13 +220,6 @@ void DefaultSystemTrayDelegate::ToggleBluetooth() {
 
 bool DefaultSystemTrayDelegate::IsBluetoothDiscovering() {
   return false;
-}
-
-void DefaultSystemTrayDelegate::ShowMobileSimDialog() {
-}
-
-void DefaultSystemTrayDelegate::ShowMobileSetupDialog(
-    const std::string& service_path) {
 }
 
 void DefaultSystemTrayDelegate::ShowOtherNetworkDialog(
@@ -286,6 +276,14 @@ bool DefaultSystemTrayDelegate::IsSearchKeyMappedToCapsLock() {
 tray::UserAccountsDelegate* DefaultSystemTrayDelegate::GetUserAccountsDelegate(
     const std::string& user_id) {
   return NULL;
+}
+
+void DefaultSystemTrayDelegate::AddCustodianInfoTrayObserver(
+    CustodianInfoTrayObserver* observer) {
+}
+
+void DefaultSystemTrayDelegate::RemoveCustodianInfoTrayObserver(
+    CustodianInfoTrayObserver* observer) {
 }
 
 }  // namespace ash

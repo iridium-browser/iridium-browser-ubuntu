@@ -27,22 +27,21 @@ class ConfirmBubbleViews : public views::DialogDelegateView,
   explicit ConfirmBubbleViews(ConfirmBubbleModel* model);
 
  protected:
-  virtual ~ConfirmBubbleViews();
+  ~ConfirmBubbleViews() override;
 
   // views::DialogDelegate implementation.
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual views::View* CreateExtraView() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
+  views::View* CreateExtraView() override;
+  bool Cancel() override;
+  bool Accept() override;
 
   // views::WidgetDelegate implementation.
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  ui::ModalType GetModalType() const override;
+  base::string16 GetWindowTitle() const override;
 
   // views::LinkListener implementation.
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
  private:
   // The model to customize this bubble view.

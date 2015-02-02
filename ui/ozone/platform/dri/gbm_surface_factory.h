@@ -17,7 +17,7 @@ class DriWindowDelegateManager;
 class GbmSurfaceFactory : public DriSurfaceFactory {
  public:
   GbmSurfaceFactory(bool allow_surfaceless);
-  virtual ~GbmSurfaceFactory();
+  ~GbmSurfaceFactory() override;
 
   void InitializeGpu(DriWrapper* dri,
                      gbm_device* device,
@@ -25,28 +25,27 @@ class GbmSurfaceFactory : public DriSurfaceFactory {
                      DriWindowDelegateManager* window_manager);
 
   // DriSurfaceFactory:
-  virtual intptr_t GetNativeDisplay() OVERRIDE;
-  virtual const int32_t* GetEGLSurfaceProperties(
-      const int32_t* desired_list) OVERRIDE;
-  virtual bool LoadEGLGLES2Bindings(
+  intptr_t GetNativeDisplay() override;
+  const int32_t* GetEGLSurfaceProperties(const int32_t* desired_list) override;
+  bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
-      SetGLGetProcAddressProcCallback set_gl_get_proc_address) OVERRIDE;
-  virtual scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
-      gfx::AcceleratedWidget w) OVERRIDE;
-  virtual scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
-      gfx::AcceleratedWidget widget) OVERRIDE;
-  virtual scoped_refptr<ui::NativePixmap> CreateNativePixmap(
+      SetGLGetProcAddressProcCallback set_gl_get_proc_address) override;
+  scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
+      gfx::AcceleratedWidget w) override;
+  scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
+      gfx::AcceleratedWidget widget) override;
+  scoped_refptr<ui::NativePixmap> CreateNativePixmap(
       gfx::Size size,
-      BufferFormat format) OVERRIDE;
-  virtual OverlayCandidatesOzone* GetOverlayCandidates(
-      gfx::AcceleratedWidget w) OVERRIDE;
-  virtual bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                                    int plane_z_order,
-                                    gfx::OverlayTransform plane_transform,
-                                    scoped_refptr<NativePixmap> buffer,
-                                    const gfx::Rect& display_bounds,
-                                    const gfx::RectF& crop_rect) OVERRIDE;
-  virtual bool CanShowPrimaryPlaneAsOverlay() OVERRIDE;
+      BufferFormat format) override;
+  OverlayCandidatesOzone* GetOverlayCandidates(
+      gfx::AcceleratedWidget w) override;
+  bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
+                            int plane_z_order,
+                            gfx::OverlayTransform plane_transform,
+                            scoped_refptr<NativePixmap> buffer,
+                            const gfx::Rect& display_bounds,
+                            const gfx::RectF& crop_rect) override;
+  bool CanShowPrimaryPlaneAsOverlay() override;
 
  private:
   DriWindowDelegate* GetOrCreateWindowDelegate(gfx::AcceleratedWidget widget);

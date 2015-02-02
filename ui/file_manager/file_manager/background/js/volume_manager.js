@@ -2,27 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Represents each volume, such as "drive", "download directory", each "USB
  * flush storage", or "mounted zip archive" etc.
  *
  * @param {VolumeManagerCommon.VolumeType} volumeType The type of the volume.
  * @param {string} volumeId ID of the volume.
- * @param {DOMFileSystem} fileSystem The file system object for this volume.
- * @param {string} error The error if an error is found.
- * @param {?string} deviceType The type of device ('usb'|'sd'|'optical'|'mobile'
- *     |'unknown') (as defined in chromeos/disks/disk_mount_manager.cc).
- *     Can be null.
- * @param {?string} devicePath Identifier of the device that the volume belongs
- *     to. Can be null.
+ * @param {FileSystem} fileSystem The file system object for this volume.
+ * @param {(string|undefined)} error The error if an error is found.
+ * @param {(string|undefined)} deviceType The type of device
+ *     ('usb'|'sd'|'optical'|'mobile'|'unknown') (as defined in
+ *     chromeos/disks/disk_mount_manager.cc). Can be undefined.
+ * @param {(string|undefined)} devicePath Identifier of the device that the
+ *     volume belongs to. Can be undefined.
  * @param {boolean} isReadOnly True if the volume is read only.
  * @param {!{displayName:string, isCurrentProfile:boolean}} profile Profile
  *     information.
  * @param {string} label Label of the volume.
- * @param {string} extensionId Id of the extension providing this volume. Empty
- *     for native volumes.
+ * @param {(string|undefined)} extensionId Id of the extension providing this
+ *     volume. Empty for native volumes.
  * @constructor
  */
 function VolumeInfo(
@@ -91,7 +89,7 @@ VolumeInfo.prototype = {
     return this.volumeId_;
   },
   /**
-   * @return {DOMFileSystem} File system object.
+   * @return {FileSystem} File system object.
    */
   get fileSystem() {
     return this.fileSystem_;
@@ -110,19 +108,19 @@ VolumeInfo.prototype = {
     return this.fakeEntries_;
   },
   /**
-   * @return {string} Error identifier.
+   * @return {(string|undefined)} Error identifier.
    */
   get error() {
     return this.error_;
   },
   /**
-   * @return {string} Device type identifier.
+   * @return {(string|undefined)} Device type identifier.
    */
   get deviceType() {
     return this.deviceType_;
   },
   /**
-   * @return {string} Device identifier.
+   * @return {(string|undefined)} Device identifier.
    */
   get devicePath() {
     return this.devicePath_;
@@ -146,7 +144,7 @@ VolumeInfo.prototype = {
     return this.label_;
   },
   /**
-   * @return {string} Id of an extennsion providing this volume.
+   * @return {(string|undefined)} Id of an extennsion providing this volume.
    */
   get extensionId() {
     return this.extensionId_;
@@ -157,15 +155,16 @@ VolumeInfo.prototype = {
  * Starts resolving the display root and obtains it.  It may take long time for
  * Drive. Once resolved, it is cached.
  *
- * @param {function(DirectoryEntry)} onSuccess Success callback with the
+ * @param {function(DirectoryEntry)=} opt_onSuccess Success callback with the
  *     display root directory as an argument.
- * @param {function(FileError)} onFailure Failure callback.
+ * @param {function(*)=} opt_onFailure Failure callback.
  * @return {Promise}
  */
-VolumeInfo.prototype.resolveDisplayRoot = function(onSuccess, onFailure) {
+VolumeInfo.prototype.resolveDisplayRoot = function(opt_onSuccess,
+                                                   opt_onFailure) {
   if (!this.displayRootPromise_) {
     // TODO(mtomasz): Do not add VolumeInfo which failed to resolve root, and
-    // remove this if logic. Call onSuccess() always, instead.
+    // remove this if logic. Call opt_onSuccess() always, instead.
     if (this.volumeType !== VolumeManagerCommon.VolumeType.DRIVE) {
       if (this.fileSystem_)
         this.displayRootPromise_ = Promise.resolve(this.fileSystem_.root);
@@ -175,7 +174,7 @@ VolumeInfo.prototype.resolveDisplayRoot = function(onSuccess, onFailure) {
       // For Drive, we need to resolve.
       var displayRootURL = this.fileSystem_.root.toURL() + '/root';
       this.displayRootPromise_ = new Promise(
-          webkitResolveLocalFileSystemURL.bind(null, displayRootURL));
+          window.webkitResolveLocalFileSystemURL.bind(null, displayRootURL));
     }
 
     // Store the obtained displayRoot.
@@ -183,8 +182,8 @@ VolumeInfo.prototype.resolveDisplayRoot = function(onSuccess, onFailure) {
       this.displayRoot_ = displayRoot;
     }.bind(this));
   }
-  if (onSuccess)
-    this.displayRootPromise_.then(onSuccess, onFailure);
+  if (opt_onSuccess)
+    this.displayRootPromise_.then(opt_onSuccess, opt_onFailure);
   return this.displayRootPromise_;
 };
 
@@ -197,8 +196,7 @@ var volumeManagerUtil = {};
  * Throws an Error when the given error is not in
  * VolumeManagerCommon.VolumeError.
  *
- * @param {VolumeManagerCommon.VolumeError} error Status string usually received
- *     from APIs.
+ * @param {string} error Status string usually received from APIs.
  */
 volumeManagerUtil.validateError = function(error) {
   for (var key in VolumeManagerCommon.VolumeError) {
@@ -231,6 +229,7 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata, callback) {
       break;
   }
 
+  console.debug('Requesting file system.');
   chrome.fileManagerPrivate.requestFileSystem(
       volumeMetadata.volumeId,
       function(fileSystem) {
@@ -238,7 +237,8 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata, callback) {
         if (!fileSystem) {
           console.error('File system not found: ' + volumeMetadata.volumeId);
           callback(new VolumeInfo(
-              volumeMetadata.volumeType,
+              /** @type {VolumeManagerCommon.VolumeType} */
+              (volumeMetadata.volumeType),
               volumeMetadata.volumeId,
               null,  // File system is not found.
               volumeMetadata.mountCondition,
@@ -250,6 +250,8 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata, callback) {
               volumeMetadata.extensionId));
           return;
         }
+
+        console.debug('File system obtained: ' + volumeMetadata.volumeId);
         if (volumeMetadata.volumeType ==
             VolumeManagerCommon.VolumeType.DRIVE) {
           // After file system is mounted, we "read" drive grand root
@@ -265,7 +267,8 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata, callback) {
               });
         }
         callback(new VolumeInfo(
-            volumeMetadata.volumeType,
+            /** @type {VolumeManagerCommon.VolumeType} */
+            (volumeMetadata.volumeType),
             volumeMetadata.volumeId,
             fileSystem,
             volumeMetadata.mountCondition,
@@ -300,8 +303,8 @@ volumeManagerUtil.volumeListOrder_ = [
  * The volumes at first are compared by volume type in the order of
  * volumeListOrder_.  Then they are compared by volume ID.
  *
- * @param {VolumeInfo} volumeInfo1 Volume info to be compared.
- * @param {VolumeInfo} volumeInfo2 Volume info to be compared.
+ * @param {!VolumeInfo} volumeInfo1 Volume info to be compared.
+ * @param {!VolumeInfo} volumeInfo2 Volume info to be compared.
  * @return {number} Returns -1 if volume1 < volume2, returns 1 if volume2 >
  *     volume1, returns 0 if volume1 === volume2.
  * @private
@@ -331,7 +334,9 @@ function VolumeInfoList() {
    * @private
    */
   this.model_ = new cr.ui.ArrayDataModel([]);
-  this.model_.setCompareFunction(field, volumeManagerUtil.compareVolumeInfo_);
+  this.model_.setCompareFunction(field,
+                                 /** @type {function(*, *): number} */
+                                 (volumeManagerUtil.compareVolumeInfo_));
   this.model_.sort(field, 'asc');
 
   Object.freeze(this);
@@ -419,10 +424,10 @@ VolumeInfoList.prototype.findByEntry = function(entry) {
 
 /**
  * @param {number} index The index of the volume in the list.
- * @return {VolumeInfo} The VolumeInfo instance.
+ * @return {!VolumeInfo} The VolumeInfo instance.
  */
 VolumeInfoList.prototype.item = function(index) {
-  return this.model_.item(index);
+  return /** @type {!VolumeInfo} */ (this.model_.item(index));
 };
 
 /**
@@ -455,9 +460,15 @@ function VolumeManager() {
 
   // The status should be merged into VolumeManager.
   // TODO(hidehiko): Remove them after the migration.
+  /**
+   * Connection state of the Drive.
+   * @type {VolumeManagerCommon.DriveConnectionState}
+   * @private
+   */
   this.driveConnectionState_ = {
     type: VolumeManagerCommon.DriveConnectionType.OFFLINE,
-    reason: VolumeManagerCommon.DriveConnectionReason.NO_SERVICE
+    reason: VolumeManagerCommon.DriveConnectionReason.NO_SERVICE,
+    hasCellularNetworkAccess: false
   };
 
   chrome.fileManagerPrivate.onDriveConnectionStatusChanged.addListener(
@@ -467,7 +478,7 @@ function VolumeManager() {
 
 /**
  * Invoked when the drive connection status is changed.
- * @private_
+ * @private
  */
 VolumeManager.prototype.onDriveConnectionStatusChanged_ = function() {
   chrome.fileManagerPrivate.getDriveConnectionState(function(state) {
@@ -478,7 +489,7 @@ VolumeManager.prototype.onDriveConnectionStatusChanged_ = function() {
 
 /**
  * Returns the drive connection state.
- * @return {VolumeManagerCommon.DriveConnectionType} Connection type.
+ * @return {VolumeManagerCommon.DriveConnectionState} Connection state.
  */
 VolumeManager.prototype.getDriveConnectionState = function() {
   return this.driveConnectionState_;
@@ -496,19 +507,22 @@ VolumeManager.prototype.__proto__ = cr.EventTarget.prototype;
 VolumeManager.TIMEOUT = 15 * 60 * 1000;
 
 /**
- * Queue to run getInstance sequentially.
- * @type {AsyncUtil.Queue}
- * @private
- */
-VolumeManager.getInstanceQueue_ = new AsyncUtil.Queue();
-
-/**
  * The singleton instance of VolumeManager. Initialized by the first invocation
  * of getInstance().
  * @type {VolumeManager}
  * @private
  */
 VolumeManager.instance_ = null;
+
+/**
+ * Returns instance of VolumeManager for debug purpose.
+ * This method returns VolumeManager.instance_ which may not be initialized.
+ *
+ * @return {VolumeManager} Volume manager.
+ */
+VolumeManager.getInstanceForDebug = function() {
+  return VolumeManager.instance_;
+};
 
 /**
  * @type {Promise}
@@ -519,11 +533,11 @@ VolumeManager.instancePromise_ = null;
 /**
  * Returns the VolumeManager instance asynchronously. If it is not created or
  * under initialization, it will waits for the finish of the initialization.
- * @param {function(VolumeManager)} callback Called with the VolumeManager
+ * @param {function(VolumeManager)=} opt_callback Called with the VolumeManager
  *     instance. TODO(hirono): Remove the callback and use Promise instead.
  * @return {Promise} Promise to be fulfilled with the volume manager.
  */
-VolumeManager.getInstance = function(callback) {
+VolumeManager.getInstance = function(opt_callback) {
   if (!VolumeManager.instancePromise_) {
     VolumeManager.instance_ = new VolumeManager();
     VolumeManager.instancePromise_ = new Promise(function(fulfill) {
@@ -532,10 +546,18 @@ VolumeManager.getInstance = function(callback) {
       });
     });
   }
-  if (callback)
-    VolumeManager.instancePromise_.then(callback);
+  if (opt_callback)
+    VolumeManager.instancePromise_.then(opt_callback);
   return VolumeManager.instancePromise_;
 };
+
+/**
+ * Revokes the singleton instance for testing.
+ */
+VolumeManager.revokeInstanceForTesting = function() {
+  VolumeManager.instancePromise_ = null;
+  VolumeManager.instance_ = null;
+}
 
 /**
  * Initializes mount points.
@@ -544,7 +566,10 @@ VolumeManager.getInstance = function(callback) {
  * @private
  */
 VolumeManager.prototype.initialize_ = function(callback) {
+  console.debug('Requesting volume list.');
   chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeMetadataList) {
+    console.debug('Volume list fetched with: ' + volumeMetadataList.length +
+        ' items.');
     // We must subscribe to the mount completed event in the callback of
     // getVolumeMetadataList. crbug.com/330061.
     // But volumes reported by onMountCompleted events must be added after the
@@ -553,6 +578,7 @@ VolumeManager.prototype.initialize_ = function(callback) {
       // Create VolumeInfo for each volume.
       var group = new AsyncUtil.Group();
       for (var i = 0; i < volumeMetadataList.length; i++) {
+        console.debug('Initializing volume: ' + volumeMetadataList[i].volumeId);
         group.add(function(volumeMetadata, continueCallback) {
           volumeManagerUtil.createVolumeInfo(
               volumeMetadata,
@@ -561,11 +587,13 @@ VolumeManager.prototype.initialize_ = function(callback) {
                 if (volumeMetadata.volumeType ===
                     VolumeManagerCommon.VolumeType.DRIVE)
                   this.onDriveConnectionStatusChanged_();
+                console.debug('Initialized volume: ' + volumeInfo.volumeId);
                 continueCallback();
               }.bind(this));
         }.bind(this, volumeMetadataList[i]));
       }
       group.run(function() {
+        console.debug('Initialized all volumes.');
         // Call the callback of the initialize function.
         callback();
         // Call the callback of AsyncQueue. Maybe it invokes callbacks
@@ -826,7 +854,7 @@ VolumeManager.prototype.onTimeout_ = function(key) {
 
 /**
  * @param {string} key Key produced by |makeRequestKey_|.
- * @param {VolumeManagerCommon.VolumeError|'success'} status Status received
+ * @param {VolumeManagerCommon.VolumeError|string} status Status received
  *     from the API.
  * @param {VolumeInfo=} opt_volumeInfo Volume info of the mounted volume.
  * @private
@@ -861,6 +889,16 @@ VolumeManager.prototype.invokeRequestCallbacks_ = function(
     volumeManagerUtil.validateError(status);
     callEach(request.errorCallbacks, this, [status]);
   }
+};
+
+/**
+ * Returns current state of VolumeManager.
+ * @return {string} Current state of VolumeManager.
+ */
+VolumeManager.prototype.toString = function() {
+  return 'VolumeManager\n' +
+      '- MountQueue_:\n' +
+      '  ' + this.mountQueue_.toString().replace(/\n/g, '\n  ');
 };
 
 /**

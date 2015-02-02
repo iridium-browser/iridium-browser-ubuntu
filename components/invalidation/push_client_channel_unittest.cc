@@ -29,12 +29,12 @@ class PushClientChannelTest
     push_client_channel_.SetSystemResources(NULL);
   }
 
-  virtual ~PushClientChannelTest() {
+  ~PushClientChannelTest() override {
     push_client_channel_.RemoveObserver(this);
   }
 
-  virtual void OnNetworkChannelStateChanged(
-      InvalidatorState invalidator_state) OVERRIDE {
+  void OnNetworkChannelStateChanged(
+      InvalidatorState invalidator_state) override {
     last_invalidator_state_ = invalidator_state;
   }
 

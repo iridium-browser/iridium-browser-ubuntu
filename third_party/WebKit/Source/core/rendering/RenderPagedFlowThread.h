@@ -19,12 +19,15 @@ public:
 
     RenderBlockFlow* pagedBlockFlow() const { return toRenderBlockFlow(parent()); }
 
-    virtual bool isRenderPagedFlowThread() const OVERRIDE { return true; }
-    virtual bool heightIsAuto() const OVERRIDE { return !columnHeightAvailable(); }
-    virtual const char* renderName() const OVERRIDE;
-    virtual bool needsNewWidth() const OVERRIDE;
-    virtual void updateLogicalWidth() OVERRIDE;
+    virtual bool isRenderPagedFlowThread() const override { return true; }
+    virtual bool heightIsAuto() const override { return !columnHeightAvailable(); }
+    virtual const char* renderName() const override;
+    virtual bool needsNewWidth() const override;
+    virtual void updateLogicalWidth() override;
     virtual void layout();
+
+private:
+    virtual bool descendantIsValidColumnSpanner(RenderObject* /*descendant*/) const override { return false; }
 };
 
 } // namespace blink

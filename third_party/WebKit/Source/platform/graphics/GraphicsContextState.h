@@ -36,6 +36,7 @@
 #include "platform/graphics/Pattern.h"
 #include "platform/graphics/StrokeData.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
+#include "third_party/skia/include/core/SkImageFilter.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefPtr.h"
@@ -44,7 +45,7 @@ namespace blink {
 
 // Encapsulates the state information we store for each pushed graphics state.
 // Only GraphicsContext can use this class.
-class PLATFORM_EXPORT GraphicsContextState FINAL {
+class PLATFORM_EXPORT GraphicsContextState final {
 public:
     static PassOwnPtr<GraphicsContextState> create()
     {
@@ -110,6 +111,10 @@ public:
     void setDrawLooper(PassRefPtr<SkDrawLooper>);
     void clearDrawLooper();
 
+    SkImageFilter* dropShadowImageFilter() const { return m_dropShadowImageFilter.get(); }
+    void setDropShadowImageFilter(PassRefPtr<SkImageFilter>);
+    void clearDropShadowImageFilter();
+
     // Text. (See TextModeFill & friends.)
     TextDrawingModeFlags textDrawingMode() const { return m_textDrawingMode; }
     void setTextDrawingMode(TextDrawingModeFlags mode) { m_textDrawingMode = mode; }
@@ -165,6 +170,7 @@ private:
     RefPtr<Pattern> m_fillPattern;
 
     RefPtr<SkDrawLooper> m_looper;
+    RefPtr<SkImageFilter> m_dropShadowImageFilter;
 
     TextDrawingModeFlags m_textDrawingMode;
 

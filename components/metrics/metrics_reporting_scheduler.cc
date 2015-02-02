@@ -5,7 +5,10 @@
 #include "components/metrics/metrics_reporting_scheduler.h"
 
 #include "base/compiler_specific.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/string_number_conversions.h"
+#include "components/variations/variations_associated_data.h"
 
 using base::TimeDelta;
 
@@ -59,6 +62,27 @@ void LogMetricsInitSequence(InitSequence sequence) {
                             INIT_SEQUENCE_ENUM_SIZE);
 }
 
+void LogActualUploadInterval(TimeDelta interval) {
+  UMA_HISTOGRAM_CUSTOM_COUNTS("UMA.ActualLogUploadInterval",
+                             interval.InMinutes(),
+                             1,
+                             base::TimeDelta::FromHours(12).InMinutes(),
+                             50);
+}
+
+// Returns upload interval specified for the current experiment running.
+// TODO(gayane): Only for experimenting with upload interval for Android
+// (bug: 17391128). Should be removed once the experiments are done.
+base::TimeDelta GetUploadIntervalFromExperiment() {
+  std::string interval_str = variations::GetVariationParamValue(
+      "UMALogUploadInterval", "interval");
+  int interval;
+  if (interval_str.empty() || !base::StringToInt(interval_str, &interval))
+    return TimeDelta::FromSeconds(kStandardUploadIntervalSeconds);
+
+  return TimeDelta::FromMinutes(interval);
+}
+
 }  // anonymous namespace
 
 MetricsReportingScheduler::MetricsReportingScheduler(
@@ -74,6 +98,7 @@ MetricsReportingScheduler::MetricsReportingScheduler(
 MetricsReportingScheduler::~MetricsReportingScheduler() {}
 
 void MetricsReportingScheduler::Start() {
+  GetUploadIntervalFromExperiment();
   running_ = true;
   ScheduleNextUpload();
 }
@@ -108,7 +133,8 @@ void MetricsReportingScheduler::UploadFinished(bool server_is_healthy,
   } else if (more_logs_remaining) {
     upload_interval_ = TimeDelta::FromSeconds(kUnsentLogsIntervalSeconds);
   } else {
-    upload_interval_ = TimeDelta::FromSeconds(kStandardUploadIntervalSeconds);
+    upload_interval_ = GetStandardUploadInterval();
+    last_upload_finish_time_ = base::TimeTicks::Now();
   }
 
   if (running_)
@@ -135,6 +161,12 @@ void MetricsReportingScheduler::TriggerUpload() {
     waiting_for_init_task_complete_ = true;
     return;
   }
+
+  if (!last_upload_finish_time_.is_null()) {
+    LogActualUploadInterval(base::TimeTicks::Now() - last_upload_finish_time_);
+    last_upload_finish_time_ = base::TimeTicks();
+  }
+
   callback_pending_ = true;
   upload_callback_.Run();
 }
@@ -154,11 +186,18 @@ void MetricsReportingScheduler::BackOffUploadInterval() {
       static_cast<int64>(kBackoffMultiplier *
                          upload_interval_.InMicroseconds()));
 
-  TimeDelta max_interval = kMaxBackoffMultiplier *
-      TimeDelta::FromSeconds(kStandardUploadIntervalSeconds);
+  TimeDelta max_interval = kMaxBackoffMultiplier * GetStandardUploadInterval();
   if (upload_interval_ > max_interval || upload_interval_.InSeconds() < 0) {
     upload_interval_ = max_interval;
   }
+}
+
+base::TimeDelta MetricsReportingScheduler::GetStandardUploadInterval() {
+#if defined(OS_ANDROID)
+  return GetUploadIntervalFromExperiment();
+#else
+  return TimeDelta::FromSeconds(kStandardUploadIntervalSeconds);
+#endif
 }
 
 }  // namespace metrics

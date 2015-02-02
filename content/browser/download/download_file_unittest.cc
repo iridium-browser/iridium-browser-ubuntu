@@ -87,8 +87,7 @@ class TestDownloadFileImpl : public DownloadFileImpl {
                          observer) {}
 
  protected:
-  virtual base::TimeDelta GetRetryDelayForFailedRename(
-      int attempt_count) OVERRIDE {
+  base::TimeDelta GetRetryDelayForFailedRename(int attempt_count) override {
     return base::TimeDelta::FromMilliseconds(0);
   }
 
@@ -96,8 +95,7 @@ class TestDownloadFileImpl : public DownloadFileImpl {
   // On Posix, we don't encounter transient errors during renames, except
   // possibly EAGAIN, which is difficult to replicate reliably. So we resort to
   // simulating a transient error using ACCESS_DENIED instead.
-  virtual bool ShouldRetryFailedRename(
-      DownloadInterruptReason reason) OVERRIDE {
+  bool ShouldRetryFailedRename(DownloadInterruptReason reason) override {
     return reason == DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED;
   }
 #endif
@@ -127,8 +125,7 @@ class DownloadFileTest : public testing::Test {
       file_thread_(BrowserThread::FILE, &loop_) {
   }
 
-  virtual ~DownloadFileTest() {
-  }
+  ~DownloadFileTest() override {}
 
   void SetUpdateDownloadInfo(int64 bytes, int64 bytes_per_sec,
                              const std::string& hash_state) {
@@ -141,7 +138,7 @@ class DownloadFileTest : public testing::Test {
     observer_->CurrentUpdateStatus(bytes_, bytes_per_sec_, hash_state_);
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     EXPECT_CALL(*(observer_.get()), DestinationUpdate(_, _, _))
         .Times(AnyNumber())
         .WillRepeatedly(Invoke(this, &DownloadFileTest::SetUpdateDownloadInfo));
@@ -182,7 +179,7 @@ class DownloadFileTest : public testing::Test {
                                  net::BoundNetLog(),
                                  observer_factory_.GetWeakPtr()));
     download_file_impl->SetClientGuid("12345678-ABCD-1234-DCBA-123456789ABC");
-    download_file_ = download_file_impl.PassAs<DownloadFile>();
+    download_file_ = download_file_impl.Pass();
 
     EXPECT_CALL(*input_stream_, Read(_, _))
         .WillOnce(Return(ByteStreamReader::STREAM_EMPTY))

@@ -74,7 +74,7 @@ class LocalFileSyncService
   static scoped_ptr<LocalFileSyncService> CreateForTesting(
       Profile* profile,
       leveldb::Env* env_override);
-  virtual ~LocalFileSyncService();
+  ~LocalFileSyncService() override;
 
   void Shutdown();
 
@@ -129,25 +129,22 @@ class LocalFileSyncService
                                     const SyncFileMetadataCallback& callback);
 
   // RemoteChangeProcessor overrides.
-  virtual void PrepareForProcessRemoteChange(
+  void PrepareForProcessRemoteChange(
       const storage::FileSystemURL& url,
-      const PrepareChangeCallback& callback) OVERRIDE;
-  virtual void ApplyRemoteChange(const FileChange& change,
-                                 const base::FilePath& local_path,
-                                 const storage::FileSystemURL& url,
-                                 const SyncStatusCallback& callback) OVERRIDE;
-  virtual void FinalizeRemoteSync(
-      const storage::FileSystemURL& url,
-      bool clear_local_changes,
-      const base::Closure& completion_callback) OVERRIDE;
-  virtual void RecordFakeLocalChange(
-      const storage::FileSystemURL& url,
-      const FileChange& change,
-      const SyncStatusCallback& callback) OVERRIDE;
+      const PrepareChangeCallback& callback) override;
+  void ApplyRemoteChange(const FileChange& change,
+                         const base::FilePath& local_path,
+                         const storage::FileSystemURL& url,
+                         const SyncStatusCallback& callback) override;
+  void FinalizeRemoteSync(const storage::FileSystemURL& url,
+                          bool clear_local_changes,
+                          const base::Closure& completion_callback) override;
+  void RecordFakeLocalChange(const storage::FileSystemURL& url,
+                             const FileChange& change,
+                             const SyncStatusCallback& callback) override;
 
   // LocalOriginChangeObserver override.
-  virtual void OnChangesAvailableInOrigins(
-      const std::set<GURL>& origins) OVERRIDE;
+  void OnChangesAvailableInOrigins(const std::set<GURL>& origins) override;
 
   // Called when a particular origin (app) is disabled/enabled while
   // the service is running. This may be called for origins/apps that
@@ -199,20 +196,18 @@ class LocalFileSyncService
       const PrepareChangeCallback& callback,
       SyncStatusCode status);
 
-  // Runs local_sync_callback_ and resets it.
-  void RunLocalSyncCallback(SyncStatusCode status,
-                            const storage::FileSystemURL& url);
-
   // Callback for ApplyRemoteChange.
   void DidApplyRemoteChange(
       const SyncStatusCallback& callback,
       SyncStatusCode status);
 
   // Callbacks for ProcessLocalChange.
-  void DidGetFileForLocalSync(SyncStatusCode status,
+  void DidGetFileForLocalSync(const SyncFileCallback& callback,
+                              SyncStatusCode status,
                               const LocalFileSyncInfo& sync_file_info,
                               storage::ScopedFile snapshot);
-  void ProcessNextChangeForURL(storage::ScopedFile snapshot,
+  void ProcessNextChangeForURL(const SyncFileCallback& callback,
+                               storage::ScopedFile snapshot,
                                const LocalFileSyncInfo& sync_file_info,
                                const FileChange& last_change,
                                const FileChangeList& changes,
@@ -236,10 +231,6 @@ class LocalFileSyncService
   std::set<GURL> pending_origins_with_changes_;
 
   OriginChangeMap origin_change_map_;
-
-  // This callback is non-null while a local sync is running (i.e.
-  // ProcessLocalChange has been called and has not been returned yet).
-  SyncFileCallback local_sync_callback_;
 
   LocalChangeProcessor* local_change_processor_;
   GetLocalChangeProcessorCallback get_local_change_processor_;

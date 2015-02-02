@@ -13,6 +13,8 @@
     'libjingle_source%': "source",
     'libpeer_target_type%': 'static_library',
     'libpeer_allocator_shim%': 0,
+    'webrtc_p2p': "../webrtc/p2p",
+    'webrtc_xmpp': "../webrtc/libjingle/xmpp",
   },
   # Most of these settings have been split according to their scope into
   # :jingle_unexported_configs, :jingle_direct_dependent_configs,
@@ -272,8 +274,8 @@
       'includes': [ 'libjingle_common.gypi' ],
       'sources!' : [
         # Compiled as part of libjingle_p2p_constants.
-        '<(libjingle_source)/talk/p2p/base/constants.cc',
-        '<(libjingle_source)/talk/p2p/base/constants.h',
+        '<(webrtc_p2p)/base/constants.cc',
+        '<(webrtc_p2p)/base/constants.h',
       ],
       'dependencies': [
         '<(DEPTH)/third_party/webrtc/base/base.gyp:webrtc_base',
@@ -295,8 +297,8 @@
       'target_name': 'libjingle_p2p_constants',
       'type': 'static_library',
       'sources': [
-        '<(libjingle_source)/talk/p2p/base/constants.cc',
-        '<(libjingle_source)/talk/p2p/base/constants.h',
+        '<(webrtc_p2p)/base/constants.cc',
+        '<(webrtc_p2p)/base/constants.h',
       ],
     },  # target libjingle_p2p_constants
     # GN version: //third_party/libjingle:peerconnection_server
@@ -572,6 +574,13 @@
           'dependencies': [
             'libjingle_webrtc_common',
           ],
+          'conditions': [
+            ['libpeer_target_type=="static_library"', {
+              'dependencies': [
+                '<(DEPTH)/third_party/webrtc/modules/modules.gyp:audio_processing',
+              ],
+            }],
+          ],
         },
         {
           # GN version: //third_party/libjingle:libpeerconnection
@@ -644,6 +653,35 @@
             }],
           ],
         },  # target libpeerconnection
+      ],
+    }],
+    ['enable_webrtc==1 and OS=="android" and "<(libpeer_target_type)"=="static_library"', {
+      'targets': [
+        {
+          # GN version: //third_party/libjingle:libjingle_peerconnection_so
+          'target_name': 'libjingle_peerconnection_so',
+          'type': 'shared_library',
+          'dependencies': [
+            '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
+            'libjingle_webrtc',
+            'libpeerconnection',
+          ],
+          'sources': [
+            '<(libjingle_source)/talk/app/webrtc/java/jni/peerconnection_jni.cc',
+          ],
+        },
+        {
+          # GN version: //third_party/libjingle:libjingle_peerconnection_java
+          'target_name': 'libjingle_peerconnection_javalib',
+          'type': 'none',
+          'variables': {
+            'java_in_dir': '<(libjingle_source)/talk/app/webrtc/java',
+          },
+          'dependencies': [
+            'libjingle_peerconnection_so',
+          ],
+          'includes': [ '../../build/java.gypi' ],
+        },
       ],
     }],
   ],

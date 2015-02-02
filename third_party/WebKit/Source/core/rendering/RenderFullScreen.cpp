@@ -26,11 +26,17 @@
 #include "core/rendering/RenderFullScreen.h"
 
 #include "core/dom/Fullscreen.h"
+#include "core/frame/FrameHost.h"
+#include "core/frame/Settings.h"
+#include "core/page/Chrome.h"
+#include "core/page/Page.h"
 #include "core/rendering/RenderBlockFlow.h"
+
+#include "public/platform/WebScreenInfo.h"
 
 using namespace blink;
 
-class RenderFullScreenPlaceholder FINAL : public RenderBlockFlow {
+class RenderFullScreenPlaceholder final : public RenderBlockFlow {
 public:
     RenderFullScreenPlaceholder(RenderFullScreen* owner)
         : RenderBlockFlow(0)
@@ -39,8 +45,8 @@ public:
         setDocumentForAnonymous(&owner->document());
     }
 private:
-    virtual bool isRenderFullScreenPlaceholder() const OVERRIDE { return true; }
-    virtual void willBeDestroyed() OVERRIDE;
+    virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectRenderFullScreenPlaceholder || RenderBlockFlow::isOfType(type); }
+    virtual void willBeDestroyed() override;
     RenderFullScreen* m_owner;
 };
 
@@ -88,7 +94,7 @@ void RenderFullScreen::willBeDestroyed()
     RenderFlexibleBox::willBeDestroyed();
 }
 
-static PassRefPtr<RenderStyle> createFullScreenStyle()
+void RenderFullScreen::updateStyle()
 {
     RefPtr<RenderStyle> fullscreenStyle = RenderStyle::createDefaultStyle();
 
@@ -99,19 +105,25 @@ static PassRefPtr<RenderStyle> createFullScreenStyle()
     fullscreenStyle->font().update(nullptr);
 
     fullscreenStyle->setDisplay(FLEX);
-    fullscreenStyle->setJustifyContent(JustifyCenter);
+    fullscreenStyle->setJustifyContent(ContentPositionCenter);
     fullscreenStyle->setAlignItems(ItemPositionCenter);
     fullscreenStyle->setFlexDirection(FlowColumn);
 
     fullscreenStyle->setPosition(FixedPosition);
-    fullscreenStyle->setWidth(Length(100.0, Percent));
-    fullscreenStyle->setHeight(Length(100.0, Percent));
     fullscreenStyle->setLeft(Length(0, blink::Fixed));
     fullscreenStyle->setTop(Length(0, blink::Fixed));
+    if (document().page()->settings().pinchVirtualViewportEnabled()) {
+        IntSize viewportSize = document().page()->frameHost().pinchViewport().size();
+        fullscreenStyle->setWidth(Length(viewportSize.width(), blink::Fixed));
+        fullscreenStyle->setHeight(Length(viewportSize.height(), blink::Fixed));
+    } else {
+        fullscreenStyle->setWidth(Length(100.0, Percent));
+        fullscreenStyle->setHeight(Length(100.0, Percent));
+    }
 
     fullscreenStyle->setBackgroundColor(StyleColor(Color::black));
 
-    return fullscreenStyle.release();
+    setStyle(fullscreenStyle);
 }
 
 RenderObject* RenderFullScreen::wrapRenderer(RenderObject* object, RenderObject* parent, Document* document)
@@ -121,7 +133,7 @@ RenderObject* RenderFullScreen::wrapRenderer(RenderObject* object, RenderObject*
     DeprecatedDisableModifyRenderTreeStructureAsserts disabler;
 
     RenderFullScreen* fullscreenRenderer = RenderFullScreen::createAnonymous(document);
-    fullscreenRenderer->setStyle(createFullScreenStyle());
+    fullscreenRenderer->updateStyle();
     if (parent && !parent->isChildAllowed(fullscreenRenderer, fullscreenRenderer->style())) {
         fullscreenRenderer->destroy();
         return 0;

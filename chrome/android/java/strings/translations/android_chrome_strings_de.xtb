@@ -2,7 +2,7 @@
 <translation id="8588878054171169263">Bild speichern</translation>
 <translation id="7998918019931843664">Geschlossenen Tab wieder öffnen</translation>
 <translation id="4996978546172906250">Teilen über</translation>
-<translation id="6292937202013477045">Angreifer könnten versuchen, Ihre Informationen von <ph name="DOMAIN_NAME"/> zu stehlen, etwa Fotos, Passwörter, Nachrichten oder Kreditkartendaten.</translation>
+<translation id="6292937202013477045">Unbefugte Dritte könnten versuchen, Ihre Informationen von <ph name="DOMAIN_NAME"/> zu stehlen, etwa Fotos, Passwörter, Nachrichten oder Kreditkartendaten.</translation>
 <translation id="346339498574870680">Bild-URL kopieren</translation>
 <translation id="6657585470893396449">Passwort</translation>
 <translation id="5578795271662203820">In <ph name="SEARCH_ENGINE"/> nach dem Bild suchen</translation>
@@ -69,7 +69,6 @@ Sie melden sich gerade mit einem verwalteten Konto an und geben dem Administrato
 <translation id="7267430310003164111">Aufforderung zum Herunterladen der App aus dem Google Play Store. Name der App: <ph name="APP_NAME"/>. Durchschnittliche Bewertung der App: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Installation wird ausgeführt...</translation>
 <translation id="3992315671621218278">Link speichern</translation>
-<translation id="8034522405403831421">Diese Seite ist auf <ph name="SOURCE_LANGUAGE"/>. In folgende Sprache übersetzen: <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Website-Einstellungen</translation>
 <translation id="4195643157523330669">In neuem Tab öffnen</translation>
 <translation id="651048280540227067">Menü schließen</translation>
@@ -95,6 +94,7 @@ Sie melden sich gerade mit einem verwalteten Konto an und geben dem Administrato
 <translation id="7947953824732555851">Akzeptieren und anmelden</translation>
 <translation id="6333140779060797560">Über <ph name="APPLICATION"/> teilen</translation>
 <translation id="6040143037577758943">Schließen</translation>
+<translation id="5138299137310274655">Diese Seite ist auf <ph name="SOURCE_LANGUAGE"/>. In <ph name="TARGET_LANGUAGE"/> übersetzen?</translation>
 <translation id="969096075394517431">Sprachen ändern</translation>
 <translation id="5032574515228824816">Eingabeaufforderung</translation>
 <translation id="7961015016161918242">Nie</translation>
@@ -102,7 +102,7 @@ Sie melden sich gerade mit einem verwalteten Konto an und geben dem Administrato
 <translation id="4056223980640387499">Sepia</translation>
 <translation id="8310344678080805313">Standard-Tabs</translation>
 <translation id="6277522088822131679">Beim Drucken der Seite ist ein Problem aufgetreten. Bitte versuchen Sie es erneut.</translation>
-<translation id="7634554953375732414">Ihre Verbindung zu dieser Website ist nicht privat.</translation>
+<translation id="7634554953375732414">Die Verbindung zu dieser Website ist nicht sicher.</translation>
 <translation id="1742134235943978220">In folgende Sprache übersetzt: <ph name="TARGET_LANGUAGE"/></translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="7561196759112975576">Immer</translation>

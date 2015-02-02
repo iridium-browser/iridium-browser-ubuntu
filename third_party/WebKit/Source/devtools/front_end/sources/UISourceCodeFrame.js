@@ -40,6 +40,7 @@ WebInspector.UISourceCodeFrame = function(uiSourceCode)
 
     this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyChanged, this._onWorkingCopyChanged, this);
     this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.WorkingCopyCommitted, this._onWorkingCopyCommitted, this);
+    this._uiSourceCode.addEventListener(WebInspector.UISourceCode.Events.SavedStateUpdated, this._onSavedStateUpdated, this);
     this._updateStyle();
 }
 
@@ -61,14 +62,14 @@ WebInspector.UISourceCodeFrame.prototype = {
     {
         WebInspector.SourceFrame.prototype.wasShown.call(this);
         this._boundWindowFocused = this._windowFocused.bind(this);
-        window.addEventListener("focus", this._boundWindowFocused, false);
+        this.element.ownerDocument.defaultView.addEventListener("focus", this._boundWindowFocused, false);
         this._checkContentUpdated();
     },
 
     willHide: function()
     {
         WebInspector.SourceFrame.prototype.willHide.call(this);
-        window.removeEventListener("focus", this._boundWindowFocused, false);
+        this.element.ownerDocument.defaultView.removeEventListener("focus", this._boundWindowFocused, false);
         delete this._boundWindowFocused;
         this._uiSourceCode.removeWorkingCopyGetter();
     },
@@ -79,7 +80,7 @@ WebInspector.UISourceCodeFrame.prototype = {
     canEditSource: function()
     {
         var projectType = this._uiSourceCode.project().type();
-        if (projectType === WebInspector.projectTypes.Debugger || projectType === WebInspector.projectTypes.Formatter)
+        if (projectType === WebInspector.projectTypes.Service || projectType === WebInspector.projectTypes.Debugger || projectType === WebInspector.projectTypes.Formatter)
             return false;
         if (projectType === WebInspector.projectTypes.Network && this._uiSourceCode.contentType() === WebInspector.resourceTypes.Document)
             return false;
@@ -149,6 +150,14 @@ WebInspector.UISourceCodeFrame.prototype = {
         });
     },
 
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onSavedStateUpdated: function(event)
+    {
+        this._updateStyle();
+    },
+
     _updateStyle: function()
     {
         this.element.classList.toggle("source-frame-unsaved-committed-changes", this._uiSourceCode.hasUnsavedCommittedChanges());
@@ -204,21 +213,23 @@ WebInspector.UISourceCodeFrame.prototype = {
  * @constructor
  * @param {!WebInspector.UISourceCodeFrame.Infobar.Level} level
  * @param {string} message
+ * @param {function()=} onDispose
  */
-WebInspector.UISourceCodeFrame.Infobar = function(level, message)
+WebInspector.UISourceCodeFrame.Infobar = function(level, message, onDispose)
 {
-    this.element = document.createElementWithClass("div", "source-frame-infobar source-frame-infobar-" + level);
+    this.element = createElementWithClass("div", "source-frame-infobar source-frame-infobar-" + level);
     this._mainRow = this.element.createChild("div", "source-frame-infobar-main-row");
     this._detailsContainer = this.element.createChild("span", "source-frame-infobar-details-container");
 
     this._mainRow.createChild("span", "source-frame-infobar-icon");
     this._mainRow.createChild("span", "source-frame-infobar-row-message").textContent = message;
 
-    this._toggleElement = this._mainRow.createChild("div", "source-frame-infobar-toggle source-frame-infobar-link");
+    this._toggleElement = this._mainRow.createChild("div", "source-frame-infobar-toggle link");
     this._toggleElement.addEventListener("click", this._onToggleDetails.bind(this), false);
 
     this._closeElement = this._mainRow.createChild("div", "close-button");
     this._closeElement.addEventListener("click", this._onClose.bind(this), false);
+    this._onDispose = onDispose;
 
     this._updateToggleElement();
 }
@@ -282,5 +293,7 @@ WebInspector.UISourceCodeFrame.Infobar.prototype = {
         this.element.remove();
         this._onResize();
         delete this._uiSourceCodeFrame;
+        if (this._onDispose)
+            this._onDispose();
     }
 }

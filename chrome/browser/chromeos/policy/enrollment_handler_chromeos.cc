@@ -133,12 +133,23 @@ void EnrollmentHandlerChromeOS::OnPolicyFetched(CloudPolicyClient* client) {
                              CloudPolicyValidatorBase::DM_TOKEN_REQUIRED);
   validator->ValidatePolicyType(dm_protocol::kChromeDevicePolicyType);
   validator->ValidatePayload();
-  // If |domain| is empty here, the policy validation code will just use the
-  // domain from the username field in the policy itself to do key validation.
-  // TODO(mnissler): Plumb the enrolling user's username into this object so
-  // we can validate the username on the resulting policy, and use the domain
-  // from that username to validate the key below (http://crbug.com/343074).
-  validator->ValidateInitialKey(GetPolicyVerificationKey(), domain);
+  if (management_mode_ == em::PolicyData::CONSUMER_MANAGED) {
+    // For consumer-managed devices, although we don't store the policy, we
+    // still need to verify its integrity since we use the request token in it.
+    // The consumer device management server does not have the verification
+    // key, and we need to skip checking on that by passing an empty key to
+    // ValidateInitialKey(). ValidateInitialKey() still checks that the policy
+    // data is correctly signed by the new public key when the verification key
+    // is empty.
+    validator->ValidateInitialKey("", "");
+  } else {
+    // If |domain| is empty here, the policy validation code will just use the
+    // domain from the username field in the policy itself to do key validation.
+    // TODO(mnissler): Plumb the enrolling user's username into this object so
+    // we can validate the username on the resulting policy, and use the domain
+    // from that username to validate the key below (http://crbug.com/343074).
+    validator->ValidateInitialKey(GetPolicyVerificationKey(), domain);
+  }
   validator.release()->StartValidation(
       base::Bind(&EnrollmentHandlerChromeOS::HandlePolicyValidationResult,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -207,7 +218,7 @@ void EnrollmentHandlerChromeOS::OnStoreError(CloudPolicyStore* store) {
 }
 
 void EnrollmentHandlerChromeOS::HandleStateKeysResult(
-    const std::vector<std::string>& state_keys, bool /* first_boot */) {
+    const std::vector<std::string>& state_keys) {
   CHECK_EQ(STEP_STATE_KEYS, enrollment_step_);
 
   // Make sure state keys are available if forced re-enrollment is on.
@@ -381,19 +392,17 @@ void EnrollmentHandlerChromeOS::HandleLockDeviceResult(
             base::TimeDelta::FromMilliseconds(kLockRetryIntervalMs));
         lockbox_init_duration_ += kLockRetryIntervalMs;
       } else {
-        ReportResult(EnrollmentStatus::ForStatus(
-            EnrollmentStatus::STATUS_LOCK_TIMEOUT));
+        HandleLockDeviceResult(EnterpriseInstallAttributes::LOCK_TIMEOUT);
       }
       break;
-    case EnterpriseInstallAttributes::LOCK_BACKEND_ERROR:
-      ReportResult(EnrollmentStatus::ForStatus(
-          EnrollmentStatus::STATUS_LOCK_ERROR));
-      break;
-    case EnterpriseInstallAttributes::LOCK_WRONG_USER:
-      LOG(ERROR) << "Enrollment cannot proceed because the InstallAttrs "
-                 << "has been locked already!";
-      ReportResult(EnrollmentStatus::ForStatus(
-          EnrollmentStatus::STATUS_LOCK_WRONG_USER));
+    case EnterpriseInstallAttributes::LOCK_TIMEOUT:
+    case EnterpriseInstallAttributes::LOCK_BACKEND_INVALID:
+    case EnterpriseInstallAttributes::LOCK_ALREADY_LOCKED:
+    case EnterpriseInstallAttributes::LOCK_SET_ERROR:
+    case EnterpriseInstallAttributes::LOCK_FINALIZE_ERROR:
+    case EnterpriseInstallAttributes::LOCK_READBACK_ERROR:
+    case EnterpriseInstallAttributes::LOCK_WRONG_DOMAIN:
+      ReportResult(EnrollmentStatus::ForLockError(lock_result));
       break;
   }
 }
@@ -443,7 +452,8 @@ void EnrollmentHandlerChromeOS::ReportResult(EnrollmentStatus status) {
     LOG(WARNING) << "Enrollment failed: " << status.status()
                  << ", client: " << status.client_status()
                  << ", validation: " << status.validation_status()
-                 << ", store: " << status.store_status();
+                 << ", store: " << status.store_status()
+                 << ", lock: " << status.lock_status();
   }
 
   if (!callback.is_null())

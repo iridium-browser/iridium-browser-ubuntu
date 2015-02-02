@@ -30,7 +30,7 @@ class SequencedWorkerPoolOwner : public SequencedWorkerPool::TestingObserver {
   SequencedWorkerPoolOwner(size_t max_threads,
                            const std::string& thread_name_prefix);
 
-  virtual ~SequencedWorkerPoolOwner();
+  ~SequencedWorkerPoolOwner() override;
 
   // Don't change the returned pool's testing observer.
   const scoped_refptr<SequencedWorkerPool>& pool();
@@ -42,9 +42,9 @@ class SequencedWorkerPoolOwner : public SequencedWorkerPool::TestingObserver {
 
  private:
   // SequencedWorkerPool::TestingObserver implementation.
-  virtual void OnHasWork() OVERRIDE;
-  virtual void WillWaitForShutdown() OVERRIDE;
-  virtual void OnDestruct() OVERRIDE;
+  void OnHasWork() override;
+  void WillWaitForShutdown() override;
+  void OnDestruct() override;
 
   MessageLoop* const constructor_message_loop_;
   scoped_refptr<SequencedWorkerPool> pool_;

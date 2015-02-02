@@ -37,16 +37,16 @@ class PrintDialogGtk2
       PrintingContextLinux* context);
 
   // printing::PrintDialogGtkInterface implementation.
-  virtual void UseDefaultSettings() OVERRIDE;
-  virtual bool UpdateSettings(printing::PrintSettings* settings) OVERRIDE;
-  virtual void ShowDialog(
+  void UseDefaultSettings() override;
+  bool UpdateSettings(printing::PrintSettings* settings) override;
+  void ShowDialog(
       gfx::NativeView parent_view,
       bool has_selection,
-      const PrintingContextLinux::PrintSettingsCallback& callback) OVERRIDE;
-  virtual void PrintDocument(const printing::MetafilePlayer& metafile,
-                             const base::string16& document_name) OVERRIDE;
-  virtual void AddRefToDialog() OVERRIDE;
-  virtual void ReleaseDialog() OVERRIDE;
+      const PrintingContextLinux::PrintSettingsCallback& callback) override;
+  void PrintDocument(const printing::MetafilePlayer& metafile,
+                     const base::string16& document_name) override;
+  void AddRefToDialog() override;
+  void ReleaseDialog() override;
 
  private:
   friend struct content::BrowserThread::DeleteOnThread<
@@ -54,7 +54,7 @@ class PrintDialogGtk2
   friend class base::DeleteHelper<PrintDialogGtk2>;
 
   explicit PrintDialogGtk2(PrintingContextLinux* context);
-  virtual ~PrintDialogGtk2();
+  ~PrintDialogGtk2() override;
 
   // Handles dialog response.
   CHROMEGTK_CALLBACK_1(PrintDialogGtk2, void, OnResponse, int);
@@ -73,7 +73,7 @@ class PrintDialogGtk2
   void InitPrintSettings(printing::PrintSettings* settings);
 
   // aura::WindowObserver implementation.
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
+  void OnWindowDestroying(aura::Window* window) override;
 
   // Printing dialog callback.
   PrintingContextLinux::PrintSettingsCallback callback_;

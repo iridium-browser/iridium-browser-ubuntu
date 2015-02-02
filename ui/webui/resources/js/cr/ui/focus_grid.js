@@ -42,6 +42,14 @@ cr.define('cr.ui', function() {
 
   FocusGrid.prototype = {
     /**
+     * Unregisters event handlers and removes all |this.rows|.
+     */
+    destroy: function() {
+      this.rows.forEach(function(row) { row.destroy(); });
+      this.rows.length = 0;
+    },
+
+    /**
      * @param {EventTarget} target A target item to find in this grid.
      * @return {?{row: number, col: number}} A position or null if not found.
      */
@@ -72,7 +80,7 @@ cr.define('cr.ui', function() {
         row = this.rows.length - 1;
 
       if (!this.rows[row])
-        return;
+        return false;
 
       var colIndex = keyRow.items.indexOf(e.target);
       var col = Math.min(colIndex, this.rows[row].items.length - 1);
@@ -80,13 +88,19 @@ cr.define('cr.ui', function() {
       this.rows[row].focusIndex(col);
 
       e.preventDefault();
+      return true;
+    },
+
+    /** @override */
+    onMousedown: function(row, e) {
+      return false;
     },
 
     /**
      * @param {!Array.<!NodeList|!Array.<!Element>>} grid A 2D array of nodes.
      */
     setGrid: function(grid) {
-      this.rows.forEach(function(row) { row.destroy(); });
+      this.destroy();
 
       this.rows = grid.map(function(row) {
         return new cr.ui.FocusRow(row, this.boundary_, this, this.observer_);

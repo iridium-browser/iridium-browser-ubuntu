@@ -1,3 +1,7 @@
+# crbug.com/395172
+WebRtcBrowserTest.CanForwardRemoteStream
+WebRtcBrowserTest.CanForwardRemoteStream720p
+
 # crbug.com/399289
 WebRtcBrowserTest.NoCrashWhenConnectChromiumSinkToRemoteTrack
 
@@ -6,3 +10,11 @@ PluginTest.PluginSingleRangeRequest
 PluginTest.PluginThreadAsyncCall
 PluginTest.PrivateDisabled
 PluginTest.ScheduleTimer
+
+# crbug.com/419396
+WebRtcBrowserTest.CallWithDataAndMedia
+
+# crbug.com/420827
+ServiceWorkerVersionBrowserTest.Activate_NoEventListener
+ServiceWorkerBrowserTest.ImportsBustMemcache
+

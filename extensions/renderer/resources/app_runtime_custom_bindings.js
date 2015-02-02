@@ -6,8 +6,8 @@
 
 var binding = require('binding').Binding.create('app.runtime');
 
-var AppViewInternal =
-    require('binding').Binding.create('appViewInternal').generate();
+var AppViewGuestInternal =
+    require('binding').Binding.create('appViewGuestInternal').generate();
 var eventBindings = require('event_bindings');
 var fileSystemHelpers = requireNative('file_system_natives');
 var GetIsolatedFileSystem = fileSystemHelpers.GetIsolatedFileSystem;
@@ -23,11 +23,11 @@ eventBindings.registerArgumentMassager('app.runtime.onEmbedRequested',
   var id = appEmbeddingRequest.guestInstanceId;
   delete appEmbeddingRequest.guestInstanceId;
   appEmbeddingRequest.allow = function(url) {
-    AppViewInternal.attachFrame(url, id);
+    AppViewGuestInternal.attachFrame(url, id);
   };
 
   appEmbeddingRequest.deny = function() {
-    AppViewInternal.denyRequest(id);
+    AppViewGuestInternal.denyRequest(id);
   };
 
   dispatch([appEmbeddingRequest]);
@@ -47,7 +47,10 @@ eventBindings.registerArgumentMassager('app.runtime.onLaunched',
         $Array.push(items, item);
       }
       if (--numItems === 0) {
-        var data = { isKioskSession: launchData.isKioskSession };
+        var data = {
+          isKioskSession: launchData.isKioskSession,
+          source: launchData.source
+        };
         if (items.length !== 0) {
           data.id = launchData.id;
           data.items = items;

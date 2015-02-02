@@ -11,6 +11,8 @@
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_offset_string_conversions.h"
@@ -21,7 +23,9 @@
 #include "cc/layers/texture_layer.h"
 #include "cc/trees/layer_tree_host.h"
 #include "content/common/content_constants_internal.h"
+#include "content/common/frame_messages.h"
 #include "content/common/input/web_input_event_traits.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/renderer/content_renderer_client.h"
@@ -38,10 +42,13 @@
 #include "content/renderer/pepper/pepper_file_ref_renderer_host.h"
 #include "content/renderer/pepper/pepper_graphics_2d_host.h"
 #include "content/renderer/pepper/pepper_in_process_router.h"
+#include "content/renderer/pepper/pepper_plugin_instance_impl.h"
+#include "content/renderer/pepper/pepper_plugin_instance_throttler.h"
 #include "content/renderer/pepper/pepper_try_catch.h"
 #include "content/renderer/pepper/pepper_url_loader_host.h"
 #include "content/renderer/pepper/plugin_module.h"
 #include "content/renderer/pepper/plugin_object.h"
+#include "content/renderer/pepper/plugin_power_saver_helper.h"
 #include "content/renderer/pepper/ppapi_preferences_builder.h"
 #include "content/renderer/pepper/ppb_buffer_impl.h"
 #include "content/renderer/pepper/ppb_graphics_3d_impl.h"
@@ -94,9 +101,7 @@
 #include "ppapi/thunk/ppb_buffer_api.h"
 #include "printing/metafile_skia_wrapper.h"
 #include "printing/pdf_metafile_skia.h"
-#include "printing/units.h"
 #include "skia/ext/platform_canvas.h"
-#include "skia/ext/platform_device.h"
 #include "third_party/WebKit/public/platform/WebCursorInfo.h"
 #include "third_party/WebKit/public/platform/WebGamepads.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
@@ -120,13 +125,9 @@
 #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/khronos/GLES2/gl2.h"
-#include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkRect.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/rect_conversions.h"
-#include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "v8/include/v8.h"
 
 #if defined(OS_CHROMEOS)
@@ -137,8 +138,6 @@
 #include "base/metrics/histogram.h"
 #include "base/win/windows_version.h"
 #include "skia/ext/platform_canvas.h"
-#include "ui/gfx/codec/jpeg_codec.h"
-#include "ui/gfx/gdi_util.h"
 #endif
 
 using base::StringPrintf;
@@ -186,36 +185,14 @@ using blink::WebView;
 
 namespace content {
 
-#if defined(OS_WIN)
-// Exported by pdf.dll
-typedef bool (*RenderPDFPageToDCProc)(const unsigned char* pdf_buffer,
-                                      int buffer_size,
-                                      int page_number,
-                                      HDC dc,
-                                      int dpi_x,
-                                      int dpi_y,
-                                      int bounds_origin_x,
-                                      int bounds_origin_y,
-                                      int bounds_width,
-                                      int bounds_height,
-                                      bool fit_to_bounds,
-                                      bool stretch_to_bounds,
-                                      bool keep_aspect_ratio,
-                                      bool center_in_bounds,
-                                      bool autorotate);
-
-void DrawEmptyRectangle(HDC dc) {
-  // TODO(sanjeevr): This is a temporary hack. If we output a JPEG
-  // to the EMF, the EnumEnhMetaFile call fails in the browser
-  // process. The failure also happens if we output nothing here.
-  // We need to investigate the reason for this failure and fix it.
-  // In the meantime this temporary hack of drawing an empty
-  // rectangle in the DC gets us by.
-  Rectangle(dc, 0, 0, 0, 0);
-}
-#endif  // defined(OS_WIN)
-
 namespace {
+
+static const int kInfiniteRatio = 99999;
+
+#define UMA_HISTOGRAM_ASPECT_RATIO(name, width, height) \
+    UMA_HISTOGRAM_SPARSE_SLOWLY( \
+        name, \
+        (height) ? ((width) * 100) / (height) : kInfiniteRatio);
 
 // Check PP_TextInput_Type and ui::TextInputType are kept in sync.
 COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_NONE) == int(PP_TEXTINPUT_TYPE_NONE),
@@ -390,14 +367,13 @@ class PluginInstanceLockTarget : public MouseLockDispatcher::LockTarget {
   PluginInstanceLockTarget(PepperPluginInstanceImpl* plugin)
       : plugin_(plugin) {}
 
-  virtual void OnLockMouseACK(bool succeeded) OVERRIDE {
+  void OnLockMouseACK(bool succeeded) override {
     plugin_->OnLockMouseACK(succeeded);
   }
 
-  virtual void OnMouseLockLost() OVERRIDE { plugin_->OnMouseLockLost(); }
+  void OnMouseLockLost() override { plugin_->OnMouseLockLost(); }
 
-  virtual bool HandleMouseLockedInputEvent(const blink::WebMouseEvent& event)
-      OVERRIDE {
+  bool HandleMouseLockedInputEvent(const blink::WebMouseEvent& event) override {
     plugin_->HandleMouseLockedInputEvent(event);
     return true;
   }
@@ -423,6 +399,77 @@ void InitLatencyInfo(ui::LatencyInfo* new_latency,
   }
 }
 
+// Histogram tracking prevalence of tiny Flash instances. Units in pixels.
+enum PluginFlashTinyContentSize {
+  TINY_CONTENT_SIZE_1_1 = 0,
+  TINY_CONTENT_SIZE_5_5 = 1,
+  TINY_CONTENT_SIZE_10_10 = 2,
+  TINY_CONTENT_SIZE_LARGE = 3,
+  TINY_CONTENT_SIZE_NUM_ITEMS
+};
+
+// How the throttled power saver is unthrottled, if ever.
+// These numeric values are used in UMA logs; do not change them.
+enum PowerSaverUnthrottleMethod {
+  UNTHROTTLE_METHOD_NEVER = 0,
+  UNTHROTTLE_METHOD_BY_CLICK = 1,
+  UNTHROTTLE_METHOD_BY_WHITELIST = 2,
+  UNTHROTTLE_METHOD_NUM_ITEMS
+};
+
+const char kFlashClickSizeAspectRatioHistogram[] =
+    "Plugin.Flash.ClickSize.AspectRatio";
+const char kFlashClickSizeHeightHistogram[] = "Plugin.Flash.ClickSize.Height";
+const char kFlashClickSizeWidthHistogram[] = "Plugin.Flash.ClickSize.Width";
+const char kFlashTinyContentSizeHistogram[] = "Plugin.Flash.TinyContentSize";
+const char kPowerSaverUnthrottleHistogram[] = "Plugin.PowerSaver.Unthrottle";
+
+// Record size metrics for all Flash instances.
+void RecordFlashSizeMetric(int width, int height) {
+  PluginFlashTinyContentSize size = TINY_CONTENT_SIZE_LARGE;
+
+  if (width <= 1 && height <= 1)
+    size = TINY_CONTENT_SIZE_1_1;
+  else if (width <= 5 && height <= 5)
+    size = TINY_CONTENT_SIZE_5_5;
+  else if (width <= 10 && height <= 10)
+    size = TINY_CONTENT_SIZE_10_10;
+
+  UMA_HISTOGRAM_ENUMERATION(kFlashTinyContentSizeHistogram, size,
+                            TINY_CONTENT_SIZE_NUM_ITEMS);
+}
+
+// Records size metrics for Flash instances that are clicked.
+void RecordFlashClickSizeMetric(int width, int height) {
+  base::HistogramBase* width_histogram = base::LinearHistogram::FactoryGet(
+      kFlashClickSizeWidthHistogram,
+      0,    // minimum width
+      500,  // maximum width
+      100,  // number of buckets.
+      base::HistogramBase::kUmaTargetedHistogramFlag);
+  width_histogram->Add(width);
+
+  base::HistogramBase* height_histogram = base::LinearHistogram::FactoryGet(
+      kFlashClickSizeHeightHistogram,
+      0,    // minimum height
+      400,  // maximum height
+      100,  // number of buckets.
+      base::HistogramBase::kUmaTargetedHistogramFlag);
+  height_histogram->Add(height);
+
+  UMA_HISTOGRAM_ASPECT_RATIO(kFlashClickSizeAspectRatioHistogram, width,
+                             height);
+}
+
+void RecordUnthrottleMethodMetric(PowerSaverUnthrottleMethod method) {
+  UMA_HISTOGRAM_ENUMERATION(kPowerSaverUnthrottleHistogram, method,
+                            UNTHROTTLE_METHOD_NUM_ITEMS);
+}
+
+bool IsFlashPlugin(PluginModule* module) {
+  return module->name() == kFlashPluginName;
+}
+
 }  // namespace
 
 // static
@@ -437,8 +484,12 @@ PepperPluginInstanceImpl* PepperPluginInstanceImpl::Create(
       PPP_Instance_Combined::Create(get_plugin_interface_func);
   if (!ppp_instance_combined)
     return NULL;
-  return new PepperPluginInstanceImpl(
-      render_frame, module, ppp_instance_combined, container, plugin_url);
+
+  return new PepperPluginInstanceImpl(render_frame,
+                                      module,
+                                      ppp_instance_combined,
+                                      container,
+                                      plugin_url);
 }
 
 PepperPluginInstanceImpl::ExternalDocumentLoader::ExternalDocumentLoader()
@@ -519,6 +570,10 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       layer_bound_to_fullscreen_(false),
       layer_is_hardware_(false),
       plugin_url_(plugin_url),
+      has_been_clicked_(false),
+      power_saver_enabled_(false),
+      is_peripheral_content_(false),
+      plugin_throttled_(false),
       full_frame_(false),
       sent_initial_did_change_view_(false),
       bound_graphics_2d_platform_(NULL),
@@ -531,7 +586,6 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       plugin_mouse_lock_interface_(NULL),
       plugin_pdf_interface_(NULL),
       plugin_private_interface_(NULL),
-      plugin_selection_interface_(NULL),
       plugin_textinput_interface_(NULL),
       plugin_zoom_interface_(NULL),
       checked_for_plugin_input_event_interface_(false),
@@ -616,6 +670,9 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
 
 PepperPluginInstanceImpl::~PepperPluginInstanceImpl() {
   DCHECK(!fullscreen_container_);
+
+  if (plugin_throttled_)
+    RecordUnthrottleMethodMetric(UNTHROTTLE_METHOD_NEVER);
 
   // Notify all the plugin objects of deletion. This will prevent blink from
   // calling into the plugin any more.
@@ -868,6 +925,45 @@ bool PepperPluginInstanceImpl::Initialize(
     bool full_frame) {
   if (!render_frame_)
     return false;
+
+  blink::WebRect bounds = container_->element().boundsInViewportSpace();
+  if (IsFlashPlugin(module_.get())) {
+    RenderThread::Get()->RecordAction(
+        base::UserMetricsAction("Flash.PluginInstanceCreated"));
+    RecordFlashSizeMetric(bounds.width, bounds.height);
+  }
+
+  PluginPowerSaverHelper* power_saver_helper =
+      render_frame_->plugin_power_saver_helper();
+  GURL content_origin = plugin_url_.GetOrigin();
+
+  bool cross_origin = false;
+  is_peripheral_content_ =
+      IsFlashPlugin(module_.get()) &&
+      power_saver_helper->ShouldThrottleContent(content_origin, bounds.width,
+                                                bounds.height, &cross_origin);
+
+  power_saver_enabled_ = is_peripheral_content_ &&
+                         base::CommandLine::ForCurrentProcess()->HasSwitch(
+                             switches::kEnablePluginPowerSaver);
+
+  if (is_peripheral_content_) {
+    // To collect UMAs, register peripheral content even if we don't throttle.
+    power_saver_helper->RegisterPeripheralPlugin(
+        content_origin,
+        base::Bind(
+            &PepperPluginInstanceImpl::DisablePowerSaverByRetroactiveWhitelist,
+            weak_factory_.GetWeakPtr()));
+
+    if (power_saver_enabled_) {
+      throttler_.reset(new PepperPluginInstanceThrottler(
+          base::Bind(&PepperPluginInstanceImpl::SetPluginThrottled,
+                     weak_factory_.GetWeakPtr(), true /* throttled */)));
+    }
+  } else if (cross_origin) {
+    power_saver_helper->WhitelistContentOrigin(content_origin);
+  }
+
   message_channel_ = MessageChannel::Create(this, &message_channel_object_);
 
   full_frame_ = full_frame;
@@ -1123,6 +1219,25 @@ bool PepperPluginInstanceImpl::HandleInputEvent(
     WebCursorInfo* cursor_info) {
   TRACE_EVENT0("ppapi", "PepperPluginInstanceImpl::HandleInputEvent");
 
+  if (event.type == blink::WebInputEvent::MouseDown && !has_been_clicked_ &&
+      IsFlashPlugin(module_.get())) {
+    has_been_clicked_ = true;
+    blink::WebRect bounds = container_->element().boundsInViewportSpace();
+    RecordFlashClickSizeMetric(bounds.width, bounds.height);
+  }
+
+  if (event.type == blink::WebInputEvent::MouseUp && is_peripheral_content_) {
+    is_peripheral_content_ = false;
+    power_saver_enabled_ = false;
+
+    RecordUnthrottleMethodMetric(UNTHROTTLE_METHOD_BY_CLICK);
+
+    if (plugin_throttled_) {
+      SetPluginThrottled(false /* throttled */);
+      return true;
+    }
+  }
+
   if (!render_frame_)
     return false;
   if (WebInputEvent::isMouseEventType(event.type)) {
@@ -1372,6 +1487,8 @@ void PepperPluginInstanceImpl::ViewFlushedPaint() {
 void PepperPluginInstanceImpl::SetSelectedText(
     const base::string16& selected_text) {
   selected_text_ = selected_text;
+  gfx::Range range(0, selected_text.length());
+  render_frame_->SetSelectedText(selected_text, 0, range);
 }
 
 void PepperPluginInstanceImpl::SetLinkUnderCursor(const std::string& url) {
@@ -1414,20 +1531,7 @@ void PepperPluginInstanceImpl::UnregisterMessageHandler(PP_Instance instance) {
 }
 
 base::string16 PepperPluginInstanceImpl::GetSelectedText(bool html) {
-  // Keep a reference on the stack. See NOTE above.
-  scoped_refptr<PepperPluginInstanceImpl> ref(this);
-  if (!LoadSelectionInterface())
-    return selected_text_;
-
-  PP_Var rv = plugin_selection_interface_->GetSelectedText(pp_instance(),
-                                                           PP_FromBool(html));
-  StringVar* string = StringVar::FromPPVar(rv);
-  base::string16 selection;
-  if (string)
-    selection = base::UTF8ToUTF16(string->value());
-  // Release the ref the plugin transfered to us.
-  HostGlobals::Get()->GetVarTracker()->ReleaseVar(rv);
-  return selection;
+  return selected_text_;
 }
 
 base::string16 PepperPluginInstanceImpl::GetLinkAtPosition(
@@ -1579,14 +1683,6 @@ bool PepperPluginInstanceImpl::LoadPrivateInterface() {
   return !!plugin_private_interface_;
 }
 
-bool PepperPluginInstanceImpl::LoadSelectionInterface() {
-  if (!plugin_selection_interface_) {
-    plugin_selection_interface_ = static_cast<const PPP_Selection_Dev*>(
-        module_->GetPluginInterface(PPP_SELECTION_DEV_INTERFACE));
-  }
-  return !!plugin_selection_interface_;
-}
-
 bool PepperPluginInstanceImpl::LoadTextInputInterface() {
   if (!plugin_textinput_interface_) {
     plugin_textinput_interface_ = static_cast<const PPP_TextInput_Dev*>(
@@ -1692,23 +1788,27 @@ void PepperPluginInstanceImpl::SendDidChangeView() {
   if (module()->is_crashed())
     return;
 
+  // When plugin is throttled, send ViewData indicating it's in the background.
+  const ppapi::ViewData& view_data =
+      plugin_throttled_ ? empty_view_data_ : view_data_;
+
   if (view_change_weak_ptr_factory_.HasWeakPtrs() ||
       (sent_initial_did_change_view_ &&
-       last_sent_view_data_.Equals(view_data_)))
+       last_sent_view_data_.Equals(view_data)))
     return;  // Nothing to update.
 
   sent_initial_did_change_view_ = true;
-  last_sent_view_data_ = view_data_;
+  last_sent_view_data_ = view_data;
   ScopedPPResource resource(
       ScopedPPResource::PassRef(),
-      (new PPB_View_Shared(ppapi::OBJECT_IS_IMPL, pp_instance(), view_data_))
+      (new PPB_View_Shared(ppapi::OBJECT_IS_IMPL, pp_instance(), view_data))
           ->GetReference());
 
   UpdateLayerTransform();
 
   if (bound_graphics_2d_platform_ &&
-      (!view_data_.is_page_visible ||
-       PP_ToGfxRect(view_data_.clip_rect).IsEmpty())) {
+      (!view_data.is_page_visible ||
+       PP_ToGfxRect(view_data.clip_rect).IsEmpty())) {
     bound_graphics_2d_platform_->ClearCache();
   }
 
@@ -1716,7 +1816,7 @@ void PepperPluginInstanceImpl::SendDidChangeView() {
   // released its reference to this object yet.
   if (instance_interface_) {
     instance_interface_->DidChangeView(
-        pp_instance(), resource, &view_data_.rect, &view_data_.clip_rect);
+        pp_instance(), resource, &view_data.rect, &view_data.clip_rect);
   }
 }
 
@@ -1787,7 +1887,7 @@ int PepperPluginInstanceImpl::PrintBegin(const WebPrintParams& print_params) {
 
 bool PepperPluginInstanceImpl::PrintPage(int page_number,
                                          blink::WebCanvas* canvas) {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINTING)
   DCHECK(plugin_print_interface_);
   PP_PrintPageNumberRange_Dev page_range;
   page_range.first_page_number = page_range.last_page_number = page_number;
@@ -1804,7 +1904,7 @@ bool PepperPluginInstanceImpl::PrintPage(int page_number,
   } else {
     return PrintPageHelper(&page_range, 1, canvas);
   }
-#else  // defined(ENABLED_PRINTING)
+#else  // ENABLE_PRINTING
   return false;
 #endif
 }
@@ -1971,7 +2071,7 @@ bool PepperPluginInstanceImpl::IsViewAccelerated() {
 
 bool PepperPluginInstanceImpl::PrintPDFOutput(PP_Resource print_output,
                                               blink::WebCanvas* canvas) {
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINTING)
   ppapi::thunk::EnterResourceNoLock<PPB_Buffer_API> enter(print_output, true);
   if (enter.failed())
     return false;
@@ -1981,91 +2081,15 @@ bool PepperPluginInstanceImpl::PrintPDFOutput(PP_Resource print_output,
     NOTREACHED();
     return false;
   }
-#if defined(OS_WIN)
-  // For Windows, we need the PDF DLL to render the output PDF to a DC.
-  HMODULE pdf_module = GetModuleHandle(L"pdf.dll");
-  if (!pdf_module)
-    return false;
-  RenderPDFPageToDCProc render_proc = reinterpret_cast<RenderPDFPageToDCProc>(
-      GetProcAddress(pdf_module, "RenderPDFPageToDC"));
-  if (!render_proc)
-    return false;
-#endif  // defined(OS_WIN)
 
-  bool ret = false;
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
   printing::PdfMetafileSkia* metafile =
       printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas);
-  DCHECK(metafile != NULL);
   if (metafile)
-    ret = metafile->InitFromData(mapper.data(), mapper.size());
-#elif defined(OS_WIN)
-  printing::PdfMetafileSkia* metafile =
-      printing::MetafileSkiaWrapper::GetMetafileFromCanvas(*canvas);
-  if (metafile) {
-    // We only have a metafile when doing print preview, so we just want to
-    // pass the PDF off to preview.
-    ret = metafile->InitFromData(mapper.data(), mapper.size());
-  } else {
-    // On Windows, we now need to render the PDF to the DC that backs the
-    // supplied canvas.
-    HDC dc = skia::BeginPlatformPaint(canvas);
-    DrawEmptyRectangle(dc);
-    gfx::Size size_in_pixels;
-    size_in_pixels.set_width(
-        printing::ConvertUnit(current_print_settings_.printable_area.size.width,
-                              static_cast<int>(printing::kPointsPerInch),
-                              current_print_settings_.dpi));
-    size_in_pixels.set_height(printing::ConvertUnit(
-        current_print_settings_.printable_area.size.height,
-        static_cast<int>(printing::kPointsPerInch),
-        current_print_settings_.dpi));
-    // We need to scale down DC to fit an entire page into DC available area.
-    // First, we'll try to use default scaling based on the 72dpi that is
-    // used in webkit for printing.
-    // If default scaling is not enough to fit the entire PDF without
-    // Current metafile is based on screen DC and have current screen size.
-    // Writing outside of those boundaries will result in the cut-off output.
-    // On metafiles (this is the case here), scaling down will still record
-    // original coordinates and we'll be able to print in full resolution.
-    // Before playback we'll need to counter the scaling up that will happen
-    // in the browser (printed_document_win.cc).
-    double dynamic_scale = gfx::CalculatePageScale(
-        dc, size_in_pixels.width(), size_in_pixels.height());
-    double page_scale = static_cast<double>(printing::kPointsPerInch) /
-                        static_cast<double>(current_print_settings_.dpi);
+    return metafile->InitFromData(mapper.data(), mapper.size());
 
-    if (dynamic_scale < page_scale) {
-      page_scale = dynamic_scale;
-      printing::MetafileSkiaWrapper::SetCustomScaleOnCanvas(*canvas,
-                                                            page_scale);
-    }
-
-    gfx::ScaleDC(dc, page_scale);
-
-    ret = render_proc(static_cast<unsigned char*>(mapper.data()),
-                      mapper.size(),
-                      0,
-                      dc,
-                      current_print_settings_.dpi,
-                      current_print_settings_.dpi,
-                      0,
-                      0,
-                      size_in_pixels.width(),
-                      size_in_pixels.height(),
-                      true,
-                      false,
-                      true,
-                      true,
-                      true);
-    skia::EndPlatformPaint(canvas);
-  }
-#endif  // defined(OS_WIN)
-
-  return ret;
-#else  // defined(ENABLE_FULL_PRINTING)
+  NOTREACHED();
+#endif  // ENABLE_PRINTING
   return false;
-#endif
 }
 
 void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
@@ -2400,7 +2424,8 @@ PP_Var PepperPluginInstanceImpl::GetWindowObject(PP_Instance instance) {
   if (!container_)
     return PP_MakeUndefined();
 
-  PepperTryCatchVar try_catch(this, NULL);
+  V8VarConverter converter(pp_instance_, V8VarConverter::kAllowObjectVars);
+  PepperTryCatchVar try_catch(this, &converter, NULL);
   WebLocalFrame* frame = container_->element().document().frame();
   if (!frame) {
     try_catch.SetException("No frame exists for window object.");
@@ -2416,7 +2441,8 @@ PP_Var PepperPluginInstanceImpl::GetWindowObject(PP_Instance instance) {
 PP_Var PepperPluginInstanceImpl::GetOwnerElementObject(PP_Instance instance) {
   if (!container_)
     return PP_MakeUndefined();
-  PepperTryCatchVar try_catch(this, NULL);
+  V8VarConverter converter(pp_instance_, V8VarConverter::kAllowObjectVars);
+  PepperTryCatchVar try_catch(this, &converter, NULL);
   ScopedPPVar result = try_catch.FromV8(container_->v8ObjectForElement());
   DCHECK(!try_catch.HasException());
   return result.Release();
@@ -2432,7 +2458,8 @@ PP_Var PepperPluginInstanceImpl::ExecuteScript(PP_Instance instance,
   // a reference to ourselves so that we can still process the result after the
   // WebBindings::evaluate() below.
   scoped_refptr<PepperPluginInstanceImpl> ref(this);
-  PepperTryCatchVar try_catch(this, exception);
+  V8VarConverter converter(pp_instance_, V8VarConverter::kAllowObjectVars);
+  PepperTryCatchVar try_catch(this, &converter, exception);
 
   // Check for an exception due to the context being destroyed.
   if (try_catch.HasException())
@@ -3011,7 +3038,6 @@ PP_ExternalPluginResult PepperPluginInstanceImpl::ResetAsProxied(
   plugin_pdf_interface_ = NULL;
   checked_for_plugin_pdf_interface_ = false;
   plugin_private_interface_ = NULL;
-  plugin_selection_interface_ = NULL;
   plugin_textinput_interface_ = NULL;
   plugin_zoom_interface_ = NULL;
 
@@ -3392,6 +3418,26 @@ void PepperPluginInstanceImpl::DidDataFromWebURLResponse(
     dispatcher->Send(new PpapiMsg_PPPInstance_HandleDocumentLoad(
         ppapi::API_ID_PPP_INSTANCE, pp_instance(), pending_host_id, data));
   }
+}
+
+void PepperPluginInstanceImpl::SetPluginThrottled(bool throttled) {
+  // Do not throttle if we've already disabled power saver.
+  if (!power_saver_enabled_ && throttled)
+    return;
+
+  plugin_throttled_ = throttled;
+  SendDidChangeView();
+}
+
+void PepperPluginInstanceImpl::DisablePowerSaverByRetroactiveWhitelist() {
+  if (!is_peripheral_content_)
+    return;
+
+  is_peripheral_content_ = false;
+  power_saver_enabled_ = false;
+  SetPluginThrottled(false);
+
+  RecordUnthrottleMethodMetric(UNTHROTTLE_METHOD_BY_WHITELIST);
 }
 
 }  // namespace content

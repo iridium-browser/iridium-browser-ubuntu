@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="bg">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="bg">
 <translation id="777702478322588152">Префектура</translation>
 <translation id="3713769522066937702">Форматът на този пощенски код не е разпознат. Пример за валиден пощенски код: <ph name="EXAMPLE"/>. Не знаете своя? Открийте го <ph name="BEGIN_LINK"/>тук<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Пощенски адрес</translation>

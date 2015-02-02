@@ -5,7 +5,8 @@
 #include "athena/wm/split_view_controller.h"
 
 #include "athena/screen/public/screen_manager.h"
-#include "athena/test/athena_test_base.h"
+#include "athena/test/base/athena_test_base.h"
+#include "athena/test/base/test_windows.h"
 #include "athena/wm/public/window_list_provider.h"
 #include "athena/wm/test/window_manager_impl_test_api.h"
 #include "base/memory/scoped_vector.h"
@@ -20,15 +21,15 @@ namespace athena {
 class SplitViewControllerTest : public test::AthenaTestBase {
  public:
   SplitViewControllerTest() {}
-  virtual ~SplitViewControllerTest() {}
+  ~SplitViewControllerTest() override {}
 
   // test::AthenaTestBase:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     test::AthenaTestBase::SetUp();
     api_.reset(new test::WindowManagerImplTestApi);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     api_.reset();
     test::AthenaTestBase::TearDown();
   }
@@ -69,6 +70,26 @@ class SplitViewControllerTest : public test::AthenaTestBase {
     return api_.get();
   }
 
+  void HandleScrollBegin(float delta) {
+    api_->GetSplitViewController()->HandleScrollBegin(delta);
+  }
+
+  void HandleScrollUpdate(float delta) {
+    api_->GetSplitViewController()->HandleScrollUpdate(delta);
+  }
+
+  void HandleScrollEnd(float velocity) {
+    api_->GetSplitViewController()->HandleScrollEnd(velocity);
+  }
+
+  float GetMaxDistanceFromMiddleForTest() {
+    return api_->GetSplitViewController()->GetMaxDistanceFromMiddleForTest();
+  }
+
+  float GetMinFlingVelocityForTest() {
+    return api_->GetSplitViewController()->GetMinFlingVelocityForTest();
+  }
+
  private:
   scoped_ptr<test::WindowManagerImplTestApi> api_;
 
@@ -82,7 +103,8 @@ TEST_F(SplitViewControllerTest, SplitModeActivation) {
   ScopedVector<aura::Window> windows;
   const int kNumWindows = 6;
   for (size_t i = 0; i < kNumWindows; ++i) {
-    scoped_ptr<aura::Window> window = CreateTestWindow(NULL, gfx::Rect());
+    scoped_ptr<aura::Window> window =
+        test::CreateNormalWindow(nullptr, nullptr);
     windows.push_back(window.release());
     windows[i]->Hide();
   }
@@ -93,7 +115,7 @@ TEST_F(SplitViewControllerTest, SplitModeActivation) {
   SplitViewController* controller = api()->GetSplitViewController();
   ASSERT_FALSE(controller->IsSplitViewModeActive());
 
-  controller->ActivateSplitMode(NULL, NULL, NULL);
+  controller->ActivateSplitMode(nullptr, nullptr, nullptr);
   ASSERT_TRUE(controller->IsSplitViewModeActive());
   // The last two windows should be on the left and right, respectively.
   EXPECT_EQ(windows[kNumWindows - 1], controller->left_window());
@@ -105,7 +127,7 @@ TEST_F(SplitViewControllerTest, SplitModeActivation) {
   // Select the window that is currently on the left for the right panel. The
   // windows should switch.
   controller->ActivateSplitMode(
-      NULL, windows[kNumWindows - 1], windows[kNumWindows - 1]);
+      nullptr, windows[kNumWindows - 1], windows[kNumWindows - 1]);
   EXPECT_EQ(windows[kNumWindows - 2], controller->left_window());
   EXPECT_EQ(windows[kNumWindows - 1], controller->right_window());
   EXPECT_EQ(windows[kNumWindows - 1], GetTopmostWindow());
@@ -113,7 +135,7 @@ TEST_F(SplitViewControllerTest, SplitModeActivation) {
   EXPECT_TRUE(OnlySplitViewWindowsVisible());
 
   controller->ActivateSplitMode(
-      windows[kNumWindows - 1], NULL, windows[kNumWindows - 1]);
+      windows[kNumWindows - 1], nullptr, windows[kNumWindows - 1]);
   EXPECT_EQ(windows[kNumWindows - 1], controller->left_window());
   EXPECT_EQ(windows[kNumWindows - 2], controller->right_window());
   EXPECT_EQ(windows[kNumWindows - 1], GetTopmostWindow());
@@ -132,14 +154,14 @@ TEST_F(SplitViewControllerTest, SplitModeActivation) {
 
   // Select one of the windows behind the stacks for the right panel. The window
   // on the left should remain unchanged.
-  controller->ActivateSplitMode(NULL, windows[0], windows[0]);
+  controller->ActivateSplitMode(nullptr, windows[0], windows[0]);
   EXPECT_EQ(windows[kNumWindows - 1], controller->left_window());
   EXPECT_EQ(windows[0], controller->right_window());
   EXPECT_EQ(windows[0], GetTopmostWindow());
   EXPECT_EQ(windows[kNumWindows - 1], GetSecondTopmostWindow());
   EXPECT_TRUE(OnlySplitViewWindowsVisible());
 
-  controller->ActivateSplitMode(windows[1], NULL, NULL);
+  controller->ActivateSplitMode(windows[1], nullptr, nullptr);
   EXPECT_EQ(windows[1], controller->left_window());
   EXPECT_EQ(windows[0], controller->right_window());
   EXPECT_EQ(windows[0], GetTopmostWindow());
@@ -153,7 +175,7 @@ TEST_F(SplitViewControllerTest, SplitModeActivation) {
   EXPECT_EQ(windows[4], GetSecondTopmostWindow());
   EXPECT_TRUE(OnlySplitViewWindowsVisible());
 
-  controller->ActivateSplitMode(windows[0], NULL, windows[0]);
+  controller->ActivateSplitMode(windows[0], nullptr, windows[0]);
   EXPECT_EQ(windows[0], controller->left_window());
   EXPECT_EQ(windows[5], controller->right_window());
   EXPECT_EQ(windows[0], GetTopmostWindow());
@@ -161,12 +183,118 @@ TEST_F(SplitViewControllerTest, SplitModeActivation) {
   EXPECT_TRUE(OnlySplitViewWindowsVisible());
 }
 
+// Helper function used to return the x-translation value of the layer
+// containing |window|.
+float XTranslationForWindow(aura::Window* window) {
+  return window->layer()->transform().To2dTranslation().x();
+}
+
+// Tests that calls to the methods of DragHandleScrollDelegate will disengage
+// split view mode under the correct circumstances.
+TEST_F(SplitViewControllerTest, ScrollDragHandle) {
+  aura::test::TestWindowDelegate delegate;
+  ScopedVector<aura::Window> windows;
+  const int kNumWindows = 2;
+  for (size_t i = 0; i < kNumWindows; ++i) {
+    scoped_ptr<aura::Window> window =
+        test::CreateNormalWindow(nullptr, nullptr);
+    windows.push_back(window.release());
+    windows[i]->Hide();
+  }
+
+  SplitViewController* controller = api()->GetSplitViewController();
+  ASSERT_FALSE(controller->IsSplitViewModeActive());
+
+  aura::Window* left_window = windows[0];
+  aura::Window* right_window = windows[1];
+  left_window->Show();
+  wm::ActivateWindow(left_window);
+
+  // Activate split view.
+  controller->ActivateSplitMode(left_window, right_window, left_window);
+  ASSERT_TRUE(controller->IsSplitViewModeActive());
+  EXPECT_TRUE(OnlySplitViewWindowsVisible());
+  EXPECT_EQ(left_window, controller->left_window());
+  EXPECT_EQ(right_window, controller->right_window());
+
+  const float small_distance = GetMaxDistanceFromMiddleForTest() - 1.0f;
+  const float large_distance = GetMaxDistanceFromMiddleForTest() + 1.0f;
+  const float slow_velocity = GetMinFlingVelocityForTest() - 1.0f;
+  const float fast_velocity = GetMinFlingVelocityForTest() + 1.0f;
+
+  // Only scroll a small distance to the right, but not enough to be able to
+  // disengage split view.
+  EXPECT_EQ(0.0f, XTranslationForWindow(right_window));
+  HandleScrollBegin(small_distance - 1.0f);
+  EXPECT_EQ(small_distance - 1.0f, XTranslationForWindow(right_window));
+  HandleScrollUpdate(small_distance);
+  EXPECT_EQ(small_distance, XTranslationForWindow(right_window));
+  HandleScrollEnd(0.0f);
+  EXPECT_EQ(0.0f, XTranslationForWindow(right_window));
+  ASSERT_TRUE(controller->IsSplitViewModeActive());
+  EXPECT_EQ(left_window, controller->left_window());
+  EXPECT_EQ(right_window, controller->right_window());
+
+  // Scroll far enough to the right to be able to disengage split view. Split
+  // view should be disengaged with the left window active.
+  HandleScrollBegin(small_distance);
+  HandleScrollUpdate(large_distance);
+  HandleScrollEnd(0.0f);
+  ASSERT_FALSE(controller->IsSplitViewModeActive());
+  EXPECT_EQ(nullptr, controller->left_window());
+  EXPECT_EQ(nullptr, controller->right_window());
+  EXPECT_EQ(left_window, GetTopmostWindow());
+
+  // Re-activate split view mode.
+  controller->ActivateSplitMode(left_window, right_window, left_window);
+
+  // Start scrolling a small distance and then fling, but not fast enough to
+  // disengage split view (see kMinFlingVelocity). Split view mode should
+  // remain engaged. Also verify that |right_window| is translated correctly.
+  EXPECT_EQ(0.0f, XTranslationForWindow(right_window));
+  HandleScrollBegin(-small_distance + 1.0f);
+  EXPECT_EQ(-small_distance + 1.0f, XTranslationForWindow(right_window));
+  HandleScrollUpdate(-small_distance);
+  EXPECT_EQ(-small_distance, XTranslationForWindow(right_window));
+  HandleScrollEnd(slow_velocity);
+  EXPECT_EQ(0.0f, XTranslationForWindow(right_window));
+  ASSERT_TRUE(controller->IsSplitViewModeActive());
+  EXPECT_EQ(left_window, controller->left_window());
+  EXPECT_EQ(right_window, controller->right_window());
+
+  // Scroll far enough to the left to be able to disengage split view, then
+  // fling to the right (but not faster than kMinFlingVelocity). Split view
+  // should be disengaged with the right window active.
+  HandleScrollBegin(-small_distance);
+  HandleScrollUpdate(-large_distance);
+  HandleScrollEnd(slow_velocity);
+  ASSERT_FALSE(controller->IsSplitViewModeActive());
+  EXPECT_EQ(nullptr, controller->left_window());
+  EXPECT_EQ(nullptr, controller->right_window());
+  EXPECT_EQ(right_window, GetTopmostWindow());
+
+  // Re-activate split view mode.
+  controller->ActivateSplitMode(left_window, right_window, left_window);
+
+  // Scroll far enough to the left to be able to disengage split view, then
+  // fling to the right, this time faster than kMinFlingVelocity). Split view
+  // should be disengaged with the left window active.
+  HandleScrollBegin(-small_distance);
+  HandleScrollUpdate(-large_distance);
+  HandleScrollEnd(fast_velocity);
+  ASSERT_FALSE(controller->IsSplitViewModeActive());
+  EXPECT_EQ(nullptr, controller->left_window());
+  EXPECT_EQ(nullptr, controller->right_window());
+  EXPECT_EQ(left_window, GetTopmostWindow());
+}
+
 TEST_F(SplitViewControllerTest, LandscapeOnly) {
   aura::test::TestWindowDelegate delegate;
   ScopedVector<aura::Window> windows;
   const int kNumWindows = 2;
   for (size_t i = 0; i < kNumWindows; ++i) {
-    scoped_ptr<aura::Window> window = CreateTestWindow(NULL, gfx::Rect());
+    scoped_ptr<aura::Window> window =
+        test::CreateNormalWindow(nullptr, nullptr);
     window->Hide();
     windows.push_back(window.release());
   }
@@ -180,7 +308,7 @@ TEST_F(SplitViewControllerTest, LandscapeOnly) {
   ASSERT_TRUE(IsSplitViewAllowed());
   ASSERT_FALSE(controller->IsSplitViewModeActive());
 
-  controller->ActivateSplitMode(NULL, NULL, NULL);
+  controller->ActivateSplitMode(nullptr, nullptr, nullptr);
   ASSERT_TRUE(controller->IsSplitViewModeActive());
 
   // Screen rotation should be locked while in splitview.

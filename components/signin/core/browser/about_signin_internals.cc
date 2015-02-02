@@ -209,8 +209,10 @@ void AboutSigninInternals::Initialize(SigninClient* client) {
   signin_manager_->AddSigninDiagnosticsObserver(this);
   token_service_->AddDiagnosticsObserver(this);
   cookie_changed_subscription_ = client_->AddCookieChangedCallback(
-     base::Bind(&AboutSigninInternals::OnCookieChanged,
-     base::Unretained(this)));
+      GaiaUrls::GetInstance()->gaia_url(),
+      "LSID",
+      base::Bind(&AboutSigninInternals::OnCookieChanged,
+                 base::Unretained(this)));
 }
 
 void AboutSigninInternals::Shutdown() {
@@ -285,12 +287,11 @@ void AboutSigninInternals::OnAuthenticationResultReceived(std::string status) {
   NotifySigninValueChanged(AUTHENTICATION_RESULT_RECEIVED, status);
 }
 
-void AboutSigninInternals::OnCookieChanged(
-    const net::CanonicalCookie* cookie) {
-  if (cookie->Name() == "LSID" &&
-      cookie->Domain() == GaiaUrls::GetInstance()->gaia_url().host() &&
-      cookie->IsSecure() &&
-      cookie->IsHttpOnly()) {
+void AboutSigninInternals::OnCookieChanged(const net::CanonicalCookie& cookie,
+                                           bool removed) {
+  DCHECK_EQ("LSID", cookie.Name());
+  DCHECK_EQ(GaiaUrls::GetInstance()->gaia_url().host(), cookie.Domain());
+  if (cookie.IsSecure() && cookie.IsHttpOnly()) {
     GetCookieAccountsAsync();
   }
 }
@@ -443,6 +444,8 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
   AddSectionEntry(basic_info, "Signin Status", signin_status_string);
   AddSectionEntry(basic_info, "Web Based Signin Enabled?",
       switches::IsEnableWebBasedSignin() == true ? "True" : "False");
+  AddSectionEntry(basic_info, "Webview Based Signin Enabled?",
+      switches::IsEnableWebviewBasedSignin() == true ? "True" : "False");
   AddSectionEntry(basic_info, "New Avatar Menu Enabled?",
       switches::IsNewAvatarMenu() == true ? "True" : "False");
   AddSectionEntry(basic_info, "New Profile Management Enabled?",

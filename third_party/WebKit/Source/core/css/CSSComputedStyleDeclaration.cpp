@@ -29,7 +29,6 @@
 #include "core/StylePropertyShorthand.h"
 #include "core/animation/DocumentAnimations.h"
 #include "core/css/BasicShapeFunctions.h"
-#include "core/css/CSSAspectRatioValue.h"
 #include "core/css/CSSBorderImage.h"
 #include "core/css/CSSFilterValue.h"
 #include "core/css/CSSFontFeatureValue.h"
@@ -227,7 +226,6 @@ static const CSSPropertyID staticComputableProperties[] = {
     CSSPropertyWebkitBackgroundComposite,
     CSSPropertyWebkitBackgroundOrigin,
     CSSPropertyWebkitBackgroundSize,
-    CSSPropertyWebkitBorderFit,
     CSSPropertyWebkitBorderHorizontalSpacing,
     CSSPropertyWebkitBorderImage,
     CSSPropertyWebkitBorderVerticalSpacing,
@@ -757,7 +755,7 @@ static PassRefPtrWillBeRawPtr<CSSTransformValue> valueForMatrixTransform(const T
 
 static PassRefPtrWillBeRawPtr<CSSValue> computedTransform(RenderObject* renderer, const RenderStyle& style)
 {
-    if (!renderer || !renderer->hasTransform() || !style.hasTransform())
+    if (!renderer || !renderer->hasTransformRelatedProperty() || !style.hasTransform())
         return cssValuePool().createIdentifierValue(CSSValueNone);
 
     IntRect box;
@@ -783,9 +781,8 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::valueForFilter(con
 
     RefPtrWillBeRawPtr<CSSFilterValue> filterValue = nullptr;
 
-    Vector<RefPtr<FilterOperation> >::const_iterator end = style.filter().operations().end();
-    for (Vector<RefPtr<FilterOperation> >::const_iterator it = style.filter().operations().begin(); it != end; ++it) {
-        FilterOperation* filterOperation = it->get();
+    for (const auto& operation : style.filter().operations()) {
+        FilterOperation* filterOperation = operation.get();
         switch (filterOperation->type()) {
         case FilterOperation::REFERENCE:
             filterValue = CSSFilterValue::create(CSSFilterValue::ReferenceFilterOperation);
@@ -1368,9 +1365,9 @@ static PassRefPtrWillBeRawPtr<CSSValue> valueForCounterDirectives(const RenderSt
         return nullptr;
 
     RefPtrWillBeRawPtr<CSSValueList> list = CSSValueList::createSpaceSeparated();
-    for (CounterDirectiveMap::const_iterator it = map->begin(); it != map->end(); ++it) {
-        list->append(cssValuePool().createValue(it->key, CSSPrimitiveValue::CSS_STRING));
-        short number = propertyID == CSSPropertyCounterIncrement ? it->value.incrementValue() : it->value.resetValue();
+    for (const auto& item : *map) {
+        list->append(cssValuePool().createValue(item.key, CSSPrimitiveValue::CSS_STRING));
+        short number = propertyID == CSSPropertyCounterIncrement ? item.value.incrementValue() : item.value.resetValue();
         list->append(cssValuePool().createValue((double)number, CSSPrimitiveValue::CSS_NUMBER));
     }
     return list.release();
@@ -1405,7 +1402,7 @@ static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> valueForLineHeight(RenderStyle&
 
 static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> valueForFontSize(RenderStyle& style)
 {
-    return zoomAdjustedPixelValue(style.fontDescription().computedPixelSize(), style);
+    return zoomAdjustedPixelValue(RuntimeEnabledFeatures::subpixelFontScalingEnabled() ? style.fontDescription().computedSize() : style.fontDescription().computedPixelSize(), style);
 }
 
 static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> valueForFontStretch(RenderStyle& style)
@@ -1548,6 +1545,17 @@ static ItemPosition resolveAlignmentAuto(ItemPosition position, Node* element)
     return isFlexOrGrid ? ItemPositionStretch : ItemPositionStart;
 }
 
+static ContentPosition resolveContentAlignmentAuto(ContentPosition position, ContentDistributionType distribution, Node* element)
+{
+    if (position != ContentPositionAuto || distribution != ContentDistributionDefault)
+        return position;
+
+    bool isFlex = element && element->computedStyle()
+        && element->computedStyle()->isDisplayFlexibleBox();
+
+    return isFlex ? ContentPositionFlexStart : ContentPositionStart;
+}
+
 static PassRefPtrWillBeRawPtr<CSSValueList> valueForItemPositionWithOverflowAlignment(ItemPosition itemPosition, OverflowAlignment overflowAlignment, ItemPositionType positionType)
 {
     RefPtrWillBeRawPtr<CSSValueList> result = CSSValueList::createSpaceSeparated();
@@ -1557,6 +1565,20 @@ static PassRefPtrWillBeRawPtr<CSSValueList> valueForItemPositionWithOverflowAlig
     if (itemPosition >= ItemPositionCenter && overflowAlignment != OverflowAlignmentDefault)
         result->append(CSSPrimitiveValue::create(overflowAlignment));
     ASSERT(result->length() <= 2);
+    return result.release();
+}
+
+static PassRefPtrWillBeRawPtr<CSSValueList> valueForContentPositionAndDistributionWithOverflowAlignment(ContentPosition position, OverflowAlignment overflowAlignment, ContentDistributionType distribution)
+{
+    RefPtrWillBeRawPtr<CSSValueList> result = CSSValueList::createSpaceSeparated();
+    if (distribution != ContentDistributionDefault)
+        result->append(CSSPrimitiveValue::create(distribution));
+    if (distribution == ContentDistributionDefault || position != ContentPositionAuto)
+        result->append(CSSPrimitiveValue::create(position));
+    if ((position >= ContentPositionCenter || distribution != ContentDistributionDefault) && overflowAlignment != OverflowAlignmentDefault)
+        result->append(CSSPrimitiveValue::create(overflowAlignment));
+    ASSERT(result->length() > 0);
+    ASSERT(result->length() <= 3);
     return result.release();
 }
 
@@ -1847,7 +1869,7 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getPropertyCSSValu
         case CSSPropertyFlexWrap:
             return cssValuePool().createValue(style->flexWrap());
         case CSSPropertyJustifyContent:
-            return cssValuePool().createValue(style->justifyContent());
+            return valueForContentPositionAndDistributionWithOverflowAlignment(resolveContentAlignmentAuto(style->justifyContent(), style->justifyContentDistribution(), styledNode), style->justifyContentOverflowAlignment(), style->justifyContentDistribution());
         case CSSPropertyOrder:
             return cssValuePool().createValue(style->order(), CSSPrimitiveValue::CSS_NUMBER);
         case CSSPropertyFloat:
@@ -1990,10 +2012,6 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getPropertyCSSValu
             if (style->hyphenationString().isNull())
                 return cssValuePool().createIdentifierValue(CSSValueAuto);
             return cssValuePool().createValue(style->hyphenationString(), CSSPrimitiveValue::CSS_STRING);
-        case CSSPropertyWebkitBorderFit:
-            if (style->borderFit() == BorderFitBorder)
-                return cssValuePool().createIdentifierValue(CSSValueBorder);
-            return cssValuePool().createIdentifierValue(CSSValueLines);
         case CSSPropertyImageRendering:
             return CSSPrimitiveValue::create(style->imageRendering());
         case CSSPropertyIsolation:
@@ -2449,10 +2467,6 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getPropertyCSSValu
         }
         case CSSPropertyWebkitAppearance:
             return cssValuePool().createValue(style->appearance());
-        case CSSPropertyWebkitAspectRatio:
-            if (!style->hasAspectRatio())
-                return cssValuePool().createIdentifierValue(CSSValueNone);
-            return CSSAspectRatioValue::create(style->aspectRatioNumerator(), style->aspectRatioDenominator());
         case CSSPropertyBackfaceVisibility:
         case CSSPropertyWebkitBackfaceVisibility:
             return cssValuePool().createIdentifierValue((style->backfaceVisibility() == BackfaceVisibilityHidden) ? CSSValueHidden : CSSValueVisible);
@@ -2759,15 +2773,6 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSComputedStyleDeclaration::getPropertyCSSValu
         case CSSPropertyOrientation:
         case CSSPropertyUserZoom:
             break;
-
-        // Internal properties that shouldn't be exposed throught getComputedStyle.
-        case CSSPropertyInternalMarqueeDirection:
-        case CSSPropertyInternalMarqueeIncrement:
-        case CSSPropertyInternalMarqueeRepetition:
-        case CSSPropertyInternalMarqueeSpeed:
-        case CSSPropertyInternalMarqueeStyle:
-            ASSERT_NOT_REACHED();
-            return nullptr;
 
         case CSSPropertyBufferedRendering:
         case CSSPropertyClipPath:

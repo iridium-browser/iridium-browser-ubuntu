@@ -87,7 +87,7 @@ class InterceptingMessageFilter : public content::BrowserMessageFilter {
   }
 
   const ClientPhishingRequest* verdict() const { return verdict_.get(); }
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& message) override {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(InterceptingMessageFilter, message)
         IPC_MESSAGE_HANDLER(SafeBrowsingHostMsg_PhishingDetectionDone,
@@ -122,7 +122,7 @@ class InterceptingMessageFilter : public content::BrowserMessageFilter {
   }
 
  private:
-  virtual ~InterceptingMessageFilter() {}
+  ~InterceptingMessageFilter() override {}
 
   scoped_ptr<ClientPhishingRequest> verdict_;
   base::MessageLoop* waiting_message_loop_;
@@ -141,7 +141,7 @@ class PhishingClassifierDelegateTest : public InProcessBrowserTest {
   }
 
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
 #if defined(OS_WIN)
     // Don't want to try to create a GPU process.
@@ -149,7 +149,7 @@ class PhishingClassifierDelegateTest : public InProcessBrowserTest {
 #endif
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     intercepting_filter_ = new InterceptingMessageFilter();
     content::RenderView* render_view =
         content::RenderView::FromRoutingID(kRenderViewRoutingId);
@@ -214,7 +214,7 @@ class PhishingClassifierDelegateTest : public InProcessBrowserTest {
     http_response->set_code(net::HTTP_OK);
     http_response->set_content_type("text/html");
     http_response->set_content(response_content_);
-    return http_response.PassAs<net::test_server::HttpResponse>();
+    return http_response.Pass();
   }
 
   content::WebContents* GetWebContents() {

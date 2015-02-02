@@ -40,7 +40,7 @@ class MessageCenterNotificationManagerTest : public BrowserWithTestWindowTest {
   MessageCenterNotificationManagerTest() {}
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
 #if !defined(OS_CHROMEOS)
     // BrowserWithTestWindowTest owns an AshTestHelper on OS_CHROMEOS, which
@@ -76,7 +76,7 @@ class MessageCenterNotificationManagerTest : public BrowserWithTestWindowTest {
 #endif
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     run_loop_.reset();
     first_run_pref_.reset();
     profile_manager_.reset();
@@ -101,10 +101,9 @@ class MessageCenterNotificationManagerTest : public BrowserWithTestWindowTest {
   const ::Notification GetANotification(const std::string& id) {
     return ::Notification(
         GURL("chrome-extension://adflkjsdflkdsfdsflkjdsflkdjfs"),
-        GURL(),
         base::string16(),
         base::string16(),
-        blink::WebTextDirectionDefault,
+        gfx::Image(),
         base::string16(),
         base::UTF8ToUTF16(id),
         new MockNotificationDelegate(id));
@@ -169,9 +168,13 @@ TEST_F(MessageCenterNotificationManagerTest, MultiUserUpdates) {
 TEST_F(MessageCenterNotificationManagerTest, FirstRunShown) {
   TestingProfile profile;
   notification_manager()->Add(GetANotification("test"), &profile);
+  std::string notification_id =
+      notification_manager()
+          ->FindById("test", NotificationUIManager::GetProfileID(&profile))
+          ->id();
   message_center()->DisplayedNotification(
-      "test", message_center::DISPLAY_SOURCE_MESSAGE_CENTER);
-  message_center()->MarkSinglePopupAsShown("test", false);
+      notification_id, message_center::DISPLAY_SOURCE_MESSAGE_CENTER);
+  message_center()->MarkSinglePopupAsShown(notification_id, false);
 
   run_loop()->Run();
   base::RunLoop run_loop_2;
@@ -184,8 +187,12 @@ TEST_F(MessageCenterNotificationManagerTest,
        FirstRunNotShownWithPopupsVisible) {
   TestingProfile profile;
   notification_manager()->Add(GetANotification("test"), &profile);
+  std::string notification_id =
+      notification_manager()
+          ->FindById("test", NotificationUIManager::GetProfileID(&profile))
+          ->id();
   message_center()->DisplayedNotification(
-      "test", message_center::DISPLAY_SOURCE_MESSAGE_CENTER);
+      notification_id, message_center::DISPLAY_SOURCE_MESSAGE_CENTER);
   run_loop()->RunUntilIdle();
   EXPECT_FALSE(delegate()->displayed_first_run_balloon());
   EXPECT_FALSE(notification_manager()->FirstRunTimerIsActive());

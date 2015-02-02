@@ -443,6 +443,16 @@
             '<(DEPTH)/content/app/strings/content_strings.gyp:content_strings',
             '<(DEPTH)/third_party/WebKit/public/blink_resources.gyp:blink_resources',
           ],
+        }, {  # else
+          'actions': [
+            {
+              'conditions': [
+                ['OS == "ios"', {
+                  'includes': ['chrome_repack_chrome_300_percent.gypi']
+                }],
+              ],
+            },
+          ],
         }],
         ['use_ash==1', {
           'dependencies': [
@@ -452,6 +462,7 @@
         }],
         ['chromeos==1', {
           'dependencies': [
+            '<(DEPTH)/remoting/remoting.gyp:remoting_resources',
             '<(DEPTH)/ui/chromeos/ui_chromeos.gyp:ui_chromeos_resources',
             '<(DEPTH)/ui/chromeos/ui_chromeos.gyp:ui_chromeos_strings',
           ],

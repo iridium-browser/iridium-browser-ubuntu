@@ -14,6 +14,7 @@
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/page/Page.h"
 #include "core/paint/BoxPainter.h"
+#include "core/paint/DrawingRecorder.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderImage.h"
 #include "core/rendering/RenderReplaced.h"
@@ -62,7 +63,9 @@ void ImagePainter::paintAreaElementFocusRing(PaintInfo& paintInfo)
     // FIXME: Clip path instead of context when Skia pathops is ready.
     // https://crbug.com/251206
     GraphicsContextStateSaver savedContext(*paintInfo.context);
-    paintInfo.context->clip(m_renderImage.absoluteContentBox());
+    IntRect focusRect = m_renderImage.absoluteContentBox();
+    DrawingRecorder recorder(paintInfo.context, &m_renderImage, paintInfo.phase, focusRect);
+    paintInfo.context->clip(focusRect);
     paintInfo.context->drawFocusRing(path, outlineWidth,
         areaElementStyle->outlineOffset(),
         m_renderImage.resolveColor(areaElementStyle, CSSPropertyOutlineColor));
@@ -88,10 +91,12 @@ void ImagePainter::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintO
             LayoutUnit topPad = m_renderImage.paddingTop();
 
             // Draw an outline rect where the image should be.
+            IntRect paintRect = pixelSnappedIntRect(LayoutRect(paintOffset.x() + leftBorder + leftPad, paintOffset.y() + topBorder + topPad, cWidth, cHeight));
+            DrawingRecorder recorder(context, &m_renderImage, paintInfo.phase, paintRect);
             context->setStrokeStyle(SolidStroke);
             context->setStrokeColor(Color::lightGray);
             context->setFillColor(Color::transparent);
-            context->drawRect(pixelSnappedIntRect(LayoutRect(paintOffset.x() + leftBorder + leftPad, paintOffset.y() + topBorder + topPad, cWidth, cHeight)));
+            context->drawRect(paintRect);
 
             bool errorPictureDrawn = false;
             LayoutSize imageOffset;
@@ -153,6 +158,7 @@ void ImagePainter::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintO
         contentRect.moveBy(paintOffset);
         LayoutRect paintRect = m_renderImage.replacedContentRect();
         paintRect.moveBy(paintOffset);
+        DrawingRecorder recorder(context, &m_renderImage, paintInfo.phase, contentRect);
         bool clip = !contentRect.contains(paintRect);
         if (clip) {
             context->save();
@@ -168,27 +174,45 @@ void ImagePainter::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintO
 
 void ImagePainter::paintIntoRect(GraphicsContext* context, const LayoutRect& rect)
 {
+    if (!m_renderImage.imageResource()->hasImage() || m_renderImage.imageResource()->errorOccurred())
+        return; // FIXME: should we just ASSERT these conditions? (audit all callers).
+
     IntRect alignedRect = pixelSnappedIntRect(rect);
-    if (!m_renderImage.imageResource()->hasImage() || m_renderImage.imageResource()->errorOccurred() || alignedRect.width() <= 0 || alignedRect.height() <= 0)
+    if (alignedRect.width() <= 0 || alignedRect.height() <= 0)
         return;
 
-    RefPtr<Image> img = m_renderImage.imageResource()->image(alignedRect.width(), alignedRect.height());
-    if (!img || img->isNull())
+    RefPtr<Image> image = m_renderImage.imageResource()->image(alignedRect.width(), alignedRect.height());
+    if (!image || image->isNull())
         return;
 
-    HTMLImageElement* imageElt = isHTMLImageElement(m_renderImage.node()) ? toHTMLImageElement(m_renderImage.node()) : 0;
-    CompositeOperator compositeOperator = imageElt ? imageElt->compositeOperator() : CompositeSourceOver;
-    Image* image = img.get();
-    InterpolationQuality interpolationQuality = BoxPainter::chooseInterpolationQuality(m_renderImage, context, image, image, alignedRect.size());
+    // FIXME: why is interpolation quality selection not included in the Instrumentation reported cost of drawing an image?
+    InterpolationQuality interpolationQuality = BoxPainter::chooseInterpolationQuality(m_renderImage, context, image.get(), image.get(), alignedRect.size());
 
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage", "data", InspectorPaintImageEvent::data(m_renderImage));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
+    // FIXME: crbug.com/361045 remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::willPaintImage(&m_renderImage);
+
     InterpolationQuality previousInterpolationQuality = context->imageInterpolationQuality();
     context->setImageInterpolationQuality(interpolationQuality);
-    context->drawImage(image, alignedRect, compositeOperator, m_renderImage.shouldRespectImageOrientation());
+    context->drawImage(image.get(), alignedRect, CompositeSourceOver, m_renderImage.shouldRespectImageOrientation());
     context->setImageInterpolationQuality(previousInterpolationQuality);
+
     InspectorInstrumentation::didPaintImage(&m_renderImage);
+}
+
+void ImagePainter::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    // Don't anti-alias the background of an image. See crbug.com/423834 for the reason why.
+    // However, don't turn off anti-aliasing for subclasses such as video.
+    // An additional mega-hack here is to turn off anti-aliasing only for situations with a large device scale factor
+    // The referenced bug gives more details about a device with a scale factor greater than 3.4).
+    bool shouldAntialias = !m_renderImage.isRenderImage() || blink::deviceScaleFactor(m_renderImage.frame()) < 3.4;
+
+    bool oldShouldAntialias = paintInfo.context->shouldAntialias();
+    paintInfo.context->setShouldAntialias(shouldAntialias);
+    BoxPainter(m_renderImage).paintBoxDecorationBackground(paintInfo, paintOffset);
+
+    paintInfo.context->setShouldAntialias(oldShouldAntialias);
 }
 
 } // namespace blink

@@ -6,7 +6,7 @@
 #include "ipc/ipc_perftest_support.h"
 #include "ipc/mojo/ipc_channel_mojo.h"
 #include "ipc/mojo/ipc_channel_mojo_host.h"
-#include "mojo/embedder/test_embedder.h"
+#include "mojo/edk/embedder/test_embedder.h"
 
 namespace {
 
@@ -29,15 +29,15 @@ public:
 
   MojoChannelPerfTest();
 
-  virtual scoped_ptr<IPC::ChannelFactory> CreateChannelFactory(
+  scoped_ptr<IPC::ChannelFactory> CreateChannelFactory(
       const IPC::ChannelHandle& handle,
-      base::TaskRunner* runner) OVERRIDE {
+      base::TaskRunner* runner) override {
     host_.reset(new IPC::ChannelMojoHost(task_runner()));
     return IPC::ChannelMojo::CreateServerFactory(host_->channel_delegate(),
                                                  handle);
   }
 
-  virtual bool DidStartClient() OVERRIDE {
+  bool DidStartClient() override {
     bool ok = IPCTestBase::DidStartClient();
     DCHECK(ok);
     host_->OnClientLaunched(client_process());
@@ -73,8 +73,7 @@ class MojoTestClient : public IPC::test::PingPongTestClient {
 
   MojoTestClient();
 
-  virtual scoped_ptr<IPC::Channel> CreateChannel(
-      IPC::Listener* listener) OVERRIDE;
+  scoped_ptr<IPC::Channel> CreateChannel(IPC::Listener* listener) override;
 };
 
 MojoTestClient::MojoTestClient() {

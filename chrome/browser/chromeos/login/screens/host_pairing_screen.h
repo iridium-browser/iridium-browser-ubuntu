@@ -6,20 +6,32 @@
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SCREENS_HOST_PAIRING_SCREEN_H_
 
 #include "base/macros.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/screens/host_pairing_screen_actor.h"
-#include "chrome/browser/chromeos/login/screens/screen_context.h"
-#include "chrome/browser/chromeos/login/screens/wizard_screen.h"
+#include "components/login/screens/screen_context.h"
 #include "components/pairing/host_pairing_controller.h"
 
 namespace chromeos {
 
-class HostPairingScreen :
-  public WizardScreen,
-  public pairing_chromeos::HostPairingController::Observer,
-  public HostPairingScreenActor::Delegate {
+class HostPairingScreen
+    : public BaseScreen,
+      public pairing_chromeos::HostPairingController::Observer,
+      public HostPairingScreenActor::Delegate {
  public:
-  HostPairingScreen(ScreenObserver* observer, HostPairingScreenActor* actor,
-                    pairing_chromeos::HostPairingController* controller);
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+    virtual void ConfigureHost(bool accepted_eula,
+                               const std::string& lang,
+                               const std::string& timezone,
+                               bool send_reports,
+                               const std::string& keyboard_layout) = 0;
+  };
+
+  HostPairingScreen(BaseScreenDelegate* base_screen_delegate,
+                    Delegate* delegate,
+                    HostPairingScreenActor* actor,
+                    pairing_chromeos::HostPairingController* remora_controller);
   virtual ~HostPairingScreen();
 
  private:
@@ -27,32 +39,34 @@ class HostPairingScreen :
 
   void CommitContextChanges();
 
-  // Overridden from WizardScreen:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  // Overridden from BaseScreen:
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual std::string GetName() const override;
 
   // pairing_chromeos::HostPairingController::Observer:
-  virtual void PairingStageChanged(Stage new_stage) OVERRIDE;
+  virtual void PairingStageChanged(Stage new_stage) override;
   virtual void ConfigureHost(bool accepted_eula,
                              const std::string& lang,
                              const std::string& timezone,
                              bool send_reports,
-                             const std::string& keyboard_layout) OVERRIDE;
-  virtual void EnrollHost(const std::string& auth_token) OVERRIDE;
+                             const std::string& keyboard_layout) override;
+  virtual void EnrollHost(const std::string& auth_token) override;
 
   // Overridden from ControllerPairingView::Delegate:
-  virtual void OnActorDestroyed(HostPairingScreenActor* actor) OVERRIDE;
+  virtual void OnActorDestroyed(HostPairingScreenActor* actor) override;
 
   // Context for sharing data between C++ and JS.
   // TODO(dzhioev): move to BaseScreen when possible.
-  ScreenContext context_;
+  ::login::ScreenContext context_;
+
+  Delegate* delegate_;
 
   HostPairingScreenActor* actor_;
 
   // Controller performing pairing. Owned by the wizard controller.
-  pairing_chromeos::HostPairingController* controller_;
+  pairing_chromeos::HostPairingController* remora_controller_;
 
   // Current stage of pairing process.
   Stage current_stage_;

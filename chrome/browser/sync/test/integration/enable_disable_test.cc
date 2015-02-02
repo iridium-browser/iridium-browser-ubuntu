@@ -17,10 +17,11 @@ namespace {
 class EnableDisableSingleClientTest : public SyncTest {
  public:
   EnableDisableSingleClientTest() : SyncTest(SINGLE_CLIENT) {}
-  virtual ~EnableDisableSingleClientTest() {}
+  ~EnableDisableSingleClientTest() override {}
 
   // Don't use self-notifications as they can trigger additional sync cycles.
-  virtual bool TestUsesSelfNotifications() OVERRIDE { return false; }
+  bool TestUsesSelfNotifications() override { return false; }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(EnableDisableSingleClientTest);
 };

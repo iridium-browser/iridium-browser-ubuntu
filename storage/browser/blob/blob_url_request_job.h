@@ -43,19 +43,16 @@ class STORAGE_EXPORT BlobURLRequestJob
                     base::MessageLoopProxy* resolving_message_loop_proxy);
 
   // net::URLRequestJob methods.
-  virtual void Start() OVERRIDE;
-  virtual void Kill() OVERRIDE;
-  virtual bool ReadRawData(net::IOBuffer* buf,
-                           int buf_size,
-                           int* bytes_read) OVERRIDE;
-  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE;
-  virtual int GetResponseCode() const OVERRIDE;
-  virtual void SetExtraRequestHeaders(
-      const net::HttpRequestHeaders& headers) OVERRIDE;
+  void Start() override;
+  void Kill() override;
+  bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read) override;
+  bool GetMimeType(std::string* mime_type) const override;
+  void GetResponseInfo(net::HttpResponseInfo* info) override;
+  int GetResponseCode() const override;
+  void SetExtraRequestHeaders(const net::HttpRequestHeaders& headers) override;
 
  protected:
-  virtual ~BlobURLRequestJob();
+  ~BlobURLRequestJob() override;
 
  private:
   typedef std::map<size_t, FileStreamReader*> IndexToReaderMap;

@@ -45,10 +45,10 @@ class WebExternalTextureLayerImpl
   virtual void setRateLimitContext(bool rate_limit);
 
   // TextureLayerClient implementation.
-  virtual bool PrepareTextureMailbox(
+  bool PrepareTextureMailbox(
       cc::TextureMailbox* mailbox,
       scoped_ptr<cc::SingleReleaseCallback>* release_callback,
-      bool use_shared_memory) OVERRIDE;
+      bool use_shared_memory) override;
 
  private:
   static void DidReleaseMailbox(

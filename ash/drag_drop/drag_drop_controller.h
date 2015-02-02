@@ -36,35 +36,32 @@ class ASH_EXPORT DragDropController
       public aura::WindowObserver {
  public:
   DragDropController();
-  virtual ~DragDropController();
+  ~DragDropController() override;
 
   void set_should_block_during_drag_drop(bool should_block_during_drag_drop) {
     should_block_during_drag_drop_ = should_block_during_drag_drop;
   }
 
   // Overridden from aura::client::DragDropClient:
-  virtual int StartDragAndDrop(
-      const ui::OSExchangeData& data,
-      aura::Window* root_window,
-      aura::Window* source_window,
-      const gfx::Point& root_location,
-      int operation,
-      ui::DragDropTypes::DragEventSource source) OVERRIDE;
-  virtual void DragUpdate(aura::Window* target,
-                          const ui::LocatedEvent& event) OVERRIDE;
-  virtual void Drop(aura::Window* target,
-                    const ui::LocatedEvent& event) OVERRIDE;
-  virtual void DragCancel() OVERRIDE;
-  virtual bool IsDragDropInProgress() OVERRIDE;
+  int StartDragAndDrop(const ui::OSExchangeData& data,
+                       aura::Window* root_window,
+                       aura::Window* source_window,
+                       const gfx::Point& root_location,
+                       int operation,
+                       ui::DragDropTypes::DragEventSource source) override;
+  void DragUpdate(aura::Window* target, const ui::LocatedEvent& event) override;
+  void Drop(aura::Window* target, const ui::LocatedEvent& event) override;
+  void DragCancel() override;
+  bool IsDragDropInProgress() override;
 
   // Overridden from ui::EventHandler:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnKeyEvent(ui::KeyEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnTouchEvent(ui::TouchEvent* event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // Overridden from aura::WindowObserver.
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
+  void OnWindowDestroyed(aura::Window* window) override;
 
  protected:
   // Helper method to create a LinearAnimation object that will run the drag
@@ -82,9 +79,9 @@ class ASH_EXPORT DragDropController
   friend class ash::test::DragDropControllerTest;
 
   // Overridden from gfx::AnimationDelegate:
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationCanceled(const gfx::Animation* animation) OVERRIDE;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void AnimationProgressed(const gfx::Animation* animation) override;
+  void AnimationCanceled(const gfx::Animation* animation) override;
 
   // Helper method to start drag widget flying back animation.
   void StartCanceledAnimation(int animation_duration_ms);

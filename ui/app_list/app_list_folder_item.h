@@ -12,18 +12,20 @@
 #include "ui/app_list/app_list_item.h"
 #include "ui/app_list/app_list_item_list_observer.h"
 #include "ui/app_list/app_list_item_observer.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/app_list/folder_image.h"
+
+namespace gfx {
+class ImageSkia;
+class Rect;
+}
 
 namespace app_list {
 
 class AppListItemList;
 
-typedef std::vector<gfx::Rect> Rects;
-
 // AppListFolderItem implements the model/controller for folders.
 class APP_LIST_EXPORT AppListFolderItem : public AppListItem,
-                                          public AppListItemListObserver,
-                                          public AppListItemObserver {
+                                          public FolderImageObserver {
  public:
   // The folder type affects folder behavior.
   enum FolderType {
@@ -36,10 +38,7 @@ class APP_LIST_EXPORT AppListFolderItem : public AppListItem,
   static const char kItemType[];
 
   AppListFolderItem(const std::string& id, FolderType folder_type);
-  virtual ~AppListFolderItem();
-
-  // Updates the folder's icon.
-  void UpdateIcon();
+  ~AppListFolderItem() override;
 
   // Returns the icon of one of the top items with |item_index|.
   const gfx::ImageSkia& GetTopIcon(size_t item_index);
@@ -56,47 +55,36 @@ class APP_LIST_EXPORT AppListFolderItem : public AppListItem,
   AppListItemList* item_list() { return item_list_.get(); }
   const AppListItemList* item_list() const { return item_list_.get(); }
 
+  // For tests.
+  // TODO(mgiuca): return a const FolderImage& (requires that
+  // base::ObserverList::HasObserver takes a const*).
+  FolderImage* folder_image() { return &folder_image_; }
+
   FolderType folder_type() const { return folder_type_; }
 
-  // AppListItem
-  virtual void Activate(int event_flags) OVERRIDE;
-  virtual const char* GetItemType() const OVERRIDE;
-  virtual ui::MenuModel* GetContextMenuModel() OVERRIDE;
-  virtual AppListItem* FindChildItem(const std::string& id) OVERRIDE;
-  virtual size_t ChildItemCount() const OVERRIDE;
-  virtual void OnExtensionPreferenceChanged() OVERRIDE;
-  virtual bool CompareForTest(const AppListItem* other) const OVERRIDE;
-
-  // Calculates the top item icons' bounds inside |folder_icon_bounds|.
-  // Returns the bounds of top item icons in sequence of top left, top right,
-  // bottom left, bottom right.
-  static Rects GetTopIconsBounds(const gfx::Rect& folder_icon_bounds);
+  // AppListItem overrides:
+  void Activate(int event_flags) override;
+  const char* GetItemType() const override;
+  ui::MenuModel* GetContextMenuModel() override;
+  AppListItem* FindChildItem(const std::string& id) override;
+  size_t ChildItemCount() const override;
+  void OnExtensionPreferenceChanged() override;
+  bool CompareForTest(const AppListItem* other) const override;
 
   // Returns an id for a new folder.
   static std::string GenerateId();
 
+  // FolderImageObserver overrides:
+  void OnFolderImageUpdated() override;
+
  private:
-  // AppListItemObserver
-  virtual void ItemIconChanged() OVERRIDE;
-
-  // AppListItemListObserver
-  virtual void OnListItemAdded(size_t index, AppListItem* item) OVERRIDE;
-  virtual void OnListItemRemoved(size_t index,
-                                 AppListItem* item) OVERRIDE;;
-  virtual void OnListItemMoved(size_t from_index,
-                               size_t to_index,
-                               AppListItem* item) OVERRIDE;
-
-  void UpdateTopItems();
-
   // The type of folder; may affect behavior of folder views.
   const FolderType folder_type_;
 
   // List of items in the folder.
   scoped_ptr<AppListItemList> item_list_;
 
-  // Top items for generating folder icon.
-  std::vector<AppListItem*> top_items_;
+  FolderImage folder_image_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListFolderItem);
 };

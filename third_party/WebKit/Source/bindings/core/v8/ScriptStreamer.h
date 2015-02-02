@@ -5,6 +5,7 @@
 #ifndef ScriptStreamer_h
 #define ScriptStreamer_h
 
+#include "bindings/core/v8/ScriptStreamingMode.h"
 #include "core/dom/PendingScript.h"
 #include "wtf/RefCounted.h"
 
@@ -43,7 +44,7 @@ public:
         return m_loadingFinished && (m_parsingFinished || m_streamingSuppressed);
     }
 
-    v8::ScriptCompiler::StreamedSource* source() { return &m_source; }
+    v8::ScriptCompiler::StreamedSource* source() { return m_source.get(); }
     ScriptResource* resource() const { return m_resource; }
 
     // Called when the script is not needed any more (e.g., loading was
@@ -61,13 +62,13 @@ public:
     void suppressStreaming();
     bool streamingSuppressed() const { return m_streamingSuppressed; }
 
-    unsigned cachedDataType() const { return m_cachedDataType; }
+    unsigned cachedDataType() const;
 
     void addClient(ScriptResourceClient* client)
     {
         ASSERT(!m_client);
-        ASSERT(!isFinished());
         m_client = client;
+        notifyFinishedToClient();
     }
 
     void removeClient(ScriptResourceClient* client)
@@ -82,11 +83,11 @@ public:
 
     // Called by ScriptStreamingTask when it has streamed all data to V8 and V8
     // has processed it.
-    void streamingComplete();
+    void streamingCompleteOnBackgroundThread();
 
-    static void removeSmallScriptThresholdForTesting()
+    static void setSmallScriptThresholdForTesting(size_t threshold)
     {
-        kSmallScriptThreshold = 0;
+        kSmallScriptThreshold = threshold;
     }
 
     static size_t smallScriptThreshold() { return kSmallScriptThreshold; }
@@ -96,9 +97,15 @@ private:
     // streamed. Non-const for testing.
     static size_t kSmallScriptThreshold;
 
-    ScriptStreamer(ScriptResource*, v8::ScriptCompiler::StreamedSource::Encoding, PendingScript::Type);
+    ScriptStreamer(ScriptResource*, PendingScript::Type, ScriptStreamingMode, ScriptState*, v8::ScriptCompiler::CompileOptions);
 
+    void streamingComplete();
     void notifyFinishedToClient();
+
+    bool shouldBlockMainThread() const
+    {
+        return m_scriptStreamingMode == ScriptStreamingModeAllPlusBlockParsingBlocking && m_scriptType == PendingScript::ParsingBlocking;
+    }
 
     static const char* startedStreamingHistogramName(PendingScript::Type);
 
@@ -114,22 +121,38 @@ private:
     bool m_detached;
 
     SourceStream* m_stream;
-    v8::ScriptCompiler::StreamedSource m_source;
+    OwnPtr<v8::ScriptCompiler::StreamedSource> m_source;
     ScriptResourceClient* m_client;
-    v8::ScriptCompiler::ScriptStreamingTask* m_task;
     bool m_loadingFinished; // Whether loading from the network is done.
-    bool m_parsingFinished; // Whether the V8 side processing is done.
-    bool m_firstDataChunkReceived;
+    // Whether the V8 side processing is done. Will be used by the main thread
+    // and the streamer thread; guarded by m_mutex.
+    bool m_parsingFinished;
+    // Whether we have received enough data to start the streaming.
+    bool m_haveEnoughDataForStreaming;
 
     // Whether the script source code should be retrieved from the Resource
-    // instead of the ScriptStreamer.
+    // instead of the ScriptStreamer; guarded by m_mutex.
     bool m_streamingSuppressed;
 
     // What kind of cached data V8 produces during streaming.
-    unsigned m_cachedDataType;
+    v8::ScriptCompiler::CompileOptions m_compileOptions;
+
+    RefPtr<ScriptState> m_scriptState;
 
     // For recording metrics for different types of scripts separately.
     PendingScript::Type m_scriptType;
+
+    // Streaming mode defines whether the main thread should block and wait for
+    // the parsing to complete after the load has finished. See
+    // ScriptStreamer::notifyFinished for more information.
+    ScriptStreamingMode m_scriptStreamingMode;
+    Mutex m_mutex;
+    ThreadCondition m_parsingFinishedCondition;
+    // Whether the main thread is currently waiting on the parser thread in
+    // notifyFinished(). This also defines which thread should do the cleanup of
+    // the parsing task: if the main thread is waiting, the main thread should
+    // do it, otherwise the parser thread should do it. Guarded by m_mutex.
+    bool m_mainThreadWaitingForParserThread;
 };
 
 } // namespace blink

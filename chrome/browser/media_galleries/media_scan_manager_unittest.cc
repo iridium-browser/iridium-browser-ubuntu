@@ -56,13 +56,9 @@ class MockMediaFolderFinder : MediaFolderFinder {
         destruction_callback_(destruction_callback),
         callback_(callback) {
   }
-  virtual ~MockMediaFolderFinder() {
-    destruction_callback_.Run();
-  }
+  ~MockMediaFolderFinder() override { destruction_callback_.Run(); }
 
-  virtual void StartScan() OVERRIDE {
-    started_callback_.Run(callback_);
-  }
+  void StartScan() override { started_callback_.Run(callback_); }
 
  private:
   FindFoldersStartedCallback started_callback_;
@@ -83,7 +79,7 @@ class TestMediaScanManager : public MediaScanManager {
   explicit TestMediaScanManager(const MediaFolderFinderFactory& factory) {
     SetMediaFolderFinderFactory(factory);
   }
-  virtual ~TestMediaScanManager() {}
+  ~TestMediaScanManager() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestMediaScanManager);
@@ -99,11 +95,11 @@ class MediaScanManagerTest : public MediaScanManagerObserver,
         expected_gallery_count_(0),
         profile_(new TestingProfile()) {}
 
-  virtual ~MediaScanManagerTest() {
+  ~MediaScanManagerTest() override {
     EXPECT_EQ(find_folders_start_count_, find_folders_destroy_count_);
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(storage_monitor::TestStorageMonitor::CreateAndInstall());
 
     extensions::TestExtensionSystem* extension_system(
@@ -138,7 +134,7 @@ class MediaScanManagerTest : public MediaScanManagerObserver,
     media_scan_manager_->AddObserver(profile_.get(), this);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     media_scan_manager_->RemoveObserver(profile_.get());
     media_scan_manager_.reset();
     storage_monitor::TestStorageMonitor::Destroy();
@@ -231,10 +227,9 @@ class MediaScanManagerTest : public MediaScanManagerObserver,
   }
 
   // MediaScanManagerObserver implementation.
-  virtual void OnScanFinished(
-      const std::string& extension_id,
-      int gallery_count,
-      const MediaGalleryScanResult& file_counts) OVERRIDE {
+  void OnScanFinished(const std::string& extension_id,
+                      int gallery_count,
+                      const MediaGalleryScanResult& file_counts) override {
     EXPECT_EQ(extension_->id(), extension_id);
     EXPECT_EQ(expected_gallery_count_, gallery_count);
     EXPECT_EQ(expected_file_counts_.audio_count, file_counts.audio_count);

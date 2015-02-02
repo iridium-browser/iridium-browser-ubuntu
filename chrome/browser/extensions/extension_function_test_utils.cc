@@ -12,7 +12,6 @@
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/extension_function.h"
@@ -32,17 +31,14 @@ class TestFunctionDispatcherDelegate
  public:
   explicit TestFunctionDispatcherDelegate(Browser* browser) :
       browser_(browser) {}
-  virtual ~TestFunctionDispatcherDelegate() {}
+  ~TestFunctionDispatcherDelegate() override {}
 
  private:
-  virtual extensions::WindowController* GetExtensionWindowController()
-      const OVERRIDE {
+  extensions::WindowController* GetExtensionWindowController() const override {
     return browser_->extension_window_controller();
   }
 
-  virtual WebContents* GetAssociatedWebContents() const OVERRIDE {
-    return NULL;
-  }
+  WebContents* GetAssociatedWebContents() const override { return NULL; }
 
   Browser* browser_;
 };
@@ -70,21 +66,22 @@ base::DictionaryValue* ParseDictionary(
   return dict;
 }
 
-bool GetBoolean(base::DictionaryValue* val, const std::string& key) {
+bool GetBoolean(const base::DictionaryValue* val, const std::string& key) {
   bool result = false;
   if (!val->GetBoolean(key, &result))
       ADD_FAILURE() << key << " does not exist or is not a boolean.";
   return result;
 }
 
-int GetInteger(base::DictionaryValue* val, const std::string& key) {
+int GetInteger(const base::DictionaryValue* val, const std::string& key) {
   int result = 0;
   if (!val->GetInteger(key, &result))
     ADD_FAILURE() << key << " does not exist or is not an integer.";
   return result;
 }
 
-std::string GetString(base::DictionaryValue* val, const std::string& key) {
+std::string GetString(const base::DictionaryValue* val,
+                      const std::string& key) {
   std::string result;
   if (!val->GetString(key, &result))
     ADD_FAILURE() << key << " does not exist or is not a string.";
@@ -209,9 +206,9 @@ class SendResponseDelegate
     return *response_.get();
   }
 
-  virtual void OnSendResponse(UIThreadExtensionFunction* function,
-                              bool success,
-                              bool bad_message) OVERRIDE {
+  void OnSendResponse(UIThreadExtensionFunction* function,
+                      bool success,
+                      bool bad_message) override {
     ASSERT_FALSE(bad_message);
     ASSERT_FALSE(HasResponse());
     response_.reset(new bool);

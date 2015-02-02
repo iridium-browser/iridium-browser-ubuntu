@@ -79,7 +79,7 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   };
 
   // Call GetWindowState() to instantiate this class.
-  virtual ~WindowState();
+  ~WindowState() override;
 
   aura::Window* window() { return window_; }
   const aura::Window* window() const { return window_; }
@@ -298,9 +298,9 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   DragDetails* drag_details() { return drag_details_.get(); }
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowPropertyChanged(aura::Window* window,
-                                       const void* key,
-                                       intptr_t old) OVERRIDE;
+  void OnWindowPropertyChanged(aura::Window* window,
+                               const void* key,
+                               intptr_t old) override;
 
  private:
   friend class DefaultState;
@@ -308,6 +308,8 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   friend class ash::MaximizeModeWindowState;
   friend ASH_EXPORT WindowState* GetWindowState(aura::Window*);
   FRIEND_TEST_ALL_PREFIXES(WindowAnimationsTest, CrossFadeToBounds);
+  FRIEND_TEST_ALL_PREFIXES(WindowAnimationsTest,
+                           CrossFadeToBoundsFromTransform);
 
   explicit WindowState(aura::Window* window);
 

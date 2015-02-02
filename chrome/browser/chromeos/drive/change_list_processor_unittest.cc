@@ -95,7 +95,7 @@ ScopedVector<ChangeList> CreateBaseChangeList() {
 
 class ChangeListProcessorTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     metadata_storage_.reset(new ResourceMetadataStorage(
@@ -195,7 +195,7 @@ TEST_F(ChangeListProcessorTest, ApplyFullResourceList) {
            "", FILE},
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kExpected); ++i) {
+  for (size_t i = 0; i < arraysize(kExpected); ++i) {
     scoped_ptr<ResourceEntry> entry = GetResourceEntry(kExpected[i].path);
     ASSERT_TRUE(entry) << "for path: " << kExpected[i].path;
     EXPECT_EQ(kExpected[i].id, entry->resource_id());

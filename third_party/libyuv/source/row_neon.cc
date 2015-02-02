@@ -16,7 +16,8 @@ extern "C" {
 #endif
 
 // This module is for GCC Neon
-#if !defined(LIBYUV_DISABLE_NEON) && defined(__ARM_NEON__)
+#if !defined(LIBYUV_DISABLE_NEON) && defined(__ARM_NEON__) && \
+    !defined(__aarch64__)
 
 // Read 8 Y, 4 U and 4 V from 422
 #define READYUV422                                                             \
@@ -541,7 +542,6 @@ void YToARGBRow_NEON(const uint8* src_y,
                      uint8* dst_argb,
                      int width) {
   asm volatile (
-    MEMACCESS(3)
     MEMACCESS(3)
     "vld1.8     {d24}, [%3]                    \n"
     MEMACCESS(4)
@@ -1271,30 +1271,6 @@ void UYVYToUVRow_NEON(const uint8* src_uyvy, int stride_uyvy,
     "+r"(pix)           // %4
   :
   : "cc", "memory", "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"  // Clobber List
-  );
-}
-
-void HalfRow_NEON(const uint8* src_uv, int src_uv_stride,
-                  uint8* dst_uv, int pix) {
-  asm volatile (
-    // change the stride to row 2 pointer
-    "add        %1, %0                         \n"
-  "1:                                          \n"
-    MEMACCESS(0)
-    "vld1.8     {q0}, [%0]!                    \n"  // load row 1 16 pixels.
-    "subs       %3, %3, #16                    \n"  // 16 processed per loop
-    MEMACCESS(1)
-    "vld1.8     {q1}, [%1]!                    \n"  // load row 2 16 pixels.
-    "vrhadd.u8  q0, q1                         \n"  // average row 1 and 2
-    MEMACCESS(2)
-    "vst1.8     {q0}, [%2]!                    \n"
-    "bgt        1b                             \n"
-  : "+r"(src_uv),         // %0
-    "+r"(src_uv_stride),  // %1
-    "+r"(dst_uv),         // %2
-    "+r"(pix)             // %3
-  :
-  : "cc", "memory", "q0", "q1"  // Clobber List
   );
 }
 
@@ -3141,7 +3117,7 @@ void SobelYRow_NEON(const uint8* src_y0, const uint8* src_y1,
   : "cc", "memory", "q0", "q1"  // Clobber List
   );
 }
-#endif  // __ARM_NEON__
+#endif  // defined(__ARM_NEON__) && !defined(__aarch64__)
 
 #ifdef __cplusplus
 }  // extern "C"

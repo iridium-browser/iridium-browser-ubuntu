@@ -2,17 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * An event handler of the background page for file operations.
- * @param {Background} background Background page.
+ * @param {FileBrowserBackground} background Background page.
  * @constructor
  */
 var FileOperationHandler = function(background) {
   /**
    * Background page.
-   * @type {Background}
+   * @type {FileBrowserBackground}
    * @private
    */
   this.background_ = background;
@@ -26,7 +24,7 @@ var FileOperationHandler = function(background) {
 
   /**
    * Progress center.
-   * @type {progressCenter}
+   * @type {ProgressCenter}
    * @private
    */
   this.progressCenter_ = background.progressCenter;
@@ -67,7 +65,7 @@ FileOperationHandler.PENDING_TIME_MS_ = 500;
 
 /**
  * Generate a progress message from the event.
- * @param {Event} event Progress event.
+ * @param {FileOperationProgressEvent} event Progress event.
  * @return {string} message.
  * @private
  */
@@ -128,6 +126,7 @@ FileOperationHandler.getMessage_ = function(event) {
  * @private
  */
 FileOperationHandler.getDeleteMessage_ = function(event) {
+  event = /** @type {FileOperationProgressEvent} */ (event);
   if (event.reason === 'ERROR') {
     return str('DELETE_ERROR');
   } else if (event.entries.length == 1) {
@@ -164,6 +163,7 @@ FileOperationHandler.getType_ = function(operationType) {
  * @private
  */
 FileOperationHandler.prototype.onCopyProgress_ = function(event) {
+  event = /** @type {FileOperationProgressEvent} */ (event);
   // If the copy is finished, may be we can close the background page.
   if (event.reason !== 'BEGIN' && event.reason !== 'PROGRESS')
     this.background_.tryClose();
@@ -230,6 +230,7 @@ FileOperationHandler.prototype.onCopyProgress_ = function(event) {
  * @private
  */
 FileOperationHandler.prototype.onDeleteProgress_ = function(event) {
+  event = /** @type {FileOperationProgressEvent} */ (event);
   // If the copy is finished, may be we can close the background page.
   if (event.reason !== 'BEGIN' && event.reason !== 'PROGRESS')
     this.background_.tryClose();

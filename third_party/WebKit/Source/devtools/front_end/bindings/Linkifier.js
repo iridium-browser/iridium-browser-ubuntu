@@ -87,7 +87,7 @@ WebInspector.Linkifier.handleLink = function(url, lineNumber)
  */
 WebInspector.Linkifier.linkifyUsingRevealer = function(revealable, text, fallbackHref, fallbackLineNumber, title, classes)
 {
-    var a = document.createElement("a");
+    var a = createElement("a");
     a.className = (classes || "") + " webkit-html-resource-link";
     a.textContent = text.trimMiddle(WebInspector.Linkifier.MaxLengthForDisplayedURLs);
     a.title = title || text;
@@ -201,14 +201,12 @@ WebInspector.Linkifier.prototype = {
     /**
      * @param {!WebInspector.CSSLocation} rawLocation
      * @param {string=} classes
-     * @return {?Element}
+     * @return {!Element}
      */
     linkifyCSSLocation: function(rawLocation, classes)
     {
         var anchor = this._createAnchor(classes);
         var liveLocation = WebInspector.cssWorkspaceBinding.createLiveLocation(rawLocation, this._updateAnchor.bind(this, anchor));
-        if (!liveLocation)
-            return null;
         this._liveLocationsByTarget.get(rawLocation.target()).push({ anchor: anchor, location: liveLocation });
         return anchor;
     },
@@ -233,7 +231,7 @@ WebInspector.Linkifier.prototype = {
      */
     _createAnchor: function(classes)
     {
-        var anchor = document.createElement("a");
+        var anchor = createElement("a");
         anchor.className = (classes || "") + " webkit-html-resource-link";
 
         /**
@@ -243,8 +241,8 @@ WebInspector.Linkifier.prototype = {
         {
             if (!anchor.__uiLocation)
                 return;
-            event.stopImmediatePropagation();
-            event.preventDefault();
+
+            event.consume(true);
             if (WebInspector.Linkifier.handleLink(anchor.__uiLocation.uiSourceCode.url, anchor.__uiLocation.lineNumber))
                 return;
             WebInspector.Revealer.reveal(anchor.__uiLocation);
@@ -255,7 +253,7 @@ WebInspector.Linkifier.prototype = {
 
     reset: function()
     {
-        var keys = this._liveLocationsByTarget.keys();
+        var keys = this._liveLocationsByTarget.keysArray();
         for (var i = 0; i < keys.length; ++i) {
             var target = keys[i];
             this.targetRemoved(target);

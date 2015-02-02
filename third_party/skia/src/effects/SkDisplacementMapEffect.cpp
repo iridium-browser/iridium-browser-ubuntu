@@ -303,7 +303,7 @@ public:
                               const GrProcessor&);
     virtual ~GrGLDisplacementMapEffect();
 
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -351,10 +351,10 @@ public:
     typedef GrGLDisplacementMapEffect GLProcessor;
     static const char* Name() { return "DisplacementMap"; }
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
 private:
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GrDisplacementMapEffect(SkDisplacementMapEffect::ChannelSelectorType xChannelSelector,
                             SkDisplacementMapEffect::ChannelSelectorType yChannelSelector,
@@ -408,17 +408,18 @@ bool SkDisplacementMapEffect::filterImageGPU(Proxy* proxy, const SkBitmap& src, 
     GrTexture* displacement = displacementBM.getTexture();
     GrContext* context = color->getContext();
 
-    GrTextureDesc desc;
-    desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+    GrSurfaceDesc desc;
+    desc.fFlags = kRenderTarget_GrSurfaceFlag | kNoStencil_GrSurfaceFlag;
     desc.fWidth = bounds.width();
     desc.fHeight = bounds.height();
     desc.fConfig = kSkia8888_GrPixelConfig;
 
-    GrAutoScratchTexture ast(context, desc);
-    if (NULL == ast.texture()) {
+    SkAutoTUnref<GrTexture> dst(
+        context->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch));
+
+    if (!dst) {
         return false;
     }
-    SkAutoTUnref<GrTexture> dst(ast.detach());
 
     GrContext::AutoRenderTarget art(context, dst->asRenderTarget());
 
@@ -472,17 +473,14 @@ GrDisplacementMapEffect::GrDisplacementMapEffect(
     this->addTextureAccess(&fDisplacementAccess);
     this->addCoordTransform(&fColorTransform);
     this->addTextureAccess(&fColorAccess);
-    this->setWillNotUseInputColor();
 }
 
 GrDisplacementMapEffect::~GrDisplacementMapEffect() {
 }
 
-bool GrDisplacementMapEffect::onIsEqual(const GrProcessor& sBase) const {
+bool GrDisplacementMapEffect::onIsEqual(const GrFragmentProcessor& sBase) const {
     const GrDisplacementMapEffect& s = sBase.cast<GrDisplacementMapEffect>();
-    return fDisplacementAccess.getTexture() == s.fDisplacementAccess.getTexture() &&
-           fColorAccess.getTexture() == s.fColorAccess.getTexture() &&
-           fXChannelSelector == s.fXChannelSelector &&
+    return fXChannelSelector == s.fXChannelSelector &&
            fYChannelSelector == s.fYChannelSelector &&
            fScale == s.fScale;
 }
@@ -491,14 +489,13 @@ const GrBackendFragmentProcessorFactory& GrDisplacementMapEffect::getFactory() c
     return GrTBackendFragmentProcessorFactory<GrDisplacementMapEffect>::getInstance();
 }
 
-void GrDisplacementMapEffect::getConstantColorComponents(GrColor*,
-                                                         uint32_t* validFlags) const {
+void GrDisplacementMapEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
     // Any displacement offset bringing a pixel out of bounds will output a color of (0,0,0,0),
     // so the only way we'd get a constant alpha is if the input color image has a constant alpha
     // and no displacement offset push any texture coordinates out of bounds OR if the constant
     // alpha is 0. Since this isn't trivial to compute at this point, let's assume the output is
     // not of constant color when a displacement effect is applied.
-    *validFlags = 0;
+    inout->setToUnknown(InvariantOutput::kWillNot_ReadInput);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -540,7 +537,7 @@ GrGLDisplacementMapEffect::GrGLDisplacementMapEffect(const GrBackendProcessorFac
 GrGLDisplacementMapEffect::~GrGLDisplacementMapEffect() {
 }
 
-void GrGLDisplacementMapEffect::emitCode(GrGLProgramBuilder* builder,
+void GrGLDisplacementMapEffect::emitCode(GrGLFPBuilder* builder,
                                          const GrFragmentProcessor&,
                                          const GrProcessorKey& key,
                                          const char* outputColor,
@@ -559,7 +556,7 @@ void GrGLDisplacementMapEffect::emitCode(GrGLProgramBuilder* builder,
                                    // a number smaller than that to approximate 0, but
                                    // leave room for 32-bit float GPU rounding errors.
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     fsBuilder->codeAppendf("\t\tvec4 %s = ", dColor);
     fsBuilder->appendTextureLookup(samplers[0], coords[0].c_str(), coords[0].getType());
     fsBuilder->codeAppend(";\n");

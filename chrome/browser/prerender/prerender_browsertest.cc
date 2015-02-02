@@ -25,7 +25,6 @@
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
@@ -68,6 +67,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -133,14 +133,14 @@ namespace {
 
 class MockNetworkChangeNotifierWIFI : public NetworkChangeNotifier {
  public:
-  virtual ConnectionType GetCurrentConnectionType() const OVERRIDE {
+  ConnectionType GetCurrentConnectionType() const override {
     return NetworkChangeNotifier::CONNECTION_WIFI;
   }
 };
 
 class MockNetworkChangeNotifier4G : public NetworkChangeNotifier {
  public:
-  virtual ConnectionType GetCurrentConnectionType() const OVERRIDE {
+  ConnectionType GetCurrentConnectionType() const override {
     return NetworkChangeNotifier::CONNECTION_4G;
   }
 };
@@ -234,14 +234,14 @@ class ChannelDestructionWatcher {
     }
 
    private:
-    virtual ~DestructionMessageFilter() {
+    ~DestructionMessageFilter() override {
       content::BrowserThread::PostTask(
           content::BrowserThread::UI, FROM_HERE,
           base::Bind(&ChannelDestructionWatcher::OnChannelDestroyed,
                      base::Unretained(watcher_)));
     }
 
-    virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+    bool OnMessageReceived(const IPC::Message& message) override {
       return false;
     }
 
@@ -298,7 +298,7 @@ class NavigationOrSwapObserver : public WebContentsObserver,
     tab_strip_model_->AddObserver(this);
   }
 
-  virtual ~NavigationOrSwapObserver() {
+  ~NavigationOrSwapObserver() override {
     tab_strip_model_->RemoveObserver(this);
   }
 
@@ -311,10 +311,10 @@ class NavigationOrSwapObserver : public WebContentsObserver,
   }
 
   // WebContentsObserver implementation:
-  virtual void DidStartLoading(RenderViewHost* render_view_host) OVERRIDE {
+  void DidStartLoading(RenderViewHost* render_view_host) override {
     did_start_loading_ = true;
   }
-  virtual void DidStopLoading(RenderViewHost* render_view_host) OVERRIDE {
+  void DidStopLoading(RenderViewHost* render_view_host) override {
     if (!did_start_loading_)
       return;
     number_of_loads_--;
@@ -323,10 +323,10 @@ class NavigationOrSwapObserver : public WebContentsObserver,
   }
 
   // TabStripModelObserver implementation:
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             WebContents* old_contents,
-                             WebContents* new_contents,
-                             int index) OVERRIDE {
+  void TabReplacedAt(TabStripModel* tab_strip_model,
+                     WebContents* old_contents,
+                     WebContents* new_contents,
+                     int index) override {
     if (old_contents != web_contents())
       return;
     // Switch to observing the new WebContents.
@@ -405,7 +405,7 @@ class TestPrerenderContents : public PrerenderContents {
         skip_final_checks_(false) {
   }
 
-  virtual ~TestPrerenderContents() {
+  ~TestPrerenderContents() override {
     if (skip_final_checks_)
       return;
 
@@ -433,7 +433,7 @@ class TestPrerenderContents : public PrerenderContents {
     EXPECT_EQ(should_be_shown_, was_shown_);
   }
 
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE {
+  void RenderProcessGone(base::TerminationStatus status) override {
     // On quit, it's possible to end up here when render processes are closed
     // before the PrerenderManager is destroyed.  As a result, it's possible to
     // get either FINAL_STATUS_APP_TERMINATING or FINAL_STATUS_RENDERER_CRASHED
@@ -450,7 +450,7 @@ class TestPrerenderContents : public PrerenderContents {
     PrerenderContents::RenderProcessGone(status);
   }
 
-  virtual bool CheckURL(const GURL& url) OVERRIDE {
+  bool CheckURL(const GURL& url) override {
     // Prevent FINAL_STATUS_UNSUPPORTED_SCHEME when navigating to about:crash in
     // the PrerenderRendererCrash test.
     if (url.spec() != content::kChromeUICrashURL)
@@ -469,8 +469,7 @@ class TestPrerenderContents : public PrerenderContents {
   FinalStatus expected_final_status() const { return expected_final_status_; }
 
  private:
-  virtual void OnRenderViewHostCreated(
-      RenderViewHost* new_render_view_host) OVERRIDE {
+  void OnRenderViewHostCreated(RenderViewHost* new_render_view_host) override {
     // Used to make sure the RenderViewHost is hidden and, if used,
     // subsequently shown.
     notification_registrar().Add(
@@ -483,9 +482,9 @@ class TestPrerenderContents : public PrerenderContents {
     PrerenderContents::OnRenderViewHostCreated(new_render_view_host);
   }
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     if (type ==
         content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED) {
       EXPECT_EQ(new_render_view_host_,
@@ -532,7 +531,7 @@ class TestPrerender : public PrerenderContents::Observer,
         number_of_loads_(0),
         expected_number_of_loads_(0) {
   }
-  virtual ~TestPrerender() {
+  ~TestPrerender() override {
     if (contents_)
       contents_->RemoveObserver(this);
   }
@@ -569,17 +568,17 @@ class TestPrerender : public PrerenderContents::Observer,
   }
 
   // PrerenderContents::Observer implementation:
-  virtual void OnPrerenderStart(PrerenderContents* contents) OVERRIDE {
+  void OnPrerenderStart(PrerenderContents* contents) override {
     start_loop_.Quit();
   }
 
-  virtual void OnPrerenderStopLoading(PrerenderContents* contents) OVERRIDE {
+  void OnPrerenderStopLoading(PrerenderContents* contents) override {
     number_of_loads_++;
     if (load_waiter_ && number_of_loads_ >= expected_number_of_loads_)
       load_waiter_->Quit();
   }
 
-  virtual void OnPrerenderStop(PrerenderContents* contents) OVERRIDE {
+  void OnPrerenderStop(PrerenderContents* contents) override {
     DCHECK(contents_);
     contents_ = NULL;
     stop_loop_.Quit();
@@ -589,9 +588,9 @@ class TestPrerender : public PrerenderContents::Observer,
       load_waiter_->Quit();
   }
 
-  virtual void OnPrerenderCreatedMatchCompleteReplacement(
-      PrerenderContents* contents, PrerenderContents* replacement) OVERRIDE {
-  }
+  void OnPrerenderCreatedMatchCompleteReplacement(
+      PrerenderContents* contents,
+      PrerenderContents* replacement) override {}
 
  private:
   TestPrerenderContents* contents_;
@@ -612,7 +611,7 @@ class TestPrerenderContentsFactory : public PrerenderContents::Factory {
  public:
   TestPrerenderContentsFactory() {}
 
-  virtual ~TestPrerenderContentsFactory() {
+  ~TestPrerenderContentsFactory() override {
     EXPECT_TRUE(expected_contents_queue_.empty());
   }
 
@@ -623,13 +622,13 @@ class TestPrerenderContentsFactory : public PrerenderContents::Factory {
     return handle.Pass();
   }
 
-  virtual PrerenderContents* CreatePrerenderContents(
+  PrerenderContents* CreatePrerenderContents(
       PrerenderManager* prerender_manager,
       Profile* profile,
       const GURL& url,
       const content::Referrer& referrer,
       Origin origin,
-      uint8 experiment_id) OVERRIDE {
+      uint8 experiment_id) override {
     ExpectedContents expected;
     if (!expected_contents_queue_.empty()) {
       expected = expected_contents_queue_.front();
@@ -681,7 +680,7 @@ class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
   // (in which that result will be communicated back via a call into the
   // client, and false will be returned).
   // Overrides SafeBrowsingService::CheckBrowseUrl.
-  virtual bool CheckBrowseUrl(const GURL& gurl, Client* client) OVERRIDE {
+  bool CheckBrowseUrl(const GURL& gurl, Client* client) override {
     if (gurl != url_ || threat_type_ == SB_THREAT_TYPE_SAFE)
       return true;
 
@@ -698,7 +697,7 @@ class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
   }
 
  private:
-  virtual ~FakeSafeBrowsingDatabaseManager() {}
+  ~FakeSafeBrowsingDatabaseManager() override {}
 
   void OnCheckBrowseURLDone(const GURL& gurl, Client* client) {
     std::vector<SBThreatType> expected_threats;
@@ -730,9 +729,9 @@ class FakeSafeBrowsingService : public SafeBrowsingService {
   }
 
  protected:
-  virtual ~FakeSafeBrowsingService() { }
+  ~FakeSafeBrowsingService() override {}
 
-  virtual SafeBrowsingDatabaseManager* CreateDatabaseManager() OVERRIDE {
+  SafeBrowsingDatabaseManager* CreateDatabaseManager() override {
     fake_database_manager_ = new FakeSafeBrowsingDatabaseManager(this);
     return fake_database_manager_;
   }
@@ -748,9 +747,9 @@ class TestSafeBrowsingServiceFactory : public SafeBrowsingServiceFactory {
  public:
   TestSafeBrowsingServiceFactory() :
       most_recent_service_(NULL) { }
-  virtual ~TestSafeBrowsingServiceFactory() { }
+  ~TestSafeBrowsingServiceFactory() override {}
 
-  virtual SafeBrowsingService* CreateSafeBrowsingService() OVERRIDE {
+  SafeBrowsingService* CreateSafeBrowsingService() override {
     most_recent_service_ =  new FakeSafeBrowsingService();
     return most_recent_service_;
   }
@@ -767,11 +766,10 @@ class TestSafeBrowsingServiceFactory : public SafeBrowsingServiceFactory {
 class FakeDevToolsClient : public content::DevToolsAgentHostClient {
  public:
   FakeDevToolsClient() {}
-  virtual ~FakeDevToolsClient() {}
-  virtual void DispatchProtocolMessage(
-      DevToolsAgentHost* agent_host, const std::string& message) OVERRIDE {}
-  virtual void AgentHostClosed(
-      DevToolsAgentHost* agent_host, bool replaced) OVERRIDE {}
+  ~FakeDevToolsClient() override {}
+  void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
+                               const std::string& message) override {}
+  void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override {}
 };
 
 class RestorePrerenderMode {
@@ -792,10 +790,10 @@ class HangingURLRequestJob : public net::URLRequestJob {
       : net::URLRequestJob(request, network_delegate) {
   }
 
-  virtual void Start() OVERRIDE {}
+  void Start() override {}
 
  private:
-  virtual ~HangingURLRequestJob() {}
+  ~HangingURLRequestJob() override {}
 };
 
 class HangingFirstRequestInterceptor : public net::URLRequestInterceptor {
@@ -806,11 +804,11 @@ class HangingFirstRequestInterceptor : public net::URLRequestInterceptor {
         callback_(callback),
         first_run_(true) {
   }
-  virtual ~HangingFirstRequestInterceptor() {}
+  ~HangingFirstRequestInterceptor() override {}
 
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     if (first_run_) {
       first_run_ = false;
       if (!callback_.is_null()) {
@@ -862,14 +860,14 @@ class MockHTTPJob : public net::URLRequestMockHTTPJob {
     start_callback_ = start_callback;
   }
 
-  virtual void Start() OVERRIDE {
+  void Start() override {
     if (!start_callback_.is_null())
       start_callback_.Run();
     net::URLRequestMockHTTPJob::Start();
   }
 
  private:
-  virtual ~MockHTTPJob() {}
+  ~MockHTTPJob() override {}
 
   base::Closure start_callback_;
 };
@@ -914,11 +912,11 @@ class CountingInterceptor : public net::URLRequestInterceptor {
         counter_(counter),
         weak_factory_(this) {
   }
-  virtual ~CountingInterceptor() {}
+  ~CountingInterceptor() override {}
 
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     MockHTTPJob* job = new MockHTTPJob(request, network_delegate, file_);
     job->set_start_callback(base::Bind(&CountingInterceptor::RequestStarted,
                                        weak_factory_.GetWeakPtr()));
@@ -963,11 +961,11 @@ void CreateMockInterceptorOnIO(const GURL& url, const base::FilePath& file) {
 class TestContentBrowserClient : public chrome::ChromeContentBrowserClient {
  public:
   TestContentBrowserClient() {}
-  virtual ~TestContentBrowserClient() {}
+  ~TestContentBrowserClient() override {}
 
   // chrome::ChromeContentBrowserClient implementation.
-  virtual bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
-                                  const GURL& url) OVERRIDE {
+  bool ShouldAllowOpenURL(content::SiteInstance* site_instance,
+                          const GURL& url) override {
     PrerenderManagerFactory::GetForProfile(
         Profile::FromBrowserContext(site_instance->GetBrowserContext()))
         ->CancelAllPrerenders();
@@ -984,13 +982,13 @@ class SwapProcessesContentBrowserClient
     : public chrome::ChromeContentBrowserClient {
  public:
   SwapProcessesContentBrowserClient() {}
-  virtual ~SwapProcessesContentBrowserClient() {}
+  ~SwapProcessesContentBrowserClient() override {}
 
   // chrome::ChromeContentBrowserClient implementation.
-  virtual bool ShouldSwapProcessesForRedirect(
+  bool ShouldSwapProcessesForRedirect(
       content::ResourceContext* resource_context,
       const GURL& current_url,
-      const GURL& new_url) OVERRIDE {
+      const GURL& new_url) override {
     return true;
   }
 
@@ -1004,32 +1002,28 @@ class NeverRunsExternalProtocolHandlerDelegate
     : public ExternalProtocolHandler::Delegate {
  public:
   // ExternalProtocolHandler::Delegate implementation.
-  virtual ShellIntegration::DefaultProtocolClientWorker* CreateShellWorker(
+  ShellIntegration::DefaultProtocolClientWorker* CreateShellWorker(
       ShellIntegration::DefaultWebClientObserver* observer,
-      const std::string& protocol) OVERRIDE {
+      const std::string& protocol) override {
     NOTREACHED();
     // This will crash, but it shouldn't get this far with BlockState::BLOCK
     // anyway.
     return NULL;
   }
-  virtual ExternalProtocolHandler::BlockState GetBlockState(
-      const std::string& scheme) OVERRIDE {
+  ExternalProtocolHandler::BlockState GetBlockState(
+      const std::string& scheme) override {
     // Block everything and fail the test.
     ADD_FAILURE();
     return ExternalProtocolHandler::BLOCK;
   }
-  virtual void BlockRequest() OVERRIDE { }
-  virtual void RunExternalProtocolDialog(const GURL& url,
-                                         int render_process_host_id,
-                                         int routing_id) OVERRIDE {
+  void BlockRequest() override {}
+  void RunExternalProtocolDialog(const GURL& url,
+                                 int render_process_host_id,
+                                 int routing_id) override {
     NOTREACHED();
   }
-  virtual void LaunchUrlWithoutSecurityCheck(const GURL& url) OVERRIDE {
-    NOTREACHED();
-  }
-  virtual void FinishedProcessingCheck() OVERRIDE {
-    NOTREACHED();
-  }
+  void LaunchUrlWithoutSecurityCheck(const GURL& url) override { NOTREACHED(); }
+  void FinishedProcessingCheck() override { NOTREACHED(); }
 };
 
 base::FilePath GetTestPath(const std::string& file_name) {
@@ -1054,7 +1048,7 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
         loader_path_("files/prerender/prerender_loader.html"),
         explicitly_set_browser_(NULL) {}
 
-  virtual ~PrerenderBrowserTest() {}
+  ~PrerenderBrowserTest() override {}
 
   content::SessionStorageNamespace* GetSessionStorageNamespace() const {
     WebContents* web_contents = GetActiveWebContents();
@@ -1063,19 +1057,19 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
     return web_contents->GetController().GetDefaultSessionStorageNamespace();
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
 #if defined(FULL_SAFE_BROWSING)
     SafeBrowsingService::RegisterFactory(safe_browsing_factory_.get());
 #endif
   }
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  void TearDownInProcessBrowserTestFixture() override {
 #if defined(FULL_SAFE_BROWSING)
     SafeBrowsingService::RegisterFactory(NULL);
 #endif
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kPrerenderMode,
                                     switches::kPrerenderModeSwitchValueEnabled);
 #if defined(OS_MACOSX)
@@ -1164,7 +1158,7 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
     }
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     current_browser()->profile()->GetPrefs()->SetBoolean(
         prefs::kPromptForDownload, false);
     IncreasePrerenderMemory();
@@ -3017,12 +3011,12 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderTargetHasPopup) {
 class TestClientCertStore : public net::ClientCertStore {
  public:
   TestClientCertStore() {}
-  virtual ~TestClientCertStore() {}
+  ~TestClientCertStore() override {}
 
   // net::ClientCertStore:
-  virtual void GetClientCerts(const net::SSLCertRequestInfo& cert_request_info,
-                              net::CertificateList* selected_certs,
-                              const base::Closure& callback) OVERRIDE {
+  void GetClientCerts(const net::SSLCertRequestInfo& cert_request_info,
+                      net::CertificateList* selected_certs,
+                      const base::Closure& callback) override {
     *selected_certs = net::CertificateList(
         1, scoped_refptr<net::X509Certificate>(
         new net::X509Certificate("test", "test", base::Time(), base::Time())));
@@ -3533,9 +3527,9 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
 class PrerenderBrowserTestWithNaCl : public PrerenderBrowserTest {
  public:
   PrerenderBrowserTestWithNaCl() {}
-  virtual ~PrerenderBrowserTestWithNaCl() {}
+  ~PrerenderBrowserTestWithNaCl() override {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     PrerenderBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableNaCl);
   }
@@ -3621,26 +3615,24 @@ class PrerenderBrowserTestWithExtensions : public PrerenderBrowserTest,
     autostart_test_server_ = false;
   }
 
-  virtual void SetUp() OVERRIDE {
-    PrerenderBrowserTest::SetUp();
-  }
+  void SetUp() override { PrerenderBrowserTest::SetUp(); }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     PrerenderBrowserTest::SetUpCommandLine(command_line);
     ExtensionApiTest::SetUpCommandLine(command_line);
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     PrerenderBrowserTest::SetUpInProcessBrowserTestFixture();
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
   }
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  void TearDownInProcessBrowserTestFixture() override {
     PrerenderBrowserTest::TearDownInProcessBrowserTestFixture();
     ExtensionApiTest::TearDownInProcessBrowserTestFixture();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     PrerenderBrowserTest::SetUpOnMainThread();
   }
 };
@@ -4416,7 +4408,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderWindowClose) {
 
 class PrerenderIncognitoBrowserTest : public PrerenderBrowserTest {
  public:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     Profile* normal_profile = current_browser()->profile();
     set_browser(ui_test_utils::OpenURLOffTheRecord(
         normal_profile, GURL("about:blank")));

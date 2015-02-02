@@ -28,24 +28,23 @@ class EmbeddedWorkerDevToolsAgentHost : public IPCDevToolsAgentHost,
                                   bool debug_service_worker_on_start);
 
   // DevToolsAgentHost override.
-  virtual bool IsWorker() const OVERRIDE;
-  virtual Type GetType() OVERRIDE;
-  virtual std::string GetTitle() OVERRIDE;
-  virtual GURL GetURL() OVERRIDE;
-  virtual bool Activate() OVERRIDE;
-  virtual bool Close() OVERRIDE;
+  bool IsWorker() const override;
+  Type GetType() override;
+  std::string GetTitle() override;
+  GURL GetURL() override;
+  bool Activate() override;
+  bool Close() override;
 
   // IPCDevToolsAgentHost implementation.
-  virtual void SendMessageToAgent(IPC::Message* message) OVERRIDE;
-  virtual void Attach() OVERRIDE;
-  virtual void OnClientAttached() OVERRIDE {}
-  virtual void OnClientDetached() OVERRIDE;
+  void SendMessageToAgent(IPC::Message* message) override;
+  void Attach() override;
+  void OnClientAttached() override {}
+  void OnClientDetached() override;
 
   // IPC::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
 
   void WorkerReadyForInspection();
-  void WorkerContextStarted();
   void WorkerRestarted(WorkerId worker_id);
   void WorkerDestroyed();
   bool Matches(const SharedWorkerInstance& other);
@@ -55,7 +54,7 @@ class EmbeddedWorkerDevToolsAgentHost : public IPCDevToolsAgentHost,
  private:
   friend class EmbeddedWorkerDevToolsManagerTest;
 
-  virtual ~EmbeddedWorkerDevToolsAgentHost();
+  ~EmbeddedWorkerDevToolsAgentHost() override;
 
   enum WorkerState {
     WORKER_UNINSPECTED,
@@ -68,7 +67,8 @@ class EmbeddedWorkerDevToolsAgentHost : public IPCDevToolsAgentHost,
   void AttachToWorker();
   void DetachFromWorker();
   void WorkerCreated();
-  void OnDispatchOnInspectorFrontend(const std::string& message);
+  void OnDispatchOnInspectorFrontend(const std::string& message,
+                                     uint32 total_size);
   void OnSaveAgentRuntimeState(const std::string& state);
 
   scoped_ptr<SharedWorkerInstance> shared_worker_;

@@ -30,13 +30,12 @@ class CC_EXPORT CheckerboardDrawQuad : public DrawQuad {
 
   SkColor color;
 
-  virtual void IterateResources(const ResourceIteratorCallback& callback)
-    OVERRIDE;
+  void IterateResources(const ResourceIteratorCallback& callback) override;
 
   static const CheckerboardDrawQuad* MaterialCast(const DrawQuad*);
 
  private:
-  virtual void ExtendValue(base::debug::TracedValue* value) const OVERRIDE;
+  void ExtendValue(base::debug::TracedValue* value) const override;
 };
 
 }  // namespace cc

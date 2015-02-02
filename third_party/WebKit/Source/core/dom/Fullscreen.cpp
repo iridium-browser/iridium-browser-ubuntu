@@ -65,13 +65,6 @@ static bool fullscreenIsSupported(const Document& document)
     return !document.settings() || document.settings()->fullscreenSupported();
 }
 
-static bool fullscreenIsSupported(const Document& document, const Element& element)
-{
-    if (!document.settings() || (document.settings()->disallowFullscreenForNonMediaElements() && !isHTMLMediaElement(element)))
-        return false;
-    return fullscreenIsSupported(document);
-}
-
 static bool fullscreenElementReady(const Element& element, Fullscreen::RequestType requestType)
 {
     // A fullscreen element ready check for an element |element| returns true if all of the
@@ -231,11 +224,16 @@ void Fullscreen::requestFullscreen(Element& element, RequestType requestType)
         //   An algorithm is allowed to show a pop-up if, in the task in which the algorithm is running, either:
         //   - an activation behavior is currently being processed whose click event was trusted, or
         //   - the event listener for a trusted click event is being handled.
-        if (!UserGestureIndicator::processingUserGesture())
+        if (!UserGestureIndicator::processingUserGesture()) {
+            String message = ExceptionMessages::failedToExecute("requestFullScreen",
+                "Element", "API can only be initiated by a user gesture.");
+            document()->executionContext()->addConsoleMessage(
+                ConsoleMessage::create(JSMessageSource, WarningMessageLevel, message));
             break;
+        }
 
         // Fullscreen is not supported.
-        if (!fullscreenIsSupported(element.document(), element))
+        if (!fullscreenIsSupported(element.document()))
             break;
 
         // 2. Let doc be element's node document. (i.e. "this")
@@ -438,7 +436,7 @@ void Fullscreen::didEnterFullScreenForElement(Element* element)
     m_fullScreenElement->setContainsFullScreenElementOnAncestorsCrossingFrameBoundaries(true);
 
     // FIXME: This should not call updateStyleIfNeeded.
-    document()->setNeedsStyleRecalc(SubtreeStyleChange);
+    document()->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::FullScreen));
     document()->updateRenderTreeIfNeeded();
 
     m_fullScreenElement->didBecomeFullscreenElement();
@@ -467,7 +465,7 @@ void Fullscreen::didExitFullScreenForElement(Element*)
         m_fullScreenRenderer->unwrapRenderer();
 
     m_fullScreenElement = nullptr;
-    document()->setNeedsStyleRecalc(SubtreeStyleChange);
+    document()->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::FullScreen));
 
     if (document()->frame())
         document()->frame()->eventHandler().scheduleHoverStateUpdate();

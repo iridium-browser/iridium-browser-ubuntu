@@ -247,6 +247,15 @@ OPENSSL_EXPORT int EVP_DigestSignUpdate(EVP_MD_CTX *ctx, const void *data,
 OPENSSL_EXPORT int EVP_DigestSignFinal(EVP_MD_CTX *ctx, uint8_t *out_sig,
                                        size_t *out_sig_len);
 
+/* EVP_DigestSignAlgorithm encodes the signing parameters of |ctx| as an
+ * AlgorithmIdentifer and saves the result in |algor|.
+ *
+ * It returns one on success, or zero on error.
+ *
+ * TODO(davidben): This API should eventually lose the dependency on
+ * crypto/asn1/. */
+OPENSSL_EXPORT int EVP_DigestSignAlgorithm(EVP_MD_CTX *ctx, X509_ALGOR *algor);
+
 
 /* Verifying */
 
@@ -261,6 +270,18 @@ OPENSSL_EXPORT int EVP_DigestVerifyInit(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx,
                                         const EVP_MD *type, ENGINE *e,
                                         EVP_PKEY *pkey);
 
+/* EVP_DigestVerifyInitFromAlgorithm sets up |ctx| for a signature verification
+ * operation with public key |pkey| and parameters from |algor|. The |ctx|
+ * argument must have been initialised with |EVP_MD_CTX_init|.
+ *
+ * It returns one on success, or zero on error.
+ *
+ * TODO(davidben): This API should eventually lose the dependency on
+ * crypto/asn1/. */
+OPENSSL_EXPORT int EVP_DigestVerifyInitFromAlgorithm(EVP_MD_CTX *ctx,
+                                                     X509_ALGOR *algor,
+                                                     EVP_PKEY *pkey);
+
 /* EVP_DigestVerifyUpdate appends |len| bytes from |data| to the data which
  * will be verified by |EVP_DigestVerifyFinal|. It returns one on success and
  * zero otherwise. */
@@ -269,10 +290,7 @@ OPENSSL_EXPORT int EVP_DigestVerifyUpdate(EVP_MD_CTX *ctx, const void *data,
 
 /* EVP_DigestVerifyFinal verifies that |sig_len| bytes of |sig| are a valid
  * signature for the data that has been included by one or more calls to
- * |EVP_DigestVerifyUpdate|.
- *
- * It returns one on success and <= 0 on error. WARNING: this differs from the
- * usual return value convention. */
+ * |EVP_DigestVerifyUpdate|. It returns one on success and zero otherwise. */
 OPENSSL_EXPORT int EVP_DigestVerifyFinal(EVP_MD_CTX *ctx, const uint8_t *sig,
                                          size_t sig_len);
 
@@ -441,8 +459,8 @@ OPENSSL_EXPORT int EVP_PKEY_sign_init(EVP_PKEY_CTX *ctx);
  * space available at |sig|. If sufficient, the signature will be written to
  * |sig| and |*sig_len| updated with the true length.
  *
- * WARNING: Setting |out| to NULL only gives the maximum size of the
- * plaintext. The actual plaintext may be smaller.
+ * WARNING: Setting |sig| to NULL only gives the maximum size of the
+ * signature. The actual signature may be smaller.
  *
  * It returns one on success or zero on error. (Note: this differs from
  * OpenSSL, which can also return negative values to indicate an error. ) */
@@ -813,6 +831,9 @@ struct evp_pkey_st {
 #define EVP_F_pkey_rsa_encrypt 152
 #define EVP_F_pkey_rsa_decrypt 153
 #define EVP_F_hmac_signctx 154
+#define EVP_F_EVP_DigestVerifyInitFromAlgorithm 155
+#define EVP_F_EVP_DigestSignAlgorithm 156
+#define EVP_F_rsa_digest_verify_init_from_algorithm 157
 #define EVP_R_UNSUPPORTED_PUBLIC_KEY_TYPE 100
 #define EVP_R_UNSUPPORTED_SIGNATURE_TYPE 101
 #define EVP_R_INVALID_DIGEST_TYPE 102
@@ -859,5 +880,10 @@ struct evp_pkey_st {
 #define EVP_R_DECODE_ERROR 143
 #define EVP_R_INVALID_PSS_SALTLEN 144
 #define EVP_R_UNKNOWN_PUBLIC_KEY_TYPE 145
+#define EVP_R_CONTEXT_NOT_INITIALISED 146
+#define EVP_R_DIGEST_AND_KEY_TYPE_NOT_SUPPORTED 147
+#define EVP_R_WRONG_PUBLIC_KEY_TYPE 148
+#define EVP_R_UNKNOWN_SIGNATURE_ALGORITHM 149
+#define EVP_R_UNKNOWN_MESSAGE_DIGEST_ALGORITHM 150
 
 #endif  /* OPENSSL_HEADER_EVP_H */

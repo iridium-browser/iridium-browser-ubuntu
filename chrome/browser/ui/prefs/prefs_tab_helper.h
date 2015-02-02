@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
+#include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -29,7 +30,7 @@ class PrefRegistrySyncable;
 class PrefsTabHelper : public content::NotificationObserver,
                        public content::WebContentsUserData<PrefsTabHelper> {
  public:
-  virtual ~PrefsTabHelper();
+  ~PrefsTabHelper() override;
 
   static void InitIncognitoUserPrefStore(OverlayUserPrefStore* pref_store);
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -43,9 +44,9 @@ class PrefsTabHelper : public content::NotificationObserver,
   friend class content::WebContentsUserData<PrefsTabHelper>;
 
   // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Update the WebContents's RendererPreferences.
   void UpdateRendererPreferences();
@@ -60,6 +61,8 @@ class PrefsTabHelper : public content::NotificationObserver,
   PrefChangeRegistrar pref_change_registrar_;
   scoped_ptr<base::CallbackList<void(void)>::Subscription>
       style_sheet_subscription_;
+  scoped_ptr<chrome::ChromeZoomLevelPrefs::DefaultZoomLevelSubscription>
+      default_zoom_level_subscription_;
   base::WeakPtrFactory<PrefsTabHelper> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrefsTabHelper);

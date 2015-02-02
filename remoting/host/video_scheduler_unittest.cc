@@ -66,9 +66,8 @@ class MockVideoEncoder : public VideoEncoder {
   MockVideoEncoder() {}
   virtual ~MockVideoEncoder() {}
 
-  scoped_ptr<VideoPacket> Encode(
-      const webrtc::DesktopFrame& frame) {
-    return scoped_ptr<VideoPacket>(EncodePtr(frame));
+  scoped_ptr<VideoPacket> Encode(const webrtc::DesktopFrame& frame) {
+    return make_scoped_ptr(EncodePtr(frame));
   }
   MOCK_METHOD1(EncodePtr, VideoPacket*(const webrtc::DesktopFrame& frame));
 
@@ -82,7 +81,7 @@ class ThreadCheckVideoEncoder : public VideoEncoderVerbatim {
       scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : task_runner_(task_runner) {
   }
-  virtual ~ThreadCheckVideoEncoder() {
+  ~ThreadCheckVideoEncoder() override {
     EXPECT_TRUE(task_runner_->BelongsToCurrentThread());
   }
 
@@ -98,7 +97,7 @@ class ThreadCheckDesktopCapturer : public FakeDesktopCapturer {
       scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : task_runner_(task_runner) {
   }
-  virtual ~ThreadCheckDesktopCapturer() {
+  ~ThreadCheckDesktopCapturer() override {
     EXPECT_TRUE(task_runner_->BelongsToCurrentThread());
   }
 
@@ -114,7 +113,7 @@ class ThreadCheckMouseCursorMonitor : public FakeMouseCursorMonitor {
       scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : task_runner_(task_runner) {
   }
-  virtual ~ThreadCheckMouseCursorMonitor() {
+  ~ThreadCheckMouseCursorMonitor() override {
     EXPECT_TRUE(task_runner_->BelongsToCurrentThread());
   }
 
@@ -128,8 +127,8 @@ class VideoSchedulerTest : public testing::Test {
  public:
   VideoSchedulerTest();
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   void StartVideoScheduler(
       scoped_ptr<webrtc::DesktopCapturer> capturer,
@@ -317,9 +316,7 @@ TEST_F(VideoSchedulerTest, StartAndStop) {
   // Start video frame capture.
   scoped_ptr<webrtc::MouseCursorMonitor> mouse_cursor_monitor(
       new FakeMouseCursorMonitor());
-  StartVideoScheduler(capturer.PassAs<webrtc::DesktopCapturer>(),
-                      encoder.PassAs<VideoEncoder>(),
-                      cursor_monitor.PassAs<webrtc::MouseCursorMonitor>());
+  StartVideoScheduler(capturer.Pass(), encoder.Pass(), cursor_monitor.Pass());
 
   // Run until there are no more pending tasks from the VideoScheduler.
   // Otherwise, a lingering frame capture might attempt to trigger a capturer

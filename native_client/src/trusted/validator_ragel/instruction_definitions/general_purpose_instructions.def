@@ -83,35 +83,15 @@ blsmsk Ey By, 0xc4 RXB.02 W.dest.0.00 0xf3 /2, CPUFeature_BMI1
 # viable addresses.
 blsr Ey By, 0xc4 RXB.02 W.dest.0.00 0xf3 /1, CPUFeature_BMI1
 ######## BSF ###################################################################
-# Textbook definition of "bsf" as per AMD/Intel manuals looks like this:
-#  bsf Ev Gv, 0x0f 0xbc
-# For consistency with the production validators, drop support for the 16-bit
-#  version of "bsf" in ia32 mode.
-# Note that the former 32- and 64-bit validators treat "bsf" inconsistently:
-#  http://code.google.com/p/nativeclient/issues/detail?id=2972
-#
 # "bsf" is not marked as nacl-amd64-zero-extends because it does not always
 # writes to it's second operand:
 #  http://code.google.com/p/nativeclient/issues/detail?id=2010
-bsf Ew Gw, data16 0x0f 0xbc, norexw nacl-ia32-forbidden
-bsf Ed Gd, 0x0f 0xbc, norexw
-bsf Eq Gq, rexw 0x0f 0xbc, amd64
-bsf Eq Gq, data16 rexw 0x0f 0xbc, amd64 nacl-forbidden
+bsf Ev Gv, 0x0f 0xbc
 ######## BSR ###################################################################
-# Textbook definition of "bsr" as per AMD/Intel manuals looks like this:
-#  bsr Ev Gv, 0x0f 0xbd
-# For consistency with the production validators, drop support for the 16-bit
-#  version of "bsr" in ia32 mode.
-# Note that the former 32- and 64-bit validators treat "bsr" inconsistently:
-#  http://code.google.com/p/nativeclient/issues/detail?id=2973
-#
 # "bsr" is not marked as nacl-amd64-zero-extends because it does not always
 # writes to it's second operand:
 #  http://code.google.com/p/nativeclient/issues/detail?id=2010
-bsr Ew Gw, data16 0x0f 0xbd, norexw nacl-ia32-forbidden
-bsr Ed Gd, 0x0f 0xbd, norexw
-bsr Eq Gq, rexw 0x0f 0xbd, amd64
-bsr Eq Gq, data16 rexw 0x0f 0xbd, amd64 nacl-forbidden
+bsr Ev Gv, 0x0f 0xbd
 ######## BSWAP #################################################################
 # "bswap" is not marked as nacl-amd64-zero-extends because we don't really think
 # that swapping the bottom bytes is a good thing to do to mask a memory
@@ -225,17 +205,13 @@ cmps Y X, 0xa6, condrep nacl-amd64-forbidden
 #  cmpxchg G E, 0x0f 0xb0, lock
 # For consistency with the production validators:
 #  * treat both explicit arguments as read-write
-#  * drop support for the 16-bit version
 # Note1: "cmpxchg" indeed writes to two arguments, but these areguments are
 #  implicit %al/%ax/%eax/%rax and second explicit argument.  First explicit
 #  argument is read-only.
-# Note2: the former 32- and 64-bit validators treat "cmpxchg" inconsistently:
-#  http://code.google.com/p/nativeclient/issues/detail?id=2974
-#
 # "cmpxchg" is not marked as nacl-amd64-zero-extends because it conditionally
 # writes to different destinations.
 cmpxchg &Gb Eb, 0x0f 0xb0, lock
-cmpxchg &Gw Ew, data16 0x0f 0xb1, norexw lock nacl-ia32-forbidden
+cmpxchg &Gw Ew, data16 0x0f 0xb1, norexw lock
 cmpxchg &Gd Ed, 0x0f 0xb1, norexw lock
 cmpxchg &Gq Eq, rexw 0x0f 0xb1, amd64 lock
 cmpxchg &Gq Eq, data16 rexw 0x0f 0xb1, amd64 lock nacl-forbidden
@@ -468,21 +444,8 @@ mov a !O, 0xa2, ia32
 movabs O !a, 0xa0, amd64 nacl-forbidden
 movabs a !O, 0xa2, amd64 nacl-forbidden
 ######## MOVBE #################################################################
-# Textbook definition of "movbe" as per AMD/Intel manuals looks like this:
-#  movbe Mv Gv, 0x0f 0x38 0xf0, CPUFeature_MOVBE
-#  movbe Gv Mv, 0x0f 0x38 0xf1, CPUFeature_MOVBE
-# For consistency with the production validators, drop support for the 16-bit
-#  version of "movbe" in ia32 mode.
-# Note that the former 32- and 64-bit validators treat "movbe" inconsistently:
-#  http://code.google.com/p/nativeclient/issues/detail?id=2976
-movbe Mw Gw, data16 0x0f 0x38 0xf0, norexw CPUFeature_MOVBE nacl-ia32-forbidden
-movbe Gw Mw, data16 0x0f 0x38 0xf1, norexw CPUFeature_MOVBE nacl-ia32-forbidden
-movbe Md Gd, 0x0f 0x38 0xf0, norexw CPUFeature_MOVBE
-movbe Gd Md, 0x0f 0x38 0xf1, norexw CPUFeature_MOVBE
-movbe Mq Gq, rexw 0x0f 0x38 0xf0, amd64 CPUFeature_MOVBE
-movbe Gq Mq, rexw 0x0f 0x38 0xf1, amd64 CPUFeature_MOVBE
-movbe Mq Gq, data16 rexw 0x0f 0x38 0xf0, amd64 CPUFeature_MOVBE nacl-forbidden
-movbe Gq Mq, data16 rexw 0x0f 0x38 0xf1, amd64 CPUFeature_MOVBE nacl-forbidden
+movbe Mv Gv, 0x0f 0x38 0xf0, CPUFeature_MOVBE
+movbe Gv Mv, 0x0f 0x38 0xf1, CPUFeature_MOVBE
 ######## MOVD ##################################################################
 # Textbook definition of "movd" as per AMD/Intel manuals looks like this:
 #  movd Ey Vy, 0x66 0x0f 0x6e, CPUFeature_SSE2
@@ -634,10 +597,13 @@ popf, data16 0x9d, norexw att-show-name-suffix-w nacl-forbidden
 popf, 0x9d, ia32 nacl-forbidden
 popf, 0x9d, norexw amd64 att-show-name-suffix-q nacl-forbidden
 popf, data16 rexw 0x9d, amd64 att-show-name-suffix-q nacl-forbidden
-######## PREFETCH/PREFETCHW ####################################################
+######## PREFETCH/PREFETCHW /PREFETCHWT1#########################################
 prefetch Mb, 0x0f 0x0d /0, CPUFeature_3DPRFTCH no_memory_access
 prefetchw Mb, 0x0f 0x0d /1, CPUFeature_3DPRFTCH no_memory_access
-prefetch Mb, 0x0f 0x0d /2, CPUFeature_3DPRFTCH no_memory_access nacl-forbidden
+# Note: that prefetchwt1 will have its own cpuid bit with AVX512.
+# TODO(shyamsundarr): Add a seperate cpu feature bit for prefetchwt1
+# if we ever consider enabling it (to match new processor CPUID bit for AVX512).
+prefetchwt1 Mb, 0x0f 0x0d /2, CPUFeature_3DPRFTCH no_memory_access nacl-forbidden
 # AMD manual desribes this opcode as "reserved" in one place (and clarifies that
 # it's aliased to prefetch for the compatibility) and as "invalid" in another
 # place.  It's textbook definition as per AMD manual looks like this:
@@ -786,25 +752,11 @@ sets Eb, 0x0f 0x98, CPUFeature_CMOV
 ######## SFENCE ################################################################
 sfence, 0x0f 0xae 0xf8, CPUFeature_EMMXSSE
 ######## SHLD ##################################################################
-# Textbook definition of "shrd" as per AMD/Intel manuals looks like this:
-#  shld Ib Gv Ev, 0x0f 0xa4
-#  shld cb Gv Ev, 0x0f 0xa5
-# For consistency with the production validators, drop support for the 16-bit
-#  version of "shld" in ia32 mode.
-# Note that the former 32- and 64-bit validators treat "shld" inconsistently:
-#  http://code.google.com/p/nativeclient/issues/detail?id=2978
-#
 # "shld" is not marked as nacl-amd64-zero-extends out of caution.  We assume
 # that this instruction is used for bit manipulation rather than computing
 # viable addresses.
-shld Ib Gw Ew, data16 0x0f 0xa4, norexw nacl-ia32-forbidden
-shld cb Gw Ew, data16 0x0f 0xa5, norexw nacl-ia32-forbidden
-shld Ib Gd Ed, 0x0f 0xa4, norexw
-shld cb Gd Ed, 0x0f 0xa5, norexw
-shld Ib Gq Eq, rexw 0x0f 0xa4, amd64
-shld cb Gq Eq, rexw 0x0f 0xa5, amd64
-shld Ib Gq Eq, data16 rexw 0x0f 0xa4, amd64 nacl-forbidden
-shld cb Gq Eq, data16 rexw 0x0f 0xa5, amd64 nacl-forbidden
+shld Ib Gv Ev, 0x0f 0xa4
+shld cb Gv Ev, 0x0f 0xa5
 ######## SHR ###################################################################
 # "shr" is not marked as nacl-amd64-zero-extends out of caution.  We assume that
 # this instruction is used for bit manipulation rather than computing viable
@@ -813,25 +765,11 @@ shr E, 0xd0 /5
 shr cb E, 0xd2 /5
 shr Ib E, 0xc0 /5
 ######## SHRD ##################################################################
-# Textbook definition of "shrd" as per AMD/Intel manuals looks like this:
-#  shld Ib Gv Ev, 0x0f 0xa4
-#  shld cb Gv Ev, 0x0f 0xa5
-# For consistency with the production validators, drop support for the 16-bit
-#  version of "shrd" in ia32 mode.
-# Note that the former 32- and 64-bit validators treat "shrd" inconsistently:
-#  http://code.google.com/p/nativeclient/issues/detail?id=2980
-#
 # "shrd" is not marked as nacl-amd64-zero-extends out of caution.  We assume
 # that this instruction is used for bit manipulation rather than computing
 # viable addresses.
-shrd Ib Gw Ew, data16 0x0f 0xac, norexw nacl-ia32-forbidden
-shrd cb Gw Ew, data16 0x0f 0xad, norexw nacl-ia32-forbidden
-shrd Ib Gd Ed, 0x0f 0xac, norexw
-shrd cb Gd Ed, 0x0f 0xad, norexw
-shrd Ib Gq Eq, rexw 0x0f 0xac, amd64
-shrd cb Gq Eq, rexw 0x0f 0xad, amd64
-shrd Ib Gq Eq, data16 rexw 0x0f 0xac, amd64 nacl-forbidden
-shrd cb Gq Eq, data16 rexw 0x0f 0xad, amd64 nacl-forbidden
+shrd Ib Gv Ev, 0x0f 0xac
+shrd cb Gv Ev, 0x0f 0xad
 ######## SLWPCB ################################################################
 slwpcb Ry, 0x8f RXB.09 W.1111.0.00 0x12 /1, CPUFeature_LWP
 ######## STC ###################################################################
@@ -875,14 +813,10 @@ tzmsk Ey By, 0x8f RXB.09 W.dest.0.00 0x01 /4, CPUFeature_TBM
 ######## XADD ##################################################################
 # Textbook definition of "xadd" as per AMD/Intel manuals looks like this:
 #  xadd &G E, 0x0f 0xc0, lock nacl-amd64-zero-extends
-# For consistency with the production validators, drop support for the 16-bit
-#  version of "xadd" in ia32 mode.
-# Also, don't consider xadd with memory zero-extending.
+# Don't consider xadd with memory zero-extending.
 #  See http://code.google.com/p/nativeclient/issues/detail?id=3077
-# Note that the former 32- and 64-bit validators treat "xadd" inconsistently:
-#  http://code.google.com/p/nativeclient/issues/detail?id=2981
 xadd &Gb Eb, 0x0f 0xc0, lock
-xadd &Gw Ew, data16 0x0f 0xc1, norexw lock nacl-ia32-forbidden
+xadd &Gw Ew, data16 0x0f 0xc1, norexw lock
 xadd &Gd Rd, 0x0f 0xc1, norexw nacl-amd64-zero-extends
 xadd &Gd Md, 0x0f 0xc1, norexw lock
 xadd &Gq Eq, rexw 0x0f 0xc1, lock amd64

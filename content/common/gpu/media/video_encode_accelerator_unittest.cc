@@ -9,7 +9,7 @@
 #include "base/files/memory_mapped_file.h"
 #include "base/memory/scoped_vector.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/time/time.h"
@@ -354,7 +354,7 @@ class H264Validator : public StreamValidator {
         seen_pps_(false),
         seen_idr_(false) {}
 
-  virtual void ProcessStreamBuffer(const uint8* stream, size_t size) OVERRIDE;
+  virtual void ProcessStreamBuffer(const uint8* stream, size_t size) override;
 
  private:
   // Set to true when encoder provides us with the corresponding NALU type.
@@ -385,15 +385,10 @@ void H264Validator::ProcessStreamBuffer(const uint8* stream, size_t size) {
         ASSERT_TRUE(seen_sps_);
         ASSERT_TRUE(seen_pps_);
         seen_idr_ = true;
+        keyframe = true;
         // fallthrough
       case media::H264NALU::kNonIDRSlice: {
         ASSERT_TRUE(seen_idr_);
-
-        media::H264SliceHeader shdr;
-        ASSERT_EQ(media::H264Parser::kOk,
-                  h264_parser_.ParseSliceHeader(nalu, &shdr));
-        keyframe = shdr.IsISlice() || shdr.IsSISlice();
-
         if (!frame_cb_.Run(keyframe))
           return;
         break;
@@ -426,7 +421,7 @@ class VP8Validator : public StreamValidator {
       : StreamValidator(frame_cb),
         seen_keyframe_(false) {}
 
-  virtual void ProcessStreamBuffer(const uint8* stream, size_t size) OVERRIDE;
+  virtual void ProcessStreamBuffer(const uint8* stream, size_t size) override;
 
  private:
   // Have we already got a keyframe in the stream?
@@ -485,11 +480,11 @@ class VEAClient : public VideoEncodeAccelerator::Client {
   // VideoDecodeAccelerator::Client implementation.
   virtual void RequireBitstreamBuffers(unsigned int input_count,
                                        const gfx::Size& input_coded_size,
-                                       size_t output_buffer_size) OVERRIDE;
+                                       size_t output_buffer_size) override;
   virtual void BitstreamBufferReady(int32 bitstream_buffer_id,
                                     size_t payload_size,
-                                    bool key_frame) OVERRIDE;
-  virtual void NotifyError(VideoEncodeAccelerator::Error error) OVERRIDE;
+                                    bool key_frame) override;
+  virtual void NotifyError(VideoEncodeAccelerator::Error error) override;
 
  private:
   bool has_encoder() { return encoder_.get(); }
@@ -697,7 +692,7 @@ void VEAClient::CreateEncoder() {
                             test_stream_->requested_profile,
                             requested_bitrate_,
                             this)) {
-    DLOG(ERROR) << "VideoEncodeAccelerator::Initialize() failed";
+    LOG(ERROR) << "VideoEncodeAccelerator::Initialize() failed";
     SetState(CS_ERROR);
     return;
   }
@@ -825,11 +820,10 @@ void VEAClient::BitstreamBufferReady(int32 bitstream_buffer_id,
 
   if (save_to_file_) {
     int size = base::checked_cast<int>(payload_size);
-    EXPECT_EQ(base::AppendToFile(
-                  base::FilePath::FromUTF8Unsafe(test_stream_->out_filename),
-                  static_cast<char*>(shm->memory()),
-                  size),
-              size);
+    EXPECT_TRUE(base::AppendToFile(
+                    base::FilePath::FromUTF8Unsafe(test_stream_->out_filename),
+                    static_cast<char*>(shm->memory()),
+                    size));
   }
 
   FeedEncoderWithOutput(shm);
@@ -944,7 +938,7 @@ void VEAClient::FeedEncoderWithOutput(base::SharedMemory* shm) {
     return;
 
   base::SharedMemoryHandle dup_handle;
-  CHECK(shm->ShareToProcess(base::Process::Current().handle(), &dup_handle));
+  CHECK(shm->ShareToProcess(base::GetCurrentProcessHandle(), &dup_handle));
 
   media::BitstreamBuffer bitstream_buffer(
       next_output_buffer_id_++, dup_handle, output_buffer_size_);
@@ -1157,15 +1151,11 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::Values(MakeTuple(1, false, 0, true, false, false, true)));
 
 INSTANTIATE_TEST_CASE_P(
-    MidStreamParamSwitchBitrateAndFPS,
-    VideoEncodeAcceleratorTest,
-    ::testing::Values(MakeTuple(1, false, 0, true, false, true, true)));
-
-INSTANTIATE_TEST_CASE_P(
     MultipleEncoders,
     VideoEncodeAcceleratorTest,
     ::testing::Values(MakeTuple(3, false, 0, false, false, false, false),
-                      MakeTuple(3, false, 0, true, false, true, true)));
+                      MakeTuple(3, false, 0, true, false, false, true),
+                      MakeTuple(3, false, 0, true, false, true, false)));
 
 // TODO(posciak): more tests:
 // - async FeedEncoderWithOutput

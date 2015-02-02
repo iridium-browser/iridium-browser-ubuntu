@@ -199,7 +199,7 @@ TEST(ThreadTest, DISABLED_Main) {
 
 // Test that setting thread names doesn't cause a malfunction.
 // There's no easy way to verify the name was set properly at this time.
-TEST(ThreadTest, DISABLED_ON_MAC(Names)) {
+TEST(ThreadTest, Names) {
   // Default name
   Thread *thread;
   thread = new Thread();
@@ -222,7 +222,7 @@ TEST(ThreadTest, DISABLED_ON_MAC(Names)) {
 
 // Test that setting thread priorities doesn't cause a malfunction.
 // There's no easy way to verify the priority was set properly at this time.
-TEST(ThreadTest, DISABLED_ON_MAC(Priorities)) {
+TEST(ThreadTest, Priorities) {
   Thread *thread;
   thread = new Thread();
   EXPECT_TRUE(thread->SetPriority(PRIORITY_HIGH));
@@ -247,7 +247,9 @@ TEST(ThreadTest, DISABLED_ON_MAC(Priorities)) {
 
 }
 
-TEST(ThreadTest, DISABLED_ON_MAC(Wrap)) {
+TEST(ThreadTest, Wrap) {
+  Thread* current_thread = Thread::Current();
+  current_thread->UnwrapCurrent();
   CustomThread* cthread = new CustomThread();
   EXPECT_TRUE(cthread->WrapCurrent());
   EXPECT_TRUE(cthread->RunningForTest());
@@ -255,9 +257,10 @@ TEST(ThreadTest, DISABLED_ON_MAC(Wrap)) {
   cthread->UnwrapCurrent();
   EXPECT_FALSE(cthread->RunningForTest());
   delete cthread;
+  current_thread->WrapCurrent();
 }
 
-TEST(ThreadTest, DISABLED_ON_MAC(Invoke)) {
+TEST(ThreadTest, Invoke) {
   // Create and start the thread.
   Thread thread;
   thread.Start();
@@ -310,42 +313,64 @@ TEST(ThreadTest, ThreeThreadsInvoke) {
   thread_b.Start();
   thread_c.Start();
 
+  class LockedBool {
+   public:
+    explicit LockedBool(bool value) : value_(value) {}
+
+    void Set(bool value) {
+      CritScope lock(&crit_);
+      value_ = value;
+    }
+
+    bool Get() {
+      CritScope lock(&crit_);
+      return value_;
+    }
+
+   private:
+    CriticalSection crit_;
+    bool value_ GUARDED_BY(crit_);
+  };
+
   struct LocalFuncs {
-    static void Set(bool* out) { *out = true; }
-    static void InvokeSet(Thread* thread, bool* out) {
+    static void Set(LockedBool* out) { out->Set(true); }
+    static void InvokeSet(Thread* thread, LockedBool* out) {
       thread->Invoke<void>(Bind(&Set, out));
     }
 
     // Set |out| true and call InvokeSet on |thread|.
-    static void SetAndInvokeSet(bool* out, Thread* thread, bool* out_inner) {
-      *out = true;
+    static void SetAndInvokeSet(LockedBool* out,
+                                Thread* thread,
+                                LockedBool* out_inner) {
+      out->Set(true);
       InvokeSet(thread, out_inner);
     }
 
     // Asynchronously invoke SetAndInvokeSet on |thread1| and wait until
     // |thread1| starts the call.
     static void AsyncInvokeSetAndWait(
-        Thread* thread1, Thread* thread2, bool* out) {
-      bool async_invoked = false;
+        Thread* thread1, Thread* thread2, LockedBool* out) {
+      CriticalSection crit;
+      LockedBool async_invoked(false);
 
       AsyncInvoker invoker;
       invoker.AsyncInvoke<void>(
           thread1, Bind(&SetAndInvokeSet, &async_invoked, thread2, out));
 
-      EXPECT_TRUE_WAIT(async_invoked, 2000);
+      EXPECT_TRUE_WAIT(async_invoked.Get(), 2000);
     }
   };
 
-  bool thread_a_called = false;
+  LockedBool thread_a_called(false);
 
   // Start the sequence A --(invoke)--> B --(async invoke)--> C --(invoke)--> A.
   // Thread B returns when C receives the call and C should be blocked until A
   // starts to process messages.
   thread_b.Invoke<void>(Bind(&LocalFuncs::AsyncInvokeSetAndWait,
                              &thread_c, thread_a, &thread_a_called));
-  EXPECT_FALSE(thread_a_called);
+  EXPECT_FALSE(thread_a_called.Get());
 
-  EXPECT_TRUE_WAIT(thread_a_called, 2000);
+  EXPECT_TRUE_WAIT(thread_a_called.Get(), 2000);
 }
 
 class AsyncInvokeTest : public testing::Test {
@@ -377,7 +402,7 @@ class AsyncInvokeTest : public testing::Test {
   Thread* expected_thread_;
 };
 
-TEST_F(AsyncInvokeTest, DISABLED_FireAndForget) {
+TEST_F(AsyncInvokeTest, FireAndForget) {
   AsyncInvoker invoker;
   // Create and start the thread.
   Thread thread;
@@ -388,7 +413,7 @@ TEST_F(AsyncInvokeTest, DISABLED_FireAndForget) {
   EXPECT_TRUE_WAIT(called, kWaitTimeout);
 }
 
-TEST_F(AsyncInvokeTest, DISABLED_WithCallback) {
+TEST_F(AsyncInvokeTest, WithCallback) {
   AsyncInvoker invoker;
   // Create and start the thread.
   Thread thread;
@@ -401,7 +426,7 @@ TEST_F(AsyncInvokeTest, DISABLED_WithCallback) {
   EXPECT_EQ_WAIT(42, int_value_, kWaitTimeout);
 }
 
-TEST_F(AsyncInvokeTest, DISABLED_CancelInvoker) {
+TEST_F(AsyncInvokeTest, CancelInvoker) {
   // Create and start the thread.
   Thread thread;
   thread.Start();
@@ -417,7 +442,7 @@ TEST_F(AsyncInvokeTest, DISABLED_CancelInvoker) {
   EXPECT_EQ(0, int_value_);
 }
 
-TEST_F(AsyncInvokeTest, DISABLED_CancelCallingThread) {
+TEST_F(AsyncInvokeTest, CancelCallingThread) {
   AsyncInvoker invoker;
   { // Create and start the thread.
     Thread thread;
@@ -434,7 +459,7 @@ TEST_F(AsyncInvokeTest, DISABLED_CancelCallingThread) {
   EXPECT_EQ(0, int_value_);
 }
 
-TEST_F(AsyncInvokeTest, DISABLED_KillInvokerBeforeExecute) {
+TEST_F(AsyncInvokeTest, KillInvokerBeforeExecute) {
   Thread thread;
   thread.Start();
   {
@@ -451,7 +476,7 @@ TEST_F(AsyncInvokeTest, DISABLED_KillInvokerBeforeExecute) {
   EXPECT_EQ(0, int_value_);
 }
 
-TEST_F(AsyncInvokeTest, DISABLED_Flush) {
+TEST_F(AsyncInvokeTest, Flush) {
   AsyncInvoker invoker;
   bool flag1 = false;
   bool flag2 = false;
@@ -469,7 +494,7 @@ TEST_F(AsyncInvokeTest, DISABLED_Flush) {
   EXPECT_TRUE(flag2);
 }
 
-TEST_F(AsyncInvokeTest, DISABLED_FlushWithIds) {
+TEST_F(AsyncInvokeTest, FlushWithIds) {
   AsyncInvoker invoker;
   bool flag1 = false;
   bool flag2 = false;

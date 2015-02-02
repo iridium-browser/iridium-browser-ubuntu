@@ -323,7 +323,7 @@ TreeOutline.prototype.findTreeElement = function(representedObject, getParent)
  */
 TreeOutline.prototype.treeElementFromPoint = function(x, y)
 {
-    var node = this._childrenListNode.ownerDocument.elementFromPoint(x, y);
+    var node = this._childrenListNode.ownerDocument.deepElementFromPoint(x, y);
     if (!node)
         return null;
 
@@ -331,6 +331,15 @@ TreeOutline.prototype.treeElementFromPoint = function(x, y)
     if (listNode)
         return listNode.parentTreeElement || listNode.treeElement;
     return null;
+}
+
+/**
+ * @param {?Event} event
+ * @return {?TreeElement}
+ */
+TreeOutline.prototype.treeElementFromEvent = function(event)
+{
+    return event ? this.treeElementFromPoint(event.pageX, event.pageY) : null;
 }
 
 TreeOutline.prototype._treeKeyDown = function(event)
@@ -507,6 +516,16 @@ TreeElement.prototype = {
 
     get hasChildren() {
         return this._hasChildren;
+    },
+
+    /**
+     * Used inside subclasses.
+     *
+     * @param {boolean} hasChildren
+     */
+    setHasChildren: function(hasChildren)
+    {
+        this.hasChildren = hasChildren;
     },
 
     set hasChildren(x) {
@@ -819,6 +838,8 @@ TreeElement.prototype.reveal = function()
         currentAncestor = currentAncestor.parent;
     }
 
+    this.listItemElement.scrollIntoViewIfNeeded();
+
     this.onreveal();
 }
 
@@ -1008,8 +1029,9 @@ TreeElement.prototype.traversePreviousTreeElement = function(skipUnrevealed, don
 TreeElement.prototype.isEventWithinDisclosureTriangle = function(event)
 {
     // FIXME: We should not use getComputedStyle(). For that we need to get rid of using ::before for disclosure triangle. (http://webk.it/74446)
-    var paddingLeftValue = window.getComputedStyle(this._listItemNode).getPropertyCSSValue("padding-left");
-    var computedLeftPadding = paddingLeftValue ? paddingLeftValue.getFloatValue(CSSPrimitiveValue.CSS_PX) : 0;
+    var paddingLeftValue = window.getComputedStyle(this._listItemNode).paddingLeft;
+    console.assert(paddingLeftValue.endsWith("px"));
+    var computedLeftPadding = parseFloat(paddingLeftValue);
     var left = this._listItemNode.totalOffsetLeft() + computedLeftPadding;
     return event.pageX >= left && event.pageX <= left + this.arrowToggleWidth && this.hasChildren;
 }

@@ -6,10 +6,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/extensions/api/management/management_api.h"
-#include "chrome/browser/extensions/api/management/management_api_constants.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
+#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -17,6 +16,8 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/browser/api/management/management_api.h"
+#include "extensions/browser/api/management/management_api_constants.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
@@ -33,8 +34,8 @@ class ExtensionManagementApiBrowserTest : public ExtensionBrowserTest {
  protected:
   bool CrashEnabledExtension(const std::string& extension_id) {
     ExtensionHost* background_host =
-        ExtensionSystem::Get(browser()->profile())->
-            process_manager()->GetBackgroundHostForExtension(extension_id);
+        ProcessManager::Get(browser()->profile())
+            ->GetBackgroundHostForExtension(extension_id);
     if (!background_host)
       return false;
     content::CrashTab(background_host->host_contents());
@@ -215,7 +216,7 @@ class ExtensionManagementApiEscalationTest :
   // The id of the permissions escalation test extension we use.
   static const char kId[];
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     EXPECT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
     base::FilePath pem_path = test_data_dir_.
         AppendASCII("permissions_increase").AppendASCII("permissions.pem");
@@ -249,7 +250,7 @@ class ExtensionManagementApiEscalationTest :
                   const std::string& expected_error) {
     scoped_refptr<ManagementSetEnabledFunction> function(
         new ManagementSetEnabledFunction);
-    const char* enabled_string = enabled ? "true" : "false";
+    const char* const enabled_string = enabled ? "true" : "false";
     if (user_gesture)
       function->set_user_gesture(true);
     bool response = util::RunFunction(

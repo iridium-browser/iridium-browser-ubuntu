@@ -92,7 +92,7 @@ cr.define('cr.ui', function() {
 
     /**
      * Function used to create grid items.
-     * @return {function(new:cr.ui.ListItem, Object)}
+     * @return {function(new:cr.ui.ListItem, *)}
      */
     get itemConstructor() {
       return this.itemConstructor_;
@@ -155,7 +155,7 @@ cr.define('cr.ui', function() {
 
     /**
      * Cached item for measuring the default item size by measureItem().
-     * @type {ListItem}
+     * @type {cr.ui.ListItem}
      */
     cachedMeasuredItem_: null,
 
@@ -341,7 +341,7 @@ cr.define('cr.ui', function() {
     },
 
     /**
-     * @param {ListItem=} item The list item to measure.
+     * @param {cr.ui.ListItem=} item The list item to measure.
      * @return {number} The height of the given item. If the fixed height on CSS
      * is set by 'px', uses that value as height. Otherwise, measures the size.
      * @private
@@ -394,9 +394,9 @@ cr.define('cr.ui', function() {
     /**
      * Creates an item (dataModel.item(0)) and measures its height. The item is
      * cached instead of creating a new one every time..
-     * @param {ListItem=} opt_item The list item to use to do the measuring. If
-     *     this is not provided an item will be created based on the first value
-     *     in the model.
+     * @param {cr.ui.ListItem=} opt_item The list item to use to do the
+     *     measuring. If this is not provided an item will be created based on
+     *     the first value in the model.
      * @return {{height: number, marginTop: number, marginBottom: number,
      *     width: number, marginLeft: number, marginRight: number}}
      *     The height and width of the item, taking
@@ -521,6 +521,9 @@ cr.define('cr.ui', function() {
      * event.
      * @param {Event} e The blur event.
      * @private
+     * @suppress {checkTypes}
+     * TODO(dbeam): remove suppression when the extern
+     * Node.prototype.contains() will be fixed.
      */
     handleElementBlur_: function(e) {
       if (!this.contains(e.relatedTarget))
@@ -769,7 +772,7 @@ cr.define('cr.ui', function() {
      * Takes a value from the data model and finds the associated list item.
      * @param {*} value The value in the data model that we want to get the list
      *     item for.
-     * @return {ListItem} The first found list item or null if not found.
+     * @return {cr.ui.ListItem} The first found list item or null if not found.
      */
     getListItem: function(value) {
       var dataModel = this.dataModel;
@@ -783,7 +786,7 @@ cr.define('cr.ui', function() {
     /**
      * Find the list item element at the given index.
      * @param {number} index The index of the list item to get.
-     * @return {ListItem} The found list item or null if not found.
+     * @return {cr.ui.ListItem} The found list item or null if not found.
      */
     getListItemByIndex: function(index) {
       return this.cachedItems_[index] || null;
@@ -791,7 +794,7 @@ cr.define('cr.ui', function() {
 
     /**
      * Find the index of the given list item element.
-     * @param {ListItem} item The list item to get the index of.
+     * @param {HTMLLIElement} item The list item to get the index of.
      * @return {number} The index of the list item, or -1 if not found.
      */
     getIndexOfListItem: function(item) {
@@ -805,7 +808,7 @@ cr.define('cr.ui', function() {
     /**
      * Creates a new list item.
      * @param {*} value The value to use for the item.
-     * @return {!ListItem} The newly created list item.
+     * @return {!cr.ui.ListItem} The newly created list item.
      */
     createItem: function(value) {
       var item = new this.itemConstructor_(value);
@@ -1159,7 +1162,7 @@ cr.define('cr.ui', function() {
      * updated and restored. Assumed the listItem relates to the same data item
      * as the lead item in the begin of the batch update.
      *
-     * @param {ListItem} leadItem Already existing lead item.
+     * @param {cr.ui.ListItem} leadItem Already existing lead item.
      */
     restoreLeadItem: function(leadItem) {
       delete this.cachedItems_[leadItem.listIndex];
@@ -1202,7 +1205,7 @@ cr.define('cr.ui', function() {
      * the visible range).
      *
      * Item returned from this method won't be removed until it remains a lead
-     * item or til the data model changes (unlike other items that could be
+     * item or till the data model changes (unlike other items that could be
      * removed when they go out of the visible range).
      *
      * @return {cr.ui.ListItem} The lead item for the list.

@@ -63,7 +63,7 @@ static KeyedService* BuildSpellcheckService(content::BrowserContext* profile) {
 
 class SpellcheckCustomDictionaryTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Use SetTestingFactoryAndUse to force creation and initialization.
     SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
         &profile_, &BuildSpellcheckService);
@@ -118,12 +118,12 @@ class SyncErrorFactoryStub : public syncer::SyncErrorFactory {
  public:
   explicit SyncErrorFactoryStub(int* error_counter)
       : error_counter_(error_counter) {}
-  virtual ~SyncErrorFactoryStub() {}
+  ~SyncErrorFactoryStub() override {}
 
   // Overridden from syncer::SyncErrorFactory:
-  virtual syncer::SyncError CreateAndUploadError(
+  syncer::SyncError CreateAndUploadError(
       const tracked_objects::Location& location,
-      const std::string& message) OVERRIDE {
+      const std::string& message) override {
     (*error_counter_)++;
     return syncer::SyncError(location,
                              syncer::SyncError::DATATYPE_ERROR,
@@ -146,9 +146,11 @@ class DictionaryObserverCounter : public SpellcheckCustomDictionary::Observer {
   int changes() const { return changes_; }
 
   // Overridden from SpellcheckCustomDictionary::Observer:
-  virtual void OnCustomDictionaryLoaded() OVERRIDE { loads_++; }
-  virtual void OnCustomDictionaryChanged(
-      const SpellcheckCustomDictionary::Change& change) OVERRIDE { changes_++; }
+  void OnCustomDictionaryLoaded() override { loads_++; }
+  void OnCustomDictionaryChanged(
+      const SpellcheckCustomDictionary::Change& change) override {
+    changes_++;
+  }
 
  private:
   int loads_;

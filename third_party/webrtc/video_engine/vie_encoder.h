@@ -192,6 +192,10 @@ class ViEEncoder
   int TimeToSendPadding(int bytes);
  private:
   bool EncoderPaused() const EXCLUSIVE_LOCKS_REQUIRED(data_cs_);
+  void TraceFrameDropStart() EXCLUSIVE_LOCKS_REQUIRED(data_cs_);
+  void TraceFrameDropEnd() EXCLUSIVE_LOCKS_REQUIRED(data_cs_);
+
+  void UpdateHistograms();
 
   int32_t engine_id_;
   const int channel_id_;
@@ -235,6 +239,7 @@ class ViEEncoder
   QMVideoSettingsCallback* qm_callback_;
   bool video_suspended_ GUARDED_BY(data_cs_);
   I420FrameCallback* pre_encode_callback_ GUARDED_BY(callback_cs_);
+  const int64_t start_ms_;
 };
 
 }  // namespace webrtc

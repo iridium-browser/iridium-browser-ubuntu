@@ -57,6 +57,7 @@ namespace blink {
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebCachedURLRequest;
+class WebCallback;
 class WebColorChooser;
 class WebColorChooserClient;
 class WebContentDecryptionModule;
@@ -67,7 +68,6 @@ class WebExternalPopupMenu;
 class WebExternalPopupMenuClient;
 class WebFormElement;
 class WebGeolocationClient;
-class WebInputEvent;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMIDIClient;
@@ -78,11 +78,11 @@ class WebServiceWorkerProviderClient;
 class WebSocketHandle;
 class WebNode;
 class WebPlugin;
+class WebPluginPlaceholder;
 class WebRTCPeerConnectionHandler;
 class WebScreenOrientationClient;
 class WebSharedWorker;
 class WebSharedWorkerClient;
-class WebSocketStreamHandle;
 class WebString;
 class WebURL;
 class WebURLLoader;
@@ -101,6 +101,9 @@ struct WebURLError;
 class WebFrameClient {
 public:
     // Factory methods -----------------------------------------------------
+
+    // May return null.
+    virtual WebPluginPlaceholder* createPluginPlaceholder(WebLocalFrame*, const WebPluginParams&) { return 0; }
 
     // May return null.
     virtual WebPlugin* createPlugin(WebLocalFrame*, const WebPluginParams&) { return 0; }
@@ -323,6 +326,12 @@ public:
     virtual WebNotificationPresenter* notificationPresenter() { return 0; }
 
 
+    // Push API ---------------------------------------------------
+
+    // Requests permission to use the Push API in the origin of this frame.
+    virtual void requestPushPermission(WebCallback* callback) { }
+
+
     // Editing -------------------------------------------------------------
 
     // These methods allow the client to intercept and overrule editing
@@ -487,12 +496,7 @@ public:
 
     // WebSocket -----------------------------------------------------
 
-    // A WebSocket object is going to open a new socket stream connection. Used
-    // by the old WebSocket implementation.
-    virtual void willOpenSocketStream(WebSocketStreamHandle*) { }
-
-    // A WebSocket object is going to open a new WebSocket connection. Used by
-    // the new WebSocket implementation.
+    // A WebSocket object is going to open a new WebSocket connection.
     virtual void willOpenWebSocket(WebSocketHandle*) { }
 
 
@@ -549,10 +553,6 @@ public:
     // Extensions3D.h in WebCore/platform/graphics).
     virtual void didLoseWebGLContext(WebLocalFrame*, int) { }
 
-    // FIXME: Remove this method once we have input routing in the browser
-    // process. See http://crbug.com/339659.
-    virtual void forwardInputEvent(const WebInputEvent*) { }
-
     // Send initial drawing parameters to a child frame that is being rendered out of process.
     virtual void initializeChildFrame(const WebRect& frameRect, float scaleFactor) { }
 
@@ -567,10 +567,24 @@ public:
     // Notifies embedder about an accessibility event.
     virtual void postAccessibilityEvent(const WebAXObject&, WebAXEvent) { }
 
+    // Provides accessibility information about a find in page result.
+    virtual void handleAccessibilityFindInPageResult(
+        int identifier,
+        int matchIndex,
+        const WebAXObject& startObject,
+        int startOffset,
+        const WebAXObject& endObject,
+        int endOffset) { }
+
     // ServiceWorker -------------------------------------------------------
 
-    // Whether the frame is controlled by the ServiceWorker
-    virtual bool isControlledByServiceWorker() { return false; }
+    // Whether the document associated with WebDataSource is controlled by the
+    // ServiceWorker.
+    virtual bool isControlledByServiceWorker(WebDataSource&) { return false; }
+
+    // Returns an identifier of the service worker controlling the document
+    // associated with the WebDataSource.
+    virtual int64_t serviceWorkerID(WebDataSource&) { return -1; }
 
 protected:
     virtual ~WebFrameClient() { }

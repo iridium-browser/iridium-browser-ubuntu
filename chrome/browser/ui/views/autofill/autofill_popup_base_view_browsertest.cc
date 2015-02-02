@@ -32,6 +32,8 @@ class MockAutofillPopupViewDelegate : public AutofillPopupViewDelegate {
   // TODO(jdduke): Mock this method upon resolution of crbug.com/352463.
   MOCK_CONST_METHOD0(popup_bounds, gfx::Rect&());
   MOCK_METHOD0(container_view, gfx::NativeView());
+  MOCK_CONST_METHOD0(element_bounds, gfx::RectF&());
+  MOCK_CONST_METHOD0(IsRTL, bool());
 };
 
 }  // namespace
@@ -41,7 +43,7 @@ class AutofillPopupBaseViewTest : public InProcessBrowserTest {
   AutofillPopupBaseViewTest() {}
   virtual ~AutofillPopupBaseViewTest() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     gfx::NativeView native_view =
         browser()->tab_strip_model()->GetActiveWebContents()->GetNativeView();
     EXPECT_CALL(mock_delegate_, container_view())

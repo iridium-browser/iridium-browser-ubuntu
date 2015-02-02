@@ -35,12 +35,12 @@
 WebInspector.NativeBreakpointsSidebarPane = function(title)
 {
     WebInspector.SidebarPane.call(this, title);
-    this.registerRequiredCSS("breakpointsList.css");
+    this.registerRequiredCSS("components/breakpointsList.css");
 
-    this.listElement = document.createElement("ol");
+    this.listElement = createElement("ol");
     this.listElement.className = "breakpoint-list";
 
-    this.emptyElement = document.createElement("div");
+    this.emptyElement = createElement("div");
     this.emptyElement.className = "info";
     this.emptyElement.textContent = WebInspector.UIString("No Breakpoints");
 

@@ -11,13 +11,12 @@
 WebInspector.DevicesView = function()
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("devicesView.css");
+    this.registerRequiredCSS("devices/devicesView.css");
     this.element.classList.add("devices");
     this._devicesHelp = this.element.createChild("div");
-    this._devicesHelp.innerHTML = WebInspector.UIString("No devices detected. \
-        Please read the <a href=\"https://developers.google.com/chrome-developer\
-        -tools/docs/remote-debugging\"> remote debugging documentation</a> to \
-        verify your device is enabled for USB debugging.");
+    this._devicesHelp.innerHTML = WebInspector.UIString("No devices detected. " +
+        "Please read the <a href=\"https://developers.google.com/chrome-developer-tools/docs/remote-debugging\"> remote debugging documentation</a> " +
+        "to verify your device is enabled for USB debugging.");
     this.element.createChild("div", "devices-info").innerHTML = WebInspector.UIString("Click \"Try here\" button, to open the current page in the selected remote browser.");
     this._devicesList = this.element.createChild("div");
     this._devicesList.cellSpacing = 0;
@@ -147,7 +146,7 @@ WebInspector.DevicesView.prototype = {
                 var incompatibleVersion = browser.hasOwnProperty("compatibleVersion") && !browser.compatibleVersion;
                 var browserSection = deviceSection.querySelector("#" + sanitizeForId(browser.id));
                 if (!browserSection) {
-                    browserSection = document.createElementWithClass("div", "browser");
+                    browserSection = createElementWithClass("div", "browser");
                     browserSection.id = sanitizeForId(browser.id);
                     insertChildSortedById(deviceSection, browserSection);
 

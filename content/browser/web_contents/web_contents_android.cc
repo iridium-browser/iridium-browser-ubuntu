@@ -99,6 +99,15 @@ ScopedJavaLocalRef<jstring> WebContentsAndroid::GetVisibleURL(
       env, web_contents_->GetVisibleURL().spec());
 }
 
+bool WebContentsAndroid::IsLoading(JNIEnv* env, jobject obj) const {
+  return web_contents_->IsLoading();
+}
+
+bool WebContentsAndroid::IsLoadingToDifferentDocument(JNIEnv* env,
+                                                      jobject obj) const {
+  return web_contents_->IsLoadingToDifferentDocument();
+}
+
 void WebContentsAndroid::Stop(JNIEnv* env, jobject obj) {
   web_contents_->Stop();
 }
@@ -151,13 +160,11 @@ void WebContentsAndroid::SetHasPendingNavigationTransitionForTesting(
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      base::Bind(&TransitionRequestManager::AddPendingTransitionRequestData,
-                 base::Unretained(TransitionRequestManager::GetInstance()),
-                 frame->GetProcess()->GetID(),
-                 frame->GetRoutingID(),
-                 "*",
-                 "",
-                 ""));
+      base::Bind(
+          &TransitionRequestManager::AddPendingTransitionRequestDataForTesting,
+          base::Unretained(TransitionRequestManager::GetInstance()),
+          frame->GetProcess()->GetID(),
+          frame->GetRoutingID()));
 }
 
 void WebContentsAndroid::SetupTransitionView(JNIEnv* env,
@@ -174,6 +181,11 @@ void WebContentsAndroid::BeginExitTransition(JNIEnv* env,
   web_contents_->GetMainFrame()->Send(new FrameMsg_BeginExitTransition(
       web_contents_->GetMainFrame()->GetRoutingID(),
       ConvertJavaStringToUTF8(env, css_selector)));
+}
+
+void WebContentsAndroid::ClearNavigationTransitionData(JNIEnv* env,
+                                                       jobject jobj) {
+  static_cast<WebContentsImpl*>(web_contents_)->ClearNavigationTransitionData();
 }
 
 void WebContentsAndroid::OnHide(JNIEnv* env, jobject obj) {
@@ -291,7 +303,7 @@ void WebContentsAndroid::DidDeferAfterResponseStarted(
   JNIEnv* env = AttachCurrentThread();
   std::vector<GURL> entering_stylesheets;
   std::string transition_color;
-  if (transition_data.response_headers) {
+  if (transition_data.response_headers.get()) {
     TransitionRequestManager::ParseTransitionStylesheetsFromHeaders(
         transition_data.response_headers,
         entering_stylesheets,
@@ -363,6 +375,25 @@ void WebContentsAndroid::EvaluateJavaScript(JNIEnv* env,
 
   web_contents_->GetMainFrame()->ExecuteJavaScript(
       ConvertJavaStringToUTF16(env, script), js_callback);
+}
+
+// TODO(sgurun) add support for posting a frame whose name is known (only
+//               main frame is supported at this time, see crbug.com/389721)
+// TODO(sgurun) add support for passing message ports
+void WebContentsAndroid::PostMessageToFrame(JNIEnv* env, jobject obj,
+    jstring frame_name, jstring message, jstring source_origin,
+    jstring target_origin) {
+
+  RenderViewHost* host = web_contents_->GetRenderViewHost();
+  if (!host)
+    return;
+  ViewMsg_PostMessage_Params params;
+  params.source_origin = ConvertJavaStringToUTF16(env, source_origin);
+  params.target_origin = ConvertJavaStringToUTF16(env, target_origin);
+  params.data = ConvertJavaStringToUTF16(env, message);
+  params.is_data_raw_string = true;
+  params.source_routing_id = MSG_ROUTING_NONE;
+  host->Send(new ViewMsg_PostMessageEvent(host->GetRoutingID(), params));
 }
 
 }  // namespace content

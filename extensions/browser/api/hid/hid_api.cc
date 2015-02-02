@@ -72,10 +72,14 @@ bool HidAsyncApiFunction::PrePrepare() {
   set_work_thread_id(content::BrowserThread::FILE);
 #endif
   device_manager_ = HidDeviceManager::Get(browser_context());
-  DCHECK(device_manager_);
+  if (!device_manager_) {
+    return false;
+  }
   connection_manager_ =
       ApiResourceManager<HidConnectionResource>::Get(browser_context());
-  DCHECK(connection_manager_);
+  if (!connection_manager_) {
+    return false;
+  }
   return true;
 }
 
@@ -137,7 +141,7 @@ bool HidConnectFunction::Prepare() {
 }
 
 void HidConnectFunction::AsyncWorkStart() {
-  device::HidDeviceInfo device_info;
+  HidDeviceInfo device_info;
   if (!device_manager_->GetDeviceInfo(parameters_->device_id, &device_info)) {
     CompleteWithError(kErrorInvalidDeviceId);
     return;
@@ -151,12 +155,19 @@ void HidConnectFunction::AsyncWorkStart() {
 
   HidService* hid_service = device::DeviceClient::Get()->GetHidService();
   DCHECK(hid_service);
-  scoped_refptr<HidConnection> connection =
-      hid_service->Connect(device_info.device_id);
+
+  hid_service->Connect(
+      device_info.device_id,
+      base::Bind(&HidConnectFunction::OnConnectComplete, this));
+}
+
+void HidConnectFunction::OnConnectComplete(
+    scoped_refptr<HidConnection> connection) {
   if (!connection.get()) {
     CompleteWithError(kErrorFailedToOpenDevice);
     return;
   }
+
   int connection_id = connection_manager_->Add(
       new HidConnectionResource(extension_->id(), connection));
   SetResult(PopulateHidConnection(connection_id, connection));

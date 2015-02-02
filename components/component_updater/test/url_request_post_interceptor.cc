@@ -10,6 +10,7 @@
 #include "base/strings/stringprintf.h"
 #include "components/component_updater/test/test_configurator.h"
 #include "net/base/upload_bytes_element_reader.h"
+#include "net/base/upload_data_stream.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
@@ -30,12 +31,12 @@ class URLRequestMockJob : public net::URLRequestSimpleJob {
         response_body_(response_body) {}
 
  protected:
-  virtual int GetResponseCode() const OVERRIDE { return response_code_; }
+  int GetResponseCode() const override { return response_code_; }
 
-  virtual int GetData(std::string* mime_type,
-                      std::string* charset,
-                      std::string* data,
-                      const net::CompletionCallback& callback) const OVERRIDE {
+  int GetData(std::string* mime_type,
+              std::string* charset,
+              std::string* data,
+              const net::CompletionCallback& callback) const override {
     mime_type->assign("text/plain");
     charset->assign("US-ASCII");
     data->assign(response_body_);
@@ -43,7 +44,7 @@ class URLRequestMockJob : public net::URLRequestSimpleJob {
   }
 
  private:
-  virtual ~URLRequestMockJob() {}
+  ~URLRequestMockJob() override {}
 
   int response_code_;
   std::string response_body_;
@@ -168,11 +169,11 @@ class URLRequestPostInterceptor::Delegate : public net::URLRequestInterceptor {
   }
 
  private:
-  virtual ~Delegate() {}
+  ~Delegate() override {}
 
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
 
     // Only intercepts POST.
@@ -198,7 +199,7 @@ class URLRequestPostInterceptor::Delegate : public net::URLRequestInterceptor {
 
     const net::UploadDataStream* stream = request->get_upload();
     const net::UploadBytesElementReader* reader =
-        stream->element_readers()[0]->AsBytesReader();
+        (*stream->GetElementReaders())[0]->AsBytesReader();
     const int size = reader->length();
     scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(size));
     const std::string request_body(reader->bytes());

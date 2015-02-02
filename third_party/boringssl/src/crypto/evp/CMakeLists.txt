@@ -5,6 +5,7 @@ add_library(
 
 	OBJECT
 
+	algorithm.c
 	asn1.c
 	digestsign.c
 	evp.c
@@ -22,9 +23,9 @@ add_library(
 
 
 add_executable(
-	example_sign
+	evp_test
 
-	example_sign.c
+	evp_test.c
 )
 
-target_link_libraries(example_sign crypto)
+target_link_libraries(evp_test crypto)

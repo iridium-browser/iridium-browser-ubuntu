@@ -15,12 +15,11 @@ class PlatformChannelFactory : public ChannelFactory {
       : handle_(handle), mode_(mode) {
   }
 
-  virtual std::string GetName() const OVERRIDE {
+  std::string GetName() const override {
     return handle_.name;
   }
 
-  virtual scoped_ptr<Channel> BuildChannel(
-      Listener* listener) OVERRIDE {
+  scoped_ptr<Channel> BuildChannel(Listener* listener) override {
     return Channel::Create(handle_, mode_, listener);
   }
 

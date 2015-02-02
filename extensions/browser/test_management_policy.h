@@ -21,7 +21,8 @@ class TestManagementPolicyProvider : public ManagementPolicy::Provider {
     PROHIBIT_LOAD = 1 << 0,
     PROHIBIT_MODIFY_STATUS = 1 << 1,
     MUST_REMAIN_ENABLED = 1 << 2,
-    MUST_REMAIN_DISABLED = 1 << 3
+    MUST_REMAIN_DISABLED = 1 << 3,
+    MUST_REMAIN_INSTALLED = 1 << 4,
   };
 
   static std::string expected_error() {
@@ -34,26 +35,30 @@ class TestManagementPolicyProvider : public ManagementPolicy::Provider {
   void SetProhibitedActions(int prohibited_actions);
   void SetDisableReason(Extension::DisableReason reason);
 
-  virtual std::string GetDebugPolicyProviderName() const OVERRIDE;
+  std::string GetDebugPolicyProviderName() const override;
 
-  virtual bool UserMayLoad(const Extension* extension,
-                           base::string16* error) const OVERRIDE;
+  bool UserMayLoad(const Extension* extension,
+                   base::string16* error) const override;
 
-  virtual bool UserMayModifySettings(const Extension* extension,
-                                     base::string16* error) const OVERRIDE;
+  bool UserMayModifySettings(const Extension* extension,
+                             base::string16* error) const override;
 
-  virtual bool MustRemainEnabled(const Extension* extension,
-                                 base::string16* error) const OVERRIDE;
+  bool MustRemainEnabled(const Extension* extension,
+                         base::string16* error) const override;
 
-  virtual bool MustRemainDisabled(const Extension* extension,
-                                  Extension::DisableReason* reason,
-                                  base::string16* error) const OVERRIDE;
+  bool MustRemainDisabled(const Extension* extension,
+                          Extension::DisableReason* reason,
+                          base::string16* error) const override;
+
+  bool MustRemainInstalled(const Extension* extension,
+                           base::string16* error) const override;
 
  private:
   bool may_load_;
   bool may_modify_status_;
   bool must_remain_enabled_;
   bool must_remain_disabled_;
+  bool must_remain_installed_;
   Extension::DisableReason disable_reason_;
 
   base::string16 error_message_;

@@ -22,7 +22,7 @@ class ProfileResetGlobalError
       public base::SupportsWeakPtr<ProfileResetGlobalError> {
  public:
   explicit ProfileResetGlobalError(Profile* profile);
-  virtual ~ProfileResetGlobalError();
+  ~ProfileResetGlobalError() override;
 
   // Returns whether or not the reset prompt is supported on this platform.
   static bool IsSupportedOnPlatform();
@@ -39,14 +39,14 @@ class ProfileResetGlobalError
   void OnBubbleViewNoThanksButtonPressed();
 
   // GlobalError:
-  virtual bool HasMenuItem() OVERRIDE;
-  virtual int MenuItemCommandID() OVERRIDE;
-  virtual base::string16 MenuItemLabel() OVERRIDE;
-  virtual void ExecuteMenuItem(Browser* browser) OVERRIDE;
-  virtual bool HasBubbleView() OVERRIDE;
-  virtual bool HasShownBubbleView() OVERRIDE;
-  virtual void ShowBubbleView(Browser* browser) OVERRIDE;
-  virtual GlobalErrorBubbleViewBase* GetBubbleView() OVERRIDE;
+  bool HasMenuItem() override;
+  int MenuItemCommandID() override;
+  base::string16 MenuItemLabel() override;
+  void ExecuteMenuItem(Browser* browser) override;
+  bool HasBubbleView() override;
+  bool HasShownBubbleView() override;
+  void ShowBubbleView(Browser* browser) override;
+  GlobalErrorBubbleViewBase* GetBubbleView() override;
 
  private:
   Profile* profile_;

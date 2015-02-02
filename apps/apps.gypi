@@ -45,10 +45,6 @@
         'launcher.cc',
         'launcher.h',
         'metrics_names.h',
-        'saved_devices_service.cc',
-        'saved_devices_service.h',
-        'saved_devices_service_factory.cc',
-        'saved_devices_service_factory.h',
         'saved_files_service.cc',
         'saved_files_service.h',
         'saved_files_service_factory.cc',
@@ -79,7 +75,7 @@
         ],
         ['toolkit_views==1', {
           'dependencies': [
-            '../components/components.gyp:native_app_window',
+            '../extensions/extensions.gyp:extensions_browser',
             '../ui/strings/ui_strings.gyp:ui_strings',
             '../ui/views/views.gyp:views',
           ],

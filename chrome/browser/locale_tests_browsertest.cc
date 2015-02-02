@@ -30,7 +30,7 @@ class ScopedLocale {
       { "zh-TW", "zh_TW.UTF-8" }
     };
     bool found_locale = false;
-    for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kLocales); ++i) {
+    for (size_t i = 0; i < arraysize(kLocales); ++i) {
       if (kLocales[i].chrome_locale == locale) {
         found_locale = true;
         setenv("LC_ALL", kLocales[i].system_locale, 1);
@@ -69,7 +69,7 @@ class LocaleTestBase : public InProcessBrowserTest {
   explicit LocaleTestBase(const char* locale) : locale_(locale) {
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kLang, locale_.locale());
   }
 

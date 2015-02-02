@@ -13,10 +13,90 @@
 #include "SkMatrixUtils.h"
 #include "SkPicture.h"
 #include "SkReadBuffer.h"
+#include "SkResourceCache.h"
 
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
 #endif
+
+namespace {
+static unsigned gBitmapSkaderKeyNamespaceLabel;
+
+struct BitmapShaderKey : public SkResourceCache::Key {
+public:
+    BitmapShaderKey(uint32_t pictureID,
+                    const SkRect& tile,
+                    SkShader::TileMode tmx,
+                    SkShader::TileMode tmy,
+                    const SkSize& scale,
+                    const SkMatrix& localMatrix)
+        : fPictureID(pictureID)
+        , fTile(tile)
+        , fTmx(tmx)
+        , fTmy(tmy)
+        , fScale(scale)
+        , fLocalMatrix(localMatrix) {
+
+        static const size_t keySize = sizeof(fPictureID) +
+                                      sizeof(fTile) +
+                                      sizeof(fTmx) + sizeof(fTmy) +
+                                      sizeof(fScale) +
+                                      sizeof(fLocalMatrix);
+        // This better be packed.
+        SkASSERT(sizeof(uint32_t) * (&fEndOfStruct - &fPictureID) == keySize);
+        this->init(&gBitmapSkaderKeyNamespaceLabel, keySize);
+    }
+
+private:
+    uint32_t           fPictureID;
+    SkRect             fTile;
+    SkShader::TileMode fTmx, fTmy;
+    SkSize             fScale;
+    SkMatrix           fLocalMatrix;
+
+    SkDEBUGCODE(uint32_t fEndOfStruct;)
+};
+
+struct BitmapShaderRec : public SkResourceCache::Rec {
+    BitmapShaderRec(const BitmapShaderKey& key, SkShader* tileShader, size_t bitmapBytes)
+        : fKey(key)
+        , fShader(SkRef(tileShader))
+        , fBitmapBytes(bitmapBytes) {}
+
+    BitmapShaderKey        fKey;
+    SkAutoTUnref<SkShader> fShader;
+    size_t                 fBitmapBytes;
+
+    virtual const Key& getKey() const SK_OVERRIDE { return fKey; }
+    virtual size_t bytesUsed() const SK_OVERRIDE {
+        return sizeof(fKey) + sizeof(SkShader) + fBitmapBytes;
+    }
+
+    static bool Visitor(const SkResourceCache::Rec& baseRec, void* contextShader) {
+        const BitmapShaderRec& rec = static_cast<const BitmapShaderRec&>(baseRec);
+        SkAutoTUnref<SkShader>* result = reinterpret_cast<SkAutoTUnref<SkShader>*>(contextShader);
+
+        result->reset(SkRef(rec.fShader.get()));
+
+        SkBitmap tile;
+        rec.fShader.get()->asABitmap(&tile, NULL, NULL);
+        // FIXME: this doesn't protect the pixels from being discarded as soon as we unlock.
+        // Should be handled via a pixel ref generator instead
+        // (https://code.google.com/p/skia/issues/detail?id=3220).
+        SkAutoLockPixels alp(tile, true);
+        return tile.getPixels() != NULL;
+    }
+};
+
+static bool cache_try_alloc_pixels(SkBitmap* bitmap) {
+    SkBitmap::Allocator* allocator = SkResourceCache::GetAllocator();
+
+    return NULL != allocator
+        ? allocator->allocPixelRef(bitmap, NULL)
+        : bitmap->tryAllocPixels();
+}
+
+} // namespace
 
 SkPictureShader::SkPictureShader(const SkPicture* picture, TileMode tmx, TileMode tmy,
                                  const SkMatrix* localMatrix, const SkRect* tile)
@@ -103,11 +183,18 @@ SkShader* SkPictureShader::refBitmapShader(const SkMatrix& matrix, const SkMatri
     SkSize tileScale = SkSize::Make(SkIntToScalar(tileSize.width()) / fTile.width(),
                                     SkIntToScalar(tileSize.height()) / fTile.height());
 
-    SkAutoMutexAcquire ama(fCachedBitmapShaderMutex);
+    SkAutoTUnref<SkShader> tileShader;
+    BitmapShaderKey key(fPicture->uniqueID(),
+                        fTile,
+                        fTmx,
+                        fTmy,
+                        tileScale,
+                        this->getLocalMatrix());
 
-    if (!fCachedBitmapShader || tileScale != fCachedTileScale) {
+    if (!SkResourceCache::Find(key, BitmapShaderRec::Visitor, &tileShader)) {
         SkBitmap bm;
-        if (!bm.tryAllocN32Pixels(tileSize.width(), tileSize.height())) {
+        bm.setInfo(SkImageInfo::MakeN32Premul(tileSize));
+        if (!cache_try_alloc_pixels(&bm)) {
             return NULL;
         }
         bm.eraseColor(SK_ColorTRANSPARENT);
@@ -117,18 +204,14 @@ SkShader* SkPictureShader::refBitmapShader(const SkMatrix& matrix, const SkMatri
         canvas.translate(fTile.x(), fTile.y());
         canvas.drawPicture(fPicture);
 
-        fCachedTileScale = tileScale;
-
         SkMatrix shaderMatrix = this->getLocalMatrix();
         shaderMatrix.preScale(1 / tileScale.width(), 1 / tileScale.height());
-        fCachedBitmapShader.reset(CreateBitmapShader(bm, fTmx, fTmy, &shaderMatrix));
+        tileShader.reset(CreateBitmapShader(bm, fTmx, fTmy, &shaderMatrix));
+
+        SkResourceCache::Add(SkNEW_ARGS(BitmapShaderRec, (key, tileShader.get(), bm.getSize())));
     }
 
-    // Increment the ref counter inside the mutex to ensure the returned pointer is still valid.
-    // Otherwise, the pointer may have been overwritten on a different thread before the object's
-    // ref count was incremented.
-    fCachedBitmapShader.get()->ref();
-    return fCachedBitmapShader;
+    return tileShader.detach();
 }
 
 size_t SkPictureShader::contextSize() const {

@@ -31,19 +31,16 @@
 
 namespace blink {
 
-class ResourceFetcher;
-class TextResourceDecoder;
-
-class XSLStyleSheetResource FINAL : public StyleSheetResource {
+class XSLStyleSheetResource final : public StyleSheetResource {
 public:
     XSLStyleSheetResource(const ResourceRequest&, const String& charset);
 
     const String& sheet() const { return m_sheet; }
 
-    virtual void didAddClient(ResourceClient*) OVERRIDE;
+    virtual void didAddClient(ResourceClient*) override;
 
 protected:
-    virtual void checkNotify() OVERRIDE;
+    virtual void checkNotify() override;
 
     String m_sheet;
 };

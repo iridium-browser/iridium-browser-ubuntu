@@ -53,6 +53,7 @@
 #include "web/PopupContainerClient.h"
 #include "web/WebPopupMenuImpl.h"
 #include "web/WebViewImpl.h"
+#include <algorithm>
 #include <limits>
 
 namespace blink {
@@ -84,9 +85,9 @@ static PlatformWheelEvent constructRelativeWheelEvent(const PlatformWheelEvent& 
 }
 
 // static
-PassRefPtr<PopupContainer> PopupContainer::create(PopupMenuClient* client, bool deviceSupportsTouch)
+PassRefPtrWillBeRawPtr<PopupContainer> PopupContainer::create(PopupMenuClient* client, bool deviceSupportsTouch)
 {
-    return adoptRef(new PopupContainer(client, deviceSupportsTouch));
+    return adoptRefWillBeNoop(new PopupContainer(client, deviceSupportsTouch));
 }
 
 PopupContainer::PopupContainer(PopupMenuClient* client, bool deviceSupportsTouch)
@@ -98,8 +99,17 @@ PopupContainer::PopupContainer(PopupMenuClient* client, bool deviceSupportsTouch
 
 PopupContainer::~PopupContainer()
 {
+#if !ENABLE(OILPAN)
     if (m_listBox->parent())
         m_listBox->setParent(0);
+#endif
+}
+
+void PopupContainer::trace(Visitor* visitor)
+{
+    visitor->trace(m_frameView);
+    visitor->trace(m_listBox);
+    Widget::trace(visitor);
 }
 
 IntRect PopupContainer::layoutAndCalculateWidgetRectInternal(IntRect widgetRectInScreen, int targetControlHeight, const FloatRect& windowRect, const FloatRect& screen, bool isRTL, const int rtlOffset, const int verticalOffset, const IntSize& transformOffset, PopupContent* listBox, bool& needToResizeView)
@@ -285,7 +295,7 @@ bool PopupContainer::handleMouseMoveEvent(const PlatformMouseEvent& event)
 
 bool PopupContainer::handleMouseReleaseEvent(const PlatformMouseEvent& event)
 {
-    RefPtr<PopupContainer> protect(this);
+    RefPtrWillBeRawPtr<PopupContainer> protect(this);
     UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
     return m_listBox->handleMouseReleaseEvent(
         constructRelativeMouseEvent(event, this, m_listBox.get()));
@@ -394,7 +404,7 @@ void PopupContainer::showInRect(const FloatQuad& controlPosition, const IntSize&
     // The controlSize is the size of the select box. It's usually larger than
     // we need. Subtract border size so that usually the container will be
     // displayed exactly the same width as the select box.
-    m_listBox->setBaseWidth(max(controlSize.width() - borderSize * 2, 0));
+    m_listBox->setBaseWidth(std::max(controlSize.width() - borderSize * 2, 0));
 
     m_listBox->updateFromElement();
 
@@ -421,7 +431,7 @@ void PopupContainer::showInRect(const FloatQuad& controlPosition, const IntSize&
 
 IntRect PopupContainer::refresh(const IntRect& targetControlRect)
 {
-    m_listBox->setBaseWidth(max(m_controlSize.width() - borderSize * 2, 0));
+    m_listBox->setBaseWidth(std::max(m_controlSize.width() - borderSize * 2, 0));
     m_listBox->updateFromElement();
 
     IntPoint locationInWindow = m_frameView->contentsToWindow(targetControlRect.location());

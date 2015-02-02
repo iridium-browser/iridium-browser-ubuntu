@@ -35,6 +35,7 @@ class URLRequestContext;
 
 namespace storage {
 class QuotaManagerProxy;
+class SpecialStoragePolicy;
 }
 
 namespace content {
@@ -43,6 +44,7 @@ class EmbeddedWorkerRegistry;
 class ServiceWorkerCacheStorageManager;
 class ServiceWorkerContextObserver;
 class ServiceWorkerContextWrapper;
+class ServiceWorkerDatabaseTaskManager;
 class ServiceWorkerHandle;
 class ServiceWorkerJobCoordinator;
 class ServiceWorkerProviderHost;
@@ -59,8 +61,7 @@ class CONTENT_EXPORT ServiceWorkerContextCore
  public:
   typedef base::Callback<void(ServiceWorkerStatusCode status)> StatusCallback;
   typedef base::Callback<void(ServiceWorkerStatusCode status,
-                              int64 registration_id,
-                              int64 version_id)> RegistrationCallback;
+                              int64 registration_id)> RegistrationCallback;
   typedef base::Callback<
       void(ServiceWorkerStatusCode status)> UnregistrationCallback;
   typedef IDMap<ServiceWorkerProviderHost, IDMapOwnPointer> ProviderMap;
@@ -98,31 +99,32 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   ServiceWorkerContextCore(
       const base::FilePath& user_data_directory,
       const scoped_refptr<base::SequencedTaskRunner>& cache_task_runner,
-      const scoped_refptr<base::SequencedTaskRunner>& database_task_runner,
+      scoped_ptr<ServiceWorkerDatabaseTaskManager> database_task_runner_manager,
       const scoped_refptr<base::SingleThreadTaskRunner>& disk_cache_thread,
       storage::QuotaManagerProxy* quota_manager_proxy,
+      storage::SpecialStoragePolicy* special_storage_policy,
       ObserverListThreadSafe<ServiceWorkerContextObserver>* observer_list,
       ServiceWorkerContextWrapper* wrapper);
   ServiceWorkerContextCore(
       ServiceWorkerContextCore* old_context,
       ServiceWorkerContextWrapper* wrapper);
-  virtual ~ServiceWorkerContextCore();
+  ~ServiceWorkerContextCore() override;
 
   // ServiceWorkerVersion::Listener overrides.
-  virtual void OnWorkerStarted(ServiceWorkerVersion* version) OVERRIDE;
-  virtual void OnWorkerStopped(ServiceWorkerVersion* version) OVERRIDE;
-  virtual void OnVersionStateChanged(ServiceWorkerVersion* version) OVERRIDE;
-  virtual void OnErrorReported(ServiceWorkerVersion* version,
-                               const base::string16& error_message,
-                               int line_number,
-                               int column_number,
-                               const GURL& source_url) OVERRIDE;
-  virtual void OnReportConsoleMessage(ServiceWorkerVersion* version,
-                                      int source_identifier,
-                                      int message_level,
-                                      const base::string16& message,
-                                      int line_number,
-                                      const GURL& source_url) OVERRIDE;
+  void OnWorkerStarted(ServiceWorkerVersion* version) override;
+  void OnWorkerStopped(ServiceWorkerVersion* version) override;
+  void OnVersionStateChanged(ServiceWorkerVersion* version) override;
+  void OnErrorReported(ServiceWorkerVersion* version,
+                       const base::string16& error_message,
+                       int line_number,
+                       int column_number,
+                       const GURL& source_url) override;
+  void OnReportConsoleMessage(ServiceWorkerVersion* version,
+                              int source_identifier,
+                              int message_level,
+                              const base::string16& message,
+                              int line_number,
+                              const GURL& source_url) override;
 
   ServiceWorkerStorage* storage() { return storage_.get(); }
   ServiceWorkerCacheStorageManager* cache_manager() {
@@ -152,6 +154,11 @@ class CONTENT_EXPORT ServiceWorkerContextCore
                              const RegistrationCallback& callback);
   void UnregisterServiceWorker(const GURL& pattern,
                                const UnregistrationCallback& callback);
+  // Callback is called issued after all unregistrations occur.  The Status
+  // is populated as SERVICE_WORKER_OK if all succeed, or SERVICE_WORKER_FAILED
+  // if any did not succeed.
+  void UnregisterServiceWorkers(const GURL& origin,
+                                const UnregistrationCallback& callback);
   void UpdateServiceWorker(ServiceWorkerRegistration* registration);
 
   // This class maintains collections of live instances, this class
@@ -195,12 +202,16 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   void RegistrationComplete(const GURL& pattern,
                             const RegistrationCallback& callback,
                             ServiceWorkerStatusCode status,
-                            ServiceWorkerRegistration* registration,
-                            ServiceWorkerVersion* version);
+                            ServiceWorkerRegistration* registration);
 
   void UnregistrationComplete(const GURL& pattern,
                               const UnregistrationCallback& callback,
                               ServiceWorkerStatusCode status);
+
+  void DidGetAllRegistrationsForUnregisterForOrigin(
+      const UnregistrationCallback& result,
+      const GURL& origin,
+      const std::vector<ServiceWorkerRegistrationInfo>& registrations);
 
   base::WeakPtrFactory<ServiceWorkerContextCore> weak_factory_;
   // It's safe to store a raw pointer instead of a scoped_refptr to |wrapper_|

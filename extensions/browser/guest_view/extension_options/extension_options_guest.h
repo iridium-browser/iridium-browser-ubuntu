@@ -27,48 +27,45 @@ class ExtensionOptionsGuest
       int guest_instance_id);
 
   // GuestViewBase implementation.
-  virtual void CreateWebContents(
-      const std::string& embedder_extension_id,
-      int embedder_render_process_id,
-      const GURL& embedder_site_url,
-      const base::DictionaryValue& create_params,
-      const WebContentsCreatedCallback& callback) OVERRIDE;
-  virtual void DidAttachToEmbedder() OVERRIDE;
-  virtual void DidInitialize() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
-  virtual const char* GetAPINamespace() const OVERRIDE;
-  virtual int GetTaskPrefix() const OVERRIDE;
-  virtual void GuestSizeChangedDueToAutoSize(
-      const gfx::Size& old_size,
-      const gfx::Size& new_size) OVERRIDE;
-  virtual bool IsAutoSizeSupported() const OVERRIDE;
+  void CreateWebContents(const std::string& embedder_extension_id,
+                         int embedder_render_process_id,
+                         const GURL& embedder_site_url,
+                         const base::DictionaryValue& create_params,
+                         const WebContentsCreatedCallback& callback) override;
+  void DidAttachToEmbedder() override;
+  void DidInitialize() override;
+  void DidStopLoading() override;
+  const char* GetAPINamespace() const override;
+  int GetTaskPrefix() const override;
+  void GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
+                                     const gfx::Size& new_size) override;
+  bool IsAutoSizeSupported() const override;
 
   // ExtensionFunctionDispatcher::Delegate implementation.
-  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
+  content::WebContents* GetAssociatedWebContents() const override;
 
   // content::WebContentsDelegate implementation.
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
-  virtual void CloseContents(content::WebContents* source) OVERRIDE;
-  virtual bool HandleContextMenu(
-      const content::ContextMenuParams& params) OVERRIDE;
-  virtual bool ShouldCreateWebContents(
+      const content::OpenURLParams& params) override;
+  void CloseContents(content::WebContents* source) override;
+  bool HandleContextMenu(const content::ContextMenuParams& params) override;
+  bool ShouldCreateWebContents(
       content::WebContents* web_contents,
       int route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,
       const std::string& partition_id,
-      content::SessionStorageNamespace* session_storage_namespace) OVERRIDE;
+      content::SessionStorageNamespace* session_storage_namespace) override;
 
   // content::WebContentsObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
  private:
   ExtensionOptionsGuest(content::BrowserContext* browser_context,
                         int guest_instance_id);
-  virtual ~ExtensionOptionsGuest();
+  ~ExtensionOptionsGuest() override;
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
   void SetUpAutoSize();
 
@@ -77,6 +74,7 @@ class ExtensionOptionsGuest
   scoped_ptr<extensions::ExtensionOptionsGuestDelegate>
       extension_options_guest_delegate_;
   GURL options_page_;
+  bool has_navigated_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionOptionsGuest);
 };

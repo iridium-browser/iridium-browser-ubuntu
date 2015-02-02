@@ -23,7 +23,6 @@
 #ifndef FETile_h
 #define FETile_h
 
-#include "platform/graphics/filters/Filter.h"
 #include "platform/graphics/filters/FilterEffect.h"
 
 namespace blink {
@@ -32,18 +31,16 @@ class PLATFORM_EXPORT FETile : public FilterEffect {
 public:
     static PassRefPtr<FETile> create(Filter* filter);
 
-    virtual PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder*) OVERRIDE;
+    virtual PassRefPtr<SkImageFilter> createImageFilter(SkiaImageFilterBuilder*) override;
 
-    virtual FloatRect mapPaintRect(const FloatRect&, bool forward = true) OVERRIDE FINAL;
+    virtual FloatRect mapPaintRect(const FloatRect&, bool forward = true) override final;
 
-    virtual FilterEffectType filterEffectType() const OVERRIDE { return FilterEffectTypeTile; }
+    virtual FilterEffectType filterEffectType() const override { return FilterEffectTypeTile; }
 
-    virtual TextStream& externalRepresentation(TextStream&, int indention) const OVERRIDE;
+    virtual TextStream& externalRepresentation(TextStream&, int indention) const override;
 
 private:
     FETile(Filter*);
-
-    virtual void applySoftware() OVERRIDE;
 };
 
 } // namespace blink

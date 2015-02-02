@@ -18,6 +18,13 @@
 namespace gpu {
 namespace gles2 {
 
+// Mapping between variable name and info.
+typedef base::hash_map<std::string, sh::Attribute> AttributeMap;
+typedef base::hash_map<std::string, sh::Uniform> UniformMap;
+typedef base::hash_map<std::string, sh::Varying> VaryingMap;
+// Mapping between hashed name and original name.
+typedef base::hash_map<std::string, std::string> NameMap;
+
 // Translates a GLSL ES 2.0 shader to desktop GLSL shader, or just
 // validates GLSL ES 2.0 shaders on a true GLSL ES implementation.
 class ShaderTranslatorInterface {
@@ -26,42 +33,6 @@ class ShaderTranslatorInterface {
     kGlsl,
     kGlslES
   };
-
-  struct VariableInfo {
-    VariableInfo()
-        : type(0),
-          size(0),
-          precision(SH_PRECISION_UNDEFINED),
-          static_use(0) {
-    }
-
-    VariableInfo(int _type, int _size, int _precision,
-                 int _static_use, std::string _name)
-        : type(_type),
-          size(_size),
-          precision(_precision),
-          static_use(_static_use),
-          name(_name) {
-    }
-    bool operator==(
-        const ShaderTranslatorInterface::VariableInfo& other) const {
-      return type == other.type &&
-          size == other.size &&
-          precision == other.precision &&
-          strcmp(name.c_str(), other.name.c_str()) == 0;
-    }
-
-    int type;
-    int size;
-    int precision;
-    int static_use;
-    std::string name;  // name in the original shader source.
-  };
-
-  // Mapping between variable name and info.
-  typedef base::hash_map<std::string, VariableInfo> VariableMap;
-  // Mapping between hashed name and original name.
-  typedef base::hash_map<std::string, std::string> NameMap;
 
   // Initializes the translator.
   // Must be called once before using the translator object.
@@ -80,9 +51,9 @@ class ShaderTranslatorInterface {
   virtual bool Translate(const std::string& shader_source,
                          std::string* info_log,
                          std::string* translated_shader,
-                         VariableMap* attrib_map,
-                         VariableMap* uniform_map,
-                         VariableMap* varying_map,
+                         AttributeMap* attrib_map,
+                         UniformMap* uniform_map,
+                         VaryingMap* varying_map,
                          NameMap* name_map) const = 0;
 
   // Return a string that is unique for a specfic set of options that would
@@ -112,24 +83,22 @@ class GPU_EXPORT ShaderTranslator
   ShaderTranslator();
 
   // Overridden from ShaderTranslatorInterface.
-  virtual bool Init(
-      sh::GLenum shader_type,
-      ShShaderSpec shader_spec,
-      const ShBuiltInResources* resources,
-      GlslImplementationType glsl_implementation_type,
-      ShCompileOptions driver_bug_workarounds) OVERRIDE;
+  bool Init(sh::GLenum shader_type,
+            ShShaderSpec shader_spec,
+            const ShBuiltInResources* resources,
+            GlslImplementationType glsl_implementation_type,
+            ShCompileOptions driver_bug_workarounds) override;
 
   // Overridden from ShaderTranslatorInterface.
-  virtual bool Translate(const std::string& shader_source,
-                         std::string* info_log,
-                         std::string* translated_source,
-                         VariableMap* attrib_map,
-                         VariableMap* uniform_map,
-                         VariableMap* varying_map,
-                         NameMap* name_map) const OVERRIDE;
+  bool Translate(const std::string& shader_source,
+                 std::string* info_log,
+                 std::string* translated_source,
+                 AttributeMap* attrib_map,
+                 UniformMap* uniform_map,
+                 VaryingMap* varying_map,
+                 NameMap* name_map) const override;
 
-  virtual std::string GetStringForOptionsThatWouldAffectCompilation() const
-      OVERRIDE;
+  std::string GetStringForOptionsThatWouldAffectCompilation() const override;
 
   void AddDestructionObserver(DestructionObserver* observer);
   void RemoveDestructionObserver(DestructionObserver* observer);
@@ -137,7 +106,7 @@ class GPU_EXPORT ShaderTranslator
  private:
   friend class base::RefCounted<ShaderTranslator>;
 
-  virtual ~ShaderTranslator();
+  ~ShaderTranslator() override;
   int GetCompileOptions() const;
 
   ShHandle compiler_;

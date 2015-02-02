@@ -76,7 +76,7 @@ public:
     virtual int pixelSnappedOffsetWidth() const;
     virtual int pixelSnappedOffsetHeight() const;
 
-    virtual void updateFromStyle() OVERRIDE;
+    virtual void updateFromStyle() override;
 
     // This will work on inlines to return the bounding box of all of the lines' border boxes.
     virtual IntRect borderBoundingBox() const = 0;
@@ -126,12 +126,7 @@ public:
 
 
     LayoutUnit borderLogicalLeft() const { return style()->isHorizontalWritingMode() ? borderLeft() : borderTop(); }
-    LayoutUnit borderLogicalRight() const { return style()->isHorizontalWritingMode() ? borderRight() : borderBottom(); }
-    LayoutUnit borderLogicalWidth() const { return borderStart() + borderEnd(); }
-    LayoutUnit borderLogicalHeight() const { return borderBefore() + borderAfter(); }
 
-    LayoutUnit paddingLogicalLeft() const { return style()->isHorizontalWritingMode() ? paddingLeft() : paddingTop(); }
-    LayoutUnit paddingLogicalRight() const { return style()->isHorizontalWritingMode() ? paddingRight() : paddingBottom(); }
     LayoutUnit paddingLogicalWidth() const { return paddingStart() + paddingEnd(); }
     LayoutUnit paddingLogicalHeight() const { return paddingBefore() + paddingAfter(); }
 
@@ -161,18 +156,18 @@ public:
     virtual LayoutUnit lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const = 0;
     virtual int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const = 0;
 
-    virtual void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const OVERRIDE;
-    virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const OVERRIDE;
+    virtual void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const override;
+    virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const override;
 
-    virtual void setSelectionState(SelectionState) OVERRIDE;
+    virtual void setSelectionState(SelectionState) override;
 
     void contentChanged(ContentChangeType);
     bool hasAcceleratedCompositing() const;
 
-    virtual void computeLayerHitTestRects(LayerHitTestRects&) const OVERRIDE;
+    virtual void computeLayerHitTestRects(LayerHitTestRects&) const override;
 
 protected:
-    virtual void willBeDestroyed() OVERRIDE;
+    virtual void willBeDestroyed() override;
 
     LayoutPoint adjustedPositionRelativeToOffsetParent(const LayoutPoint&) const;
 
@@ -184,6 +179,7 @@ protected:
     LayoutRect localCaretRectForEmptyElement(LayoutUnit width, LayoutUnit textIndentOffset);
 
     bool hasAutoHeightOrContainingBlockWithAutoHeight() const;
+    RenderBlock* containingBlockForAutoHeightDetection(Length logicalHeight) const;
 
 public:
 
@@ -213,14 +209,14 @@ public:
     {
         moveChildrenTo(toBoxModelObject, startChild, endChild, 0, fullRemoveInsert);
     }
-    void moveChildrenTo(RenderBoxModelObject* toBoxModelObject, RenderObject* startChild, RenderObject* endChild, RenderObject* beforeChild, bool fullRemoveInsert = false);
+    virtual void moveChildrenTo(RenderBoxModelObject* toBoxModelObject, RenderObject* startChild, RenderObject* endChild, RenderObject* beforeChild, bool fullRemoveInsert = false);
 
     enum ScaleByEffectiveZoomOrNot { ScaleByEffectiveZoom, DoNotScaleByEffectiveZoom };
     IntSize calculateImageIntrinsicDimensions(StyleImage*, const IntSize& scaledPositioningAreaSize, ScaleByEffectiveZoomOrNot) const;
 
 private:
     LayoutUnit computedCSSPadding(const Length&) const;
-    virtual bool isBoxModelObject() const OVERRIDE FINAL { return true; }
+    virtual bool isBoxModelObject() const override final { return true; }
 };
 
 DEFINE_RENDER_OBJECT_TYPE_CASTS(RenderBoxModelObject, isBoxModelObject());

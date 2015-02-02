@@ -43,7 +43,10 @@ div.container {
 }
 
 div.header {
-  background: url(../images/header-optin-1x.png) no-repeat;
+  background: -webkit-image-set(
+      url(../images/header-optin-1x.png) 1x,
+      url(../images/header-optin-2x.png) 2x)
+      no-repeat;
   height: 240px;
   vertical-align: bottom;
 }
@@ -69,15 +72,18 @@ div.content {
 }
 
 .close {
-  background: url(../images/bt-close-1x.png);
+  background: -webkit-image-set(
+      url(../images/bt-close-1x.png) 1x,
+      url(../images/bt-close-2x.png) 2x);
   float: right;
   height: 60px;
   width: 60px;
 }
 
 
-button.grayed-out {
+.buttonbar button.grayed-out {
   color: rgba(0, 0, 0, .28);
+  text-transform: none;
 }
 
 .col-3 {
@@ -109,7 +115,7 @@ button.grayed-out {
   width: 16px;
 }
 
-a.link-button {
+a[is='action-link'] {
   display: inline-block;
   font-size: 14px;
   margin-top: 22px;
@@ -180,24 +186,45 @@ button.primary {
   color: rgb(213, 0, 0);
 }
 
+@-webkit-keyframes rotate {
+  from { -webkit-transform: rotate(0); }
+  to { -webkit-transform: rotate(359deg); }
+}
+
 .train.listening .icon {
-  background: url(../images/placeholder-loader-1x.png) no-repeat;
+  -webkit-animation: rotate 2s linear infinite;
+  background: -webkit-image-set(
+      url(../images/placeholder-loader-1x.png) 1x,
+      url(../images/placeholder-loader-2x.png) 2x)
+      no-repeat;
 }
 
 .train.not-started .icon {
-  background: url(../images/ic-check-gray-1x.png) no-repeat;
+  background: -webkit-image-set(
+      url(../images/ic-check-gray-1x.png) 1x,
+      url(../images/ic-check-gray-2x.png) 2x)
+      no-repeat;
 }
 
 .train.recorded .icon {
-  background: url(../images/ic-check-blue-1x.png) no-repeat;
+  background: -webkit-image-set(
+      url(../images/ic-check-blue-1x.png) 1x,
+      url(../images/ic-check-blue-2x.png) 2x)
+      no-repeat;
 }
 
 .train.error .icon {
-  background: url(../images/placeholder-loader-error-1x.png) no-repeat;
+  background: -webkit-image-set(
+      url(../images/ic-error-1x.png) 1x,
+      url(../images/ic-error-2x.png) 2x)
+      no-repeat;
 }
 
 .mic {
-  background: url(../images/mic-1x.png) no-repeat;
+  background: -webkit-image-set(
+      url(../images/mic-1x.png) 1x,
+      url(../images/mic-2x.png) 2x)
+      no-repeat;
   height: 80px;
   left: 666px;
   position: absolute;
@@ -212,7 +239,10 @@ button.primary {
 }
 
 .check .icon {
-  background: url(../images/ic-check-blue-1x.png) no-repeat;
+  background: -webkit-image-set(
+      url(../images/ic-check-blue-1x.png) 1x,
+      url(../images/ic-check-blue-2x.png) 2x)
+      no-repeat;
   display: inline-block;
   height: 24px;
   margin-right: 16px;

@@ -46,7 +46,7 @@ class MultiPartResponseClient : public blink::WebURLLoaderClient {
   // blink::WebURLLoaderClient implementation:
   virtual void didReceiveResponse(
       blink::WebURLLoader* loader,
-      const blink::WebURLResponse& response) OVERRIDE {
+      const blink::WebURLResponse& response) override {
     int64 byte_range_upper_bound, instance_size;
     if (!MultipartResponseDelegate::ReadContentRanges(response,
                                                       &byte_range_lower_bound_,
@@ -58,7 +58,7 @@ class MultiPartResponseClient : public blink::WebURLLoaderClient {
   virtual void didReceiveData(blink::WebURLLoader* loader,
                               const char* data,
                               int data_length,
-                              int encoded_data_length) OVERRIDE {
+                              int encoded_data_length) override {
     // TODO(ananta)
     // We should defer further loads on multipart resources on the same lines
     // as regular resources requested by plugins to prevent reentrancy.
@@ -114,6 +114,8 @@ PluginURLFetcher::PluginURLFetcher(PluginStreamUrl* plugin_stream,
   request_info.requestor_pid = origin_pid;
   request_info.request_type = RESOURCE_TYPE_OBJECT;
   request_info.routing_id = render_view_id;
+  // ServiceWorker is disabled for NPAPI.
+  request_info.skip_service_worker = true;
 
   RequestExtraData extra_data;
   extra_data.set_render_frame_id(render_frame_id);

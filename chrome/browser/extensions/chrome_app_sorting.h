@@ -25,45 +25,41 @@ class ExtensionScopedPrefs;
 class ChromeAppSorting : public AppSorting {
  public:
   ChromeAppSorting();
-  virtual ~ChromeAppSorting();
+  ~ChromeAppSorting() override;
 
   // AppSorting implementation:
-  virtual void SetExtensionScopedPrefs(ExtensionScopedPrefs* prefs) OVERRIDE;
-  virtual void SetExtensionSyncService(
-      ExtensionSyncService* extension_sync_service) OVERRIDE;
-  virtual void Initialize(
-      const extensions::ExtensionIdList& extension_ids) OVERRIDE;
-  virtual void FixNTPOrdinalCollisions() OVERRIDE;
-  virtual void EnsureValidOrdinals(
+  void SetExtensionScopedPrefs(ExtensionScopedPrefs* prefs) override;
+  void SetExtensionSyncService(
+      ExtensionSyncService* extension_sync_service) override;
+  void Initialize(const extensions::ExtensionIdList& extension_ids) override;
+  void FixNTPOrdinalCollisions() override;
+  void EnsureValidOrdinals(
       const std::string& extension_id,
-      const syncer::StringOrdinal& suggested_page) OVERRIDE;
-  virtual void OnExtensionMoved(
-      const std::string& moved_extension_id,
-      const std::string& predecessor_extension_id,
-      const std::string& successor_extension_id) OVERRIDE;
-  virtual syncer::StringOrdinal GetAppLaunchOrdinal(
-      const std::string& extension_id) const OVERRIDE;
-  virtual void SetAppLaunchOrdinal(
+      const syncer::StringOrdinal& suggested_page) override;
+  void OnExtensionMoved(const std::string& moved_extension_id,
+                        const std::string& predecessor_extension_id,
+                        const std::string& successor_extension_id) override;
+  syncer::StringOrdinal GetAppLaunchOrdinal(
+      const std::string& extension_id) const override;
+  void SetAppLaunchOrdinal(
       const std::string& extension_id,
-      const syncer::StringOrdinal& new_app_launch_ordinal) OVERRIDE;
-  virtual syncer::StringOrdinal CreateFirstAppLaunchOrdinal(
-      const syncer::StringOrdinal& page_ordinal) const OVERRIDE;
-  virtual syncer::StringOrdinal CreateNextAppLaunchOrdinal(
-      const syncer::StringOrdinal& page_ordinal) const OVERRIDE;
-  virtual syncer::StringOrdinal CreateFirstAppPageOrdinal() const OVERRIDE;
-  virtual syncer::StringOrdinal GetNaturalAppPageOrdinal() const OVERRIDE;
-  virtual syncer::StringOrdinal GetPageOrdinal(
-      const std::string& extension_id) const OVERRIDE;
-  virtual void SetPageOrdinal(
-      const std::string& extension_id,
-      const syncer::StringOrdinal& new_page_ordinal) OVERRIDE;
-  virtual void ClearOrdinals(const std::string& extension_id) OVERRIDE;
-  virtual int PageStringOrdinalAsInteger(
-      const syncer::StringOrdinal& page_ordinal) const OVERRIDE;
-  virtual syncer::StringOrdinal PageIntegerAsStringOrdinal(
-      size_t page_index) OVERRIDE;
-  virtual void SetExtensionVisible(const std::string& extension_id,
-                                   bool visible) OVERRIDE;
+      const syncer::StringOrdinal& new_app_launch_ordinal) override;
+  syncer::StringOrdinal CreateFirstAppLaunchOrdinal(
+      const syncer::StringOrdinal& page_ordinal) const override;
+  syncer::StringOrdinal CreateNextAppLaunchOrdinal(
+      const syncer::StringOrdinal& page_ordinal) const override;
+  syncer::StringOrdinal CreateFirstAppPageOrdinal() const override;
+  syncer::StringOrdinal GetNaturalAppPageOrdinal() const override;
+  syncer::StringOrdinal GetPageOrdinal(
+      const std::string& extension_id) const override;
+  void SetPageOrdinal(const std::string& extension_id,
+                      const syncer::StringOrdinal& new_page_ordinal) override;
+  void ClearOrdinals(const std::string& extension_id) override;
+  int PageStringOrdinalAsInteger(
+      const syncer::StringOrdinal& page_ordinal) const override;
+  syncer::StringOrdinal PageIntegerAsStringOrdinal(size_t page_index) override;
+  void SetExtensionVisible(const std::string& extension_id,
+                           bool visible) override;
 
  private:
   // The StringOrdinal is the app launch ordinal and the string is the extension

@@ -64,25 +64,25 @@ class ExtensionDialog : public views::DialogDelegate,
   extensions::ExtensionViewHost* host() const { return host_.get(); }
 
   // views::DialogDelegate override.
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual bool CanResize() const OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual bool ShouldShowWindowTitle() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
+  int GetDialogButtons() const override;
+  bool CanResize() const override;
+  ui::ModalType GetModalType() const override;
+  bool ShouldShowWindowTitle() const override;
+  base::string16 GetWindowTitle() const override;
+  void WindowClosing() override;
+  void DeleteDelegate() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
+  views::View* GetContentsView() override;
+  bool UseNewStyleForThisDialog() const override;
 
   // content::NotificationObserver overrides.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  protected:
-  virtual ~ExtensionDialog();
+  ~ExtensionDialog() override;
 
  private:
   friend class base::RefCounted<ExtensionDialog>;

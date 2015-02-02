@@ -23,13 +23,12 @@ class SharedBufferHandle : public Handle {
   // Copying and assignment allowed.
 };
 
-MOJO_COMPILE_ASSERT(sizeof(SharedBufferHandle) == sizeof(Handle),
-                    bad_size_for_cpp_SharedBufferHandle);
+static_assert(sizeof(SharedBufferHandle) == sizeof(Handle),
+              "Bad size for C++ SharedBufferHandle");
 
 typedef ScopedHandleBase<SharedBufferHandle> ScopedSharedBufferHandle;
-MOJO_COMPILE_ASSERT(sizeof(ScopedSharedBufferHandle) ==
-                        sizeof(SharedBufferHandle),
-                    bad_size_for_cpp_ScopedSharedBufferHandle);
+static_assert(sizeof(ScopedSharedBufferHandle) == sizeof(SharedBufferHandle),
+              "Bad size for C++ ScopedSharedBufferHandle");
 
 inline MojoResult CreateSharedBuffer(
     const MojoCreateSharedBufferOptions* options,
@@ -37,8 +36,8 @@ inline MojoResult CreateSharedBuffer(
     ScopedSharedBufferHandle* shared_buffer) {
   assert(shared_buffer);
   SharedBufferHandle handle;
-  MojoResult rv = MojoCreateSharedBuffer(options, num_bytes,
-                                         handle.mutable_value());
+  MojoResult rv =
+      MojoCreateSharedBuffer(options, num_bytes, handle.mutable_value());
   // Reset even on failure (reduces the chances that a "stale"/incorrect handle
   // will be used).
   shared_buffer->reset(handle);
@@ -92,16 +91,16 @@ class SharedBuffer {
 };
 
 inline SharedBuffer::SharedBuffer(uint64_t num_bytes) {
-  MojoResult result MOJO_ALLOW_UNUSED =
-      CreateSharedBuffer(NULL, num_bytes, &handle);
+  MojoResult result = CreateSharedBuffer(nullptr, num_bytes, &handle);
+  MOJO_ALLOW_UNUSED_LOCAL(result);
   assert(result == MOJO_RESULT_OK);
 }
 
 inline SharedBuffer::SharedBuffer(
     uint64_t num_bytes,
     const MojoCreateSharedBufferOptions& options) {
-  MojoResult result MOJO_ALLOW_UNUSED =
-      CreateSharedBuffer(&options, num_bytes, &handle);
+  MojoResult result = CreateSharedBuffer(&options, num_bytes, &handle);
+  MOJO_ALLOW_UNUSED_LOCAL(result);
   assert(result == MOJO_RESULT_OK);
 }
 

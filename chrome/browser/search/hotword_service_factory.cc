@@ -40,6 +40,14 @@ bool HotwordServiceFactory::IsHotwordAllowed(BrowserContext* context) {
 }
 
 // static
+bool HotwordServiceFactory::IsHotwordHardwareAvailable() {
+  // TODO(rlp, dgreid): return has_hotword_hardware()
+  // Fill in once the hardware has the correct interface implemented.
+  // In the meantime, this function can be used to get other parts moving.
+  return true;
+}
+
+// static
 int HotwordServiceFactory::GetCurrentError(BrowserContext* context) {
   HotwordService* hotword_service = GetForProfile(context);
   if (!hotword_service)
@@ -52,11 +60,17 @@ bool HotwordServiceFactory::IsMicrophoneAvailable() {
   return GetInstance()->microphone_available();
 }
 
+// static
+bool HotwordServiceFactory::IsAudioDeviceStateUpdated() {
+  return GetInstance()->audio_device_state_updated();
+}
+
 HotwordServiceFactory::HotwordServiceFactory()
     : BrowserContextKeyedServiceFactory(
         "HotwordService",
         BrowserContextDependencyManager::GetInstance()),
-      microphone_available_(false) {
+      microphone_available_(false),
+      audio_device_state_updated_(false) {
   // No dependencies.
 
   // Register with the device observer list to update the microphone
@@ -77,26 +91,17 @@ void HotwordServiceFactory::InitializeMicrophoneObserver() {
 void HotwordServiceFactory::OnUpdateAudioDevices(
     const content::MediaStreamDevices& devices) {
   microphone_available_ = !devices.empty();
+  audio_device_state_updated_ = true;
 }
 
 void HotwordServiceFactory::UpdateMicrophoneState() {
   // In order to trigger the monitor, just call getAudioCaptureDevices.
   content::MediaStreamDevices devices =
-      MediaCaptureDevicesDispatcher::GetInstance()->GetAudioCaptureDevices();
-
-  // If the monitor had not previously been started, there may be 0 devices
-  // even if that is not accurate. However, we can update the microphone
-  // availability state now. Either the number of devices will be correct or
-  // we know that the call above will start the monitor and the microphone
-  // state will be updated very soon and call OnUpdateAudioDevices.
-  OnUpdateAudioDevices(devices);
+    MediaCaptureDevicesDispatcher::GetInstance()->GetAudioCaptureDevices();
 }
 
 void HotwordServiceFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* prefs) {
-  prefs->RegisterBooleanPref(prefs::kHotwordSearchEnabled,
-                             false,
-                             user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   // Although this is default true, users will not send back information to
   // Google unless they have opted-in to Hotwording at which point they must
   // also confirm that they wish this preference to be true or opt out of it.
@@ -106,9 +111,16 @@ void HotwordServiceFactory::RegisterProfilePrefs(
   prefs->RegisterStringPref(prefs::kHotwordPreviousLanguage,
                             std::string(),
                             user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kHotwordAlwaysOnSearchEnabled,
+  prefs->RegisterBooleanPref(prefs::kHotwordAudioHistoryEnabled,
                              false,
                              user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  // Per-device settings (do not sync).
+  prefs->RegisterBooleanPref(prefs::kHotwordSearchEnabled,
+                             false,
+                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kHotwordAlwaysOnSearchEnabled,
+                             false,
+                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 KeyedService* HotwordServiceFactory::BuildServiceInstanceFor(

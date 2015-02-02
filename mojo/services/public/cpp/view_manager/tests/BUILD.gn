@@ -18,9 +18,10 @@ test("mojo_view_manager_lib_unittests") {
     "//ui/gfx",
     "//ui/gfx:test_support",
     "//mojo/application_manager",
+    "//mojo/converters/geometry",
     "//mojo/environment:chromium",
-    "//mojo/services/public/interfaces/geometry",
     "//mojo/services/public/cpp/geometry",
+    "//mojo/services/public/interfaces/geometry",
     "//mojo/shell:test_support",
     "//mojo/services/public/interfaces/view_manager",
     "//mojo/services/public/cpp/view_manager",
@@ -28,6 +29,6 @@ test("mojo_view_manager_lib_unittests") {
   if (use_aura) {
     deps += [ "//mojo/services/public/cpp/view_manager/lib:run_unittests" ]
   } else {
-    deps += [ "//mojo/common/test:run_all_unittests" ]
+    deps += [ "//mojo/edk/test:run_all_unittests" ]
   }
 }

@@ -12,21 +12,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/scoped_observer.h"
+#include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/browser/content_settings/content_settings_usages_state.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
-#include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
-#include "content/public/common/media_stream_request.h"
 #include "net/cookies/canonical_cookie.h"
 
-class CookiesTreeModel;
 class HostContentSettingsMap;
-class Profile;
 
 namespace content {
 class RenderViewHost;
@@ -45,14 +42,23 @@ class TabSpecificContentSettings
       public content_settings::Observer,
       public content::WebContentsUserData<TabSpecificContentSettings> {
  public:
-  enum MicrophoneCameraState {
-    MICROPHONE_CAMERA_NOT_ACCESSED = 0,
-    MICROPHONE_ACCESSED,
-    CAMERA_ACCESSED,
-    MICROPHONE_CAMERA_ACCESSED,
-    MICROPHONE_BLOCKED,
-    CAMERA_BLOCKED,
-    MICROPHONE_CAMERA_BLOCKED,
+  // Fields describing the current mic/camera state. If a page has attempted to
+  // access a device, the XXX_ACCESSED bit will be set. If access was blocked,
+  // XXX_BLOCKED will be set.
+  typedef uint32_t MicrophoneCameraState;
+  static const MicrophoneCameraState MICROPHONE_CAMERA_NOT_ACCESSED = 0;
+  static const MicrophoneCameraState MICROPHONE_ACCESSED = 1 << 0;
+  static const MicrophoneCameraState MICROPHONE_BLOCKED = 1 << 1;
+  static const MicrophoneCameraState CAMERA_ACCESSED = 1 << 2;
+  static const MicrophoneCameraState CAMERA_BLOCKED = 1 << 3;
+
+  // UMA statistics for the mixed content shield
+  enum MixedScriptAction {
+    MIXED_SCRIPT_ACTION_DISPLAYED_SHIELD = 0,
+    MIXED_SCRIPT_ACTION_DISPLAYED_BUBBLE,
+    MIXED_SCRIPT_ACTION_CLICKED_ALLOW,
+    MIXED_SCRIPT_ACTION_CLICKED_LEARN_MORE,
+    MIXED_SCRIPT_ACTION_COUNT
   };
 
   // Classes that want to be notified about site data events must implement
@@ -81,7 +87,9 @@ class TabSpecificContentSettings
     DISALLOW_COPY_AND_ASSIGN(SiteDataObserver);
   };
 
-  virtual ~TabSpecificContentSettings();
+  ~TabSpecificContentSettings() override;
+
+  static void RecordMixedScriptAction(MixedScriptAction action);
 
   // Returns the object given a render view's id.
   static TabSpecificContentSettings* Get(int render_process_id,
@@ -199,6 +207,9 @@ class TabSpecificContentSettings
   // only tracks cookies.
   bool IsContentAllowed(ContentSettingsType content_type) const;
 
+  // Returns the names of plugins that have been blocked for this tab.
+  const base::string16 GetBlockedPluginNames() const;
+
   const GURL& media_stream_access_origin() const {
     return media_stream_access_origin_;
   }
@@ -211,8 +222,22 @@ class TabSpecificContentSettings
     return media_stream_requested_video_device_;
   }
 
+  const std::string& media_stream_selected_audio_device() const {
+    return media_stream_selected_audio_device_;
+  }
+
+  const std::string& media_stream_selected_video_device() const {
+    return media_stream_selected_video_device_;
+  }
+
   // Returns the state of the camera and microphone usage.
+  // The return value always includes all active media capture devices, on top
+  // of the devices from the last request.
   MicrophoneCameraState GetMicrophoneCameraState() const;
+
+  // Returns whether the camera or microphone permission or media device setting
+  // has changed since the last permission request.
+  bool IsMicrophoneCameraStateChanged() const;
 
   // Returns the ContentSettingsUsagesState that controls the
   // geolocation API usage on this page.
@@ -259,17 +284,25 @@ class TabSpecificContentSettings
     return pending_protocol_handler_setting_;
   }
 
-
-  // Returns a pointer to the |LocalSharedObjectsContainer| that contains all
-  // allowed local shared objects like cookies, local storage, ... .
-  const LocalSharedObjectsContainer& allowed_local_shared_objects() const {
+  // Returns the |LocalSharedObjectsCounter| instances corresponding to all
+  // allowed, and blocked, respectively, local shared objects like cookies,
+  // local storage, ... .
+  const LocalSharedObjectsCounter& allowed_local_shared_objects() const {
     return allowed_local_shared_objects_;
   }
 
-  // Returns a pointer to the |LocalSharedObjectsContainer| that contains all
-  // blocked local shared objects like cookies, local storage, ... .
-  const LocalSharedObjectsContainer& blocked_local_shared_objects() const {
+  const LocalSharedObjectsCounter& blocked_local_shared_objects() const {
     return blocked_local_shared_objects_;
+  }
+
+  // Creates a new copy of a CookiesTreeModel for all allowed, and blocked,
+  // respectively, local shared objects.
+  scoped_ptr<CookiesTreeModel> CreateAllowedCookiesTreeModel() const {
+    return allowed_local_shared_objects_.CreateCookiesTreeModel();
+  }
+
+  scoped_ptr<CookiesTreeModel> CreateBlockedCookiesTreeModel() const {
+    return blocked_local_shared_objects_.CreateCookiesTreeModel();
   }
 
   bool load_plugins_link_enabled() { return load_plugins_link_enabled_; }
@@ -282,24 +315,25 @@ class TabSpecificContentSettings
   void SetPepperBrokerAllowed(bool allowed);
 
   // content::WebContentsObserver overrides.
-  virtual void RenderFrameForInterstitialPageCreated(
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual bool OnMessageReceived(
-      const IPC::Message& message,
-      content::RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void DidNavigateMainFrame(
+  void RenderFrameForInterstitialPageCreated(
+      content::RenderFrameHost* render_frame_host) override;
+  bool OnMessageReceived(const IPC::Message& message,
+                         content::RenderFrameHost* render_frame_host) override;
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
+      const content::FrameNavigateParams& params) override;
+  void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       bool is_error_page,
-      bool is_iframe_srcdoc) OVERRIDE;
-  virtual void AppCacheAccessed(const GURL& manifest_url,
-                                bool blocked_by_policy) OVERRIDE;
+      bool is_iframe_srcdoc) override;
+  void AppCacheAccessed(const GURL& manifest_url,
+                        bool blocked_by_policy) override;
 
   // Message handlers. Public for testing.
   void OnContentBlocked(ContentSettingsType type);
+  void OnContentBlockedWithDetail(ContentSettingsType type,
+                                  const base::string16& details);
   void OnContentAllowed(ContentSettingsType type);
 
   // These methods are invoked on the UI thread by the static functions above.
@@ -333,12 +367,14 @@ class TabSpecificContentSettings
 #endif
 
   // This method is called to update the status about the microphone and
-  // camera stream access. |request_permissions| contains a list of requested
-  // media stream types and the permission for each type.
+  // camera stream access.
   void OnMediaStreamPermissionSet(
       const GURL& request_origin,
-      const MediaStreamDevicesController::MediaStreamTypeSettingsMap&
-          request_permissions);
+      MicrophoneCameraState new_microphone_camera_state,
+      const std::string& media_stream_selected_audio_device,
+      const std::string& media_stream_selected_video_device,
+      const std::string& media_stream_requested_audio_device,
+      const std::string& media_stream_requested_video_device);
 
   // There methods are called to update the status about MIDI access.
   void OnMidiSysExAccessed(const GURL& reqesting_origin);
@@ -356,11 +392,10 @@ class TabSpecificContentSettings
   friend class content::WebContentsUserData<TabSpecificContentSettings>;
 
   // content_settings::Observer implementation.
-  virtual void OnContentSettingChanged(
-      const ContentSettingsPattern& primary_pattern,
-      const ContentSettingsPattern& secondary_pattern,
-      ContentSettingsType content_type,
-      std::string resource_identifier) OVERRIDE;
+  void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
+                               const ContentSettingsPattern& secondary_pattern,
+                               ContentSettingsType content_type,
+                               std::string resource_identifier) override;
 
   // Notifies all registered |SiteDataObserver|s.
   void NotifySiteDataObservers();
@@ -376,9 +411,6 @@ class TabSpecificContentSettings
 
   // Stores which content setting types actually were allowed.
   bool content_allowed_[CONTENT_SETTINGS_NUM_TYPES];
-
-  // The profile of the tab.
-  Profile* profile_;
 
   // Stores the blocked/allowed cookies.
   LocalSharedObjectsContainer allowed_local_shared_objects_;
@@ -405,6 +437,9 @@ class TabSpecificContentSettings
   // the user opens the bubble and makes changes multiple times.
   ContentSetting pending_protocol_handler_setting_;
 
+  // The name(s) of the plugin(s) being blocked.
+  std::vector<base::string16> blocked_plugin_names_;
+
   // Stores whether the user can load blocked plugins on this page.
   bool load_plugins_link_enabled_;
 
@@ -412,6 +447,13 @@ class TabSpecificContentSettings
   // settings for one request per tab. The latest request's origin will be
   // stored here. http://crbug.com/259794
   GURL media_stream_access_origin_;
+
+  // The microphone and camera state at the last media stream request.
+  // This value is composed of MicrophoneCameraState values.
+  MicrophoneCameraState microphone_camera_state_;
+  // The selected devices at the last media stream request.
+  std::string media_stream_selected_audio_device_;
+  std::string media_stream_selected_video_device_;
 
   // The devices to be displayed in the media bubble when the media stream
   // request is requesting certain specific devices.

@@ -33,29 +33,40 @@ namespace {
 // Run tests with combinations of {QuicVersion, ToggleVersionSerialization}.
 struct TestParams {
   TestParams(QuicVersion version,
-             bool version_serialization)
+             bool version_serialization,
+             QuicConnectionIdLength length)
       : version(version),
+        connection_id_length(length),
         version_serialization(version_serialization) {
   }
 
   friend ostream& operator<<(ostream& os, const TestParams& p) {
     os << "{ client_version: " << QuicVersionToString(p.version)
+       << " connection id length: " << p.connection_id_length
        << " include version: " << p.version_serialization << " }";
     return os;
   }
 
   QuicVersion version;
+  QuicConnectionIdLength connection_id_length;
   bool version_serialization;
 };
 
 // Constructs various test permutations.
 vector<TestParams> GetTestParams() {
   vector<TestParams> params;
+  QuicConnectionIdLength max = PACKET_8BYTE_CONNECTION_ID;
   QuicVersionVector all_supported_versions = QuicSupportedVersions();
   for (size_t i = 0; i < all_supported_versions.size(); ++i) {
-    params.push_back(TestParams(all_supported_versions[i], true));
-    params.push_back(TestParams(all_supported_versions[i], false));
+    params.push_back(TestParams(all_supported_versions[i], true, max));
+    params.push_back(TestParams(all_supported_versions[i], false, max));
   }
+  params.push_back(TestParams(
+      all_supported_versions[0], true, PACKET_0BYTE_CONNECTION_ID));
+  params.push_back(TestParams(
+      all_supported_versions[0], true, PACKET_1BYTE_CONNECTION_ID));
+  params.push_back(TestParams(
+      all_supported_versions[0], true, PACKET_4BYTE_CONNECTION_ID));
   return params;
 }
 
@@ -70,12 +81,13 @@ class QuicPacketCreatorTest : public ::testing::TestWithParam<TestParams> {
         connection_id_(2),
         data_("foo"),
         creator_(connection_id_, &client_framer_, &mock_random_) {
+    creator_.set_connection_id_length(GetParam().connection_id_length);
     client_framer_.set_visitor(&framer_visitor_);
     client_framer_.set_received_entropy_calculator(&entropy_calculator_);
     server_framer_.set_visitor(&framer_visitor_);
   }
 
-  virtual ~QuicPacketCreatorTest() OVERRIDE {
+  virtual ~QuicPacketCreatorTest() override {
   }
 
   void ProcessPacket(QuicPacket* packet) {
@@ -144,7 +156,8 @@ class QuicPacketCreatorTest : public ::testing::TestWithParam<TestParams> {
 };
 
 // Run all packet creator tests with all supported versions of QUIC, and with
-// and without version in the packet header.
+// and without version in the packet header, as well as doing a run for each
+// length of truncated connection id.
 INSTANTIATE_TEST_CASE_P(QuicPacketCreatorTests,
                         QuicPacketCreatorTest,
                         ::testing::ValuesIn(GetTestParams()));
@@ -793,23 +806,23 @@ TEST_P(QuicPacketCreatorTest, UpdatePacketSequenceNumberLengthLeastAwaiting) {
   size_t max_packets_per_fec_group = 10;
   creator_.set_max_packets_per_fec_group(max_packets_per_fec_group);
   creator_.set_sequence_number(64 - max_packets_per_fec_group);
-  creator_.UpdateSequenceNumberLength(2, 10000);
+  creator_.UpdateSequenceNumberLength(2, 10000 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_1BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 
   creator_.set_sequence_number(64 * 256 - max_packets_per_fec_group);
-  creator_.UpdateSequenceNumberLength(2, 10000);
+  creator_.UpdateSequenceNumberLength(2, 10000 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_2BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 
   creator_.set_sequence_number(64 * 256 * 256 - max_packets_per_fec_group);
-  creator_.UpdateSequenceNumberLength(2, 10000);
+  creator_.UpdateSequenceNumberLength(2, 10000 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_4BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 
   creator_.set_sequence_number(
       GG_UINT64_C(64) * 256 * 256 * 256 * 256 - max_packets_per_fec_group);
-  creator_.UpdateSequenceNumberLength(2, 10000);
+  creator_.UpdateSequenceNumberLength(2, 10000 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_6BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 }
@@ -818,20 +831,21 @@ TEST_P(QuicPacketCreatorTest, UpdatePacketSequenceNumberLengthBandwidth) {
   EXPECT_EQ(PACKET_1BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 
-  creator_.UpdateSequenceNumberLength(1, 10000);
+  creator_.UpdateSequenceNumberLength(1, 10000 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_1BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 
-  creator_.UpdateSequenceNumberLength(1, 10000 * 256);
+  creator_.UpdateSequenceNumberLength(1, 10000 * 256 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_2BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 
-  creator_.UpdateSequenceNumberLength(1, 10000 * 256 * 256);
+  creator_.UpdateSequenceNumberLength(
+      1, 10000 * 256 * 256 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_4BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 
   creator_.UpdateSequenceNumberLength(
-      1, GG_UINT64_C(1000) * 256 * 256 * 256 * 256);
+      1, GG_UINT64_C(1000) * 256 * 256 * 256 * 256 / kDefaultMaxPacketSize);
   EXPECT_EQ(PACKET_6BYTE_SEQUENCE_NUMBER,
             creator_.next_sequence_number_length());
 }
@@ -887,6 +901,7 @@ TEST_P(QuicPacketCreatorTest, CreateStreamFrameTooLarge) {
   creator_.set_max_packet_length(GetPacketLengthForOneStream(
       client_framer_.version(),
       QuicPacketCreatorPeer::SendVersionInPacket(&creator_),
+      creator_.connection_id_length(),
       PACKET_1BYTE_SEQUENCE_NUMBER, NOT_IN_FEC_GROUP, &payload_length));
   QuicFrame frame;
   const string too_long_payload(payload_length * 2, 'a');

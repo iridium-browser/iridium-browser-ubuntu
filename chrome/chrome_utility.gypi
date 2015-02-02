@@ -142,6 +142,7 @@
         }],
         ['enable_extensions==1', {
           'dependencies': [
+            '../extensions/extensions.gyp:extensions_utility',
             '../third_party/libexif/libexif.gyp:libexif',
             'common/extensions/api/api.gyp:chrome_api',
           ],
@@ -172,7 +173,7 @@
             }],
           ],
         }],
-        ['enable_printing!=1 and OS!="win"', {
+        ['enable_print_preview==0 and OS!="win"', {
           'sources!': [
             'utility/printing_handler.cc',
             'utility/printing_handler.h',

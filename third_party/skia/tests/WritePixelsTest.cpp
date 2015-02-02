@@ -195,7 +195,7 @@ static bool check_write(skiatest::Reporter* reporter, SkCanvas* canvas, const Sk
     // At some point this will be unsupported, as we won't allow accessBitmap() to magically call
     // readPixels for the client.
     SkBitmap secretDevBitmap;
-    canvas->readPixels(SkIRect::MakeWH(canvasInfo.width(), canvasInfo.height()), &secretDevBitmap);
+    canvas->readPixels(canvasInfo.bounds(), &secretDevBitmap);
 
     SkAutoLockPixels alp(secretDevBitmap);
     canvasRowBytes = secretDevBitmap.rowBytes();
@@ -312,16 +312,16 @@ static SkSurface* create_surface(const CanvasConfig& c, GrContext* grCtx) {
 #if SK_SUPPORT_GPU
         case kGpu_BottomLeft_DevType:
         case kGpu_TopLeft_DevType:
-            GrTextureDesc desc;
-            desc.fFlags = kRenderTarget_GrTextureFlagBit;
+            GrSurfaceDesc desc;
+            desc.fFlags = kRenderTarget_GrSurfaceFlag;
             desc.fWidth = DEV_W;
             desc.fHeight = DEV_H;
             desc.fConfig = kSkia8888_GrPixelConfig;
             desc.fOrigin = kGpu_TopLeft_DevType == c.fDevType ?
                 kTopLeft_GrSurfaceOrigin : kBottomLeft_GrSurfaceOrigin;
-            GrAutoScratchTexture ast(grCtx, desc, GrContext::kExact_ScratchTexMatch);
-            SkAutoTUnref<GrTexture> tex(ast.detach());
-            return SkSurface::NewRenderTargetDirect(tex->asRenderTarget());
+            SkAutoTUnref<GrTexture> texture(
+                grCtx->refScratchTexture(desc, GrContext::kExact_ScratchTexMatch));
+            return SkSurface::NewRenderTargetDirect(texture->asRenderTarget());
 #endif
     }
     return NULL;

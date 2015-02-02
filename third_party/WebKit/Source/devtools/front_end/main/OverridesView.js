@@ -35,7 +35,7 @@
 WebInspector.OverridesView = function()
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("overrides.css");
+    this.registerRequiredCSS("main/overrides.css");
     this.element.classList.add("overrides-view");
 
     this._tabbedPane = new WebInspector.TabbedPane();
@@ -200,22 +200,19 @@ WebInspector.OverridesView.DeviceTab = function()
     this.element.appendChild(this._createDeviceElement());
 
     var footnote = this.element.createChild("p", "help-footnote");
-    var footnoteLink = footnote.createChild("a");
-    footnoteLink.href = "https://developers.google.com/chrome-developer-tools/docs/mobile-emulation";
-    footnoteLink.target = "_blank";
-    footnoteLink.createTextChild(WebInspector.UIString("More information about screen emulation"));
+    footnote.appendChild(WebInspector.createDocumentationAnchor("device-mode", WebInspector.UIString("More information about screen emulation")));
 }
 
 WebInspector.OverridesView.DeviceTab.prototype = {
     _createDeviceElement: function()
     {
-        var fieldsetElement = document.createElement("fieldset");
+        var fieldsetElement = createElement("fieldset");
         fieldsetElement.id = "metrics-override-section";
 
         var deviceModelElement = fieldsetElement.createChild("p", "overrides-device-model-section");
         deviceModelElement.createChild("span").textContent = WebInspector.UIString("Model:");
 
-        var deviceSelectElement = WebInspector.OverridesUI.createDeviceSelect(document, this._showTitleDialog.bind(this));
+        var deviceSelectElement = WebInspector.OverridesUI.createDeviceSelect(this._showTitleDialog.bind(this));
         var buttons = deviceSelectElement.querySelectorAll("button");
         for (var i = 0; i < buttons.length; ++i)
             buttons[i].classList.add("text-button");
@@ -280,7 +277,7 @@ WebInspector.OverridesView.DeviceTab.CustomDeviceTitleDialog = function(callback
 {
     WebInspector.DialogDelegate.call(this);
 
-    this.element = document.createElementWithClass("div", "custom-device-title-dialog");
+    this.element = createElementWithClass("div", "custom-device-title-dialog");
     this.element.createChild("label").textContent = WebInspector.UIString("Save as: ");
 
     this._input = this.element.createChild("input");
@@ -362,7 +359,7 @@ WebInspector.OverridesView.MediaTab.prototype = {
                 // "all" is not a device-specific media type.
                 continue;
             }
-            var option = document.createElement("option");
+            var option = createElement("option");
             option.text = mediaType;
             option.value = mediaType;
             mediaSelectElement.add(option);
@@ -371,7 +368,7 @@ WebInspector.OverridesView.MediaTab.prototype = {
         }
 
         mediaSelectElement.addEventListener("change", this._emulateMediaChanged.bind(this, mediaSelectElement), false);
-        var fragment = document.createDocumentFragment();
+        var fragment = createDocumentFragment();
         fragment.appendChild(checkbox);
         fragment.appendChild(fieldsetElement);
         this.element.appendChild(fragment);
@@ -413,7 +410,7 @@ WebInspector.OverridesView.NetworkTab.prototype = {
         var fieldsetElement = this.element.createChild("fieldset");
         fieldsetElement.createChild("span").textContent = WebInspector.UIString("Limit network throughput:");
         fieldsetElement.createChild("br");
-        fieldsetElement.appendChild(WebInspector.OverridesUI.createNetworkConditionsSelect(document));
+        fieldsetElement.appendChild(WebInspector.OverridesUI.createNetworkConditionsSelect());
 
         WebInspector.overridesSupport.settings.networkConditions.addChangeListener(this.updateActiveState, this);
     },
@@ -430,7 +427,7 @@ WebInspector.OverridesView.NetworkTab.prototype = {
     {
         var fieldsetElement = this.element.createChild("fieldset");
         fieldsetElement.createChild("label").textContent = WebInspector.UIString("Spoof user agent:");
-        var selectAndInput = WebInspector.OverridesUI.createUserAgentSelectAndInput(document);
+        var selectAndInput = WebInspector.OverridesUI.createUserAgentSelectAndInput();
         fieldsetElement.appendChild(selectAndInput.select);
         fieldsetElement.appendChild(selectAndInput.input);
 
@@ -454,7 +451,7 @@ WebInspector.OverridesView.SensorsTab = function()
     ]);
 
     this.element.classList.add("overrides-sensors");
-    this.registerRequiredCSS("accelerometer.css");
+    this.registerRequiredCSS("main/accelerometer.css");
     this.element.appendChild(this._createSettingCheckbox(WebInspector.UIString("Emulate touch screen"), WebInspector.overridesSupport.settings.emulateTouch, undefined));
     this._appendGeolocationOverrideControl();
     this._apendDeviceOrientationOverrideControl();
@@ -523,7 +520,7 @@ WebInspector.OverridesView.SensorsTab.prototype = {
         rowElement = tableElement.createChild("tr");
         cellElement = rowElement.createChild("td");
         cellElement.colSpan = 2;
-        var geolocationErrorLabelElement = document.createElement("label");
+        var geolocationErrorLabelElement = createElement("label");
         var geolocationErrorCheckboxElement = geolocationErrorLabelElement.createChild("input");
         geolocationErrorCheckboxElement.id = "geolocation-error";
         geolocationErrorCheckboxElement.type = "checkbox";
@@ -730,9 +727,11 @@ WebInspector.OverridesView.Revealer = function()
 WebInspector.OverridesView.Revealer.prototype = {
     /**
      * @param {!Object} overridesSupport
+     * @return {!Promise}
      */
     reveal: function(overridesSupport)
     {
         WebInspector.inspectorView.showViewInDrawer("emulation");
+        return Promise.resolve();
     }
 }

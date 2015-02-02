@@ -10,7 +10,6 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 
-class GURL;
 class PrefService;
 class Profile;
 
@@ -30,7 +29,10 @@ class LoginUtils {
   class Delegate {
    public:
     // Called after profile is loaded and prepared for the session.
-    virtual void OnProfilePrepared(Profile* profile) = 0;
+    // |browser_launched| will be true is browser has been launched, otherwise
+    // it will return false and client is responsible on launching browser.
+    virtual void OnProfilePrepared(Profile* profile,
+                                   bool browser_launched) = 0;
 
 #if defined(ENABLE_RLZ)
     // Called after post-profile RLZ initialization.
@@ -54,10 +56,6 @@ class LoginUtils {
 
   virtual ~LoginUtils() {}
 
-  // Switch to the locale that |profile| wishes to use and invoke |callback|.
-  virtual void RespectLocalePreference(Profile* profile,
-                                       const base::Closure& callback) = 0;
-
   // Thin wrapper around StartupBrowserCreator::LaunchBrowser().  Meant to be
   // used in a Task posted to the UI thread.  Once the browser is launched the
   // login host is deleted.
@@ -77,11 +75,6 @@ class LoginUtils {
 
   // Invalidates |delegate|, which was passed to PrepareProfile method call.
   virtual void DelegateDeleted(Delegate* delegate) = 0;
-
-  // Invoked after the tmpfs is successfully mounted.
-  // Asks session manager to restart Chrome in Browse Without Sign In mode.
-  // |start_url| is url for launched browser to open.
-  virtual void CompleteOffTheRecordLogin(const GURL& start_url) = 0;
 
   // Creates and returns the authenticator to use.
   // Before WebUI login (Up to R14) the caller owned the returned

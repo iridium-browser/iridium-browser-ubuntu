@@ -11,7 +11,6 @@
 #include "chrome/browser/chrome_page_zoom_constants.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
-#include "chrome/common/pref_names.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
@@ -72,9 +71,7 @@ void Zoom(content::WebContents* web_contents, content::PageZoom zoom) {
   DCHECK(zoom_controller);
 
   double current_zoom_level = zoom_controller->GetZoomLevel();
-  double default_zoom_level =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext())->
-          GetPrefs()->GetDouble(prefs::kDefaultZoomLevel);
+  double default_zoom_level = zoom_controller->GetDefaultZoomLevel();
 
   if (zoom == content::PAGE_ZOOM_RESET) {
     zoom_controller->SetZoomLevel(default_zoom_level);

@@ -36,6 +36,8 @@ namespace content {
 
 namespace {
 
+const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
+
 // For now client must be a per-thread instance.
 // TODO(kinuko): This needs to be refactored when we start using thread pool
 // or having multiple clients per one thread.
@@ -192,6 +194,11 @@ void EmbeddedWorkerContextClient::workerContextStarted(
       "ExecuteScript");
 }
 
+void EmbeddedWorkerContextClient::didEvaluateWorkerScript(bool success) {
+  Send(new EmbeddedWorkerHostMsg_WorkerScriptEvaluated(
+      embedded_worker_id_, success));
+}
+
 void EmbeddedWorkerContextClient::willDestroyWorkerContext() {
   // At this point OnWorkerRunLoopStopped is already called, so
   // worker_task_runner_->RunsTasksOnCurrentThread() returns false
@@ -243,8 +250,20 @@ void EmbeddedWorkerContextClient::reportConsoleMessage(
 
 void EmbeddedWorkerContextClient::dispatchDevToolsMessage(
     const blink::WebString& message) {
-  sender_->Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
-      worker_devtools_agent_route_id_, message.utf8()));
+  std::string msg(message.utf8());
+
+  if (msg.length() < kMaxMessageChunkSize) {
+    sender_->Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
+        worker_devtools_agent_route_id_, msg, msg.size()));
+    return;
+  }
+
+  for (size_t pos = 0; pos < msg.length(); pos += kMaxMessageChunkSize) {
+    sender_->Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
+        worker_devtools_agent_route_id_,
+        msg.substr(pos, kMaxMessageChunkSize),
+        pos ? 0 : msg.size()));
+  }
 }
 
 void EmbeddedWorkerContextClient::saveDevToolsAgentState(
@@ -290,8 +309,10 @@ void EmbeddedWorkerContextClient::didHandleFetchEvent(
   ServiceWorkerResponse response(web_response.url(),
                                  web_response.status(),
                                  web_response.statusText().utf8(),
+                                 web_response.responseType(),
                                  headers,
-                                 web_response.blobUUID().utf8());
+                                 web_response.blobUUID().utf8(),
+                                 web_response.blobSize());
   script_context_->DidHandleFetchEvent(
       request_id, SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE, response);
 }

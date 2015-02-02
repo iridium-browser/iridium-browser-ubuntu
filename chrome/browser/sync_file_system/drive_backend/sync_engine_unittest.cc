@@ -29,9 +29,9 @@ class SyncEngineTest : public testing::Test,
   typedef RemoteFileSyncService::OriginStatusMap RemoteOriginStatusMap;
 
   SyncEngineTest() {}
-  virtual ~SyncEngineTest() {}
+  ~SyncEngineTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(profile_dir_.CreateUniqueTempDir());
 
     scoped_ptr<drive::DriveServiceInterface>
@@ -48,20 +48,20 @@ class SyncEngineTest : public testing::Test,
     sync_engine_.reset(new drive_backend::SyncEngine(
         ui_task_runner.get(),
         worker_task_runner_.get(),
-        NULL /* drive_task_runner */,
+        nullptr /* drive_task_runner */,
         profile_dir_.path(),
-        NULL /* task_logger */,
-        NULL /* notification_manager */,
-        NULL /* extension_service */,
-        NULL /* signin_manager */,
-        NULL /* token_service */,
-        NULL /* request_context */,
-        scoped_ptr<SyncEngine::DriveServiceFactory>(),
-        NULL /* in_memory_env */));
+        nullptr /* task_logger */,
+        nullptr /* notification_manager */,
+        nullptr /* extension_service */,
+        nullptr /* signin_manager */,
+        nullptr /* token_service */,
+        nullptr /* request_context */,
+        nullptr /* drive_service_factory */,
+        nullptr /* in_memory_env */));
 
     sync_engine_->InitializeForTesting(
         fake_drive_service.Pass(),
-        scoped_ptr<drive::DriveUploaderInterface>(),
+        nullptr,  // drive_uploader
         scoped_ptr<SyncWorkerInterface>(new FakeSyncWorker));
     sync_engine_->SetSyncEnabled(true);
     sync_engine_->OnReadyToSendRequests();
@@ -69,13 +69,13 @@ class SyncEngineTest : public testing::Test,
     WaitForWorkerTaskRunner();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     sync_engine_.reset();
     WaitForWorkerTaskRunner();
     worker_pool_->Shutdown();
 
-    worker_task_runner_ = NULL;
-    worker_pool_ = NULL;
+    worker_task_runner_ = nullptr;
+    worker_pool_ = nullptr;
 
     base::RunLoop().RunUntilIdle();
   }
@@ -219,7 +219,7 @@ TEST_F(SyncEngineTest, UpdateServiceState) {
     {REMOTE_SERVICE_DISABLED, "DISABLED"},
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
+  for (size_t i = 0; i < arraysize(test_data); ++i) {
     PostUpdateServiceState(test_data[i].state, test_data[i].description);
     EXPECT_EQ(test_data[i].state, sync_engine()->GetCurrentState())
         << "Expected state: REMOTE_SERVICE_" << test_data[i].description;

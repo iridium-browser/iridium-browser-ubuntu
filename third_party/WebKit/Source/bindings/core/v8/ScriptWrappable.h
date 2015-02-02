@@ -32,7 +32,6 @@
 #define ScriptWrappable_h
 
 #include "bindings/core/v8/WrapperTypeInfo.h"
-#include "platform/ScriptForbiddenScope.h"
 #include "platform/heap/Handle.h"
 #include <v8.h>
 
@@ -84,10 +83,19 @@ public:
     }
     ScriptWrappableBase* toScriptWrappableBase()
     {
+        ASSERT(this);
         // The internal pointers must be aligned to at least 4 byte alignment.
         ASSERT((reinterpret_cast<intptr_t>(this) & 0x3) == 0);
         return this;
     }
+
+    // Creates and returns a new wrapper object.
+    // Do not call this method for a ScriptWrappable or its subclasses. This
+    // non-virtual version of "wrap" is meant only for non-ScriptWrappable
+    // objects. This wrap takes an extra third argument of type WrapperTypeInfo
+    // because ScriptWrappableBase doesn't have wrapperTypeInfo() method unlike
+    // ScriptWrappable.
+    v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*, const WrapperTypeInfo*);
 
     void assertWrapperSanity(v8::Local<v8::Object> object)
     {
@@ -110,7 +118,7 @@ public:
  */
 class ScriptWrappable : public ScriptWrappableBase {
 public:
-    ScriptWrappable() : m_wrapper(0) { }
+    ScriptWrappable() { }
 
     // Returns the WrapperTypeInfo of the instance.
     //
@@ -126,50 +134,44 @@ public:
     void setWrapper(v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
     {
         ASSERT(!containsWrapper());
-        if (!*wrapper) {
-            m_wrapper = 0;
+        if (!*wrapper)
             return;
-        }
-        v8::Persistent<v8::Object> persistent(isolate, wrapper);
-        wrapperTypeInfo->configureWrapper(&persistent);
-        persistent.SetWeak(this, &setWeakCallback);
-        m_wrapper = persistent.ClearAndLeak();
+        m_wrapper.Reset(isolate, wrapper);
+        wrapperTypeInfo->configureWrapper(&m_wrapper);
+        m_wrapper.SetWeak(this, &setWeakCallback);
         ASSERT(containsWrapper());
     }
 
     v8::Local<v8::Object> newLocalWrapper(v8::Isolate* isolate) const
     {
-        v8::Persistent<v8::Object> persistent;
-        getPersistent(&persistent);
-        return v8::Local<v8::Object>::New(isolate, persistent);
+        return v8::Local<v8::Object>::New(isolate, m_wrapper);
     }
 
     bool isEqualTo(const v8::Local<v8::Object>& other) const
     {
-        v8::Persistent<v8::Object> persistent;
-        getPersistent(&persistent);
-        return persistent == other;
+        return m_wrapper == other;
     }
 
-    static bool wrapperCanBeStoredInObject(const void*) { return false; }
-    static bool wrapperCanBeStoredInObject(const ScriptWrappable*) { return true; }
-
-    static ScriptWrappable* fromObject(const void*)
-    {
-        ASSERT_NOT_REACHED();
-        return 0;
-    }
-
-    static ScriptWrappable* fromObject(ScriptWrappable* object)
-    {
-        return object;
-    }
+    // Provides a way to convert Node* to ScriptWrappable* without including
+    // "core/dom/Node.h".
+    //
+    // Example:
+    //   void foo(const void*) { ... }       // [1]
+    //   void foo(ScriptWrappable*) { ... }  // [2]
+    //   class Node;
+    //   Node* node;
+    //   foo(node);  // This calls [1] because there is no definition of Node
+    //               // and compilers do not know that Node is a subclass of
+    //               // ScriptWrappable.
+    //   foo(ScriptWrappable::fromNode(node));  // This calls [2] as expected.
+    //
+    // The definition of fromNode is placed in Node.h because we'd like to
+    // inline calls to fromNode as much as possible.
+    static ScriptWrappable* fromNode(Node*);
 
     bool setReturnValue(v8::ReturnValue<v8::Value> returnValue)
     {
-        v8::Persistent<v8::Object> persistent;
-        getPersistent(&persistent);
-        returnValue.Set(persistent);
+        returnValue.Set(m_wrapper);
         return containsWrapper();
     }
 
@@ -178,47 +180,18 @@ public:
         ASSERT(containsWrapper());
         ASSERT(groupRoot && groupRoot->containsWrapper());
 
-        v8::UniqueId groupId(reinterpret_cast<intptr_t>(groupRoot->m_wrapper));
-        v8::Persistent<v8::Object> wrapper;
-        getPersistent(&wrapper);
-        wrapper.MarkPartiallyDependent();
-        isolate->SetObjectGroupId(v8::Persistent<v8::Value>::Cast(wrapper), groupId);
+        // FIXME: There has to be a better way.
+        v8::UniqueId groupId(*reinterpret_cast<intptr_t*>(&groupRoot->m_wrapper));
+        m_wrapper.MarkPartiallyDependent();
+        isolate->SetObjectGroupId(v8::Persistent<v8::Value>::Cast(m_wrapper), groupId);
     }
 
     void setReference(const v8::Persistent<v8::Object>& parent, v8::Isolate* isolate)
     {
-        v8::Persistent<v8::Object> persistent;
-        getPersistent(&persistent);
-        isolate->SetReference(parent, persistent);
+        isolate->SetReference(parent, m_wrapper);
     }
 
-    template<typename V8T, typename T>
-    static void assertWrapperSanity(v8::Local<v8::Object> object, T* objectAsT)
-    {
-        ASSERT(objectAsT);
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(object.IsEmpty()
-            || object->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex) == V8T::toScriptWrappableBase(objectAsT));
-    }
-
-    template<typename V8T, typename T>
-    static void assertWrapperSanity(void* object, T* objectAsT)
-    {
-        ASSERT_NOT_REACHED();
-    }
-
-    template<typename V8T, typename T>
-    static void assertWrapperSanity(ScriptWrappable* object, T* objectAsT)
-    {
-        ASSERT(object);
-        ASSERT(objectAsT);
-        v8::Object* value = object->m_wrapper;
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(value == 0
-            || value->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex) == V8T::toScriptWrappableBase(objectAsT));
-    }
-
-    using ScriptWrappableBase::assertWrapperSanity;
-
-    bool containsWrapper() const { return m_wrapper; }
+    bool containsWrapper() const { return !m_wrapper.IsEmpty(); }
 
 #if !ENABLE(OILPAN)
 protected:
@@ -227,7 +200,6 @@ protected:
         // We must not get deleted as long as we contain a wrapper. If this happens, we screwed up ref
         // counting somewhere. Crash here instead of crashing during a later gc cycle.
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(!containsWrapper());
-        m_wrapper = 0; // Break UAF attempts to wrap.
     }
 #endif
     // With Oilpan we don't need a ScriptWrappable destructor.
@@ -238,39 +210,17 @@ protected:
     // must not be called since the wrapper has a persistent handle back to this ScriptWrappable object.
     // Assuming that Oilpan's GC is correct (If we cannot assume this, a lot of more things are
     // already broken), we must not hit the RELEASE_ASSERT.
-    //
-    // - 'm_wrapper = 0' is not needed because Oilpan's GC zeroes out memory when
-    // the memory is collected and added to a free list.
 
 private:
-    void getPersistent(v8::Persistent<v8::Object>* persistent) const
-    {
-        ASSERT(persistent);
-
-        // Horrible and super unsafe: Cast the Persistent to an Object*, so
-        // that we can inject the wrapped value. This only works because
-        // we previously 'stole' the object pointer from a Persistent in
-        // the setWrapper() method.
-        *reinterpret_cast<v8::Object**>(persistent) = m_wrapper;
-    }
-
     void disposeWrapper(v8::Local<v8::Object> wrapper)
     {
         ASSERT(containsWrapper());
-
-        v8::Persistent<v8::Object> persistent;
-        getPersistent(&persistent);
-
-        ASSERT(wrapper == persistent);
-        persistent.Reset();
-        m_wrapper = 0;
+        ASSERT(wrapper == m_wrapper);
+        m_wrapper.Reset();
     }
 
     static void setWeakCallback(const v8::WeakCallbackData<v8::Object, ScriptWrappable>& data)
     {
-        v8::Persistent<v8::Object> persistent;
-        data.GetParameter()->getPersistent(&persistent);
-        ASSERT(persistent == data.GetValue());
         data.GetParameter()->disposeWrapper(data.GetValue());
 
         // FIXME: I noticed that 50%~ of minor GC cycle times can be consumed
@@ -279,7 +229,7 @@ private:
         releaseObject(data.GetValue());
     }
 
-    v8::Object* m_wrapper;
+    v8::Persistent<v8::Object> m_wrapper;
 };
 
 // Defines 'wrapperTypeInfo' virtual method which returns the WrapperTypeInfo of
@@ -299,7 +249,7 @@ private:
 // indirectly, must write this macro in the class definition.
 #define DEFINE_WRAPPERTYPEINFO() \
 public: \
-    virtual const WrapperTypeInfo* wrapperTypeInfo() const OVERRIDE \
+    virtual const WrapperTypeInfo* wrapperTypeInfo() const override \
     { \
         return &s_wrapperTypeInfo; \
     } \

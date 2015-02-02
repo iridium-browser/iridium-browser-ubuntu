@@ -12,8 +12,6 @@
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
-#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -27,10 +25,11 @@
 #include "chrome/browser/ui/panels/test_panel_active_state_observer.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/app_modal_dialogs/app_modal_dialog.h"
+#include "components/app_modal_dialogs/native_app_modal_dialog.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
@@ -360,10 +359,10 @@ class WaitForStableInitialSize : public TestPanelNotificationObserver {
           chrome::NOTIFICATION_PANEL_COLLECTION_UPDATED,
           content::NotificationService::AllSources()),
         panel_(panel) {}
-  virtual ~WaitForStableInitialSize() {}
+  ~WaitForStableInitialSize() override {}
 
  protected:
-  virtual bool AtExpectedState() OVERRIDE {
+  bool AtExpectedState() override {
     return panel_->GetBounds().height() > panel_->TitleOnlyHeight();
   }
   Panel* panel_;
@@ -377,10 +376,10 @@ class WaitForAutoResizeWider : public TestPanelNotificationObserver {
           content::NotificationService::AllSources()),
         panel_(panel),
         initial_size_(panel->GetBounds().size()) {}
-  virtual ~WaitForAutoResizeWider() {}
+  ~WaitForAutoResizeWider() override {}
 
  protected:
-  virtual bool AtExpectedState() OVERRIDE {
+  bool AtExpectedState() override {
     return panel_->GetBounds().width() > initial_size_.width();
   }
   Panel* panel_;
@@ -395,10 +394,10 @@ class WaitForAutoResizeNarrower : public TestPanelNotificationObserver {
           content::NotificationService::AllSources()),
         panel_(panel),
         initial_size_(panel->GetBounds().size()) {}
-  virtual ~WaitForAutoResizeNarrower() {}
+  ~WaitForAutoResizeNarrower() override {}
 
  protected:
-  virtual bool AtExpectedState() OVERRIDE {
+  bool AtExpectedState() override {
     return panel_->GetBounds().width() < initial_size_.width();
   }
   Panel* panel_;
@@ -1759,7 +1758,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest,
 
 class PanelExtensionApiTest : public ExtensionApiTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
   }

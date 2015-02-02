@@ -17,7 +17,7 @@ class MockDeviceLightListener : public blink::WebDeviceLightListener {
   MockDeviceLightListener() : did_change_device_light_(false) {}
   virtual ~MockDeviceLightListener() {}
 
-  virtual void didChangeDeviceLight(double value) OVERRIDE {
+  virtual void didChangeDeviceLight(double value) override {
     data_.value = value;
     did_change_device_light_ = true;
   }
@@ -41,14 +41,14 @@ class DeviceLightEventPumpForTesting : public DeviceLightEventPump {
  public:
   DeviceLightEventPumpForTesting()
       : DeviceLightEventPump(0) {}
-  virtual ~DeviceLightEventPumpForTesting() {}
+  ~DeviceLightEventPumpForTesting() override {}
 
   void OnDidStart(base::SharedMemoryHandle renderer_handle) {
     DeviceLightEventPump::OnDidStart(renderer_handle);
   }
-  virtual void SendStartMessage() OVERRIDE { }
-  virtual void SendStopMessage() OVERRIDE { }
-  virtual void FireEvent() OVERRIDE {
+  void SendStartMessage() override {}
+  void SendStopMessage() override {}
+  void FireEvent() override {
     DeviceLightEventPump::FireEvent();
     Stop();
     base::MessageLoop::current()->QuitWhenIdle();
@@ -66,7 +66,7 @@ class DeviceLightEventPumpTest : public testing::Test {
   }
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     const DeviceLightHardwareBuffer* null_buffer = NULL;
     listener_.reset(new MockDeviceLightListener);
     light_pump_.reset(new DeviceLightEventPumpForTesting);

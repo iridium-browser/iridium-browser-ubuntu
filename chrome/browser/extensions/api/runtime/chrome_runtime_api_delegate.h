@@ -33,29 +33,28 @@ class ChromeRuntimeAPIDelegate : public extensions::RuntimeAPIDelegate,
                                  public content::NotificationObserver {
  public:
   explicit ChromeRuntimeAPIDelegate(content::BrowserContext* context);
-  virtual ~ChromeRuntimeAPIDelegate();
+  ~ChromeRuntimeAPIDelegate() override;
 
  private:
   friend class extensions::RuntimeAPI;
 
   // extensions::RuntimeAPIDelegate implementation.
-  virtual void AddUpdateObserver(extensions::UpdateObserver* observer) OVERRIDE;
-  virtual void RemoveUpdateObserver(
-      extensions::UpdateObserver* observer) OVERRIDE;
-  virtual base::Version GetPreviousExtensionVersion(
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void ReloadExtension(const std::string& extension_id) OVERRIDE;
-  virtual bool CheckForUpdates(const std::string& extension_id,
-                               const UpdateCheckCallback& callback) OVERRIDE;
-  virtual void OpenURL(const GURL& uninstall_url) OVERRIDE;
-  virtual bool GetPlatformInfo(
-      extensions::core_api::runtime::PlatformInfo* info) OVERRIDE;
-  virtual bool RestartDevice(std::string* error_message) OVERRIDE;
+  void AddUpdateObserver(extensions::UpdateObserver* observer) override;
+  void RemoveUpdateObserver(extensions::UpdateObserver* observer) override;
+  base::Version GetPreviousExtensionVersion(
+      const extensions::Extension* extension) override;
+  void ReloadExtension(const std::string& extension_id) override;
+  bool CheckForUpdates(const std::string& extension_id,
+                       const UpdateCheckCallback& callback) override;
+  void OpenURL(const GURL& uninstall_url) override;
+  bool GetPlatformInfo(
+      extensions::core_api::runtime::PlatformInfo* info) override;
+  bool RestartDevice(std::string* error_message) override;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   void UpdateCheckComplete(const std::string& extension_id);
   void CallUpdateCallbacks(const std::string& extension_id,

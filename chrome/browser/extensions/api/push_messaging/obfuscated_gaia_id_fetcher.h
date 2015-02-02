@@ -8,6 +8,7 @@
 #include <string>
 
 #include "google_apis/gaia/oauth2_api_call_flow.h"
+#include "google_apis/gaia/oauth2_token_service.h"
 
 class GoogleServiceAuthError;
 
@@ -39,25 +40,17 @@ class ObfuscatedGaiaIdFetcher : public OAuth2ApiCallFlow {
 
   // TODO(petewil): Someday let's make a profile keyed service to cache
   // the Gaia ID.
+  explicit ObfuscatedGaiaIdFetcher(Delegate* delegate);
+  ~ObfuscatedGaiaIdFetcher() override;
 
-  ObfuscatedGaiaIdFetcher(net::URLRequestContextGetter* context,
-                          Delegate* delegate,
-                          const std::string& refresh_token);
-  virtual ~ObfuscatedGaiaIdFetcher();
-
-  static std::vector<std::string> GetScopes();
+  static OAuth2TokenService::ScopeSet GetScopes();
 
  protected:
   // OAuth2ApiCallFlow implementation
-  virtual GURL CreateApiCallUrl() OVERRIDE;
-  virtual std::string CreateApiCallBody() OVERRIDE;
-  virtual void ProcessApiCallSuccess(
-      const net::URLFetcher* source) OVERRIDE;
-  virtual void ProcessApiCallFailure(
-      const net::URLFetcher* source) OVERRIDE;
-  virtual void ProcessNewAccessToken(const std::string& access_token) OVERRIDE;
-  virtual void ProcessMintAccessTokenFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
+  GURL CreateApiCallUrl() override;
+  std::string CreateApiCallBody() override;
+  void ProcessApiCallSuccess(const net::URLFetcher* source) override;
+  void ProcessApiCallFailure(const net::URLFetcher* source) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ObfuscatedGaiaIdFetcherTest, SetUp);

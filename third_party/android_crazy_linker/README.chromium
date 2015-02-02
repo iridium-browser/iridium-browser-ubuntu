@@ -45,3 +45,19 @@ Local Modifications:
 - Fix phdr_table_get_dynamic_section() call in ElfView::InitUnmapped().
 
 - Fix typo in LOG() call, added in arm64 packed relative relocations change.
+
+- Add an error message for failures where no shared RELRO pages are swapped.
+
+- Remove excess newline from the message added above.
+
+- Avoid mixing size_t and uint32_t in Leb128Decoder::Dequeue().
+
+- Add fallback library loading when SELinux blocks EXEC permission.
+
+- Re-order application of relocation sections to match the system linker.
+
+- Add method for enabling/disabling the memory fallback (disabled by default).
+
+- Add a check whether file is uncompressed in zip file.
+
+- Fix for crbug/444714 (Chrome_Android: Crash Report - -1DB24FB5)

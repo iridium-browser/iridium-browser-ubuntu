@@ -86,11 +86,11 @@ static PassOwnPtr<BlobData> createBlobDataForFileSystemURL(const KURL& fileSyste
     return blobData.release();
 }
 
-PassRefPtrWillBeRawPtr<File> File::createWithRelativePath(const String& path, const String& relativePath)
+File* File::createWithRelativePath(const String& path, const String& relativePath)
 {
-    RefPtrWillBeRawPtr<File> file = adoptRefWillBeNoop(new File(path, File::AllContentTypes, File::IsUserVisible));
+    File* file = new File(path, File::AllContentTypes, File::IsUserVisible);
     file->m_relativePath = relativePath;
-    return file.release();
+    return file;
 }
 
 File::File(const String& path, ContentTypeLookupPolicy policy, UserVisibility userVisibility)
@@ -148,10 +148,10 @@ File::File(const String& name, const FileMetadata& metadata, UserVisibility user
 {
 }
 
-File::File(const KURL& fileSystemURL, const FileMetadata& metadata)
+File::File(const KURL& fileSystemURL, const FileMetadata& metadata, UserVisibility userVisibility)
     : Blob(BlobDataHandle::create(createBlobDataForFileSystemURL(fileSystemURL, metadata), metadata.length))
-    , m_hasBackingFile(true)
-    , m_userVisibility(File::IsNotUserVisible)
+    , m_hasBackingFile(false)
+    , m_userVisibility(userVisibility)
     , m_name(decodeURLEscapeSequences(fileSystemURL.lastPathComponent()))
     , m_fileSystemURL(fileSystemURL)
     , m_snapshotSize(metadata.length)
@@ -210,7 +210,7 @@ unsigned long long File::size() const
     return static_cast<unsigned long long>(size);
 }
 
-PassRefPtrWillBeRawPtr<Blob> File::slice(long long start, long long end, const String& contentType, ExceptionState& exceptionState) const
+Blob* File::slice(long long start, long long end, const String& contentType, ExceptionState& exceptionState) const
 {
     if (hasBeenClosed()) {
         exceptionState.throwDOMException(InvalidStateError, "File has been closed.");
@@ -294,6 +294,23 @@ void File::appendTo(BlobData& blobData) const
     }
     ASSERT(!m_path.isEmpty());
     blobData.appendFile(m_path, 0, size, modificationTime);
+}
+
+bool File::hasSameSource(const File& other) const
+{
+    if (m_hasBackingFile != other.m_hasBackingFile)
+        return false;
+
+    if (m_hasBackingFile)
+        return m_path == other.m_path;
+
+    if (m_fileSystemURL.isEmpty() != other.m_fileSystemURL.isEmpty())
+        return false;
+
+    if (!m_fileSystemURL.isEmpty())
+        return m_fileSystemURL == other.m_fileSystemURL;
+
+    return uuid() == other.uuid();
 }
 
 } // namespace blink

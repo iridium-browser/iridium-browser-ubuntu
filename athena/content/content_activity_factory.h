@@ -13,14 +13,15 @@ namespace athena {
 class ContentActivityFactory : public ActivityFactory {
  public:
   ContentActivityFactory();
-  virtual ~ContentActivityFactory();
+  ~ContentActivityFactory() override;
 
   // Overridden from ActivityFactory:
-  virtual Activity* CreateWebActivity(content::BrowserContext* browser_context,
-                                      const base::string16& title,
-                                      const GURL& url) OVERRIDE;
-  virtual Activity* CreateAppActivity(extensions::AppWindow* app_window,
-                                      views::WebView* web_view) OVERRIDE;
+  Activity* CreateWebActivity(content::BrowserContext* browser_context,
+                              const base::string16& title,
+                              const GURL& url) override;
+  Activity* CreateWebActivity(content::WebContents* contents) override;
+  Activity* CreateAppActivity(const std::string& app_id,
+                              views::WebView* web_view) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ContentActivityFactory);

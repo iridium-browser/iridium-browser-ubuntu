@@ -127,14 +127,49 @@ WebInspector.ConsolePanel.ConsoleRevealer = function()
 WebInspector.ConsolePanel.ConsoleRevealer.prototype = {
     /**
      * @param {!Object} object
+     * @return {!Promise}
      */
     reveal: function(object)
     {
         var consoleView = WebInspector.ConsolePanel._view();
         if (consoleView.isShowing()) {
             consoleView.focus();
-            return;
+            return Promise.resolve();
         }
         WebInspector.inspectorView.showViewInDrawer("console");
+        return Promise.resolve();
+    }
+}
+
+WebInspector.ConsolePanel.show = function()
+{
+    WebInspector.inspectorView.setCurrentPanel(WebInspector.ConsolePanel._instance());
+}
+
+/**
+ * @return {!WebInspector.ConsolePanel}
+ */
+WebInspector.ConsolePanel._instance = function()
+{
+    if (!WebInspector.ConsolePanel._instanceObject)
+        WebInspector.ConsolePanel._instanceObject = new WebInspector.ConsolePanel();
+    return WebInspector.ConsolePanel._instanceObject;
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.PanelFactory}
+ */
+WebInspector.ConsolePanelFactory = function()
+{
+}
+
+WebInspector.ConsolePanelFactory.prototype = {
+    /**
+     * @return {!WebInspector.Panel}
+     */
+    createPanel: function()
+    {
+        return WebInspector.ConsolePanel._instance();
     }
 }

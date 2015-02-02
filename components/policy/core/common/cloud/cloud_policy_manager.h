@@ -55,22 +55,22 @@ class POLICY_EXPORT CloudPolicyManager
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& file_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& io_task_runner);
-  virtual ~CloudPolicyManager();
+  ~CloudPolicyManager() override;
 
   CloudPolicyCore* core() { return &core_; }
   const CloudPolicyCore* core() const { return &core_; }
 
   // ConfigurationPolicyProvider:
-  virtual void Shutdown() OVERRIDE;
-  virtual bool IsInitializationComplete(PolicyDomain domain) const OVERRIDE;
-  virtual void RefreshPolicies() OVERRIDE;
+  void Shutdown() override;
+  bool IsInitializationComplete(PolicyDomain domain) const override;
+  void RefreshPolicies() override;
 
   // CloudPolicyStore::Observer:
-  virtual void OnStoreLoaded(CloudPolicyStore* cloud_policy_store) OVERRIDE;
-  virtual void OnStoreError(CloudPolicyStore* cloud_policy_store) OVERRIDE;
+  void OnStoreLoaded(CloudPolicyStore* cloud_policy_store) override;
+  void OnStoreError(CloudPolicyStore* cloud_policy_store) override;
 
   // ComponentCloudPolicyService::Delegate:
-  virtual void OnComponentCloudPolicyUpdated() OVERRIDE;
+  void OnComponentCloudPolicyUpdated() override;
 
  protected:
   // Check whether fully initialized and if so, publish policy by calling

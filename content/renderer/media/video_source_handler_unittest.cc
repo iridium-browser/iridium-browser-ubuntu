@@ -27,10 +27,8 @@ static const std::string kUnknownStreamUrl = "unknown_stream_url";
 
 class FakeFrameReader : public FrameReaderInterface {
  public:
-  virtual bool GotFrame(
-      const scoped_refptr<media::VideoFrame>& frame) OVERRIDE {
+  void GotFrame(const scoped_refptr<media::VideoFrame>& frame) override {
     last_frame_ = frame;
-    return true;
   }
 
   const media::VideoFrame* last_frame() {
@@ -51,8 +49,9 @@ class VideoSourceHandlerTest : public ::testing::Test {
     registry_->AddVideoTrack(kTestVideoTrackId);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     registry_.reset();
+    handler_.reset();
     blink::WebHeap::collectAllGarbageForTesting();
   }
 

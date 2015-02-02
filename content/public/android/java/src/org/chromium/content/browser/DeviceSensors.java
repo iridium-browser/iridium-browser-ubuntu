@@ -49,6 +49,12 @@ class DeviceSensors implements SensorEventListener {
     // The lock to access the mNativePtr.
     private final Object mNativePtrLock = new Object();
 
+    // The acceleration vector including gravity expressed in the body frame.
+    private float[] mAccelerationIncludingGravityVector;
+
+    // The geomagnetic vector expressed in the body frame.
+    private float[] mMagneticFieldVector;
+
     // Holds a shortened version of the rotation vector for compatibility purposes.
     private float[] mTruncatedRotationVector;
 
@@ -67,9 +73,12 @@ class DeviceSensors implements SensorEventListener {
     static final int DEVICE_MOTION = 1;
     static final int DEVICE_LIGHT = 2;
 
-    static final Set<Integer> DEVICE_ORIENTATION_SENSORS = CollectionUtil.newHashSet(
+    static final Set<Integer> DEVICE_ORIENTATION_DEFAULT_SENSORS = CollectionUtil.newHashSet(
             Sensor.TYPE_ROTATION_VECTOR);
-
+    // Backup sensors are used when Sensor.TYPE_ROTATION_VECTOR is not available.
+    static final Set<Integer> DEVICE_ORIENTATION_BACKUP_SENSORS = CollectionUtil.newHashSet(
+            Sensor.TYPE_ACCELEROMETER,
+            Sensor.TYPE_MAGNETIC_FIELD);
     static final Set<Integer> DEVICE_MOTION_SENSORS = CollectionUtil.newHashSet(
             Sensor.TYPE_ACCELEROMETER,
             Sensor.TYPE_LINEAR_ACCELERATION,
@@ -79,9 +88,11 @@ class DeviceSensors implements SensorEventListener {
 
     @VisibleForTesting
     final Set<Integer> mActiveSensors = new HashSet<Integer>();
+    Set<Integer> mDeviceOrientationSensors = DEVICE_ORIENTATION_DEFAULT_SENSORS;
     boolean mDeviceLightIsActive = false;
     boolean mDeviceMotionIsActive = false;
     boolean mDeviceOrientationIsActive = false;
+    boolean mUseBackupOrientationSensors = false;
 
     protected DeviceSensors(Context context) {
         mAppContext = context.getApplicationContext();
@@ -92,26 +103,33 @@ class DeviceSensors implements SensorEventListener {
      * for events, the old callback is unregistered first.
      *
      * @param nativePtr Value to pass to nativeGotOrientation() for each event.
-     * @param rateInMilliseconds Requested callback rate in milliseconds. The
+     * @param rateInMicroseconds Requested callback rate in microseconds. The
      *            actual rate may be higher. Unwanted events should be ignored.
      * @param eventType Type of event to listen to, can be either DEVICE_ORIENTATION or
      *                  DEVICE_MOTION or DEVICE_LIGHT.
      * @return True on success.
      */
     @CalledByNative
-    public boolean start(long nativePtr, int eventType, int rateInMilliseconds) {
+    public boolean start(long nativePtr, int eventType, int rateInMicroseconds) {
         boolean success = false;
         synchronized (mNativePtrLock) {
             switch (eventType) {
                 case DEVICE_ORIENTATION:
-                    success = registerSensors(DEVICE_ORIENTATION_SENSORS, rateInMilliseconds, true);
+                    success = registerSensors(mDeviceOrientationSensors, rateInMicroseconds,
+                            true);
+                    if (!success) {
+                        mDeviceOrientationSensors = DEVICE_ORIENTATION_BACKUP_SENSORS;
+                        success = registerSensors(mDeviceOrientationSensors, rateInMicroseconds,
+                                true);
+                        mUseBackupOrientationSensors = success;
+                    }
                     break;
                 case DEVICE_MOTION:
                     // note: device motion spec does not require all sensors to be available
-                    success = registerSensors(DEVICE_MOTION_SENSORS, rateInMilliseconds, false);
+                    success = registerSensors(DEVICE_MOTION_SENSORS, rateInMicroseconds, false);
                     break;
                 case DEVICE_LIGHT:
-                    success = registerSensors(DEVICE_LIGHT_SENSORS, rateInMilliseconds, true);
+                    success = registerSensors(DEVICE_LIGHT_SENSORS, rateInMicroseconds, true);
                     break;
                 default:
                     Log.e(TAG, "Unknown event type: " + eventType);
@@ -130,6 +148,11 @@ class DeviceSensors implements SensorEventListener {
         Set<Integer> deviceMotionSensors = new HashSet<Integer>(DEVICE_MOTION_SENSORS);
         deviceMotionSensors.removeAll(mActiveSensors);
         return DEVICE_MOTION_SENSORS.size() - deviceMotionSensors.size();
+    }
+
+    @CalledByNative
+    public boolean isUsingBackupSensorsForOrientation() {
+        return mUseBackupOrientationSensors;
     }
 
     /**
@@ -156,7 +179,7 @@ class DeviceSensors implements SensorEventListener {
                     break;
                 case DEVICE_MOTION:
                     if (mDeviceOrientationIsActive) {
-                        sensorsToRemainActive.addAll(DEVICE_ORIENTATION_SENSORS);
+                        sensorsToRemainActive.addAll(mDeviceOrientationSensors);
                     }
                     if (mDeviceLightIsActive) {
                         sensorsToRemainActive.addAll(DEVICE_LIGHT_SENSORS);
@@ -167,7 +190,7 @@ class DeviceSensors implements SensorEventListener {
                         sensorsToRemainActive.addAll(DEVICE_MOTION_SENSORS);
                     }
                     if (mDeviceOrientationIsActive) {
-                        sensorsToRemainActive.addAll(DEVICE_ORIENTATION_SENSORS);
+                        sensorsToRemainActive.addAll(mDeviceOrientationSensors);
                     }
                     break;
                 default:
@@ -202,6 +225,9 @@ class DeviceSensors implements SensorEventListener {
                 if (mDeviceMotionIsActive) {
                     gotAccelerationIncludingGravity(values[0], values[1], values[2]);
                 }
+                if (mDeviceOrientationIsActive && mUseBackupOrientationSensors) {
+                    getOrientationFromGeomagneticVectors(values, mMagneticFieldVector);
+                }
                 break;
             case Sensor.TYPE_LINEAR_ACCELERATION:
                 if (mDeviceMotionIsActive) {
@@ -228,6 +254,15 @@ class DeviceSensors implements SensorEventListener {
                     } else {
                         getOrientationFromRotationVector(values);
                     }
+                }
+                break;
+            case Sensor.TYPE_MAGNETIC_FIELD:
+                if (mDeviceOrientationIsActive && mUseBackupOrientationSensors) {
+                    if (mMagneticFieldVector == null) {
+                        mMagneticFieldVector = new float[3];
+                    }
+                    System.arraycopy(values, 0, mMagneticFieldVector, 0,
+                            mMagneticFieldVector.length);
                 }
                 break;
             case Sensor.TYPE_LIGHT:
@@ -270,7 +305,7 @@ class DeviceSensors implements SensorEventListener {
      * </ul>
      * <p>
      *
-     * @param R
+     * @param matrixR
      *        a 3x3 rotation matrix {@see SensorManager.getRotationMatrix}.
      *
      * @param values
@@ -279,7 +314,8 @@ class DeviceSensors implements SensorEventListener {
      * @return the array values passed as argument.
      */
     @VisibleForTesting
-    public static double[] computeDeviceOrientationFromRotationMatrix(float[] R, double[] values) {
+    public static double[] computeDeviceOrientationFromRotationMatrix(
+            float[] matrixR, double[] values) {
         /*
          * 3x3 (length=9) case:
          *   /  R[ 0]   R[ 1]   R[ 2]  \
@@ -287,39 +323,39 @@ class DeviceSensors implements SensorEventListener {
          *   \  R[ 6]   R[ 7]   R[ 8]  /
          *
          */
-        if (R.length != 9)
-            return values;
+        if (matrixR.length != 9) return values;
 
-        if (R[8] > 0) {  // cos(beta) > 0
-            values[0] = Math.atan2(-R[1], R[4]);
-            values[1] = Math.asin(R[7]);           // beta (-pi/2, pi/2)
-            values[2] = Math.atan2(-R[6], R[8]);   // gamma (-pi/2, pi/2)
-        } else if (R[8] < 0) {  // cos(beta) < 0
-            values[0] = Math.atan2(R[1], -R[4]);
-            values[1] = -Math.asin(R[7]);
+        if (matrixR[8] > 0) {  // cos(beta) > 0
+            values[0] = Math.atan2(-matrixR[1], matrixR[4]);
+            values[1] = Math.asin(matrixR[7]);                 // beta (-pi/2, pi/2)
+            values[2] = Math.atan2(-matrixR[6], matrixR[8]);   // gamma (-pi/2, pi/2)
+        } else if (matrixR[8] < 0) {  // cos(beta) < 0
+            values[0] = Math.atan2(matrixR[1], -matrixR[4]);
+            values[1] = -Math.asin(matrixR[7]);
             values[1] += (values[1] >= 0) ? -Math.PI : Math.PI; // beta [-pi,-pi/2) U (pi/2,pi)
-            values[2] = Math.atan2(R[6], -R[8]);   // gamma (-pi/2, pi/2)
+            values[2] = Math.atan2(matrixR[6], -matrixR[8]);    // gamma (-pi/2, pi/2)
         } else { // R[8] == 0
-            if (R[6] > 0) {  // cos(gamma) == 0, cos(beta) > 0
-                values[0] = Math.atan2(-R[1], R[4]);
-                values[1] = Math.asin(R[7]);       // beta [-pi/2, pi/2]
-                values[2] = -Math.PI / 2;          // gamma = -pi/2
-            } else if (R[6] < 0) { // cos(gamma) == 0, cos(beta) < 0
-                values[0] = Math.atan2(R[1], -R[4]);
-                values[1] = -Math.asin(R[7]);
+            if (matrixR[6] > 0) {  // cos(gamma) == 0, cos(beta) > 0
+                values[0] = Math.atan2(-matrixR[1], matrixR[4]);
+                values[1] = Math.asin(matrixR[7]);       // beta [-pi/2, pi/2]
+                values[2] = -Math.PI / 2;                // gamma = -pi/2
+            } else if (matrixR[6] < 0) { // cos(gamma) == 0, cos(beta) < 0
+                values[0] = Math.atan2(matrixR[1], -matrixR[4]);
+                values[1] = -Math.asin(matrixR[7]);
                 values[1] += (values[1] >= 0) ? -Math.PI : Math.PI; // beta [-pi,-pi/2) U (pi/2,pi)
-                values[2] = -Math.PI / 2;          // gamma = -pi/2
+                values[2] = -Math.PI / 2;                           // gamma = -pi/2
             } else { // R[6] == 0, cos(beta) == 0
                 // gimbal lock discontinuity
-                values[0] = Math.atan2(R[3], R[0]);
-                values[1] = (R[7] > 0) ? Math.PI / 2 : -Math.PI / 2;  // beta = +-pi/2
-                values[2] = 0;                                        // gamma = 0
+                values[0] = Math.atan2(matrixR[3], matrixR[0]);
+                values[1] = (matrixR[7] > 0) ? Math.PI / 2 : -Math.PI / 2;  // beta = +-pi/2
+                values[2] = 0;                                              // gamma = 0
             }
         }
 
         // alpha is in [-pi, pi], make sure it is in [0, 2*pi).
-        if (values[0] < 0)
+        if (values[0] < 0) {
             values[0] += 2 * Math.PI; // alpha [0, 2*pi)
+        }
 
         return values;
     }
@@ -336,6 +372,23 @@ class DeviceSensors implements SensorEventListener {
                        Math.toDegrees(rotationAngles[2]));
     }
 
+    private void getOrientationFromGeomagneticVectors(float[] acceleration, float[] magnetic) {
+        float[] deviceRotationMatrix = new float[9];
+        if (acceleration == null || magnetic == null) {
+            return;
+        }
+        if (!SensorManager.getRotationMatrix(deviceRotationMatrix, null, acceleration, magnetic)) {
+            return;
+        }
+
+        double[] rotationAngles = new double[3];
+        computeDeviceOrientationFromRotationMatrix(deviceRotationMatrix, rotationAngles);
+
+        gotOrientation(Math.toDegrees(rotationAngles[0]),
+                       Math.toDegrees(rotationAngles[1]),
+                       Math.toDegrees(rotationAngles[2]));
+    }
+
     private SensorManagerProxy getSensorManagerProxy() {
         if (mSensorManagerProxy != null) {
             return mSensorManagerProxy;
@@ -343,11 +396,11 @@ class DeviceSensors implements SensorEventListener {
 
         SensorManager sensorManager = ThreadUtils.runOnUiThreadBlockingNoException(
                 new Callable<SensorManager>() {
-            @Override
-            public SensorManager call() {
-                return (SensorManager) mAppContext.getSystemService(Context.SENSOR_SERVICE);
-            }
-        });
+                    @Override
+                    public SensorManager call() {
+                        return (SensorManager) mAppContext.getSystemService(Context.SENSOR_SERVICE);
+                    }
+                });
 
         if (sensorManager != null) {
             mSensorManagerProxy = new SensorManagerProxyImpl(sensorManager);
@@ -376,19 +429,19 @@ class DeviceSensors implements SensorEventListener {
 
     /**
      * @param sensorTypes List of sensors to activate.
-     * @param rateInMilliseconds Intended delay (in milliseconds) between sensor readings.
+     * @param rateInMicroseconds Intended delay (in microseconds) between sensor readings.
      * @param failOnMissingSensor If true the method returns true only if all sensors could be
      *                            activated. When false the method return true if at least one
      *                            sensor in sensorTypes could be activated.
      */
-    private boolean registerSensors(Set<Integer> sensorTypes, int rateInMilliseconds,
+    private boolean registerSensors(Set<Integer> sensorTypes, int rateInMicroseconds,
             boolean failOnMissingSensor) {
         Set<Integer> sensorsToActivate = new HashSet<Integer>(sensorTypes);
         sensorsToActivate.removeAll(mActiveSensors);
         boolean success = false;
 
         for (Integer sensorType : sensorsToActivate) {
-            boolean result = registerForSensorType(sensorType, rateInMilliseconds);
+            boolean result = registerForSensorType(sensorType, rateInMicroseconds);
             if (!result && failOnMissingSensor) {
                 // restore the previous state upon failure
                 unregisterSensors(sensorsToActivate);
@@ -411,12 +464,11 @@ class DeviceSensors implements SensorEventListener {
         }
     }
 
-    private boolean registerForSensorType(int type, int rateInMilliseconds) {
+    private boolean registerForSensorType(int type, int rateInMicroseconds) {
         SensorManagerProxy sensorManager = getSensorManagerProxy();
         if (sensorManager == null) {
             return false;
         }
-        final int rateInMicroseconds = 1000 * rateInMilliseconds;
         return sensorManager.registerListener(this, type, rateInMicroseconds, getHandler());
     }
 

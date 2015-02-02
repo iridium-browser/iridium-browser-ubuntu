@@ -36,13 +36,17 @@ found in the LICENSE file.
     </style>
     <div class="toolbar">
       <a href="https://code.google.com/p/chromium/wiki/UsefulURLs">Useful URLs</a>
+      <a href="http://www.chromium.org/developers/tree-sheriffs/sheriff-details-chromium">How to Sheriff</a>
     </div>
     <ct-tree-status status="{{ treeStatuses['chromium'] }}" state="{{ treeStatuses['chromium'].status }}"></ct-tree-status>
-    <ct-tree-status status="{{ treeStatuses['blink'] }}" state="{{ treeStatuses['blink'].status }}"></ct-tree-status>
+    <template if="{{ tree == 'blink' }}">
+      <ct-tree-status status="{{ treeStatuses['blink'] }}" state="{{ treeStatuses['blink'].status }}"></ct-tree-status>
+    </template>
     <template if="{{ failures && failures.failures && (!failures.failures[tree] || !failures.failures[tree].length) }}">
       <ct-party-time></ct-party-time>
     </template>
-    <ct-failure-stream title="Probably-hung bots" category="builders" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
+    <ct-failure-stream title="Tree closers" category="treecloser" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
+    <ct-failure-stream title="Probably-hung bots" category="builder" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
     <ct-failure-stream title="Reliable failures" category="default" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
     <ct-failure-stream title="Failures that have only happened once (on one bot)" category="failedOnce" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>
     <ct-failure-stream title="Snoozed failures" category="snoozed" groups="{{ failures && failures.failures[tree] }}" commitLog="{{ commitLog }}"></ct-failure-stream>

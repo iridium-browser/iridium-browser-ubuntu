@@ -28,6 +28,7 @@
 
 #include "bindings/core/v8/Nullable.h"
 #include "core/dom/ActiveDOMObject.h"
+#include "core/dom/DOMTypedArray.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/html/canvas/WebGLExtensionName.h"
 #include "core/html/canvas/WebGLGetInfo.h"
@@ -40,8 +41,6 @@
 #include "platform/graphics/gpu/Extensions3DUtil.h"
 #include "platform/graphics/gpu/WebGLImageConversion.h"
 #include "public/platform/WebGraphicsContext3D.h"
-#include "wtf/Float32Array.h"
-#include "wtf/Int32Array.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/text/WTFString.h"
 
@@ -55,6 +54,7 @@ class ANGLEInstancedArrays;
 class EXTBlendMinMax;
 class EXTFragDepth;
 class EXTShaderTextureLOD;
+class EXTsRGB;
 class EXTTextureFilterAnisotropic;
 class ExceptionState;
 class HTMLImageElement;
@@ -127,10 +127,10 @@ public:
     void blendFuncSeparate(GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha);
 
     void bufferData(GLenum target, long long size, GLenum usage);
-    void bufferData(GLenum target, ArrayBuffer* data, GLenum usage);
-    void bufferData(GLenum target, ArrayBufferView* data, GLenum usage);
-    void bufferSubData(GLenum target, long long offset, ArrayBuffer* data);
-    void bufferSubData(GLenum target, long long offset, ArrayBufferView* data);
+    void bufferData(GLenum target, DOMArrayBuffer* data, GLenum usage);
+    void bufferData(GLenum target, DOMArrayBufferView* data, GLenum usage);
+    void bufferSubData(GLenum target, long long offset, DOMArrayBuffer* data);
+    void bufferSubData(GLenum target, long long offset, DOMArrayBufferView* data);
 
     GLenum checkFramebufferStatus(GLenum target);
     void clear(GLbitfield mask);
@@ -140,8 +140,8 @@ public:
     void colorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
     void compileShader(WebGLShader*);
 
-    void compressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, ArrayBufferView* data);
-    void compressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, ArrayBufferView* data);
+    void compressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, DOMArrayBufferView* data);
+    void compressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, DOMArrayBufferView* data);
 
     void copyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
     void copyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height);
@@ -185,8 +185,8 @@ public:
 
     PassRefPtrWillBeRawPtr<WebGLActiveInfo> getActiveAttrib(WebGLProgram*, GLuint index);
     PassRefPtrWillBeRawPtr<WebGLActiveInfo> getActiveUniform(WebGLProgram*, GLuint index);
-    bool getAttachedShaders(WebGLProgram*, WillBeHeapVector<RefPtrWillBeMember<WebGLShader> >&);
-    Nullable<WillBeHeapVector<RefPtrWillBeMember<WebGLShader> > > getAttachedShaders(WebGLProgram*);
+    bool getAttachedShaders(WebGLProgram*, WillBeHeapVector<RefPtrWillBeMember<WebGLShader>>&);
+    Nullable<WillBeHeapVector<RefPtrWillBeMember<WebGLShader>>> getAttachedShaders(WebGLProgram*);
     GLint getAttribLocation(WebGLProgram*, const String& name);
     WebGLGetInfo getBufferParameter(GLenum target, GLenum pname);
     PassRefPtrWillBeRawPtr<WebGLContextAttributes> getContextAttributes();
@@ -201,7 +201,7 @@ public:
     String getShaderInfoLog(WebGLShader*);
     PassRefPtrWillBeRawPtr<WebGLShaderPrecisionFormat> getShaderPrecisionFormat(GLenum shaderType, GLenum precisionType);
     String getShaderSource(WebGLShader*);
-    Nullable<Vector<String> > getSupportedExtensions();
+    Nullable<Vector<String>> getSupportedExtensions();
     WebGLGetInfo getTexParameter(GLenum target, GLenum pname);
     WebGLGetInfo getUniform(WebGLProgram*, const WebGLUniformLocation*);
     PassRefPtrWillBeRawPtr<WebGLUniformLocation> getUniformLocation(WebGLProgram*, const String&);
@@ -222,7 +222,7 @@ public:
     void linkProgram(WebGLProgram*);
     void pixelStorei(GLenum pname, GLint param);
     void polygonOffset(GLfloat factor, GLfloat units);
-    void readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, ArrayBufferView* pixels);
+    void readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, DOMArrayBufferView* pixels);
     void renderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
     void sampleCoverage(GLfloat value, GLboolean invert);
     void scissor(GLint x, GLint y, GLsizei width, GLsizei height);
@@ -236,7 +236,7 @@ public:
 
     void texImage2D(GLenum target, GLint level, GLenum internalformat,
         GLsizei width, GLsizei height, GLint border,
-        GLenum format, GLenum type, ArrayBufferView*, ExceptionState&);
+        GLenum format, GLenum type, DOMArrayBufferView*, ExceptionState&);
     void texImage2D(GLenum target, GLint level, GLenum internalformat,
         GLenum format, GLenum type, ImageData*, ExceptionState&);
     void texImage2D(GLenum target, GLint level, GLenum internalformat,
@@ -251,7 +251,7 @@ public:
 
     void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
         GLsizei width, GLsizei height,
-        GLenum format, GLenum type, ArrayBufferView*, ExceptionState&);
+        GLenum format, GLenum type, DOMArrayBufferView*, ExceptionState&);
     void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
         GLenum format, GLenum type, ImageData*, ExceptionState&);
     void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
@@ -262,50 +262,50 @@ public:
         GLenum format, GLenum type, HTMLVideoElement*, ExceptionState&);
 
     void uniform1f(const WebGLUniformLocation*, GLfloat x);
-    void uniform1fv(const WebGLUniformLocation*, Float32Array* v);
+    void uniform1fv(const WebGLUniformLocation*, DOMFloat32Array* v);
     void uniform1fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
     void uniform1i(const WebGLUniformLocation*, GLint x);
-    void uniform1iv(const WebGLUniformLocation*, Int32Array* v);
+    void uniform1iv(const WebGLUniformLocation*, DOMInt32Array* v);
     void uniform1iv(const WebGLUniformLocation*, GLint* v, GLsizei);
     void uniform2f(const WebGLUniformLocation*, GLfloat x, GLfloat y);
-    void uniform2fv(const WebGLUniformLocation*, Float32Array* v);
+    void uniform2fv(const WebGLUniformLocation*, DOMFloat32Array* v);
     void uniform2fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
     void uniform2i(const WebGLUniformLocation*, GLint x, GLint y);
-    void uniform2iv(const WebGLUniformLocation*, Int32Array* v);
+    void uniform2iv(const WebGLUniformLocation*, DOMInt32Array* v);
     void uniform2iv(const WebGLUniformLocation*, GLint* v, GLsizei);
     void uniform3f(const WebGLUniformLocation*, GLfloat x, GLfloat y, GLfloat z);
-    void uniform3fv(const WebGLUniformLocation*, Float32Array* v);
+    void uniform3fv(const WebGLUniformLocation*, DOMFloat32Array* v);
     void uniform3fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
     void uniform3i(const WebGLUniformLocation*, GLint x, GLint y, GLint z);
-    void uniform3iv(const WebGLUniformLocation*, Int32Array* v);
+    void uniform3iv(const WebGLUniformLocation*, DOMInt32Array* v);
     void uniform3iv(const WebGLUniformLocation*, GLint* v, GLsizei);
     void uniform4f(const WebGLUniformLocation*, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
-    void uniform4fv(const WebGLUniformLocation*, Float32Array* v);
+    void uniform4fv(const WebGLUniformLocation*, DOMFloat32Array* v);
     void uniform4fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
     void uniform4i(const WebGLUniformLocation*, GLint x, GLint y, GLint z, GLint w);
-    void uniform4iv(const WebGLUniformLocation*, Int32Array* v);
+    void uniform4iv(const WebGLUniformLocation*, DOMInt32Array* v);
     void uniform4iv(const WebGLUniformLocation*, GLint* v, GLsizei);
-    void uniformMatrix2fv(const WebGLUniformLocation*, GLboolean transpose, Float32Array* value);
+    void uniformMatrix2fv(const WebGLUniformLocation*, GLboolean transpose, DOMFloat32Array* value);
     void uniformMatrix2fv(const WebGLUniformLocation*, GLboolean transpose, GLfloat* value, GLsizei);
-    void uniformMatrix3fv(const WebGLUniformLocation*, GLboolean transpose, Float32Array* value);
+    void uniformMatrix3fv(const WebGLUniformLocation*, GLboolean transpose, DOMFloat32Array* value);
     void uniformMatrix3fv(const WebGLUniformLocation*, GLboolean transpose, GLfloat* value, GLsizei);
-    void uniformMatrix4fv(const WebGLUniformLocation*, GLboolean transpose, Float32Array* value);
+    void uniformMatrix4fv(const WebGLUniformLocation*, GLboolean transpose, DOMFloat32Array* value);
     void uniformMatrix4fv(const WebGLUniformLocation*, GLboolean transpose, GLfloat* value, GLsizei);
 
     void useProgram(WebGLProgram*);
     void validateProgram(WebGLProgram*);
 
     void vertexAttrib1f(GLuint index, GLfloat x);
-    void vertexAttrib1fv(GLuint index, Float32Array* values);
+    void vertexAttrib1fv(GLuint index, DOMFloat32Array* values);
     void vertexAttrib1fv(GLuint index, GLfloat* values, GLsizei);
     void vertexAttrib2f(GLuint index, GLfloat x, GLfloat y);
-    void vertexAttrib2fv(GLuint index, Float32Array* values);
+    void vertexAttrib2fv(GLuint index, DOMFloat32Array* values);
     void vertexAttrib2fv(GLuint index, GLfloat* values, GLsizei);
     void vertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z);
-    void vertexAttrib3fv(GLuint index, Float32Array* values);
+    void vertexAttrib3fv(GLuint index, DOMFloat32Array* values);
     void vertexAttrib3fv(GLuint index, GLfloat* values, GLsizei);
     void vertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
-    void vertexAttrib4fv(GLuint index, Float32Array* values);
+    void vertexAttrib4fv(GLuint index, DOMFloat32Array* values);
     void vertexAttrib4fv(GLuint index, GLfloat* values, GLsizei);
     void vertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized,
         GLsizei stride, long long offset);
@@ -356,12 +356,10 @@ public:
     unsigned maxVertexAttribs() const { return m_maxVertexAttribs; }
 
     // ActiveDOMObject notifications
-    virtual bool hasPendingActivity() const OVERRIDE;
-    virtual void stop() OVERRIDE;
+    virtual bool hasPendingActivity() const override;
+    virtual void stop() override;
 
-    void setSavingImage(bool isSaving) { m_savingImage = isSaving; }
-
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     class TextureUnitState {
         ALLOW_ONLY_INLINE_ALLOCATION();
@@ -397,11 +395,11 @@ protected:
 #endif
 
     // CanvasRenderingContext implementation.
-    virtual bool is3d() const OVERRIDE { return true; }
-    virtual bool isAccelerated() const OVERRIDE { return true; }
-    virtual void setIsHidden(bool) OVERRIDE;
-    virtual void paintRenderingResultsToCanvas() OVERRIDE;
-    virtual blink::WebLayer* platformLayer() const OVERRIDE;
+    virtual bool is3d() const override { return true; }
+    virtual bool isAccelerated() const override { return true; }
+    virtual void setIsHidden(bool) override;
+    virtual void paintRenderingResultsToCanvas(SourceBuffer) override;
+    virtual blink::WebLayer* platformLayer() const override;
 
     void addSharedObject(WebGLSharedObject*);
     void addContextObject(WebGLContextObject*);
@@ -456,9 +454,8 @@ protected:
     bool m_restoreAllowed;
     Timer<WebGLRenderingContextBase> m_restoreTimer;
 
-    bool m_needsUpdate;
     bool m_markedCanvasDirty;
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<WebGLContextObject> > m_contextObjects;
+    WillBeHeapHashSet<RawPtrWillBeWeakMember<WebGLContextObject>> m_contextObjects;
 
     OwnPtrWillBeMember<WebGLRenderingContextLostCallback> m_contextLostCallbackAdapter;
     OwnPtrWillBeMember<WebGLRenderingContextErrorMessageCallback> m_errorMessageCallbackAdapter;
@@ -572,8 +569,6 @@ protected:
 
     OwnPtr<Extensions3DUtil> m_extensionsUtil;
 
-    bool m_savingImage;
-
     enum ExtensionFlags {
         ApprovedExtension               = 0x00,
         // Extension that is behind the draft extensions runtime flag:
@@ -615,9 +610,9 @@ protected:
     };
 
     template <typename T>
-    class TypedExtensionTracker FINAL : public ExtensionTracker {
+    class TypedExtensionTracker final : public ExtensionTracker {
     public:
-        static PassOwnPtrWillBeRawPtr<TypedExtensionTracker<T> > create(RefPtrWillBeMember<T>& extensionField, ExtensionFlags flags, const char* const* prefixes)
+        static PassOwnPtrWillBeRawPtr<TypedExtensionTracker<T>> create(RefPtrWillBeMember<T>& extensionField, ExtensionFlags flags, const char* const* prefixes)
         {
             return adoptPtrWillBeNoop(new TypedExtensionTracker<T>(extensionField, flags, prefixes));
         }
@@ -632,7 +627,7 @@ protected:
         }
 #endif
 
-        virtual PassRefPtrWillBeRawPtr<WebGLExtension> getExtension(WebGLRenderingContextBase* context) OVERRIDE
+        virtual PassRefPtrWillBeRawPtr<WebGLExtension> getExtension(WebGLRenderingContextBase* context) override
         {
             if (!m_extension) {
                 m_extension = T::create(context);
@@ -642,17 +637,17 @@ protected:
             return m_extension;
         }
 
-        virtual bool supported(WebGLRenderingContextBase* context) const OVERRIDE
+        virtual bool supported(WebGLRenderingContextBase* context) const override
         {
             return T::supported(context);
         }
 
-        virtual const char* extensionName() const OVERRIDE
+        virtual const char* extensionName() const override
         {
             return T::extensionName();
         }
 
-        virtual void loseExtension() OVERRIDE
+        virtual void loseExtension() override
         {
             if (m_extension) {
                 m_extension->lose(false);
@@ -661,7 +656,7 @@ protected:
             }
         }
 
-        virtual void trace(Visitor* visitor) OVERRIDE
+        virtual void trace(Visitor* visitor) override
         {
             visitor->trace(m_extension);
             ExtensionTracker::trace(visitor);
@@ -681,7 +676,7 @@ protected:
     };
 
     bool m_extensionEnabled[WebGLExtensionNameCount];
-    WillBeHeapVector<OwnPtrWillBeMember<ExtensionTracker> > m_extensions;
+    WillBeHeapVector<OwnPtrWillBeMember<ExtensionTracker>> m_extensions;
 
     template <typename T>
     void registerExtension(RefPtrWillBeMember<T>& extensionPtr, ExtensionFlags flags = ApprovedExtension, const char* const* prefixes = 0)
@@ -797,7 +792,7 @@ protected:
     // Helper function to validate that the given ArrayBufferView
     // is of the correct type and contains enough data for the texImage call.
     // Generates GL error and returns false if parameters are invalid.
-    bool validateTexFuncData(const char* functionName, GLint level, GLsizei width, GLsizei height, GLenum format, GLenum type, ArrayBufferView* pixels, NullDisposition);
+    bool validateTexFuncData(const char* functionName, GLint level, GLsizei width, GLsizei height, GLenum format, GLenum type, DOMArrayBufferView* pixels, NullDisposition);
 
     // Helper function to validate a given texture format is settable as in
     // you can supply data to texImage2D, or call texImage2D, copyTexImage2D and
@@ -807,7 +802,7 @@ protected:
 
     // Helper function to validate compressed texture data is correct size
     // for the given format and dimensions.
-    bool validateCompressedTexFuncData(const char* functionName, GLsizei width, GLsizei height, GLenum format, ArrayBufferView* pixels);
+    bool validateCompressedTexFuncData(const char* functionName, GLsizei width, GLsizei height, GLenum format, DOMArrayBufferView* pixels);
 
     // Helper function for validating compressed texture formats.
     bool validateCompressedTexFormat(GLenum format);
@@ -853,10 +848,10 @@ protected:
     bool validateCapability(const char* functionName, GLenum);
 
     // Helper function to validate input parameters for uniform functions.
-    bool validateUniformParameters(const char* functionName, const WebGLUniformLocation*, Float32Array*, GLsizei mod);
-    bool validateUniformParameters(const char* functionName, const WebGLUniformLocation*, Int32Array*, GLsizei mod);
+    bool validateUniformParameters(const char* functionName, const WebGLUniformLocation*, DOMFloat32Array*, GLsizei mod);
+    bool validateUniformParameters(const char* functionName, const WebGLUniformLocation*, DOMInt32Array*, GLsizei mod);
     bool validateUniformParameters(const char* functionName, const WebGLUniformLocation*, void*, GLsizei, GLsizei mod);
-    bool validateUniformMatrixParameters(const char* functionName, const WebGLUniformLocation*, GLboolean transpose, Float32Array*, GLsizei mod);
+    bool validateUniformMatrixParameters(const char* functionName, const WebGLUniformLocation*, GLboolean transpose, DOMFloat32Array*, GLsizei mod);
     bool validateUniformMatrixParameters(const char* functionName, const WebGLUniformLocation*, GLboolean transpose, void*, GLsizei, GLsizei mod);
 
     // Helper function to validate the target for bufferData.
@@ -883,7 +878,7 @@ protected:
 
     // Helper functions for vertexAttribNf{v}.
     void vertexAttribfImpl(const char* functionName, GLuint index, GLsizei expectedSize, GLfloat, GLfloat, GLfloat, GLfloat);
-    void vertexAttribfvImpl(const char* functionName, GLuint index, Float32Array*, GLsizei expectedSize);
+    void vertexAttribfvImpl(const char* functionName, GLuint index, DOMFloat32Array*, GLsizei expectedSize);
     void vertexAttribfvImpl(const char* functionName, GLuint index, GLfloat*, GLsizei, GLsizei expectedSize);
 
     // Helper functions to bufferData() and bufferSubData().
@@ -935,7 +930,7 @@ protected:
     void restoreCurrentFramebuffer();
     void restoreCurrentTexture2D();
 
-    virtual void multisamplingChanged(bool) OVERRIDE;
+    virtual void multisamplingChanged(bool) override;
 
     void findNewMaxNonDefaultTextureUnit();
 

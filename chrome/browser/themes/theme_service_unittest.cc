@@ -10,8 +10,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
-#include "chrome/browser/supervised_user/supervised_user_service.h"
-#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/themes/custom_theme_supplier.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_paths.h"
@@ -25,6 +23,11 @@
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/supervised_user/supervised_user_service.h"
+#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
+#endif
+
 using extensions::ExtensionRegistry;
 
 namespace theme_service_internal {
@@ -33,7 +36,7 @@ class ThemeServiceTest : public extensions::ExtensionServiceTestBase {
  public:
   ThemeServiceTest() : is_supervised_(false),
                        registry_(NULL) {}
-  virtual ~ThemeServiceTest() {}
+  ~ThemeServiceTest() override {}
 
   // Moves a minimal theme to |temp_dir_path| and unpacks it from that
   // directory.
@@ -83,7 +86,7 @@ class ThemeServiceTest : public extensions::ExtensionServiceTestBase {
     base::MessageLoop::current()->RunUntilIdle();
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     extensions::ExtensionServiceTestBase::SetUp();
     extensions::ExtensionServiceTestBase::ExtensionServiceInitParams params =
         CreateDefaultInitParams();
@@ -234,12 +237,13 @@ TEST_F(ThemeServiceTest, ThemeUpgrade) {
                                           ExtensionRegistry::DISABLED));
 }
 
+#if defined(ENABLE_MANAGED_USERS)
 class ThemeServiceSupervisedUserTest : public ThemeServiceTest {
  public:
   ThemeServiceSupervisedUserTest() {}
-  virtual ~ThemeServiceSupervisedUserTest() {}
+  ~ThemeServiceSupervisedUserTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     is_supervised_ = true;
     ThemeServiceTest::SetUp();
   }
@@ -270,6 +274,7 @@ TEST_F(ThemeServiceSupervisedUserTest, SupervisedUserThemeReplacesNativeTheme) {
   EXPECT_EQ(get_theme_supplier(theme_service)->get_theme_type(),
             CustomThemeSupplier::SUPERVISED_USER_THEME);
 }
-#endif
+#endif // defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#endif // defined(ENABLE_MANAGED_USERS)
 
 }; // namespace theme_service_internal

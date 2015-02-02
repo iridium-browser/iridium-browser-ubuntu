@@ -11,7 +11,6 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/threading/sequenced_worker_pool.h"
@@ -39,11 +38,11 @@ class NativeProcessLauncherImpl : public NativeProcessLauncher {
  public:
   NativeProcessLauncherImpl(bool allow_user_level_hosts,
                             intptr_t native_window);
-  virtual ~NativeProcessLauncherImpl();
+  ~NativeProcessLauncherImpl() override;
 
-  virtual void Launch(const GURL& origin,
-                      const std::string& native_host_name,
-                      LaunchedCallback callback) const OVERRIDE;
+  void Launch(const GURL& origin,
+              const std::string& native_host_name,
+              LaunchedCallback callback) const override;
 
  private:
   class Core : public base::RefCountedThreadSafe<Core> {

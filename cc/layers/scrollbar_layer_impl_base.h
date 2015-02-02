@@ -24,8 +24,8 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
   }
 
   void SetScrollLayerAndClipLayerByIds(int scroll_layer_id, int clip_layer_id);
-  void ClearScrollLayer() { scroll_layer_ = NULL; }
-  void ClearClipLayer() { clip_layer_ = NULL; }
+  void ClearScrollLayer() { scroll_layer_ = nullptr; }
+  void ClearClipLayer() { clip_layer_ = nullptr; }
 
   float current_pos() const { return current_pos_; }
   bool SetCurrentPos(float current_pos);
@@ -44,8 +44,10 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
     return is_left_side_vertical_scrollbar_;
   }
 
-  virtual void PushPropertiesTo(LayerImpl* layer) OVERRIDE;
-  virtual ScrollbarLayerImplBase* ToScrollbarLayer() OVERRIDE;
+  bool CanScrollOrientation() const;
+
+  void PushPropertiesTo(LayerImpl* layer) override;
+  ScrollbarLayerImplBase* ToScrollbarLayer() override;
   void PushScrollClipPropertiesTo(LayerImpl* layer);
 
   bool SetVisibleToTotalLengthRatio(float ratio);
@@ -56,7 +58,7 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
   }
   bool SetThumbThicknessScaleFactor(float thumb_thickness_scale_factor);
 
-  void ScrollbarParametersDidChange();
+  void ScrollbarParametersDidChange(bool on_resize);
 
  protected:
   ScrollbarLayerImplBase(LayerTreeImpl* tree_impl,
@@ -64,7 +66,7 @@ class CC_EXPORT ScrollbarLayerImplBase : public LayerImpl {
                          ScrollbarOrientation orientation,
                          bool is_left_side_vertical_scrollbar,
                          bool is_overlay);
-  virtual ~ScrollbarLayerImplBase();
+  ~ScrollbarLayerImplBase() override;
 
   gfx::Rect ScrollbarLayerRectToContentRect(const gfx::RectF& layer_rect) const;
 

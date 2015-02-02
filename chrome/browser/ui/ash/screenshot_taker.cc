@@ -127,10 +127,7 @@ class ScreenshotTakerNotificationDelegate : public NotificationDelegate {
   }
 
   // Overridden from NotificationDelegate:
-  virtual void Display() OVERRIDE {}
-  virtual void Error() OVERRIDE {}
-  virtual void Close(bool by_user) OVERRIDE {}
-  virtual void Click() OVERRIDE {
+  void Click() override {
     if (!success_)
       return;
 #if defined(OS_CHROMEOS)
@@ -139,7 +136,7 @@ class ScreenshotTakerNotificationDelegate : public NotificationDelegate {
     // TODO(sschmitz): perhaps add similar action for Windows.
 #endif
   }
-  virtual void ButtonClick(int button_index) OVERRIDE {
+  void ButtonClick(int button_index) override {
     DCHECK(success_ && button_index == 0);
 
     // To avoid keeping the screenshot image on memory, it will re-read the
@@ -158,16 +155,11 @@ class ScreenshotTakerNotificationDelegate : public NotificationDelegate {
         FROM_HERE, base::Bind(
             &ReadFileAndCopyToClipboardLocal, screenshot_path_));
   }
-  virtual bool HasClickedListener() OVERRIDE { return success_; }
-  virtual std::string id() const OVERRIDE {
-    return std::string(kNotificationId);
-  }
-  virtual content::WebContents* GetWebContents() const OVERRIDE {
-    return NULL;
-  }
+  bool HasClickedListener() override { return success_; }
+  std::string id() const override { return std::string(kNotificationId); }
 
  private:
-  virtual ~ScreenshotTakerNotificationDelegate() {}
+  ~ScreenshotTakerNotificationDelegate() override {}
 
   const bool success_;
   Profile* profile_;
@@ -360,7 +352,7 @@ bool GetScreenshotDirectory(base::FilePath* directory) {
 }
 
 #if defined(OS_CHROMEOS)
-const int GetScreenshotNotificationTitle(
+int GetScreenshotNotificationTitle(
     ScreenshotTakerObserver::Result screenshot_result) {
   switch (screenshot_result) {
     case ScreenshotTakerObserver::SCREENSHOTS_DISABLED:
@@ -372,7 +364,7 @@ const int GetScreenshotNotificationTitle(
   }
 }
 
-const int GetScreenshotNotificationText(
+int GetScreenshotNotificationText(
     ScreenshotTakerObserver::Result screenshot_result) {
   switch (screenshot_result) {
     case ScreenshotTakerObserver::SCREENSHOTS_DISABLED:
@@ -476,7 +468,8 @@ Notification* ScreenshotTaker::CreateNotification(
   const std::string notification_id(kNotificationId);
   // We cancel a previous screenshot notification, if any, to ensure we get
   // a fresh notification pop-up.
-  g_browser_process->notification_ui_manager()->CancelById(notification_id);
+  g_browser_process->notification_ui_manager()->CancelById(
+      notification_id, NotificationUIManager::GetProfileID(GetProfile()));
   const base::string16 replace_id(base::UTF8ToUTF16(notification_id));
   bool success =
       (screenshot_result == ScreenshotTakerObserver::SCREENSHOT_SUCCESS);

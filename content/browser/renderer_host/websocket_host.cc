@@ -88,47 +88,44 @@ class WebSocketEventHandler : public net::WebSocketEventInterface {
   WebSocketEventHandler(WebSocketDispatcherHost* dispatcher,
                         int routing_id,
                         int render_frame_id);
-  virtual ~WebSocketEventHandler();
+  ~WebSocketEventHandler() override;
 
   // net::WebSocketEventInterface implementation
 
-  virtual ChannelState OnAddChannelResponse(
-      bool fail,
-      const std::string& selected_subprotocol,
-      const std::string& extensions) OVERRIDE;
-  virtual ChannelState OnDataFrame(bool fin,
-                                   WebSocketMessageType type,
-                                   const std::vector<char>& data) OVERRIDE;
-  virtual ChannelState OnClosingHandshake() OVERRIDE;
-  virtual ChannelState OnFlowControl(int64 quota) OVERRIDE;
-  virtual ChannelState OnDropChannel(bool was_clean,
-                                     uint16 code,
-                                     const std::string& reason) OVERRIDE;
-  virtual ChannelState OnFailChannel(const std::string& message) OVERRIDE;
-  virtual ChannelState OnStartOpeningHandshake(
-      scoped_ptr<net::WebSocketHandshakeRequestInfo> request) OVERRIDE;
-  virtual ChannelState OnFinishOpeningHandshake(
-      scoped_ptr<net::WebSocketHandshakeResponseInfo> response) OVERRIDE;
-  virtual ChannelState OnSSLCertificateError(
+  ChannelState OnAddChannelResponse(bool fail,
+                                    const std::string& selected_subprotocol,
+                                    const std::string& extensions) override;
+  ChannelState OnDataFrame(bool fin,
+                           WebSocketMessageType type,
+                           const std::vector<char>& data) override;
+  ChannelState OnClosingHandshake() override;
+  ChannelState OnFlowControl(int64 quota) override;
+  ChannelState OnDropChannel(bool was_clean,
+                             uint16 code,
+                             const std::string& reason) override;
+  ChannelState OnFailChannel(const std::string& message) override;
+  ChannelState OnStartOpeningHandshake(
+      scoped_ptr<net::WebSocketHandshakeRequestInfo> request) override;
+  ChannelState OnFinishOpeningHandshake(
+      scoped_ptr<net::WebSocketHandshakeResponseInfo> response) override;
+  ChannelState OnSSLCertificateError(
       scoped_ptr<net::WebSocketEventInterface::SSLErrorCallbacks> callbacks,
       const GURL& url,
       const net::SSLInfo& ssl_info,
-      bool fatal) OVERRIDE;
+      bool fatal) override;
 
  private:
   class SSLErrorHandlerDelegate : public SSLErrorHandler::Delegate {
    public:
     SSLErrorHandlerDelegate(
         scoped_ptr<net::WebSocketEventInterface::SSLErrorCallbacks> callbacks);
-    virtual ~SSLErrorHandlerDelegate();
+    ~SSLErrorHandlerDelegate() override;
 
     base::WeakPtr<SSLErrorHandler::Delegate> GetWeakPtr();
 
     // SSLErrorHandler::Delegate methods
-    virtual void CancelSSLRequest(const GlobalRequestID& id,
-                                  int error,
-                                  const net::SSLInfo* ssl_info) OVERRIDE;
-    virtual void ContinueSSLRequest(const GlobalRequestID& id) OVERRIDE;
+    void CancelSSLRequest(int error, const net::SSLInfo* ssl_info) override;
+    void ContinueSSLRequest() override;
 
    private:
     scoped_ptr<net::WebSocketEventInterface::SSLErrorCallbacks> callbacks_;
@@ -276,10 +273,7 @@ ChannelState WebSocketEventHandler::OnSSLCertificateError(
            << " cert_status=" << ssl_info.cert_status << " fatal=" << fatal;
   ssl_error_handler_delegate_.reset(
       new SSLErrorHandlerDelegate(callbacks.Pass()));
-  // We don't need request_id to be unique so just make a fake one.
-  GlobalRequestID request_id(-1, -1);
   SSLManager::OnSSLCertificateError(ssl_error_handler_delegate_->GetWeakPtr(),
-                                    request_id,
                                     RESOURCE_TYPE_SUB_RESOURCE,
                                     url,
                                     dispatcher_->render_process_id(),
@@ -302,7 +296,6 @@ WebSocketEventHandler::SSLErrorHandlerDelegate::GetWeakPtr() {
 }
 
 void WebSocketEventHandler::SSLErrorHandlerDelegate::CancelSSLRequest(
-    const GlobalRequestID& id,
     int error,
     const net::SSLInfo* ssl_info) {
   DVLOG(3) << "SSLErrorHandlerDelegate::CancelSSLRequest"
@@ -312,8 +305,7 @@ void WebSocketEventHandler::SSLErrorHandlerDelegate::CancelSSLRequest(
   callbacks_->CancelSSLRequest(error, ssl_info);
 }
 
-void WebSocketEventHandler::SSLErrorHandlerDelegate::ContinueSSLRequest(
-    const GlobalRequestID& id) {
+void WebSocketEventHandler::SSLErrorHandlerDelegate::ContinueSSLRequest() {
   DVLOG(3) << "SSLErrorHandlerDelegate::ContinueSSLRequest";
   callbacks_->ContinueSSLRequest();
 }

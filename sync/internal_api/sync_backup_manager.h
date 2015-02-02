@@ -18,26 +18,26 @@ namespace syncer {
 class SYNC_EXPORT_PRIVATE SyncBackupManager : public SyncRollbackManagerBase {
  public:
   SyncBackupManager();
-  virtual ~SyncBackupManager();
+  ~SyncBackupManager() override;
 
   // SyncManager implementation.
-  virtual void Init(InitArgs* args) OVERRIDE;
-  virtual void SaveChanges() OVERRIDE;
-  virtual SyncStatus GetDetailedStatus() const OVERRIDE;
-  virtual void ShutdownOnSyncThread(ShutdownReason reason) OVERRIDE;
+  void Init(InitArgs* args) override;
+  void SaveChanges() override;
+  SyncStatus GetDetailedStatus() const override;
+  void ShutdownOnSyncThread(ShutdownReason reason) override;
 
   // DirectoryChangeDelegate implementation.
-  virtual ModelTypeSet HandleTransactionEndingChangeEvent(
+  ModelTypeSet HandleTransactionEndingChangeEvent(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::BaseTransaction* trans) OVERRIDE;
+      syncable::BaseTransaction* trans) override;
 
-  virtual void RegisterDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual void UnregisterDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual bool HasDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual void RequestEmitDebugInfo() OVERRIDE;
+  void RegisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  void UnregisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  bool HasDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  void RequestEmitDebugInfo() override;
 
  private:
   // Replaces local IDs with server IDs and clear unsynced bit of modified

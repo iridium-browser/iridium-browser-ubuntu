@@ -27,6 +27,7 @@ char kTSanDefaultSuppressions[] =
 "race:rtc::MessageQueue::Quit\n"
 "race:FileVideoCapturerTest::VideoCapturerListener::OnFrameCaptured\n"
 "race:vp8cx_remove_encoder_threads\n"
+"race:third_party/libvpx/source/libvpx/vp9/common/vp9_scan.h\n"
 
 // Usage of trace callback and trace level is racy in libjingle_media_unittests.
 // https://code.google.com/p/webrtc/issues/detail?id=3372
@@ -40,6 +41,12 @@ char kTSanDefaultSuppressions[] =
 // https://code.google.com/p/webrtc/issues/detail?id=2521 for details.
 "race:webrtc/modules/audio_processing/aec/aec_core.c\n"
 "race:webrtc/modules/audio_processing/aec/aec_rdft.c\n"
+
+// rtc_unittest
+// https://code.google.com/p/webrtc/issues/detail?id=3911 for details.
+"race:rtc::FireAndForgetAsyncClosure<FunctorB>::Execute\n"
+"race:rtc::MessageQueueManager::Clear\n"
+"race:rtc::Thread::Clear\n"
 
 // libjingle_p2p_unittest
 // https://code.google.com/p/webrtc/issues/detail?id=2079
@@ -59,8 +66,6 @@ char kTSanDefaultSuppressions[] =
 
 // Potential deadlocks detected after roll in r6516.
 // https://code.google.com/p/webrtc/issues/detail?id=3509
-"deadlock:cricket::WebRtcVideoChannel2::WebRtcVideoSendStream::InputFrame\n"
-"deadlock:cricket::WebRtcVideoChannel2::WebRtcVideoSendStream::SetCapturer\n"
 "deadlock:webrtc::ProcessThreadImpl::RegisterModule\n"
 "deadlock:webrtc::RTCPReceiver::SetSsrcs\n"
 "deadlock:webrtc::RTPSenderAudio::RegisterAudioPayload\n"

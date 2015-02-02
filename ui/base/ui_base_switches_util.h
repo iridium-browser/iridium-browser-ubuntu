@@ -13,6 +13,7 @@ UI_BASE_EXPORT bool IsLinkDisambiguationPopupEnabled();
 UI_BASE_EXPORT bool IsTextInputFocusManagerEnabled();
 UI_BASE_EXPORT bool IsTouchDragDropEnabled();
 UI_BASE_EXPORT bool IsTouchEditingEnabled();
+UI_BASE_EXPORT bool IsTouchFeedbackEnabled();
 
 }  // namespace switches
 

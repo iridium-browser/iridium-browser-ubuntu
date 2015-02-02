@@ -14,16 +14,14 @@ namespace extensions {
 
 class DatabaseStringTableTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath db_file = temp_dir_.path().AppendASCII("StringTable.db");
 
     ASSERT_TRUE(db_.Open(db_file));
   }
 
-  virtual void TearDown() OVERRIDE {
-    db_.Close();
-  }
+  void TearDown() override { db_.Close(); }
 
   base::ScopedTempDir temp_dir_;
   sql::Connection db_;

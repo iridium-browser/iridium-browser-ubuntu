@@ -14,16 +14,19 @@ WebInspector.WorkerTargetManager = function(mainTarget, targetManager)
     this._targetManager = targetManager;
     mainTarget.workerManager.addEventListener(WebInspector.WorkerManager.Events.WorkerAdded, this._onWorkerAdded, this);
     mainTarget.workerManager.addEventListener(WebInspector.WorkerManager.Events.WorkersCleared, this._onWorkersCleared, this);
-    WebInspector.profilingLock().addEventListener(WebInspector.Lock.Events.StateChanged, this._onProfilingStateChanged, this);
-    this._onProfilingStateChanged();
+    WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.SuspendStateChanged, this._onSuspendStateChanged, this);
+    this._onSuspendStateChanged();
     this._lastAnonymousTargetId = 0;
+    this._shouldPauseWorkerOnStart = WebInspector.isWorkerFrontend();
 }
 
 WebInspector.WorkerTargetManager.prototype = {
-    _onProfilingStateChanged: function()
+    _onSuspendStateChanged: function()
     {
-        var acquired = WebInspector.profilingLock().isAcquired();
-        this._mainTarget.workerAgent().setAutoconnectToWorkers(!acquired);
+        // FIXME: the logic needs to be extended and cover the case when a worker was started after disabling autoconnect
+        // and still alive after enabling autoconnect.
+        var suspended = WebInspector.targetManager.allTargetsSuspended();
+        this._mainTarget.workerAgent().setAutoconnectToWorkers(!suspended);
     },
 
     /**
@@ -42,16 +45,60 @@ WebInspector.WorkerTargetManager.prototype = {
         {
             var parsedURL = data.url.asParsedURL();
             var workerId = parsedURL ? parsedURL.lastPathComponent : "#" + (++this._lastAnonymousTargetId);
-            this._targetManager.createTarget(WebInspector.UIString("Worker %s", workerId), connection, targetCreated);
+            this._targetManager.createTarget(WebInspector.UIString("Worker %s", workerId), connection, targetCreated.bind(this));
         }
 
         /**
+         * @this {WebInspector.WorkerTargetManager}
          * @param {?WebInspector.Target} target
          */
         function targetCreated(target)
         {
-            if (target && data.inspectorConnected)
-                target.runtimeAgent().run();
+            if (!target)
+                return;
+            if (data.inspectorConnected) {
+                if (this._shouldPauseWorkerOnStart)
+                    target.debuggerAgent().pause();
+                target.runtimeAgent().run(calculateTitle.bind(this, target));
+            } else {
+                calculateTitle.call(this, target);
+            }
+            this._shouldPauseWorkerOnStart = false;
+        }
+
+        /**
+         * @this {WebInspector.WorkerTargetManager}
+         * @param {!WebInspector.Target} target
+         */
+        function calculateTitle(target)
+        {
+            if (!WebInspector.isWorkerFrontend())
+                return;
+            this._calculateWorkerInspectorTitle(target);
+        }
+    },
+
+    /**
+     * @param {!WebInspector.Target} target
+     */
+    _calculateWorkerInspectorTitle: function(target)
+    {
+        var expression = "location.href";
+        expression += " + (this.name ? ' (' + this.name + ')' : '')";
+        target.runtimeAgent().invoke_evaluate({expression:expression, doNotPauseOnExceptionsAndMuteConsole:true, returnByValue: true}, evalCallback);
+
+        /**
+         * @param {?Protocol.Error} error
+         * @param {!RuntimeAgent.RemoteObject} result
+         * @param {boolean=} wasThrown
+         */
+        function evalCallback(error, result, wasThrown)
+        {
+            if (error || wasThrown) {
+                console.error(error);
+                return;
+            }
+            InspectorFrontendHost.inspectedURLChanged(String(result.value));
         }
     },
 

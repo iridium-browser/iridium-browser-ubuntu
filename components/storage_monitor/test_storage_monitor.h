@@ -14,9 +14,9 @@ namespace storage_monitor {
 class TestStorageMonitor : public StorageMonitor {
  public:
   TestStorageMonitor();
-  virtual ~TestStorageMonitor();
+  ~TestStorageMonitor() override;
 
-  virtual void Init() OVERRIDE;
+  void Init() override;
 
   void MarkInitialized();
 
@@ -34,28 +34,26 @@ class TestStorageMonitor : public StorageMonitor {
   // Synchronously initialize the current storage monitor.
   static void SyncInitialize();
 
-  virtual bool GetStorageInfoForPath(
-      const base::FilePath& path,
-      StorageInfo* device_info) const OVERRIDE;
+  bool GetStorageInfoForPath(const base::FilePath& path,
+                             StorageInfo* device_info) const override;
 
 #if defined(OS_WIN)
   virtual bool GetMTPStorageInfoFromDeviceId(
       const std::string& storage_device_id,
       base::string16* device_location,
-      base::string16* storage_object_id) const OVERRIDE;
+      base::string16* storage_object_id) const override;
 #endif
 
 #if defined(OS_LINUX)
-  virtual device::MediaTransferProtocolManager*
-      media_transfer_protocol_manager() OVERRIDE;
+  device::MediaTransferProtocolManager* media_transfer_protocol_manager()
+      override;
 #endif
 
-  virtual Receiver* receiver() const OVERRIDE;
+  Receiver* receiver() const override;
 
-  virtual void EjectDevice(
+  void EjectDevice(
       const std::string& device_id,
-      base::Callback<void(StorageMonitor::EjectStatus)> callback)
-      OVERRIDE;
+      base::Callback<void(StorageMonitor::EjectStatus)> callback) override;
 
   const std::string& ejected_device() const { return ejected_device_; }
 

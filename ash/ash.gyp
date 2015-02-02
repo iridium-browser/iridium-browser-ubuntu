@@ -167,7 +167,6 @@
       'keyboard_uma_event_filter.h',
       'magnifier/magnification_controller.cc',
       'magnifier/magnification_controller.h',
-      'magnifier/magnifier_constants.h',
       'magnifier/partial_magnification_controller.cc',
       'magnifier/partial_magnification_controller.h',
       'metrics/user_metrics_recorder.cc',
@@ -291,15 +290,11 @@
       'system/chromeos/label_tray_view.h',
       'system/chromeos/multi_user/user_switch_util.cc',
       'system/chromeos/multi_user/user_switch_util.h',
-      'system/chromeos/network/network_connect.cc',
-      'system/chromeos/network/network_connect.h',
       'system/chromeos/network/network_detailed_view.h',
       'system/chromeos/network/network_observer.h',
       'system/chromeos/network/network_portal_detector_observer.h',
       'system/chromeos/network/network_state_list_detailed_view.cc',
       'system/chromeos/network/network_state_list_detailed_view.h',
-      'system/chromeos/network/network_state_notifier.cc',
-      'system/chromeos/network/network_state_notifier.h',
       'system/chromeos/network/tray_network.cc',
       'system/chromeos/network/tray_network.h',
       'system/chromeos/network/tray_network_state_observer.cc',
@@ -343,6 +338,7 @@
       'system/chromeos/session/tray_session_length_limit.h',
       'system/chromeos/settings/tray_settings.cc',
       'system/chromeos/settings/tray_settings.h',
+      'system/chromeos/supervised/custodian_info_tray_observer.h',
       'system/chromeos/supervised/tray_supervised_user.cc',
       'system/chromeos/supervised/tray_supervised_user.h',
       'system/chromeos/system_clock_observer.cc',
@@ -353,8 +349,12 @@
       'system/chromeos/tray_display.h',
       'system/chromeos/tray_tracing.cc',
       'system/chromeos/tray_tracing.h',
+      'system/chromeos/virtual_keyboard/tray_keyboard_lock.cc',
+      'system/chromeos/virtual_keyboard/tray_keyboard_lock.h',
+      'system/chromeos/virtual_keyboard/tray_keyboard_lock_unittest.h',
       'system/chromeos/virtual_keyboard/virtual_keyboard_tray.cc',
       'system/chromeos/virtual_keyboard/virtual_keyboard_tray.h',
+      'system/chromeos/virtual_keyboard/virtual_keyboard_observer.h',
       'system/date/clock_observer.h',
       'system/date/date_default_view.cc',
       'system/date/date_default_view.h',
@@ -427,6 +427,8 @@
       'system/tray/tray_notification_view.h',
       'system/tray/tray_popup_header_button.cc',
       'system/tray/tray_popup_header_button.h',
+      'system/tray/tray_popup_item_container.cc',
+      'system/tray/tray_popup_item_container.h',
       'system/tray/tray_popup_label_button.cc',
       'system/tray/tray_popup_label_button.h',
       'system/tray/tray_popup_label_button_border.cc',
@@ -723,6 +725,8 @@
       'test/test_volume_control_delegate.h',
       'test/ui_controls_factory_ash.cc',
       'test/ui_controls_factory_ash.h',
+      'test/virtual_keyboard_test_helper.cc',
+      'test/virtual_keyboard_test_helper.h',
     ],
     'ash_shell_lib_sources': [
       '../ui/views/test/test_views_delegate_aura.cc',
@@ -813,7 +817,6 @@
       'sticky_keys/sticky_keys_overlay_unittest.cc',
       'sticky_keys/sticky_keys_unittest.cc',
       'system/chromeos/brightness/tray_brightness_unittest.cc',
-      'system/chromeos/network/network_state_notifier_unittest.cc',
       'system/chromeos/power/power_event_observer_unittest.cc',
       'system/chromeos/power/power_status_unittest.cc',
       'system/chromeos/power/power_status_view_unittest.cc',
@@ -825,6 +828,7 @@
       'system/chromeos/session/tray_session_length_limit_unittest.cc',
       'system/chromeos/supervised/tray_supervised_user_unittest.cc',
       'system/chromeos/tray_display_unittest.cc',
+      'system/chromeos/virtual_keyboard/tray_keyboard_lock_unittest.cc',
       'system/date/date_view_unittest.cc',
       'system/overview/overview_button_tray_unittest.cc',
       'system/tray/media_security/multi_profile_media_tray_item_unittest.cc',
@@ -907,8 +911,10 @@
         '../ui/aura/aura.gyp:aura',
         '../ui/base/ui_base.gyp:ui_base',
         '../ui/compositor/compositor.gyp:compositor',
+        '../ui/events/devices/events_devices.gyp:events_devices',
         '../ui/events/events.gyp:events',
         '../ui/events/events.gyp:events_base',
+        '../ui/events/events.gyp:gesture_detection',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/gfx/gfx.gyp:gfx_geometry',
         '../ui/keyboard/keyboard.gyp:keyboard',
@@ -948,8 +954,6 @@
             'accelerators/magnifier_key_scroller.h',
             'accelerators/spoken_feedback_toggler.cc',
             'accelerators/spoken_feedback_toggler.h',
-            'touch/touch_transformer_controller.cc',
-            'touch/touch_transformer_controller.h',
           ],
         }, { # else: use_x11==1
           'dependencies': [
@@ -981,6 +985,8 @@
             'touch/touch_transformer_controller.h',
             'touch/touchscreen_util.cc',
             'touch/touchscreen_util.h',
+            'virtual_keyboard_controller.cc',
+            'virtual_keyboard_controller.h'
           ],
         }],
       ],
@@ -1036,6 +1042,7 @@
         '../testing/gtest.gyp:gtest',
         '../ui/accessibility/accessibility.gyp:ax_gen',
         '../ui/app_list/app_list.gyp:app_list_test_support',
+        '../ui/events/devices/events_devices.gyp:events_devices',
         '../ui/views/views.gyp:views_test_support',
         'ash',
         'ash_resources.gyp:ash_resources',
@@ -1084,6 +1091,7 @@
         '../ui/base/ui_base.gyp:ui_base_test_support',
         '../ui/compositor/compositor.gyp:compositor',
         '../ui/compositor/compositor.gyp:compositor_test_support',
+        '../ui/events/devices/events_devices.gyp:events_devices',
         '../ui/events/events.gyp:events',
         '../ui/events/events.gyp:events_test_support',
         '../ui/events/events.gyp:gesture_detection',
@@ -1122,6 +1130,7 @@
             'sticky_keys/sticky_keys_unittest.cc',
             'system/tray/media_security/multi_profile_media_tray_item_unittest.cc',
             'autoclick/autoclick_unittest.cc',
+            "virtual_keyboard_controller_unittest.cc"
           ],
           'sources': [
             '<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_unscaled_resources.rc',
@@ -1138,7 +1147,6 @@
           'sources!': [
             'accelerators/magnifier_key_scroller_unittest.cc',
             'accelerators/spoken_feedback_toggler_unittest.cc',
-            'touch/touch_transformer_controller_unittest.cc',
           ],
         }],
         ['chromeos==1', {
@@ -1246,6 +1254,11 @@
             '../device/bluetooth/bluetooth.gyp:device_bluetooth',
           ],
         }],
+        ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+          ],
+        }],
       ],
     },
     {
@@ -1273,7 +1286,31 @@
             '../ui/display/display.gyp:display',
           ],
         }],
+        ['OS=="win" and component!="shared_library" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+          ],
+        }],
       ],
     },
+  ],
+  'conditions': [
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'ash_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'ash_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+          ],
+          'sources': [
+            'ash_unittests.isolate',
+          ],
+        },
+      ],
+    }],
   ],
 }

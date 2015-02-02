@@ -12,6 +12,7 @@
 #include "modules/serviceworkers/FetchHeaderList.h"
 #include "platform/network/ResourceRequest.h"
 #include "public/platform/WebServiceWorkerRequest.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
@@ -39,6 +40,8 @@ FetchRequestData* FetchRequestData::create(const WebServiceWorkerRequest& webReq
         request->m_headerList->append(it->key, it->value);
     request->m_blobDataHandle = webRequest.blobDataHandle();
     request->m_referrer.setURL(webRequest.referrer());
+    request->setMode(webRequest.mode());
+    request->setCredentials(webRequest.credentialsMode());
     return request;
 }
 
@@ -96,8 +99,8 @@ FetchRequestData::FetchRequestData()
     , m_unsafeRequestFlag(false)
     , m_context(NullContext)
     , m_sameOriginDataURLFlag(false)
-    , m_mode(NoCORSMode)
-    , m_credentials(OmitCredentials)
+    , m_mode(WebURLRequest::FetchRequestModeNoCORS)
+    , m_credentials(WebURLRequest::FetchCredentialsModeOmit)
     , m_responseTainting(BasicTainting)
 {
 }

@@ -22,7 +22,7 @@ ChromeExtensionOptionsGuestDelegate::~ChromeExtensionOptionsGuestDelegate() {
 }
 
 void ChromeExtensionOptionsGuestDelegate::DidInitialize() {
-  extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
+  ChromeExtensionWebContentsObserver::CreateForWebContents(
       extension_options_guest()->web_contents());
 }
 
@@ -32,7 +32,7 @@ bool ChromeExtensionOptionsGuestDelegate::HandleContextMenu(
       extension_options_guest()->web_contents());
   DCHECK(menu_delegate);
 
-  scoped_ptr<RenderViewContextMenu> menu = menu_delegate->BuildMenu(
+  scoped_ptr<RenderViewContextMenuBase> menu = menu_delegate->BuildMenu(
       extension_options_guest()->web_contents(), params);
   menu_delegate->ShowMenu(menu.Pass());
   return true;

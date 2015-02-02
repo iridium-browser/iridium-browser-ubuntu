@@ -7,7 +7,6 @@
 
 #include "base/metrics/field_trial.h"
 #include "components/autofill/core/common/password_form.h"
-#include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/password_manager/core/browser/password_store.h"
 
 class PrefService;
@@ -18,6 +17,11 @@ struct CredentialInfo;
 class PasswordFormManager;
 class PasswordManagerDriver;
 class PasswordStore;
+
+enum CustomPassphraseState {
+  WITHOUT_CUSTOM_PASSPHRASE,
+  ONLY_CUSTOM_PASSPHRASE
+};
 
 // An abstraction of operations that depend on the embedders (e.g. Chrome)
 // environment.
@@ -39,6 +43,10 @@ class PasswordManagerClient {
   // Return true if |form| should not be available for autofill.
   virtual bool ShouldFilterAutofillResult(
       const autofill::PasswordForm& form) = 0;
+
+  // Return the username that the user is syncing with. Should return an empty
+  // string if sync is not enabled for passwords.
+  virtual std::string GetSyncUsername() const = 0;
 
   // Returns true if |username| and |origin| correspond to the account which is
   // syncing.
@@ -75,11 +83,6 @@ class PasswordManagerClient {
   virtual void PasswordAutofillWasBlocked(
       const autofill::PasswordFormMap& best_matches) const {}
 
-  // Called to authenticate the autofill password data.  If authentication is
-  // successful, this should continue filling the form.
-  virtual void AuthenticateAutofillAndFillForm(
-      scoped_ptr<autofill::PasswordFormFillData> fill_data) = 0;
-
   // Gets prefs associated with this embedder.
   virtual PrefService* GetPrefs() = 0;
 
@@ -94,9 +97,10 @@ class PasswordManagerClient {
   virtual base::FieldTrial::Probability GetProbabilityForExperiment(
       const std::string& experiment_name);
 
-  // Returns true if password sync is enabled in the embedder. The default
-  // implementation returns false.
-  virtual bool IsPasswordSyncEnabled();
+  // Returns true if password sync is enabled in the embedder. Return value for
+  // custom passphrase users depends on |state|. The default implementation
+  // always returns false.
+  virtual bool IsPasswordSyncEnabled(CustomPassphraseState state);
 
   // Only for clients which registered with a LogRouter: If called with
   // |router_can_be_used| set to false, the client may no longer use the
@@ -115,24 +119,6 @@ class PasswordManagerClient {
   // Only relevant on OSX.
   virtual PasswordStore::AuthorizationPromptPolicy GetAuthorizationPromptPolicy(
       const autofill::PasswordForm& form);
-
-  // Called in response to an IPC from the renderer, triggered by a page's call
-  // to 'navigator.credentials.notifyFailedSignIn'.
-  virtual void OnNotifyFailedSignIn(int request_id, const CredentialInfo&) {}
-
-  // Called in response to an IPC from the renderer, triggered by a page's call
-  // to 'navigator.credentials.notifySignedIn'.
-  virtual void OnNotifySignedIn(int request_id, const CredentialInfo&) {}
-
-  // Called in response to an IPC from the renderer, triggered by a page's call
-  // to 'navigator.credentials.notifySignedOut'.
-  virtual void OnNotifySignedOut(int request_id) {}
-
-  // Called in response to an IPC from the renderer, triggered by a page's call
-  // to 'navigator.credentials.request'.
-  virtual void OnRequestCredential(int request_id,
-                                   bool zero_click_only,
-                                   const std::vector<GURL>& federations) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);

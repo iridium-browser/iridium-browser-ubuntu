@@ -35,7 +35,7 @@ class DemoWindow : public ui::PlatformWindowDelegate {
     platform_window_ = ui::OzonePlatform::GetInstance()->CreatePlatformWindow(
         this, gfx::Rect(kTestWindowWidth, kTestWindowHeight));
   }
-  virtual ~DemoWindow() {}
+  ~DemoWindow() override {}
 
   gfx::AcceleratedWidget GetAcceleratedWidget() {
     // TODO(spang): We should start rendering asynchronously.
@@ -66,22 +66,18 @@ class DemoWindow : public ui::PlatformWindowDelegate {
    }
 
   // PlatformWindowDelegate:
-  virtual void OnBoundsChanged(const gfx::Rect& new_bounds) OVERRIDE {}
-  virtual void OnDamageRect(const gfx::Rect& damaged_region) OVERRIDE {}
-  virtual void DispatchEvent(ui::Event* event) OVERRIDE {}
-  virtual void OnCloseRequest() OVERRIDE {
-    Quit();
-  }
-  virtual void OnClosed() OVERRIDE {}
-  virtual void OnWindowStateChanged(
-      ui::PlatformWindowState new_state) OVERRIDE {}
-  virtual void OnLostCapture() OVERRIDE {}
-  virtual void OnAcceleratedWidgetAvailable(
-      gfx::AcceleratedWidget widget) OVERRIDE {
+   void OnBoundsChanged(const gfx::Rect& new_bounds) override {}
+   void OnDamageRect(const gfx::Rect& damaged_region) override {}
+   void DispatchEvent(ui::Event* event) override {}
+   void OnCloseRequest() override { Quit(); }
+   void OnClosed() override {}
+   void OnWindowStateChanged(ui::PlatformWindowState new_state) override {}
+   void OnLostCapture() override {}
+   void OnAcceleratedWidgetAvailable(gfx::AcceleratedWidget widget) override {
     DCHECK_NE(widget, gfx::kNullAcceleratedWidget);
     widget_ = widget;
   }
-  virtual void OnActivationChanged(bool active) OVERRIDE {}
+  void OnActivationChanged(bool active) override {}
 
  private:
   bool InitializeGLSurface() {

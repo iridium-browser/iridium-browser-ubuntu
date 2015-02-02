@@ -201,7 +201,7 @@ extern "C" {
    */
 
   int16_t WebRtcIsacfix_UpdateBwEstimate1(ISACFIX_MainStruct *ISAC_main_inst,
-                                          const uint16_t *encoded,
+                                          const uint8_t* encoded,
                                           int32_t  packet_size,
                                           uint16_t rtp_seq_number,
                                           uint32_t arr_ts);
@@ -226,7 +226,7 @@ extern "C" {
    */
 
   int16_t WebRtcIsacfix_UpdateBwEstimate(ISACFIX_MainStruct *ISAC_main_inst,
-                                         const uint16_t   *encoded,
+                                         const uint8_t* encoded,
                                          int32_t          packet_size,
                                          uint16_t         rtp_seq_number,
                                          uint32_t         send_ts,
@@ -252,7 +252,7 @@ extern "C" {
    */
 
   int16_t WebRtcIsacfix_Decode(ISACFIX_MainStruct *ISAC_main_inst,
-                               const uint16_t *encoded,
+                               const uint8_t* encoded,
                                int16_t len,
                                int16_t *decoded,
                                int16_t *speechType);
@@ -350,13 +350,15 @@ extern "C" {
    *
    * Input:
    *      - encoded           : Encoded bitstream
+   *      - encoded_len_bytes : Length of the bitstream in bytes.
    *
    * Output:
    *      - frameLength       : Length of frame in packet (in samples)
    *
    */
 
-  int16_t WebRtcIsacfix_ReadFrameLen(const int16_t* encoded,
+  int16_t WebRtcIsacfix_ReadFrameLen(const uint8_t* encoded,
+                                     int encoded_len_bytes,
                                      int16_t* frameLength);
 
   /****************************************************************************
@@ -555,7 +557,7 @@ extern "C" {
   int16_t WebRtcIsacfix_GetNewBitStream(ISACFIX_MainStruct *ISAC_main_inst,
                                         int16_t          bweIndex,
                                         float              scale,
-                                        int16_t        *encoded);
+                                        uint8_t* encoded);
 
 
   /****************************************************************************
@@ -599,13 +601,15 @@ extern "C" {
    *
    * Input:
    *      - encoded           : Encoded bitstream
+   *      - encoded_len_bytes : Length of the bitstream in bytes.
    *
    * Output:
    *      - rateIndex         : Bandwidth estimate in bitstream
    *
    */
 
-  int16_t WebRtcIsacfix_ReadBwIndex(const int16_t* encoded,
+  int16_t WebRtcIsacfix_ReadBwIndex(const uint8_t* encoded,
+                                    int encoded_len_bytes,
                                     int16_t* rateIndex);
 
 

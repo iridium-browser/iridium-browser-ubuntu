@@ -18,31 +18,32 @@ class TestMetricsServiceClient : public MetricsServiceClient {
   static const char kBrandForTesting[];
 
   TestMetricsServiceClient();
-  virtual ~TestMetricsServiceClient();
+  ~TestMetricsServiceClient() override;
 
   // MetricsServiceClient:
-  virtual void SetMetricsClientId(const std::string& client_id) OVERRIDE;
-  virtual bool IsOffTheRecordSessionActive() OVERRIDE;
-  virtual std::string GetApplicationLocale() OVERRIDE;
-  virtual bool GetBrand(std::string* brand_code) OVERRIDE;
-  virtual SystemProfileProto::Channel GetChannel() OVERRIDE;
-  virtual std::string GetVersionString() OVERRIDE;
-  virtual void OnLogUploadComplete() OVERRIDE;
-  virtual void StartGatheringMetrics(
-      const base::Closure& done_callback) OVERRIDE;
-  virtual void CollectFinalMetrics(const base::Closure& done_callback)
-      OVERRIDE;
-  virtual scoped_ptr<MetricsLogUploader> CreateUploader(
+  void SetMetricsClientId(const std::string& client_id) override;
+  bool IsOffTheRecordSessionActive() override;
+  int32_t GetProduct() override;
+  std::string GetApplicationLocale() override;
+  bool GetBrand(std::string* brand_code) override;
+  SystemProfileProto::Channel GetChannel() override;
+  std::string GetVersionString() override;
+  void OnLogUploadComplete() override;
+  void StartGatheringMetrics(const base::Closure& done_callback) override;
+  void CollectFinalMetrics(const base::Closure& done_callback) override;
+  scoped_ptr<MetricsLogUploader> CreateUploader(
       const std::string& server_url,
       const std::string& mime_type,
-      const base::Callback<void(int)>& on_upload_complete) OVERRIDE;
+      const base::Callback<void(int)>& on_upload_complete) override;
 
   const std::string& get_client_id() const { return client_id_; }
   void set_version_string(const std::string& str) { version_string_ = str; }
+  void set_product(int32_t product) { product_ = product; }
 
  private:
   std::string client_id_;
   std::string version_string_;
+  int32_t product_;
 
   DISALLOW_COPY_AND_ASSIGN(TestMetricsServiceClient);
 };

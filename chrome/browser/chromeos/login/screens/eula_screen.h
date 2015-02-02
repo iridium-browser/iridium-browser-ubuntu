@@ -8,8 +8,8 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/screens/eula_screen_actor.h"
-#include "chrome/browser/chromeos/login/screens/wizard_screen.h"
 #include "chromeos/tpm_password_fetcher.h"
 #include "url/gurl.h"
 
@@ -17,28 +17,39 @@ namespace chromeos {
 
 // Representation independent class that controls OOBE screen showing EULA
 // to users.
-class EulaScreen : public WizardScreen,
+class EulaScreen : public BaseScreen,
                    public EulaScreenActor::Delegate,
                    public TpmPasswordFetcherDelegate {
  public:
-  EulaScreen(ScreenObserver* observer, EulaScreenActor* actor);
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Whether usage statistics reporting is enabled on EULA screen.
+    virtual void SetUsageStatisticsReporting(bool val) = 0;
+    virtual bool GetUsageStatisticsReporting() const = 0;
+  };
+
+  EulaScreen(BaseScreenDelegate* base_screen_delegate,
+             Delegate* delegate,
+             EulaScreenActor* actor);
   virtual ~EulaScreen();
 
-  // WizardScreen implementation:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  // BaseScreen implementation:
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual std::string GetName() const override;
 
   // EulaScreenActor::Delegate implementation:
-  virtual GURL GetOemEulaUrl() const OVERRIDE;
-  virtual void OnExit(bool accepted, bool usage_stats_enabled) OVERRIDE;
-  virtual void InitiatePasswordFetch() OVERRIDE;
-  virtual bool IsUsageStatsEnabled() const OVERRIDE;
-  virtual void OnActorDestroyed(EulaScreenActor* actor) OVERRIDE;
+  virtual GURL GetOemEulaUrl() const override;
+  virtual void OnExit(bool accepted, bool usage_stats_enabled) override;
+  virtual void InitiatePasswordFetch() override;
+  virtual bool IsUsageStatsEnabled() const override;
+  virtual void OnActorDestroyed(EulaScreenActor* actor) override;
 
   // TpmPasswordFetcherDelegate implementation:
-  virtual void OnPasswordFetched(const std::string& tpm_password) OVERRIDE;
+  virtual void OnPasswordFetched(const std::string& tpm_password) override;
 
  private:
   // URL of the OEM EULA page (on disk).
@@ -50,6 +61,8 @@ class EulaScreen : public WizardScreen,
   // TODO(glotov): Sanitize memory used to store password when
   // it's destroyed.
   std::string tpm_password_;
+
+  Delegate* delegate_;
 
   EulaScreenActor* actor_;
 

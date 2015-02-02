@@ -18,7 +18,7 @@ const char kSoftwareRenderingListJson[] = LONG_STRING_CONST(
 {
   "name": "software rendering list",
   // Please update the version number whenever you change this file.
-  "version": "9.12",
+  "version": "9.13",
   "entries": [
     {
       "id": 1,
@@ -868,7 +868,11 @@ LONG_STRING_CONST(
       "description": "Samsung Galaxy NOTE is too buggy to use for video decoding",
       "cr_bugs": [308721],
       "os": {
-        "type": "android"
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "4.4"
+        }
       },
       "machine_model_name": ["GT-.*"],
       "features": [
@@ -880,7 +884,11 @@ LONG_STRING_CONST(
       "description": "Samsung Galaxy S4 is too buggy to use for video decoding",
       "cr_bugs": [329072],
       "os": {
-        "type": "android"
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "4.4"
+        }
       },
       "machine_model_name": ["SCH-.*"],
       "features": [
@@ -1117,11 +1125,28 @@ LONG_STRING_CONST(
       "description": "Samsung Galaxy Tab is too buggy to use for video decoding",
       "cr_bugs": [408353],
       "os": {
-        "type": "android"
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "4.4"
+        }
       },
       "machine_model_name": ["SM-.*"],
       "features": [
         "accelerated_video_decode"
+      ]
+    },
+    {
+      "id": 102,
+      "description": "Accelerated 2D canvas and Ganesh broken on Galaxy Tab 2",
+      "cr_bugs": [416910],
+      "os": {
+        "type": "android"
+      },
+      "gl_renderer": "PowerVR SGX 540",
+      "features": [
+        "accelerated_2d_canvas",
+        "gpu_rasterization"
       ]
     },
     {
@@ -1139,6 +1164,23 @@ LONG_STRING_CONST(
       "device_id": ["0x2a02"],
       "features": [
         "all"
+      ]
+    },
+    {
+      "id": 104,
+      "description": "GPU raster broken on PowerVR Rogue",
+      "cr_bugs": [436331],
+      "os": {
+        "type": "android",
+        "version": {
+          "op": "<",
+          "value": "5.0"
+        }
+      },
+      "gl_renderer": "PowerVR Rogue.*",
+      "features": [
+        "accelerated_2d_canvas",
+        "gpu_rasterization"
       ]
     }
   ]

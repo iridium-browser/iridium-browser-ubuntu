@@ -40,19 +40,20 @@ const unsigned short cFullTruncation = USHRT_MAX - 1;
 
 class InlineTextBox : public InlineBox {
 public:
-    InlineTextBox(RenderObject& obj)
+    InlineTextBox(RenderObject& obj, int start, unsigned short length)
         : InlineBox(obj)
         , m_prevTextBox(0)
         , m_nextTextBox(0)
-        , m_start(0)
-        , m_len(0)
+        , m_start(start)
+        , m_len(length)
         , m_truncation(cNoTruncation)
     {
+        setIsText(true);
     }
 
     RenderText& renderer() const { return toRenderText(InlineBox::renderer()); }
 
-    virtual void destroy() OVERRIDE FINAL;
+    virtual void destroy() override final;
 
     InlineTextBox* prevTextBox() const { return m_prevTextBox; }
     InlineTextBox* nextTextBox() const { return m_nextTextBox; }
@@ -64,14 +65,11 @@ public:
     unsigned end() const { return m_len ? m_start + m_len - 1 : m_start; }
     unsigned len() const { return m_len; }
 
-    void setStart(unsigned start) { m_start = start; }
-    void setLen(unsigned len) { m_len = len; }
-
-    void offsetRun(int d) { ASSERT(!isDirty()); m_start += d; }
+    void offsetRun(int delta);
 
     unsigned short truncation() { return m_truncation; }
 
-    virtual void markDirty() OVERRIDE FINAL;
+    virtual void markDirty() override final;
 
     using InlineBox::hasHyphen;
     using InlineBox::setHasHyphen;
@@ -80,8 +78,8 @@ public:
 
     static inline bool compareByStart(const InlineTextBox* first, const InlineTextBox* second) { return first->start() < second->start(); }
 
-    virtual int baselinePosition(FontBaseline) const OVERRIDE FINAL;
-    virtual LayoutUnit lineHeight() const OVERRIDE FINAL;
+    virtual int baselinePosition(FontBaseline) const override final;
+    virtual LayoutUnit lineHeight() const override final;
 
     bool getEmphasisMarkPosition(RenderStyle*, TextEmphasisPosition&) const;
 
@@ -90,48 +88,48 @@ public:
     LayoutUnit logicalTopVisualOverflow() const { return logicalOverflowRect().y(); }
     LayoutUnit logicalBottomVisualOverflow() const { return logicalOverflowRect().maxY(); }
 
-#ifndef NDEBUG
-    virtual void showBox(int = 0) const OVERRIDE;
-    virtual const char* boxName() const OVERRIDE;
-#endif
-
-    enum RotationDirection { Counterclockwise, Clockwise };
-    static AffineTransform rotation(const FloatRect& boxRect, RotationDirection);
-private:
-    LayoutUnit selectionTop();
-    LayoutUnit selectionBottom();
-    LayoutUnit selectionHeight();
-
     // charactersWithHyphen, if provided, must not be destroyed before the TextRun.
     TextRun constructTextRun(RenderStyle*, const Font&, StringBuilder* charactersWithHyphen = 0) const;
     TextRun constructTextRun(RenderStyle*, const Font&, StringView, int maximumLength, StringBuilder* charactersWithHyphen = 0) const;
 
+#ifndef NDEBUG
+    virtual void showBox(int = 0) const override;
+    virtual const char* boxName() const override;
+#endif
+
+    enum RotationDirection { Counterclockwise, Clockwise };
+    static AffineTransform rotation(const FloatRect& boxRect, RotationDirection);
+
 public:
     TextRun constructTextRunForInspector(RenderStyle*, const Font&) const;
-    virtual FloatRect calculateBoundaries() const OVERRIDE { return FloatRect(x(), y(), width(), height()); }
+    virtual FloatRect calculateBoundaries() const override { return FloatRect(x(), y(), width(), height()); }
 
     virtual LayoutRect localSelectionRect(int startPos, int endPos);
     bool isSelected(int startPos, int endPos) const;
     void selectionStartEnd(int& sPos, int& ePos) const;
 
+    // These functions both paint markers and update the DocumentMarker's renderedRect.
+    virtual void paintDocumentMarker(GraphicsContext*, const FloatPoint& boxOrigin, DocumentMarker*, RenderStyle*, const Font&, bool grammar);
+    virtual void paintTextMatchMarker(GraphicsContext*, const FloatPoint& boxOrigin, DocumentMarker*, RenderStyle*, const Font&);
+
 protected:
-    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) OVERRIDE;
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) OVERRIDE;
+    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) override;
 
 private:
-    virtual void deleteLine() OVERRIDE FINAL;
-    virtual void extractLine() OVERRIDE FINAL;
-    virtual void attachLine() OVERRIDE FINAL;
+    virtual void deleteLine() override final;
+    virtual void extractLine() override final;
+    virtual void attachLine() override final;
 
 public:
-    virtual RenderObject::SelectionState selectionState() const OVERRIDE FINAL;
+    virtual RenderObject::SelectionState selectionState() const override final;
 
 private:
-    virtual void clearTruncation() OVERRIDE FINAL { m_truncation = cNoTruncation; }
-    virtual float placeEllipsisBox(bool flowIsLTR, float visibleLeftEdge, float visibleRightEdge, float ellipsisWidth, float &truncatedWidth, bool& foundBox) OVERRIDE FINAL;
+    virtual void clearTruncation() override final { m_truncation = cNoTruncation; }
+    virtual float placeEllipsisBox(bool flowIsLTR, float visibleLeftEdge, float visibleRightEdge, float ellipsisWidth, float &truncatedWidth, bool& foundBox) override final;
 
 public:
-    virtual bool isLineBreak() const OVERRIDE FINAL;
+    virtual bool isLineBreak() const override final;
 
     void setExpansion(int newExpansion)
     {
@@ -141,13 +139,12 @@ public:
     }
 
 private:
-    virtual bool isInlineTextBox() const OVERRIDE FINAL { return true; }
+    virtual bool isInlineTextBox() const override final { return true; }
 
 public:
-    virtual int caretMinOffset() const OVERRIDE FINAL;
-    virtual int caretMaxOffset() const OVERRIDE FINAL;
+    virtual int caretMinOffset() const override final;
+    virtual int caretMaxOffset() const override final;
 
-private:
     float textPos() const; // returns the x position relative to the left start of the text line.
 
 public:
@@ -169,23 +166,7 @@ private:
     unsigned short m_truncation; // Where to truncate when text overflow is applied.  We use special constants to
                       // denote no truncation (the whole run paints) and full truncation (nothing paints at all).
 
-    unsigned underlinePaintStart(const CompositionUnderline&);
-    unsigned underlinePaintEnd(const CompositionUnderline&);
-
-protected:
-    void paintSingleCompositionBackgroundRun(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&, Color backgroundColor, int startPos, int endPos);
-    void paintCompositionBackgrounds(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&, bool useCustomUnderlines);
-    void paintDocumentMarkers(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&, bool background);
-    void paintCompositionUnderline(GraphicsContext*, const FloatPoint& boxOrigin, const CompositionUnderline&);
-
-    // These functions both paint markers and update the DocumentMarker's renderedRect.
-    virtual void paintDocumentMarker(GraphicsContext*, const FloatPoint& boxOrigin, DocumentMarker*, RenderStyle*, const Font&, bool grammar);
-    virtual void paintTextMatchMarker(GraphicsContext*, const FloatPoint& boxOrigin, DocumentMarker*, RenderStyle*, const Font&);
-
 private:
-    void paintDecoration(GraphicsContext*, const FloatPoint& boxOrigin, TextDecoration);
-    void paintSelection(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&, Color textColor);
-
     TextRun::ExpansionBehavior expansionBehavior() const
     {
         return (canHaveLeadingExpansion() ? TextRun::AllowLeadingExpansion : TextRun::ForbidLeadingExpansion)

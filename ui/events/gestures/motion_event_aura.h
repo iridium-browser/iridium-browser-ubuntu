@@ -19,31 +19,28 @@ namespace ui {
 class EVENTS_EXPORT MotionEventAura : public MotionEvent {
  public:
   MotionEventAura();
-  virtual ~MotionEventAura();
+  ~MotionEventAura() override;
 
   void OnTouch(const TouchEvent& touch);
 
   // MotionEvent implementation.
-  virtual int GetId() const OVERRIDE;
-  virtual Action GetAction() const OVERRIDE;
-  virtual int GetActionIndex() const OVERRIDE;
-  virtual size_t GetPointerCount() const OVERRIDE;
-  virtual int GetPointerId(size_t pointer_index) const OVERRIDE;
-  virtual float GetX(size_t pointer_index) const OVERRIDE;
-  virtual float GetY(size_t pointer_index) const OVERRIDE;
-  virtual float GetRawX(size_t pointer_index) const OVERRIDE;
-  virtual float GetRawY(size_t pointer_index) const OVERRIDE;
-  virtual float GetTouchMajor(size_t pointer_index) const OVERRIDE;
-  virtual float GetTouchMinor(size_t pointer_index) const OVERRIDE;
-  virtual float GetOrientation(size_t pointer_index) const OVERRIDE;
-  virtual float GetPressure(size_t pointer_index) const OVERRIDE;
-  virtual ToolType GetToolType(size_t pointer_index) const OVERRIDE;
-  virtual int GetButtonState() const OVERRIDE;
-  virtual int GetFlags() const OVERRIDE;
-  virtual base::TimeTicks GetEventTime() const OVERRIDE;
-
-  virtual scoped_ptr<MotionEvent> Clone() const OVERRIDE;
-  virtual scoped_ptr<MotionEvent> Cancel() const OVERRIDE;
+  int GetId() const override;
+  Action GetAction() const override;
+  int GetActionIndex() const override;
+  size_t GetPointerCount() const override;
+  int GetPointerId(size_t pointer_index) const override;
+  float GetX(size_t pointer_index) const override;
+  float GetY(size_t pointer_index) const override;
+  float GetRawX(size_t pointer_index) const override;
+  float GetRawY(size_t pointer_index) const override;
+  float GetTouchMajor(size_t pointer_index) const override;
+  float GetTouchMinor(size_t pointer_index) const override;
+  float GetOrientation(size_t pointer_index) const override;
+  float GetPressure(size_t pointer_index) const override;
+  ToolType GetToolType(size_t pointer_index) const override;
+  int GetButtonState() const override;
+  int GetFlags() const override;
+  base::TimeTicks GetEventTime() const override;
 
   int GetSourceDeviceId(size_t pointer_index) const;
 
@@ -81,7 +78,7 @@ class EVENTS_EXPORT MotionEventAura : public MotionEvent {
   void AddTouch(const TouchEvent& touch);
   void UpdateTouch(const TouchEvent& touch);
   void UpdateCachedAction(const TouchEvent& touch);
-  size_t GetIndexFromId(int id) const;
+  int GetIndexFromId(int id) const;
 
   size_t pointer_count_;
   base::TimeTicks last_touch_time_;

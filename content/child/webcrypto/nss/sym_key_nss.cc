@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "content/child/webcrypto/crypto_data.h"
+#include "content/child/webcrypto/generate_key_result.h"
 #include "content/child/webcrypto/nss/key_nss.h"
 #include "content/child/webcrypto/nss/util_nss.h"
 #include "content/child/webcrypto/status.h"
@@ -19,10 +20,10 @@ namespace webcrypto {
 
 Status GenerateSecretKeyNss(const blink::WebCryptoKeyAlgorithm& algorithm,
                             bool extractable,
-                            blink::WebCryptoKeyUsageMask usage_mask,
+                            blink::WebCryptoKeyUsageMask usages,
                             unsigned keylen_bytes,
                             CK_MECHANISM_TYPE mechanism,
-                            blink::WebCryptoKey* key) {
+                            GenerateKeyResult* result) {
   DCHECK_NE(CKM_INVALID_MECHANISM, mechanism);
 
   crypto::ScopedPK11Slot slot(PK11_GetInternalKeySlot());
@@ -45,18 +46,20 @@ Status GenerateSecretKeyNss(const blink::WebCryptoKeyAlgorithm& algorithm,
   scoped_ptr<SymKeyNss> handle(new SymKeyNss(
       pk11_key.Pass(), CryptoData(key_data->data, key_data->len)));
 
-  *key = blink::WebCryptoKey::create(handle.release(),
-                                     blink::WebCryptoKeyTypeSecret,
-                                     extractable,
-                                     algorithm,
-                                     usage_mask);
+  result->AssignSecretKey(
+      blink::WebCryptoKey::create(handle.release(),
+                                  blink::WebCryptoKeyTypeSecret,
+                                  extractable,
+                                  algorithm,
+                                  usages));
+
   return Status::Success();
 }
 
 Status ImportKeyRawNss(const CryptoData& key_data,
                        const blink::WebCryptoKeyAlgorithm& algorithm,
                        bool extractable,
-                       blink::WebCryptoKeyUsageMask usage_mask,
+                       blink::WebCryptoKeyUsageMask usages,
                        CK_MECHANISM_TYPE mechanism,
                        CK_FLAGS flags,
                        blink::WebCryptoKey* key) {
@@ -82,7 +85,7 @@ Status ImportKeyRawNss(const CryptoData& key_data,
                                      blink::WebCryptoKeyTypeSecret,
                                      extractable,
                                      algorithm,
-                                     usage_mask);
+                                     usages);
   return Status::Success();
 }
 

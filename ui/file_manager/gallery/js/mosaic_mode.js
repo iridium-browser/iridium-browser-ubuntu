@@ -2,20 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * @param {Element} container Content container.
+ * @param {ErrorBanner} errorBanner Error banner.
  * @param {cr.ui.ArrayDataModel} dataModel Data model.
  * @param {cr.ui.ListSelectionModel} selectionModel Selection model.
  * @param {VolumeManagerWrapper} volumeManager Volume manager.
- * @param {function} toggleMode Function to switch to the Slide mode.
+ * @param {function()} toggleMode Function to switch to the Slide mode.
  * @constructor
  */
 function MosaicMode(
-    container, dataModel, selectionModel, volumeManager, toggleMode) {
-  this.mosaic_ = new Mosaic(
-      container.ownerDocument, dataModel, selectionModel, volumeManager);
+    container, errorBanner, dataModel, selectionModel, volumeManager,
+    toggleMode) {
+  this.mosaic_ = new Mosaic(container.ownerDocument, errorBanner,
+      dataModel, selectionModel, volumeManager);
   container.appendChild(this.mosaic_);
 
   this.toggleMode_ = toggleMode;
@@ -40,7 +40,7 @@ MosaicMode.prototype.getTitle = function() { return 'GALLERY_MOSAIC'; };
 
 /**
  * Execute an action (this mode has no busy state).
- * @param {function} action Action to execute.
+ * @param {function()} action Action to execute.
  */
 MosaicMode.prototype.executeWhenReady = function(action) { action(); };
 
@@ -73,15 +73,17 @@ MosaicMode.prototype.onKeyDown = function(event) {
  * Mosaic control.
  *
  * @param {Document} document Document.
+ * @param {ErrorBanner} errorBanner Error banner.
  * @param {cr.ui.ArrayDataModel} dataModel Data model.
  * @param {cr.ui.ListSelectionModel} selectionModel Selection model.
  * @param {VolumeManagerWrapper} volumeManager Volume manager.
  * @return {Element} Mosaic element.
  * @constructor
  */
-function Mosaic(document, dataModel, selectionModel, volumeManager) {
+function Mosaic(document, errorBanner, dataModel, selectionModel,
+    volumeManager) {
   var self = document.createElement('div');
-  Mosaic.decorate(self, dataModel, selectionModel, volumeManager);
+  Mosaic.decorate(self, errorBanner, dataModel, selectionModel, volumeManager);
   return self;
 }
 
@@ -109,18 +111,20 @@ Mosaic.ANIMATED_SCROLL_DURATION = 500;
  * Decorates a Mosaic instance.
  *
  * @param {Mosaic} self Self pointer.
+ * @param {ErrorBanner} errorBanner Error banner.
  * @param {cr.ui.ArrayDataModel} dataModel Data model.
  * @param {cr.ui.ListSelectionModel} selectionModel Selection model.
  * @param {VolumeManagerWrapper} volumeManager Volume manager.
  */
 Mosaic.decorate = function(
-    self, dataModel, selectionModel, volumeManager) {
+    self, errorBanner, dataModel, selectionModel, volumeManager) {
   self.__proto__ = Mosaic.prototype;
   self.className = 'mosaic';
 
   self.dataModel_ = dataModel;
   self.selectionModel_ = selectionModel;
   self.volumeManager_ = volumeManager;
+  self.errorBanner_ = errorBanner;
 
   // Initialization is completed lazily on the first call to |init|.
 };
@@ -258,7 +262,7 @@ Mosaic.prototype.getSelectedTile = function() {
 
 /**
  * @param {number} index Tile index.
- * @return {Rect} Tile's image rectangle.
+ * @return {ImageRect} Tile's image rectangle.
  */
 Mosaic.prototype.getTileRect = function(index) {
   var tile = this.tiles_[index];
@@ -427,6 +431,11 @@ Mosaic.prototype.onSplice_ = function(event) {
     }
 
     this.tiles_.splice(index, event.removed.length);
+
+    // No items left, show the banner.
+    if (this.getItemCount_() === 0)
+      this.errorBanner_.show('GALLERY_NO_IMAGES');
+
     this.scheduleLayout(Mosaic.LAYOUT_DELAY);
   }
 
@@ -495,6 +504,10 @@ Mosaic.prototype.canZoom = function() {
  * Shows the mosaic.
  */
 Mosaic.prototype.show = function() {
+  // If the items are empty, just show the error message.
+  if (this.getItemCount_() === 0)
+    this.errorBanner_.show('GALLERY_NO_IMAGES');
+
   var duration = ImageView.MODE_TRANSITION_DURATION;
   if (this.canZoom()) {
     // Fade in in parallel with the zoom effect.
@@ -517,6 +530,8 @@ Mosaic.prototype.show = function() {
  * Hides the mosaic.
  */
 Mosaic.prototype.hide = function() {
+  this.errorBanner_.clear();
+
   if (this.showingTimeoutID_ !== null) {
     clearTimeout(this.showingTimeoutID_);
     this.showingTimeoutID_ = null;
@@ -553,16 +568,15 @@ Mosaic.prototype.loadVisibleTiles_ = function() {
   }.bind(this), 100);
 
   // Tiles only in the viewport (visible).
-  var visibleRect = new Rect(0,
-                             0,
-                             this.clientWidth,
-                             this.clientHeight);
+  var visibleRect = new ImageRect(
+      0, 0, this.clientWidth, this.clientHeight);
 
   // Tiles in the viewport and also some distance on the left and right.
-  var renderableRect = new Rect(-this.clientWidth,
-                                0,
-                                3 * this.clientWidth,
-                                this.clientHeight);
+  var renderableRect = new ImageRect(
+      -this.clientWidth,
+      0,
+      3 * this.clientWidth,
+      this.clientHeight);
 
   // Unload tiles out of scope.
   for (var index = 0; index < this.tiles_.length; index++) {
@@ -606,8 +620,9 @@ Mosaic.prototype.loadVisibleTiles_ = function() {
 /**
  * Applies reset the zoom transform.
  *
- * @param {Rect} tileRect Tile rectangle. Reset the transform if null.
- * @param {Rect} imageRect Large image rectangle. Reset the transform if null.
+ * @param {ImageRect} tileRect Tile rectangle. Reset the transform if null.
+ * @param {ImageRect} imageRect Large image rectangle. Reset the transform if
+ *     null.
  * @param {boolean=} opt_instant True of the transition should be instant.
  */
 Mosaic.prototype.transform = function(tileRect, imageRect, opt_instant) {
@@ -631,6 +646,14 @@ Mosaic.prototype.transform = function(tileRect, imageRect, opt_instant) {
   } else {
     this.style.webkitTransform = '';
   }
+};
+
+/**
+ * @return {number} Item count
+ * @private
+ */
+Mosaic.prototype.getItemCount_ = function() {
+  return this.dataModel_.length;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1968,7 +1991,7 @@ Mosaic.Tile.prototype.scrollIntoView = function(opt_animated) {
 };
 
 /**
- * @return {Rect} Rectangle occupied by the tile's image,
+ * @return {ImageRect} Rectangle occupied by the tile's image,
  *   relative to the viewport.
  */
 Mosaic.Tile.prototype.getImageRect = function() {
@@ -1976,7 +1999,7 @@ Mosaic.Tile.prototype.getImageRect = function() {
     return null;
 
   var margin = Mosaic.Layout.SPACING / 2;
-  return new Rect(this.left_ - this.container_.scrollLeft, this.top_,
+  return new ImageRect(this.left_ - this.container_.scrollLeft, this.top_,
       this.width_, this.height_).inflate(-margin, -margin);
 };
 

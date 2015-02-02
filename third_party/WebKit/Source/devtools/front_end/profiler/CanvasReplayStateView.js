@@ -36,7 +36,7 @@
 WebInspector.CanvasReplayStateView = function(traceLogPlayer)
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("canvasProfiler.css");
+    this.registerRequiredCSS("profiler/canvasProfiler.css");
     this.element.classList.add("canvas-replay-state-view");
     this._traceLogPlayer = traceLogPlayer;
 
@@ -509,7 +509,7 @@ WebInspector.CanvasReplayStateView.prototype = {
             if (typeof nameElement === "string")
                 nameElement += "[" + descriptor.values.length + "]";
             else {
-                var element = document.createElement("span");
+                var element = createElement("span");
                 element.appendChild(nameElement);
                 element.createTextChild("[" + descriptor.values.length + "]");
                 nameElement = element;

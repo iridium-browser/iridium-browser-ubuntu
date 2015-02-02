@@ -44,7 +44,7 @@ class AndroidHistoryProviderServiceTest : public testing::Test {
   }
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     // Setup the testing profile, so the bookmark_model_sql_handler could
     // get the bookmark model from it.
     ASSERT_TRUE(profile_manager_.SetUp());
@@ -54,13 +54,13 @@ class AndroidHistoryProviderServiceTest : public testing::Test {
         chrome::kInitialProfile);
 
     testing_profile_->CreateBookmarkModel(true);
-    test::WaitForBookmarkModelToLoad(
+    bookmarks::test::WaitForBookmarkModelToLoad(
         BookmarkModelFactory::GetForProfile(testing_profile_));
     ASSERT_TRUE(testing_profile_->CreateHistoryService(true, false));
     service_.reset(new AndroidHistoryProviderService(testing_profile_));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     testing_profile_->DestroyHistoryService();
     profile_manager_.DeleteTestingProfile(chrome::kInitialProfile);
     testing_profile_=NULL;

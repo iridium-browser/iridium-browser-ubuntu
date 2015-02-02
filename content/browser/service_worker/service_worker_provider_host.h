@@ -13,6 +13,8 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/public/common/request_context_frame_type.h"
+#include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
 
 namespace IPC {
@@ -72,6 +74,10 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
         associated_registration_->installing_version() : NULL;
   }
 
+  ServiceWorkerRegistration* associated_registration() const {
+    return associated_registration_.get();
+  }
+
   // The running version, if any, that this provider is providing resource
   // loads for.
   ServiceWorkerVersion* running_hosted_version() const {
@@ -80,6 +86,9 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
 
   void SetDocumentUrl(const GURL& url);
   const GURL& document_url() const { return document_url_; }
+
+  void SetTopmostFrameUrl(const GURL& url);
+  const GURL& topmost_frame_url() const { return topmost_frame_url_; }
 
   // Associates to |registration| to listen for its version change events.
   void AssociateRegistration(ServiceWorkerRegistration* registration);
@@ -94,7 +103,11 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
   // Returns a handler for a request, the handler may return NULL if
   // the request doesn't require special handling.
   scoped_ptr<ServiceWorkerRequestHandler> CreateRequestHandler(
+      FetchRequestMode request_mode,
+      FetchCredentialsMode credentials_mode,
       ResourceType resource_type,
+      RequestContextType request_context_type,
+      RequestContextFrameType frame_type,
       base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
       scoped_refptr<ResourceRequestBody> body);
 
@@ -120,14 +133,14 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
 
  private:
   friend class ServiceWorkerProviderHostTest;
+  friend class ServiceWorkerWriteToCacheJobTest;
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
                            UpdateBefore24Hours);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
                            UpdateAfter24Hours);
 
   // ServiceWorkerRegistration::Listener overrides.
-  virtual void OnRegistrationFailed(
-      ServiceWorkerRegistration* registration) OVERRIDE;
+  void OnRegistrationFailed(ServiceWorkerRegistration* registration) override;
 
   // Sets the controller version field to |version| or if |version| is NULL,
   // clears the field.
@@ -145,6 +158,7 @@ class CONTENT_EXPORT ServiceWorkerProviderHost
   const int process_id_;
   const int provider_id_;
   GURL document_url_;
+  GURL topmost_frame_url_;
 
   std::vector<GURL> associated_patterns_;
   scoped_refptr<ServiceWorkerRegistration> associated_registration_;

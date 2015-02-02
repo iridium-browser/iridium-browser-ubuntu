@@ -59,6 +59,7 @@
 
 namespace base {
 
+#if !defined(OS_NACL_NONSFI)
 namespace {
 
 #if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL)
@@ -321,7 +322,9 @@ bool CopyDirectory(const FilePath& from_path,
     }
 
     if (S_ISDIR(from_stat.st_mode)) {
-      if (mkdir(target_path.value().c_str(), from_stat.st_mode & 01777) != 0 &&
+      if (mkdir(target_path.value().c_str(),
+                (from_stat.st_mode & 01777) | S_IRUSR | S_IXUSR | S_IWUSR) !=
+              0 &&
           errno != EEXIST) {
         DLOG(ERROR) << "CopyDirectory() couldn't create directory: "
                     << target_path.value() << " errno = " << errno;
@@ -345,6 +348,7 @@ bool CopyDirectory(const FilePath& from_path,
 
   return success;
 }
+#endif  // !defined(OS_NACL_NONSFI)
 
 bool PathExists(const FilePath& path) {
   ThreadRestrictions::AssertIOAllowed();
@@ -356,6 +360,7 @@ bool PathExists(const FilePath& path) {
   return access(path.value().c_str(), F_OK) == 0;
 }
 
+#if !defined(OS_NACL_NONSFI)
 bool PathIsWritable(const FilePath& path) {
   ThreadRestrictions::AssertIOAllowed();
   return access(path.value().c_str(), W_OK) == 0;
@@ -368,6 +373,7 @@ bool DirectoryExists(const FilePath& path) {
     return S_ISDIR(file_info.st_mode);
   return false;
 }
+#endif  // !defined(OS_NACL_NONSFI)
 
 bool ReadFromFD(int fd, char* buffer, size_t bytes) {
   size_t total_read = 0;
@@ -381,6 +387,7 @@ bool ReadFromFD(int fd, char* buffer, size_t bytes) {
   return total_read == bytes;
 }
 
+#if !defined(OS_NACL_NONSFI)
 bool CreateSymbolicLink(const FilePath& target_path,
                         const FilePath& symlink_path) {
   DCHECK(!symlink_path.empty());
@@ -682,13 +689,13 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
   if (fd < 0)
     return -1;
 
-  int bytes_written = WriteFileDescriptor(fd, data, size);
+  int bytes_written = WriteFileDescriptor(fd, data, size) ? size : -1;
   if (IGNORE_EINTR(close(fd)) < 0)
     return -1;
   return bytes_written;
 }
 
-int WriteFileDescriptor(const int fd, const char* data, int size) {
+bool WriteFileDescriptor(const int fd, const char* data, int size) {
   // Allow for partial writes.
   ssize_t bytes_written_total = 0;
   for (ssize_t bytes_written_partial = 0; bytes_written_total < size;
@@ -697,22 +704,33 @@ int WriteFileDescriptor(const int fd, const char* data, int size) {
         HANDLE_EINTR(write(fd, data + bytes_written_total,
                            size - bytes_written_total));
     if (bytes_written_partial < 0)
-      return -1;
+      return false;
   }
 
-  return bytes_written_total;
+  return true;
 }
 
-int AppendToFile(const FilePath& filename, const char* data, int size) {
+bool AppendToFile(const FilePath& filename, const char* data, int size) {
   ThreadRestrictions::AssertIOAllowed();
+  bool ret = true;
   int fd = HANDLE_EINTR(open(filename.value().c_str(), O_WRONLY | O_APPEND));
-  if (fd < 0)
-    return -1;
+  if (fd < 0) {
+    VPLOG(1) << "Unable to create file " << filename.value();
+    return false;
+  }
 
-  int bytes_written = WriteFileDescriptor(fd, data, size);
-  if (IGNORE_EINTR(close(fd)) < 0)
-    return -1;
-  return bytes_written;
+  // This call will either write all of the data or return false.
+  if (!WriteFileDescriptor(fd, data, size)) {
+    VPLOG(1) << "Error while writing to file " << filename.value();
+    ret = false;
+  }
+
+  if (IGNORE_EINTR(close(fd)) < 0) {
+    VPLOG(1) << "Error while closing file " << filename.value();
+    return false;
+  }
+
+  return ret;
 }
 
 // Gets the current working directory for the process.
@@ -909,4 +927,6 @@ bool CopyFileUnsafe(const FilePath& from_path, const FilePath& to_path) {
 #endif  // !defined(OS_MACOSX)
 
 }  // namespace internal
+
+#endif  // !defined(OS_NACL_NONSFI)
 }  // namespace base

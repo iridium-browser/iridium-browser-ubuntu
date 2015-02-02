@@ -14,6 +14,7 @@
 #include "chrome/browser/extensions/webstore_data_fetcher_delegate.h"
 
 class Browser;
+class ExtensionInstallPromptShowParams;
 class ExtensionInstallUI;
 class GlobalError;
 class GlobalErrorService;
@@ -48,11 +49,11 @@ class ExternalInstallError : public ExtensionInstallPrompt::Delegate,
                        const std::string& extension_id,
                        AlertType error_type,
                        ExternalInstallManager* manager);
-  virtual ~ExternalInstallError();
+  ~ExternalInstallError() override;
 
   // ExtensionInstallPrompt::Delegate implementation.
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
 
   // Show the associated dialog. This should only be called once the dialog is
   // ready.
@@ -66,18 +67,17 @@ class ExternalInstallError : public ExtensionInstallPrompt::Delegate,
 
  private:
   // WebstoreDataFetcherDelegate implementation.
-  virtual void OnWebstoreRequestFailure() OVERRIDE;
-  virtual void OnWebstoreResponseParseSuccess(
-      scoped_ptr<base::DictionaryValue> webstore_data) OVERRIDE;
-  virtual void OnWebstoreResponseParseFailure(
-      const std::string& error) OVERRIDE;
+  void OnWebstoreRequestFailure() override;
+  void OnWebstoreResponseParseSuccess(
+      scoped_ptr<base::DictionaryValue> webstore_data) override;
+  void OnWebstoreResponseParseFailure(const std::string& error) override;
 
   // Called when data fetching has completed (either successfully or not).
   void OnFetchComplete();
 
   // Called when the dialog has been successfully populated, and is ready to be
   // shown.
-  void OnDialogReady(const ExtensionInstallPrompt::ShowParams& show_params,
+  void OnDialogReady(ExtensionInstallPromptShowParams* show_params,
                      ExtensionInstallPrompt::Delegate* prompt_delegate,
                      scoped_refptr<ExtensionInstallPrompt::Prompt> prompt);
 
@@ -98,6 +98,7 @@ class ExternalInstallError : public ExtensionInstallPrompt::Delegate,
 
   // The UI for showing the error.
   scoped_ptr<ExtensionInstallPrompt> install_ui_;
+  scoped_ptr<ExtensionInstallPromptShowParams> install_ui_show_params_;
   scoped_refptr<ExtensionInstallPrompt::Prompt> prompt_;
 
   // The UI for the given error, which will take the form of either a menu

@@ -23,7 +23,6 @@
 #include "chrome/browser/chromeos/mobile/mobile_activator.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -144,16 +143,16 @@ class MobileSetupUIHTMLSource : public content::URLDataSource {
   MobileSetupUIHTMLSource();
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
+  virtual std::string GetSource() const override;
   virtual void StartDataRequest(
       const std::string& path,
       int render_process_id,
       int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string&) const OVERRIDE {
+      const content::URLDataSource::GotDataCallback& callback) override;
+  virtual std::string GetMimeType(const std::string&) const override {
     return "text/html";
   }
-  virtual bool ShouldAddContentSecurityPolicy() const OVERRIDE {
+  virtual bool ShouldAddContentSecurityPolicy() const override {
     return false;
   }
 
@@ -186,7 +185,7 @@ class MobileSetupHandler
   virtual ~MobileSetupHandler();
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
  private:
   enum Type {
@@ -205,7 +204,7 @@ class MobileSetupHandler
   virtual void OnActivationStateChanged(
       const NetworkState* network,
       MobileActivator::PlanActivationState new_state,
-      const std::string& error_description) OVERRIDE;
+      const std::string& error_description) override;
 
   // Callbacks for NetworkConfigurationHandler::GetProperties.
   void GetPropertiesAndCallStatusChanged(
@@ -230,9 +229,9 @@ class MobileSetupHandler
 
   // NetworkStateHandlerObserver implementation.
   virtual void NetworkConnectionStateChanged(
-      const NetworkState* network) OVERRIDE;
+      const NetworkState* network) override;
   virtual void DefaultNetworkChanged(
-      const NetworkState* default_network) OVERRIDE;
+      const NetworkState* default_network) override;
 
   // Updates |lte_portal_reachable_| for lte network |network| and notifies
   // webui of the new state if the reachability changed or |force_notification|
@@ -337,8 +336,6 @@ void MobileSetupUIHTMLSource::GetPropertiesAndStartDataRequest(
   strings.SetString("ok_button",
                     l10n_util::GetStringUTF16(IDS_OK));
   webui::SetFontAndTextDirection(&strings);
-
-  webui::UseVersion2 version_2;
 
   // The webui differs based on whether the network is activated or not. If the
   // network is activated, the webui goes straight to portal. Otherwise the

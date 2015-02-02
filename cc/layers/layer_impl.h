@@ -19,6 +19,7 @@
 #include "cc/base/region.h"
 #include "cc/base/scoped_ptr_vector.h"
 #include "cc/input/input_handler.h"
+#include "cc/input/scrollbar.h"
 #include "cc/layers/draw_properties.h"
 #include "cc/layers/layer_lists.h"
 #include "cc/layers/layer_position_constraint.h"
@@ -30,9 +31,10 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
 #include "third_party/skia/include/core/SkPicture.h"
-#include "ui/gfx/point3_f.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/transform.h"
 
 namespace base {
@@ -77,9 +79,10 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   // of the layer.
   class ScrollOffsetDelegate {
    public:
-    virtual void SetTotalScrollOffset(const gfx::Vector2dF& new_value) = 0;
-    virtual gfx::Vector2dF GetTotalScrollOffset() = 0;
+    virtual void SetTotalScrollOffset(const gfx::ScrollOffset& new_value) = 0;
+    virtual gfx::ScrollOffset GetTotalScrollOffset() = 0;
     virtual bool IsExternalFlingActive() const = 0;
+    virtual void Update() const = 0;
   };
 
   typedef LayerImplList RenderSurfaceListType;
@@ -92,29 +95,28 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
     return make_scoped_ptr(new LayerImpl(tree_impl, id));
   }
 
-  virtual ~LayerImpl();
+  ~LayerImpl() override;
 
   int id() const { return layer_id_; }
 
   // LayerAnimationValueProvider implementation.
-  virtual gfx::Vector2dF ScrollOffsetForAnimation() const OVERRIDE;
+  gfx::ScrollOffset ScrollOffsetForAnimation() const override;
 
   // LayerAnimationValueObserver implementation.
-  virtual void OnFilterAnimated(const FilterOperations& filters) OVERRIDE;
-  virtual void OnOpacityAnimated(float opacity) OVERRIDE;
-  virtual void OnTransformAnimated(const gfx::Transform& transform) OVERRIDE;
-  virtual void OnScrollOffsetAnimated(
-      const gfx::Vector2dF& scroll_offset) OVERRIDE;
-  virtual void OnAnimationWaitingForDeletion() OVERRIDE;
-  virtual bool IsActive() const OVERRIDE;
+  void OnFilterAnimated(const FilterOperations& filters) override;
+  void OnOpacityAnimated(float opacity) override;
+  void OnTransformAnimated(const gfx::Transform& transform) override;
+  void OnScrollOffsetAnimated(const gfx::ScrollOffset& scroll_offset) override;
+  void OnAnimationWaitingForDeletion() override;
+  bool IsActive() const override;
 
   // AnimationDelegate implementation.
-  virtual void NotifyAnimationStarted(
-      base::TimeTicks monotonic_time,
-      Animation::TargetProperty target_property) OVERRIDE{};
-  virtual void NotifyAnimationFinished(
-      base::TimeTicks monotonic_time,
-      Animation::TargetProperty target_property) OVERRIDE;
+  void NotifyAnimationStarted(base::TimeTicks monotonic_time,
+                              Animation::TargetProperty target_property,
+                              int group) override{};
+  void NotifyAnimationFinished(base::TimeTicks monotonic_time,
+                               Animation::TargetProperty target_property,
+                               int group) override;
 
   // Tree structure.
   LayerImpl* parent() { return parent_; }
@@ -194,11 +196,12 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   virtual bool WillDraw(DrawMode draw_mode,
                         ResourceProvider* resource_provider);
   virtual void AppendQuads(RenderPass* render_pass,
-                           const OcclusionTracker<LayerImpl>& occlusion_tracker,
+                           const Occlusion& occlusion_in_content_space,
                            AppendQuadsData* append_quads_data) {}
   virtual void DidDraw(ResourceProvider* resource_provider);
 
-  virtual ResourceProvider::ResourceId ContentsResourceId() const;
+  virtual void GetContentsResourceId(ResourceProvider::ResourceId* resource_id,
+                                     gfx::Size* resource_size) const;
 
   virtual bool HasDelegatedContent() const;
   virtual bool HasContributingDelegatedRenderPasses() const;
@@ -364,6 +367,9 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
 
   void SetBounds(const gfx::Size& bounds);
   gfx::Size bounds() const;
+  // Like bounds() but doesn't snap to int. Lossy on giant pages (e.g. millions
+  // of pixels) due to use of single precision float.
+  gfx::SizeF BoundsForScrolling() const;
   void SetBoundsDelta(const gfx::Vector2dF& bounds_delta);
   gfx::Vector2dF bounds_delta() const { return bounds_delta_; }
 
@@ -375,24 +381,26 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   void SetContentsScale(float contents_scale_x, float contents_scale_y);
 
   void SetScrollOffsetDelegate(ScrollOffsetDelegate* scroll_offset_delegate);
+  void DidScroll();
   bool IsExternalFlingActive() const;
 
-  void SetScrollOffset(const gfx::Vector2d& scroll_offset);
-  void SetScrollOffsetAndDelta(const gfx::Vector2d& scroll_offset,
+  void SetScrollOffset(const gfx::ScrollOffset& scroll_offset);
+  void SetScrollOffsetAndDelta(const gfx::ScrollOffset& scroll_offset,
                                const gfx::Vector2dF& scroll_delta);
-  gfx::Vector2d scroll_offset() const { return scroll_offset_; }
+  gfx::ScrollOffset scroll_offset() const { return scroll_offset_; }
 
-  gfx::Vector2d MaxScrollOffset() const;
+  gfx::ScrollOffset MaxScrollOffset() const;
   gfx::Vector2dF ClampScrollToMaxScrollOffset();
   void SetScrollbarPosition(ScrollbarLayerImplBase* scrollbar_layer,
-                            LayerImpl* scrollbar_clip_layer) const;
+                            LayerImpl* scrollbar_clip_layer,
+                            bool on_resize) const;
   void SetScrollDelta(const gfx::Vector2dF& scroll_delta);
   gfx::Vector2dF ScrollDelta() const;
 
-  gfx::Vector2dF TotalScrollOffset() const;
+  gfx::ScrollOffset TotalScrollOffset() const;
 
-  void SetSentScrollDelta(const gfx::Vector2d& sent_scroll_delta);
-  gfx::Vector2d sent_scroll_delta() const { return sent_scroll_delta_; }
+  void SetSentScrollDelta(const gfx::Vector2dF& sent_scroll_delta);
+  gfx::Vector2dF sent_scroll_delta() const { return sent_scroll_delta_; }
 
   // Returns the delta of the scroll that was outside of the bounds of the
   // initial scroll
@@ -405,9 +413,15 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   void set_user_scrollable_horizontal(bool scrollable) {
     user_scrollable_horizontal_ = scrollable;
   }
+  bool user_scrollable_horizontal() const {
+    return user_scrollable_horizontal_;
+  }
   void set_user_scrollable_vertical(bool scrollable) {
     user_scrollable_vertical_ = scrollable;
   }
+  bool user_scrollable_vertical() const { return user_scrollable_vertical_; }
+
+  bool user_scrollable(ScrollbarOrientation orientation) const;
 
   void ApplySentScrollDeltasFromAbortedCommit();
   void ApplyScrollDeltasSinceBeginMainFrame();
@@ -468,9 +482,8 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   bool transform_is_invertible() const { return transform_is_invertible_; }
 
   // Note this rect is in layer space (not content space).
-  void SetUpdateRect(const gfx::RectF& update_rect);
-
-  const gfx::RectF& update_rect() const { return update_rect_; }
+  void SetUpdateRect(const gfx::Rect& update_rect);
+  gfx::Rect update_rect() const { return update_rect_; }
 
   void AddDamageRect(const gfx::RectF& damage_rect);
 
@@ -512,7 +525,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   void AddScrollbar(ScrollbarLayerImplBase* layer);
   void RemoveScrollbar(ScrollbarLayerImplBase* layer);
   bool HasScrollbar(ScrollbarOrientation orientation) const;
-  void ScrollbarParametersDidChange();
+  void ScrollbarParametersDidChange(bool on_resize);
   int clip_height() {
     return scroll_clip_layer_ ? scroll_clip_layer_->bounds().height() : 0;
   }
@@ -589,10 +602,10 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   // used. If this pointer turns out to be too heavy, we could have this (and
   // the scroll parent above) be stored in a LayerImpl -> scroll_info
   // map somewhere.
-  scoped_ptr<std::set<LayerImpl*> > scroll_children_;
+  scoped_ptr<std::set<LayerImpl*>> scroll_children_;
 
   LayerImpl* clip_parent_;
-  scoped_ptr<std::set<LayerImpl*> > clip_children_;
+  scoped_ptr<std::set<LayerImpl*>> clip_children_;
 
   // mask_layer_ can be temporarily stolen during tree sync, we need this ID to
   // confirm newly assigned layer is still the previous one
@@ -607,7 +620,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   gfx::Point3F transform_origin_;
   gfx::Size bounds_;
   gfx::Vector2dF bounds_delta_;
-  gfx::Vector2d scroll_offset_;
+  gfx::ScrollOffset scroll_offset_;
   ScrollOffsetDelegate* scroll_offset_delegate_;
   LayerImpl* scroll_clip_layer_;
   bool scrollable_ : 1;
@@ -650,8 +663,8 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   LayerPositionConstraint position_constraint_;
 
   gfx::Vector2dF scroll_delta_;
-  gfx::Vector2d sent_scroll_delta_;
-  gfx::Vector2dF last_scroll_offset_;
+  gfx::Vector2dF sent_scroll_delta_;
+  gfx::ScrollOffset last_scroll_offset_;
 
   int num_descendants_that_draw_content_;
 
@@ -685,7 +698,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   // Rect indicating what was repainted/updated during update.
   // Note that plugin layers bypass this and leave it empty.
   // Uses layer (not content) space.
-  gfx::RectF update_rect_;
+  gfx::Rect update_rect_;
 
   // This rect is in layer space.
   gfx::RectF damage_rect_;

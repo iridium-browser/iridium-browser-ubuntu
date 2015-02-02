@@ -75,31 +75,30 @@ class PasswordStoreX : public password_manager::PasswordStoreDefault {
  private:
   friend class PasswordStoreXTest;
 
-  virtual ~PasswordStoreX();
+  ~PasswordStoreX() override;
 
   // Implements PasswordStore interface.
-  virtual password_manager::PasswordStoreChangeList AddLoginImpl(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList UpdateLoginImpl(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList RemoveLoginImpl(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList
-      RemoveLoginsCreatedBetweenImpl(base::Time delete_begin,
-                                     base::Time delete_end) OVERRIDE;
-  virtual password_manager::PasswordStoreChangeList
-      RemoveLoginsSyncedBetweenImpl(base::Time delete_begin,
-                                    base::Time delete_end) OVERRIDE;
-  virtual void GetLoginsImpl(
-      const autofill::PasswordForm& form,
-      AuthorizationPromptPolicy prompt_policy,
-      const ConsumerCallbackRunner& callback_runner) OVERRIDE;
-  virtual void GetAutofillableLoginsImpl(GetLoginsRequest* request) OVERRIDE;
-  virtual void GetBlacklistLoginsImpl(GetLoginsRequest* request) OVERRIDE;
-  virtual bool FillAutofillableLogins(
-      std::vector<autofill::PasswordForm*>* forms) OVERRIDE;
-  virtual bool FillBlacklistLogins(
-      std::vector<autofill::PasswordForm*>* forms) OVERRIDE;
+  password_manager::PasswordStoreChangeList AddLoginImpl(
+      const autofill::PasswordForm& form) override;
+  password_manager::PasswordStoreChangeList UpdateLoginImpl(
+      const autofill::PasswordForm& form) override;
+  password_manager::PasswordStoreChangeList RemoveLoginImpl(
+      const autofill::PasswordForm& form) override;
+  password_manager::PasswordStoreChangeList RemoveLoginsCreatedBetweenImpl(
+      base::Time delete_begin,
+      base::Time delete_end) override;
+  password_manager::PasswordStoreChangeList RemoveLoginsSyncedBetweenImpl(
+      base::Time delete_begin,
+      base::Time delete_end) override;
+  void GetLoginsImpl(const autofill::PasswordForm& form,
+                     AuthorizationPromptPolicy prompt_policy,
+                     const ConsumerCallbackRunner& callback_runner) override;
+  void GetAutofillableLoginsImpl(GetLoginsRequest* request) override;
+  void GetBlacklistLoginsImpl(GetLoginsRequest* request) override;
+  bool FillAutofillableLogins(
+      std::vector<autofill::PasswordForm*>* forms) override;
+  bool FillBlacklistLogins(
+      std::vector<autofill::PasswordForm*>* forms) override;
 
   // Sort logins by origin, like the ORDER BY clause in login_database.cc.
   void SortLoginsByOrigin(NativeBackend::PasswordFormList* list);

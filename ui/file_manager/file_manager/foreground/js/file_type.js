@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Namespace object for file type utility functions.
  */
@@ -157,6 +155,12 @@ FileType.types = [
     type: 'hosted', icon: 'gform', name: 'GFORM_DOCUMENT_FILE_TYPE',
     subtype: 'form', pattern: /\.gform$/i
   },
+  {
+    // We use extension ".gmaps" to avoid conflict, but use singular form
+    // (gmap/map) in other parts to be consistent with other file type.
+    type: 'hosted', icon: 'gmap', name: 'GMAP_DOCUMENT_FILE_TYPE',
+    subtype: 'map', pattern: /\.gmaps$/i
+  },
 
   // Others
   {
@@ -165,7 +169,7 @@ FileType.types = [
   },
   {
     type: 'document', name: 'HTML_DOCUMENT_FILE_TYPE',
-    subtype: 'HTML', pattern: /\.(html?|mht|mhtml)$/i
+    subtype: 'HTML', pattern: /\.(html?|mht(ml)?|shtml|xht(ml)?)$/i
   },
   {
     type: 'document', icon: 'word', name: 'WORD_DOCUMENT_FILE_TYPE',

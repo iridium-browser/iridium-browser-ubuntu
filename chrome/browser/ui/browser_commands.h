@@ -100,7 +100,9 @@ void BookmarkAllTabs(Browser* browser);
 bool CanBookmarkAllTabs(const Browser* browser);
 void Translate(Browser* browser);
 void ManagePasswordsForPage(Browser* browser);
+#if defined(OS_WIN)
 void TogglePagePinnedToStartScreen(Browser* browser);
+#endif
 void SavePage(Browser* browser);
 bool CanSavePage(const Browser* browser);
 void ShowFindBar(Browser* browser);
@@ -110,10 +112,10 @@ void ShowWebsiteSettings(Browser* browser,
                          const content::SSLStatus& ssl);
 void Print(Browser* browser);
 bool CanPrint(Browser* browser);
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
 void BasicPrint(Browser* browser);
 bool CanBasicPrint(Browser* browser);
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
 void EmailPageLocation(Browser* browser);
 bool CanEmailPageLocation(const Browser* browser);
 void Cut(Browser* browser);

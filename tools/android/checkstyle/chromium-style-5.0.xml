@@ -12,25 +12,27 @@
       <property name="severity" value="error"/>
     </module>
     <module name="IllegalCatch">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="info"/>
     </module>
     <module name="RedundantImport">
       <message key="import.redundant" value="Redundant import: {0}. Use :JavaImportOrganize (ECLIM) or Ctrl+Shift+O (Eclipse) to sort imports"/>
-      <property name="severity" value="error"/>
+      <!-- This check is set to a warning because JNI generator sometimes requires to leave an unused import -->
+      <property name="severity" value="warning"/>
     </module>
     <module name="UnusedImports">
-      <property name="severity" value="error"/>
-      <property name="processJavadoc" value="true"/>
       <message key="import.unused" value="Unused import: {0}. Use :JavaImportOrganize (ECLIM) or Ctrl+Shift+O (Eclipse) to sort imports"/>
+      <!-- This check is set to a warning because JNI generator sometimes requires to leave an unused import -->
+      <property name="severity" value="warning"/>
+      <property name="processJavadoc" value="true"/>
     </module>
     <module name="JavadocType">
-      <property name="severity" value="error"/>
+      <property name="severity" value="warning"/>
       <property name="tokens" value="INTERFACE_DEF, CLASS_DEF"/>
       <property name="scope" value="public"/>
       <message key="javadoc.missing" value="Public classes and interfaces require JavaDoc comments."/>
     </module>
     <module name="JavadocMethod">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="info"/>
       <property name="scope" value="public"/>
       <property name="allowMissingParamTags" value="true"/>
       <property name="allowMissingPropertyJavadoc" value="true"/>
@@ -99,7 +101,7 @@
       <property name="severity" value="error"/>
     </module>
     <module name="NeedBraces">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="info"/>
       <property name="tokens" value="LITERAL_FOR, LITERAL_WHILE, LITERAL_DO"/>
     </module>
     <module name="EmptyBlock">
@@ -140,9 +142,12 @@
       <property name="severity" value="error"/>
     </module>
     <module name="NoFinalizer">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="info"/>
     </module>
     <module name="ParenPad">
+      <property name="severity" value="error"/>
+    </module>
+    <module name="MethodParamPad">
       <property name="severity" value="error"/>
     </module>
     <module name="ImportOrder">
@@ -153,23 +158,36 @@
       <property name="option" value="top"/>
       <property name="separated" value="true"/>
     </module>
-    <!-- TODO(aurimas): make indentation an error once https://github.com/checkstyle/checkstyle/issues/255 is fixed. -->
     <module name="Indentation">
-      <property name="severity" value="warning"/>
+      <property name="severity" value="error"/>
       <property name="basicOffset" value="4"/>
       <property name="throwsIndent" value="8"/>
+      <property name="lineWrappingIndentation" value="8"/>
+    </module>
+    <!-- TODO(aurimas): make OperatorWrap into an error once all the warnings are fixed. -->
+    <module name="OperatorWrap">
+      <property name="severity" value="warning"/>
+      <property name="option" value="NL" />
+      <property name="tokens" value="BAND, BOR, BSR, BXOR, DIV, EQUAL, GE, GT, LAND, LE, LITERAL_INSTANCEOF, LOR, LT, MINUS, MOD, NOT_EQUAL, PLUS, QUESTION, SL, SR, STAR " />
+    </module>
+    <module name="OperatorWrap">
+     <property name="severity" value="warning"/>
+     <property name="option" value="eol"/>
+     <property name="tokens" value="ASSIGN"/>
+    </module>
+    <module name="SeparatorWrap">
+      <property name="severity" value="warning"/>
+      <property name="tokens" value="DOT"/>
+      <property name="option" value="nl"/>
+    </module>
+    <module name="SeparatorWrap">
+      <property name="severity" value="warning"/>
+      <property name="tokens" value="COMMA"/>
+      <property name="option" value="EOL"/>
     </module>
   </module>
   <module name="FileTabCharacter">
     <property name="severity" value="error"/>
-  </module>
-  <module name="RegexpSingleline">
-    <property name="format" value="((//.*)|(\*.*))FIXME"/>
-    <property name="message" value="TODO is preferred to FIXME.  e.g. &quot;TODO(johndoe):"/>
-  </module>
-  <module name="RegexpSingleline">
-    <property name="format" value="((//.*)|(\*.*))(?&lt;!TODO\(.{0,100})(TODO[^(])|(TODO\([^)]*$)"/>
-    <property name="message" value="All TODOs should be named.  e.g. &quot;TODO(johndoe):"/>
   </module>
   <module name="RegexpSingleline">
     <property name="severity" value="error"/>

@@ -26,60 +26,63 @@ class TestSigninClient : public SigninClient {
  public:
   TestSigninClient();
   TestSigninClient(PrefService* pref_service);
-  virtual ~TestSigninClient();
+  ~TestSigninClient() override;
 
   // SigninClient implementation that is specialized for unit tests.
 
   // Returns NULL.
   // NOTE: This should be changed to return a properly-initalized PrefService
   // once there is a unit test that requires it.
-  virtual PrefService* GetPrefs() OVERRIDE;
+  PrefService* GetPrefs() override;
 
   // Returns a pointer to a loaded database.
-  virtual scoped_refptr<TokenWebData> GetDatabase() OVERRIDE;
+  scoped_refptr<TokenWebData> GetDatabase() override;
 
   // Returns true.
-  virtual bool CanRevokeCredentials() OVERRIDE;
+  bool CanRevokeCredentials() override;
 
   // Returns empty string.
-  virtual std::string GetSigninScopedDeviceId() OVERRIDE;
+  std::string GetSigninScopedDeviceId() override;
 
   // Does nothing.
-  virtual void ClearSigninScopedDeviceId() OVERRIDE;
+  void OnSignedOut() override;
 
   // Returns the empty string.
-  virtual std::string GetProductVersion() OVERRIDE;
+  std::string GetProductVersion() override;
 
   // Returns a TestURLRequestContextGetter or an manually provided
   // URLRequestContextGetter.
-  virtual net::URLRequestContextGetter* GetURLRequestContext() OVERRIDE;
+  net::URLRequestContextGetter* GetURLRequestContext() override;
 
   // For testing purposes, can override the TestURLRequestContextGetter created
   // in the default constructor.
   void SetURLRequestContext(net::URLRequestContextGetter* request_context);
 
 #if defined(OS_IOS)
-  virtual ios::ProfileOAuth2TokenServiceIOSProvider* GetIOSProvider() OVERRIDE;
+  virtual ios::ProfileOAuth2TokenServiceIOSProvider* GetIOSProvider() override;
 #endif
 
   // Returns true.
-  virtual bool ShouldMergeSigninCredentialsIntoCookieJar() OVERRIDE;
+  bool ShouldMergeSigninCredentialsIntoCookieJar() override;
 
-  // Does nothing.
-  virtual scoped_ptr<CookieChangedCallbackList::Subscription>
-      AddCookieChangedCallback(const CookieChangedCallback& callback) OVERRIDE;
+  // Registers |callback| and returns the subscription.
+  // Note that |callback| will never be called.
+  scoped_ptr<SigninClient::CookieChangedSubscription> AddCookieChangedCallback(
+      const GURL& url,
+      const std::string& name,
+      const net::CookieStore::CookieChangedCallback& callback) override;
 
 #if defined(OS_IOS)
   ios::FakeProfileOAuth2TokenServiceIOSProvider* GetIOSProviderAsFake();
 #endif
 
   // SigninClient overrides:
-  virtual void SetSigninProcess(int host_id) OVERRIDE;
-  virtual void ClearSigninProcess() OVERRIDE;
-  virtual bool IsSigninProcess(int host_id) const OVERRIDE;
-  virtual bool HasSigninProcess() const OVERRIDE;
-  virtual bool IsFirstRun() const OVERRIDE;
-  virtual base::Time GetInstallDate() OVERRIDE;
+  void SetSigninProcess(int host_id) override;
+  void ClearSigninProcess() override;
+  bool IsSigninProcess(int host_id) const override;
+  bool HasSigninProcess() const override;
+  bool IsFirstRun() const override;
+  base::Time GetInstallDate() override;
 
  private:
   // Loads the token database.
@@ -89,8 +92,6 @@ class TestSigninClient : public SigninClient {
   scoped_refptr<net::URLRequestContextGetter> request_context_;
   scoped_refptr<TokenWebData> database_;
   int signin_host_id_;
-  CookieChangedCallbackList cookie_callbacks_;
-
   PrefService* pref_service_;
 
 #if defined(OS_IOS)

@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <math.h>
 #include <limits>
 
 #include "webrtc/audio_processing/debug.pb.h"
 #include "webrtc/common_audio/include/audio_util.h"
-#include "webrtc/common_audio/wav_writer.h"
+#include "webrtc/common_audio/wav_file.h"
 #include "webrtc/modules/audio_processing/common.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
 #include "webrtc/modules/interface/module_common_types.h"
@@ -49,7 +50,7 @@ class RawFile {
 
 static inline void WriteIntData(const int16_t* data,
                                 size_t length,
-                                WavFile* wav_file,
+                                WavWriter* wav_file,
                                 RawFile* raw_file) {
   if (wav_file) {
     wav_file->WriteSamples(data, length);
@@ -62,7 +63,7 @@ static inline void WriteIntData(const int16_t* data,
 static inline void WriteFloatData(const float* const* data,
                                   size_t samples_per_channel,
                                   int num_channels,
-                                  WavFile* wav_file,
+                                  WavWriter* wav_file,
                                   RawFile* raw_file) {
   size_t length = num_channels * samples_per_channel;
   scoped_ptr<float[]> buffer(new float[length]);
@@ -151,6 +152,28 @@ static inline bool ReadMessageFromFile(FILE* file,
 
   msg->Clear();
   return msg->ParseFromArray(bytes.get(), size);
+}
+
+template <typename T>
+float ComputeSNR(const T* ref, const T* test, int length, float* variance) {
+  float mse = 0;
+  float mean = 0;
+  *variance = 0;
+  for (int i = 0; i < length; ++i) {
+    T error = ref[i] - test[i];
+    mse += error * error;
+    *variance += ref[i] * ref[i];
+    mean += ref[i];
+  }
+  mse /= length;
+  *variance /= length;
+  mean /= length;
+  *variance -= mean * mean;
+
+  float snr = 100;  // We assign 100 dB to the zero-error case.
+  if (mse > 0)
+    snr = 10 * log10(*variance / mse);
+  return snr;
 }
 
 }  // namespace webrtc

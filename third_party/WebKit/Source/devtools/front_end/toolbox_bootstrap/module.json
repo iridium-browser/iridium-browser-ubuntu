@@ -1,6 +1,6 @@
 {
     "dependencies": [
-        "toolbox"
+        "platform"
     ],
     "scripts": [
         "Toolbox.js"

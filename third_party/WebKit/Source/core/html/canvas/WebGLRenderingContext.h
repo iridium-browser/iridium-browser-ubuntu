@@ -31,17 +31,17 @@
 
 namespace blink {
 
-class WebGLRenderingContext FINAL : public WebGLRenderingContextBase, public ScriptWrappable {
+class WebGLRenderingContext final : public WebGLRenderingContextBase, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassOwnPtrWillBeRawPtr<WebGLRenderingContext> create(HTMLCanvasElement*, WebGLContextAttributes*);
     virtual ~WebGLRenderingContext();
 
-    virtual unsigned version() const OVERRIDE { return 1; }
-    virtual String contextName() const OVERRIDE { return "WebGLRenderingContext"; }
-    virtual void registerContextExtensions() OVERRIDE;
+    virtual unsigned version() const override { return 1; }
+    virtual String contextName() const override { return "WebGLRenderingContext"; }
+    virtual void registerContextExtensions() override;
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     WebGLRenderingContext(HTMLCanvasElement*, PassOwnPtr<blink::WebGraphicsContext3D>, WebGLContextAttributes*);
@@ -51,6 +51,7 @@ private:
     RefPtrWillBeMember<EXTBlendMinMax> m_extBlendMinMax;
     RefPtrWillBeMember<EXTFragDepth> m_extFragDepth;
     RefPtrWillBeMember<EXTShaderTextureLOD> m_extShaderTextureLOD;
+    RefPtrWillBeMember<EXTsRGB> m_extsRGB;
     RefPtrWillBeMember<EXTTextureFilterAnisotropic> m_extTextureFilterAnisotropic;
     RefPtrWillBeMember<OESTextureFloat> m_oesTextureFloat;
     RefPtrWillBeMember<OESTextureFloatLinear> m_oesTextureFloatLinear;

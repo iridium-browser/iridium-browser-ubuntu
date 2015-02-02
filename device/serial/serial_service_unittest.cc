@@ -17,7 +17,7 @@ namespace device {
 namespace {
 
 class FakeSerialDeviceEnumerator : public SerialDeviceEnumerator {
-  virtual mojo::Array<serial::DeviceInfoPtr> GetDevices() OVERRIDE {
+  mojo::Array<serial::DeviceInfoPtr> GetDevices() override {
     mojo::Array<serial::DeviceInfoPtr> devices(1);
     devices[0] = serial::DeviceInfo::New();
     devices[0]->path = "device";
@@ -27,13 +27,13 @@ class FakeSerialDeviceEnumerator : public SerialDeviceEnumerator {
 
 class FailToOpenIoHandler : public TestSerialIoHandler {
  public:
-  virtual void Open(const std::string& port,
-                    const OpenCompleteCallback& callback) OVERRIDE {
+  void Open(const std::string& port,
+            const OpenCompleteCallback& callback) override {
     callback.Run(false);
   }
 
  protected:
-  virtual ~FailToOpenIoHandler() {}
+  ~FailToOpenIoHandler() override {}
 };
 
 }  // namespace
@@ -47,7 +47,7 @@ class SerialServiceTest : public testing::Test, public mojo::ErrorHandler {
     StopMessageLoop();
   }
 
-  virtual void OnConnectionError() OVERRIDE {
+  void OnConnectionError() override {
     StopMessageLoop();
     EXPECT_TRUE(expecting_error_);
   }
@@ -86,9 +86,9 @@ class SerialServiceTest : public testing::Test, public mojo::ErrorHandler {
     mojo::InterfacePtr<serial::DataSource> source;
     service->Connect(path,
                      serial::ConnectionOptions::New(),
-                     mojo::Get(&connection),
-                     mojo::Get(&sink),
-                     mojo::Get(&source));
+                     mojo::GetProxy(&connection),
+                     mojo::GetProxy(&sink),
+                     mojo::GetProxy(&source));
     connection.set_error_handler(this);
     expecting_error_ = !expecting_success;
     connection->GetInfo(
@@ -113,7 +113,7 @@ class SerialServiceTest : public testing::Test, public mojo::ErrorHandler {
 
 TEST_F(SerialServiceTest, GetDevices) {
   mojo::InterfacePtr<serial::SerialService> service;
-  SerialServiceImpl::Create(NULL, mojo::Get(&service));
+  SerialServiceImpl::Create(NULL, NULL, mojo::GetProxy(&service));
   service.set_error_handler(this);
   mojo::Array<serial::DeviceInfoPtr> result;
   service->GetDevices(

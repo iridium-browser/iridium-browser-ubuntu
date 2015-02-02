@@ -57,65 +57,57 @@ class WrappedStreamSocket : public StreamSocket {
  public:
   explicit WrappedStreamSocket(scoped_ptr<StreamSocket> transport)
       : transport_(transport.Pass()) {}
-  virtual ~WrappedStreamSocket() {}
+  ~WrappedStreamSocket() override {}
 
   // StreamSocket implementation:
-  virtual int Connect(const CompletionCallback& callback) OVERRIDE {
+  int Connect(const CompletionCallback& callback) override {
     return transport_->Connect(callback);
   }
-  virtual void Disconnect() OVERRIDE { transport_->Disconnect(); }
-  virtual bool IsConnected() const OVERRIDE {
-    return transport_->IsConnected();
-  }
-  virtual bool IsConnectedAndIdle() const OVERRIDE {
+  void Disconnect() override { transport_->Disconnect(); }
+  bool IsConnected() const override { return transport_->IsConnected(); }
+  bool IsConnectedAndIdle() const override {
     return transport_->IsConnectedAndIdle();
   }
-  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE {
+  int GetPeerAddress(IPEndPoint* address) const override {
     return transport_->GetPeerAddress(address);
   }
-  virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE {
+  int GetLocalAddress(IPEndPoint* address) const override {
     return transport_->GetLocalAddress(address);
   }
-  virtual const BoundNetLog& NetLog() const OVERRIDE {
-    return transport_->NetLog();
-  }
-  virtual void SetSubresourceSpeculation() OVERRIDE {
+  const BoundNetLog& NetLog() const override { return transport_->NetLog(); }
+  void SetSubresourceSpeculation() override {
     transport_->SetSubresourceSpeculation();
   }
-  virtual void SetOmniboxSpeculation() OVERRIDE {
-    transport_->SetOmniboxSpeculation();
-  }
-  virtual bool WasEverUsed() const OVERRIDE {
-    return transport_->WasEverUsed();
-  }
-  virtual bool UsingTCPFastOpen() const OVERRIDE {
+  void SetOmniboxSpeculation() override { transport_->SetOmniboxSpeculation(); }
+  bool WasEverUsed() const override { return transport_->WasEverUsed(); }
+  bool UsingTCPFastOpen() const override {
     return transport_->UsingTCPFastOpen();
   }
-  virtual bool WasNpnNegotiated() const OVERRIDE {
+  bool WasNpnNegotiated() const override {
     return transport_->WasNpnNegotiated();
   }
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE {
+  NextProto GetNegotiatedProtocol() const override {
     return transport_->GetNegotiatedProtocol();
   }
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE {
+  bool GetSSLInfo(SSLInfo* ssl_info) override {
     return transport_->GetSSLInfo(ssl_info);
   }
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE {
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override {
     return transport_->Read(buf, buf_len, callback);
   }
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE {
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override {
     return transport_->Write(buf, buf_len, callback);
   }
-  virtual int SetReceiveBufferSize(int32 size) OVERRIDE {
+  int SetReceiveBufferSize(int32 size) override {
     return transport_->SetReceiveBufferSize(size);
   }
-  virtual int SetSendBufferSize(int32 size) OVERRIDE {
+  int SetSendBufferSize(int32 size) override {
     return transport_->SetSendBufferSize(size);
   }
 
@@ -132,12 +124,12 @@ class WrappedStreamSocket : public StreamSocket {
 class ReadBufferingStreamSocket : public WrappedStreamSocket {
  public:
   explicit ReadBufferingStreamSocket(scoped_ptr<StreamSocket> transport);
-  virtual ~ReadBufferingStreamSocket() {}
+  ~ReadBufferingStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
 
   // Sets the internal buffer to |size|. This must not be greater than
   // the largest value supplied to Read() - that is, it does not handle
@@ -262,15 +254,15 @@ void ReadBufferingStreamSocket::OnReadCompleted(int result) {
 class SynchronousErrorStreamSocket : public WrappedStreamSocket {
  public:
   explicit SynchronousErrorStreamSocket(scoped_ptr<StreamSocket> transport);
-  virtual ~SynchronousErrorStreamSocket() {}
+  ~SynchronousErrorStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override;
 
   // Sets the next Read() call and all future calls to return |error|.
   // If there is already a pending asynchronous read, the configured error
@@ -333,15 +325,15 @@ int SynchronousErrorStreamSocket::Write(IOBuffer* buf,
 class FakeBlockingStreamSocket : public WrappedStreamSocket {
  public:
   explicit FakeBlockingStreamSocket(scoped_ptr<StreamSocket> transport);
-  virtual ~FakeBlockingStreamSocket() {}
+  ~FakeBlockingStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE;
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE;
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override;
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override;
 
   // Blocks read results on the socket. Reads will not complete until
   // UnblockReadResult() has been called and a result is ready from the
@@ -549,18 +541,18 @@ class CountingStreamSocket : public WrappedStreamSocket {
       : WrappedStreamSocket(transport.Pass()),
         read_count_(0),
         write_count_(0) {}
-  virtual ~CountingStreamSocket() {}
+  ~CountingStreamSocket() override {}
 
   // Socket implementation:
-  virtual int Read(IOBuffer* buf,
-                   int buf_len,
-                   const CompletionCallback& callback) OVERRIDE {
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override {
     read_count_++;
     return transport_->Read(buf, buf_len, callback);
   }
-  virtual int Write(IOBuffer* buf,
-                    int buf_len,
-                    const CompletionCallback& callback) OVERRIDE {
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override {
     write_count_++;
     return transport_->Write(buf, buf_len, callback);
   }
@@ -581,7 +573,7 @@ class DeleteSocketCallback : public TestCompletionCallbackBase {
       : socket_(socket),
         callback_(base::Bind(&DeleteSocketCallback::OnComplete,
                              base::Unretained(this))) {}
-  virtual ~DeleteSocketCallback() {}
+  ~DeleteSocketCallback() override {}
 
   const CompletionCallback& callback() const { return callback_; }
 
@@ -605,62 +597,58 @@ class DeleteSocketCallback : public TestCompletionCallbackBase {
 // A ChannelIDStore that always returns an error when asked for a
 // channel id.
 class FailingChannelIDStore : public ChannelIDStore {
-  virtual int GetChannelID(const std::string& server_identifier,
-                           base::Time* expiration_time,
-                           std::string* private_key_result,
-                           std::string* cert_result,
-                           const GetChannelIDCallback& callback) OVERRIDE {
+  int GetChannelID(const std::string& server_identifier,
+                   base::Time* expiration_time,
+                   std::string* private_key_result,
+                   std::string* cert_result,
+                   const GetChannelIDCallback& callback) override {
     return ERR_UNEXPECTED;
   }
-  virtual void SetChannelID(const std::string& server_identifier,
-                            base::Time creation_time,
-                            base::Time expiration_time,
-                            const std::string& private_key,
-                            const std::string& cert) OVERRIDE {}
-  virtual void DeleteChannelID(const std::string& server_identifier,
-                               const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAllCreatedBetween(base::Time delete_begin,
-                                       base::Time delete_end,
-                                       const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAll(const base::Closure& completion_callback) OVERRIDE {}
-  virtual void GetAllChannelIDs(const GetChannelIDListCallback& callback)
-      OVERRIDE {}
-  virtual int GetChannelIDCount() OVERRIDE { return 0; }
-  virtual void SetForceKeepSessionState() OVERRIDE {}
+  void SetChannelID(const std::string& server_identifier,
+                    base::Time creation_time,
+                    base::Time expiration_time,
+                    const std::string& private_key,
+                    const std::string& cert) override {}
+  void DeleteChannelID(const std::string& server_identifier,
+                       const base::Closure& completion_callback) override {}
+  void DeleteAllCreatedBetween(
+      base::Time delete_begin,
+      base::Time delete_end,
+      const base::Closure& completion_callback) override {}
+  void DeleteAll(const base::Closure& completion_callback) override {}
+  void GetAllChannelIDs(const GetChannelIDListCallback& callback) override {}
+  int GetChannelIDCount() override { return 0; }
+  void SetForceKeepSessionState() override {}
 };
 
 // A ChannelIDStore that asynchronously returns an error when asked for a
 // channel id.
 class AsyncFailingChannelIDStore : public ChannelIDStore {
-  virtual int GetChannelID(const std::string& server_identifier,
-                           base::Time* expiration_time,
-                           std::string* private_key_result,
-                           std::string* cert_result,
-                           const GetChannelIDCallback& callback) OVERRIDE {
+  int GetChannelID(const std::string& server_identifier,
+                   base::Time* expiration_time,
+                   std::string* private_key_result,
+                   std::string* cert_result,
+                   const GetChannelIDCallback& callback) override {
     base::MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(callback, ERR_UNEXPECTED,
                               server_identifier, base::Time(), "", ""));
     return ERR_IO_PENDING;
   }
-  virtual void SetChannelID(const std::string& server_identifier,
-                            base::Time creation_time,
-                            base::Time expiration_time,
-                            const std::string& private_key,
-                            const std::string& cert) OVERRIDE {}
-  virtual void DeleteChannelID(const std::string& server_identifier,
-                               const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAllCreatedBetween(base::Time delete_begin,
-                                       base::Time delete_end,
-                                       const base::Closure& completion_callback)
-      OVERRIDE {}
-  virtual void DeleteAll(const base::Closure& completion_callback) OVERRIDE {}
-  virtual void GetAllChannelIDs(const GetChannelIDListCallback& callback)
-      OVERRIDE {}
-  virtual int GetChannelIDCount() OVERRIDE { return 0; }
-  virtual void SetForceKeepSessionState() OVERRIDE {}
+  void SetChannelID(const std::string& server_identifier,
+                    base::Time creation_time,
+                    base::Time expiration_time,
+                    const std::string& private_key,
+                    const std::string& cert) override {}
+  void DeleteChannelID(const std::string& server_identifier,
+                       const base::Closure& completion_callback) override {}
+  void DeleteAllCreatedBetween(
+      base::Time delete_begin,
+      base::Time delete_end,
+      const base::Closure& completion_callback) override {}
+  void DeleteAll(const base::Closure& completion_callback) override {}
+  void GetAllChannelIDs(const GetChannelIDListCallback& callback) override {}
+  int GetChannelIDCount() override { return 0; }
+  void SetForceKeepSessionState() override {}
 };
 
 // A mock CTVerifier that records every call to Verify but doesn't verify
@@ -858,10 +846,8 @@ class SSLClientSocketFalseStartTest : public SSLClientSocketTest {
     EXPECT_EQ(OK, rv);
 
     FakeBlockingStreamSocket* raw_transport = transport.get();
-    scoped_ptr<SSLClientSocket> sock =
-        CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                              test_server()->host_port_pair(),
-                              client_config);
+    scoped_ptr<SSLClientSocket> sock = CreateSSLClientSocket(
+        transport.Pass(), test_server()->host_port_pair(), client_config);
 
     if (monitor_handshake_callback_) {
       sock->SetHandshakeCompletionCallback(
@@ -1332,10 +1318,8 @@ TEST_F(SSLClientSocketTest, Connect_WithSynchronousError) {
   ssl_config.false_start_enabled = false;
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   raw_transport->SetNextWriteError(ERR_CONNECTION_RESET);
 
@@ -1370,10 +1354,8 @@ TEST_F(SSLClientSocketTest, Read_WithSynchronousError) {
   ssl_config.false_start_enabled = false;
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1423,7 +1405,7 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousError) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
   int rv = callback.GetResult(transport->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1432,10 +1414,8 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousError) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1497,7 +1477,7 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousErrorNoRead) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<CountingStreamSocket> counting_socket(
-      new CountingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new CountingStreamSocket(error_socket.Pass()));
   CountingStreamSocket* raw_counting_socket = counting_socket.get();
   int rv = callback.GetResult(counting_socket->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
@@ -1506,10 +1486,8 @@ TEST_F(SSLClientSocketTest, Write_WithSynchronousErrorNoRead) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(counting_socket.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      counting_socket.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
@@ -1627,7 +1605,7 @@ TEST_F(SSLClientSocketTest, Read_DeleteWhilePendingFullDuplex) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
 
   int rv = callback.GetResult(transport->Connect(callback.callback()));
@@ -1637,10 +1615,8 @@ TEST_F(SSLClientSocketTest, Read_DeleteWhilePendingFullDuplex) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock =
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config);
+  scoped_ptr<SSLClientSocket> sock = CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config);
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1743,7 +1719,7 @@ TEST_F(SSLClientSocketTest, Read_WithWriteError) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
 
   int rv = callback.GetResult(transport->Connect(callback.callback()));
@@ -1753,10 +1729,8 @@ TEST_F(SSLClientSocketTest, Read_WithWriteError) {
   SSLConfig ssl_config;
   ssl_config.false_start_enabled = false;
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1848,7 +1822,7 @@ TEST_F(SSLClientSocketTest, Connect_WithZeroReturn) {
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
   scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
+      CreateSSLClientSocket(transport.Pass(),
                             test_server.host_port_pair(),
                             kDefaultSSLConfig));
 
@@ -1885,7 +1859,7 @@ TEST_F(SSLClientSocketTest, Read_WithZeroReturn) {
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
   scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
+      CreateSSLClientSocket(transport.Pass(),
                             test_server.host_port_pair(),
                             ssl_config));
 
@@ -1918,7 +1892,7 @@ TEST_F(SSLClientSocketTest, Read_WithAsyncZeroReturn) {
       new SynchronousErrorStreamSocket(real_transport.Pass()));
   SynchronousErrorStreamSocket* raw_error_socket = error_socket.get();
   scoped_ptr<FakeBlockingStreamSocket> transport(
-      new FakeBlockingStreamSocket(error_socket.PassAs<StreamSocket>()));
+      new FakeBlockingStreamSocket(error_socket.Pass()));
   FakeBlockingStreamSocket* raw_transport = transport.get();
   int rv = callback.GetResult(transport->Connect(callback.callback()));
   EXPECT_EQ(OK, rv);
@@ -1928,7 +1902,7 @@ TEST_F(SSLClientSocketTest, Read_WithAsyncZeroReturn) {
   ssl_config.false_start_enabled = false;
 
   scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
+      CreateSSLClientSocket(transport.Pass(),
                             test_server.host_port_pair(),
                             ssl_config));
 
@@ -2018,10 +1992,8 @@ TEST_F(SSLClientSocketTest, Read_ManySmallRecords) {
   int rv = callback.GetResult(transport->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
 
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            kDefaultSSLConfig));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), kDefaultSSLConfig));
 
   rv = callback.GetResult(sock->Connect(callback.callback()));
   ASSERT_EQ(OK, rv);
@@ -2821,10 +2793,8 @@ TEST_F(SSLClientSocketTest, HandshakeCallbackIsRun_WithFailure) {
   ssl_config.false_start_enabled = false;
 
   SynchronousErrorStreamSocket* raw_transport = transport.get();
-  scoped_ptr<SSLClientSocket> sock(
-      CreateSSLClientSocket(transport.PassAs<StreamSocket>(),
-                            test_server.host_port_pair(),
-                            ssl_config));
+  scoped_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      transport.Pass(), test_server.host_port_pair(), ssl_config));
 
   sock->SetHandshakeCompletionCallback(base::Bind(
       &SSLClientSocketTest::RecordCompletedHandshake, base::Unretained(this)));

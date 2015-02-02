@@ -52,25 +52,24 @@ class FrontendDataTypeController : public sync_driver::DataTypeController {
       ProfileSyncService* sync_service);
 
   // DataTypeController interface.
-  virtual void LoadModels(
-      const ModelLoadCallback& model_load_callback) OVERRIDE;
-  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void LoadModels(const ModelLoadCallback& model_load_callback) override;
+  void StartAssociating(const StartCallback& start_callback) override;
+  void Stop() override;
   virtual syncer::ModelType type() const = 0;
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
-  virtual std::string name() const OVERRIDE;
-  virtual State state() const OVERRIDE;
+  syncer::ModelSafeGroup model_safe_group() const override;
+  std::string name() const override;
+  State state() const override;
 
   // DataTypeErrorHandler interface.
-  virtual void OnSingleDataTypeUnrecoverableError(
-      const syncer::SyncError& error) OVERRIDE;
+  void OnSingleDataTypeUnrecoverableError(
+      const syncer::SyncError& error) override;
 
  protected:
   friend class FrontendDataTypeControllerMock;
 
   // For testing only.
   FrontendDataTypeController();
-  virtual ~FrontendDataTypeController();
+  ~FrontendDataTypeController() override;
 
   // Kick off any dependent services that need to be running before we can
   // associate models. The default implementation is a no-op.
@@ -84,7 +83,7 @@ class FrontendDataTypeController : public sync_driver::DataTypeController {
   virtual void CreateSyncComponents() = 0;
 
   // DataTypeController interface.
-  virtual void OnModelLoaded() OVERRIDE;
+  void OnModelLoaded() override;
 
   // Perform any DataType controller specific state cleanup before stopping
   // the datatype controller. The default implementation is a no-op.
@@ -104,7 +103,7 @@ class FrontendDataTypeController : public sync_driver::DataTypeController {
   virtual sync_driver::AssociatorInterface* model_associator() const;
   virtual void set_model_associator(
       sync_driver::AssociatorInterface* associator);
-  virtual sync_driver::ChangeProcessor* GetChangeProcessor() const OVERRIDE;
+  sync_driver::ChangeProcessor* GetChangeProcessor() const override;
   virtual void set_change_processor(sync_driver::ChangeProcessor* processor);
 
   // Handles the reporting of unrecoverable error. It records stuff in

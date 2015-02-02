@@ -46,11 +46,11 @@ const char kUserID1[] = "user1";
 class FakeGCMConnectionObserver : public GCMConnectionObserver {
  public:
   FakeGCMConnectionObserver();
-  virtual ~FakeGCMConnectionObserver();
+  ~FakeGCMConnectionObserver() override;
 
   // gcm::GCMConnectionObserver implementation:
-  virtual void OnConnected(const net::IPEndPoint& ip_endpoint) OVERRIDE;
-  virtual void OnDisconnected() OVERRIDE;
+  void OnConnected(const net::IPEndPoint& ip_endpoint) override;
+  void OnDisconnected() override;
 
   bool connected() const { return connected_; }
 
@@ -99,11 +99,11 @@ class GCMDriverTest : public testing::Test {
   };
 
   GCMDriverTest();
-  virtual ~GCMDriverTest();
+  ~GCMDriverTest() override;
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   GCMDriverDesktop* driver() { return driver_.get(); }
   FakeGCMAppHandler* gcm_app_handler() { return gcm_app_handler_.get(); }
@@ -681,10 +681,10 @@ TEST_F(GCMDriverTest, GCMClientNotReadyBeforeSending) {
 class GCMDriverFunctionalTest : public GCMDriverTest {
  public:
   GCMDriverFunctionalTest();
-  virtual ~GCMDriverFunctionalTest();
+  ~GCMDriverFunctionalTest() override;
 
   // GCMDriverTest:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GCMDriverFunctionalTest);
@@ -825,9 +825,7 @@ TEST_F(GCMDriverFunctionalTest, UnregisterWhenAsyncOperationPending) {
   std::vector<std::string> sender_ids;
   sender_ids.push_back("sender1");
   // First start registration without waiting for it to complete.
-  Register(kTestAppID1,
-                     sender_ids,
-                     GCMDriverTest::DO_NOT_WAIT);
+  Register(kTestAppID1, sender_ids, GCMDriverTest::DO_NOT_WAIT);
 
   // Test that unregistration fails with async operation pending when there is a
   // registration already in progress.
@@ -859,9 +857,7 @@ TEST_F(GCMDriverFunctionalTest, RegisterWhenAsyncOperationPending) {
   std::vector<std::string> sender_ids;
   sender_ids.push_back("sender1");
   // First start registration without waiting for it to complete.
-  Register(kTestAppID1,
-                     sender_ids,
-                     GCMDriverTest::DO_NOT_WAIT);
+  Register(kTestAppID1, sender_ids, GCMDriverTest::DO_NOT_WAIT);
 
   // Test that registration fails with async operation pending when there is a
   // registration already in progress.
@@ -873,24 +869,34 @@ TEST_F(GCMDriverFunctionalTest, RegisterWhenAsyncOperationPending) {
   // Complete the registration.
   WaitForAsyncOperation();
   EXPECT_EQ(GCMClient::SUCCESS, registration_result());
+}
 
-  // Start unregistration without waiting for it to complete. This time no async
-  // operation is pending.
-  Unregister(kTestAppID1, GCMDriverTest::DO_NOT_WAIT);
-
-  // Test that registration fails with async operation pending when there is an
-  // unregistration already in progress.
-  Register(kTestAppID1, sender_ids, GCMDriverTest::WAIT);
-  EXPECT_EQ(GCMClient::ASYNC_OPERATION_PENDING,
-            registration_result());
-
-  // Complete the first unregistration expecting success.
-  WaitForAsyncOperation();
-  EXPECT_EQ(GCMClient::SUCCESS, unregistration_result());
-
-  // Test that it is ok to register again after unregistration.
+TEST_F(GCMDriverFunctionalTest, RegisterAfterUnfinishedUnregister) {
+  // Register and wait for it to complete.
+  std::vector<std::string> sender_ids;
+  sender_ids.push_back("sender1");
   Register(kTestAppID1, sender_ids, GCMDriverTest::WAIT);
   EXPECT_EQ(GCMClient::SUCCESS, registration_result());
+  EXPECT_EQ(GetGCMClient()->GetRegistrationIdFromSenderIds(sender_ids),
+            registration_id());
+
+  // Clears the results the would be set by the Register callback in preparation
+  // to call register 2nd time.
+  ClearResults();
+
+  // Start unregistration without waiting for it to complete.
+  Unregister(kTestAppID1, GCMDriverTest::DO_NOT_WAIT);
+
+  // Register immeidately after unregistration is not completed.
+  sender_ids.push_back("sender2");
+  Register(kTestAppID1, sender_ids, GCMDriverTest::WAIT);
+
+  // We need one more waiting since the waiting in Register is indeed for
+  // uncompleted Unregister.
+  WaitForAsyncOperation();
+  EXPECT_EQ(GCMClient::SUCCESS, registration_result());
+  EXPECT_EQ(GetGCMClient()->GetRegistrationIdFromSenderIds(sender_ids),
+            registration_id());
 }
 
 TEST_F(GCMDriverFunctionalTest, Send) {
@@ -985,14 +991,21 @@ TEST_F(GCMDriverFunctionalTest, MessagesDeleted) {
   EXPECT_EQ(kTestAppID1, gcm_app_handler()->app_id());
 }
 
+TEST_F(GCMDriverFunctionalTest, LastTokenFetchTime) {
+  EXPECT_EQ(base::Time(), driver()->GetLastTokenFetchTime());
+  base::Time fetch_time = base::Time::Now();
+  driver()->SetLastTokenFetchTime(fetch_time);
+  EXPECT_EQ(fetch_time, driver()->GetLastTokenFetchTime());
+}
+
 // Tests a single instance of GCMDriver.
 class GCMChannelStatusSyncerTest : public GCMDriverTest {
  public:
   GCMChannelStatusSyncerTest();
-  virtual ~GCMChannelStatusSyncerTest();
+  ~GCMChannelStatusSyncerTest() override;
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   void CompleteGCMChannelStatusRequest(bool enabled, int poll_interval_seconds);
   bool CompareDelaySeconds(bool expected_delay_seconds,

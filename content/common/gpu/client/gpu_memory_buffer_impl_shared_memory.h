@@ -12,40 +12,43 @@ namespace content {
 // Implementation of GPU memory buffer based on shared memory.
 class GpuMemoryBufferImplSharedMemory : public GpuMemoryBufferImpl {
  public:
-  static void Create(const gfx::Size& size,
-                     unsigned internalformat,
-                     unsigned usage,
+  static void Create(gfx::GpuMemoryBufferId id,
+                     const gfx::Size& size,
+                     Format format,
                      const CreationCallback& callback);
 
-  static void AllocateForChildProcess(const gfx::Size& size,
-                                      unsigned internalformat,
+  static void AllocateForChildProcess(gfx::GpuMemoryBufferId id,
+                                      const gfx::Size& size,
+                                      Format format,
                                       base::ProcessHandle child_process,
                                       const AllocationCallback& callback);
 
   static scoped_ptr<GpuMemoryBufferImpl> CreateFromHandle(
       const gfx::GpuMemoryBufferHandle& handle,
       const gfx::Size& size,
-      unsigned internalformat,
+      Format format,
       const DestructionCallback& callback);
 
-  static bool IsLayoutSupported(const gfx::Size& size, unsigned internalformat);
-  static bool IsUsageSupported(unsigned usage);
+  static bool IsFormatSupported(Format format);
+  static bool IsUsageSupported(Usage usage);
+  static bool IsLayoutSupported(const gfx::Size& size, Format format);
   static bool IsConfigurationSupported(const gfx::Size& size,
-                                       unsigned internalformat,
-                                       unsigned usage);
+                                       Format format,
+                                       Usage usage);
 
   // Overridden from gfx::GpuMemoryBuffer:
-  virtual void* Map() OVERRIDE;
-  virtual void Unmap() OVERRIDE;
-  virtual uint32 GetStride() const OVERRIDE;
-  virtual gfx::GpuMemoryBufferHandle GetHandle() const OVERRIDE;
+  void* Map() override;
+  void Unmap() override;
+  uint32 GetStride() const override;
+  gfx::GpuMemoryBufferHandle GetHandle() const override;
 
  private:
-  GpuMemoryBufferImplSharedMemory(const gfx::Size& size,
-                                  unsigned internalformat,
+  GpuMemoryBufferImplSharedMemory(gfx::GpuMemoryBufferId id,
+                                  const gfx::Size& size,
+                                  Format format,
                                   const DestructionCallback& callback,
                                   scoped_ptr<base::SharedMemory> shared_memory);
-  virtual ~GpuMemoryBufferImplSharedMemory();
+  ~GpuMemoryBufferImplSharedMemory() override;
 
   scoped_ptr<base::SharedMemory> shared_memory_;
 

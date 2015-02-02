@@ -47,6 +47,7 @@
 #include "core/XMLNSNames.h"
 #include "core/XMLNames.h"
 #include "core/dom/Document.h"
+#include "core/dom/StyleChangeReason.h"
 #include "core/events/EventFactory.h"
 #include "core/html/parser/HTMLParserThread.h"
 #include "core/workers/WorkerThread.h"
@@ -95,6 +96,8 @@ void CoreInitializer::init()
     // ordering dependencies, e.g. about "xmlns".
     WTF::StringStatics::init();
 
+    StyleChangeExtraData::init();
+
     QualifiedName::init();
     Partitions::init();
     EventTracer::initialize();
@@ -119,9 +122,6 @@ void CoreInitializer::shutdown()
     // Platform::current() is cleared.
     ScriptStreamerThread::shutdown();
     HTMLParserThread::shutdown();
-
-    // Make sure we stop WorkerThreads before Partition::shutdown() which frees ExecutionContext.
-    WorkerThread::terminateAndWaitForAllWorkers();
 
     Partitions::shutdown();
 }

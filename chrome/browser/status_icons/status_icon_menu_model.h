@@ -53,7 +53,7 @@ class StatusIconMenuModel
 
   // The Delegate can be NULL.
   explicit StatusIconMenuModel(Delegate* delegate);
-  virtual ~StatusIconMenuModel();
+  ~StatusIconMenuModel() override;
 
   // Methods for seting the state of specific command ids.
   void SetCommandIdChecked(int command_id, bool checked);
@@ -77,20 +77,19 @@ class StatusIconMenuModel
   void RemoveObserver(Observer* observer);
 
   // Overridden from ui::SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdVisible(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id, ui::Accelerator* accelerator) OVERRIDE;
-  virtual bool IsItemForCommandIdDynamic(int command_id) const OVERRIDE;
-  virtual base::string16 GetLabelForCommandId(int command_id) const OVERRIDE;
-  virtual base::string16 GetSublabelForCommandId(int command_id) const OVERRIDE;
-  virtual bool GetIconForCommandId(int command_id, gfx::Image* icon) const
-      OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool IsCommandIdVisible(int command_id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  bool IsItemForCommandIdDynamic(int command_id) const override;
+  base::string16 GetLabelForCommandId(int command_id) const override;
+  base::string16 GetSublabelForCommandId(int command_id) const override;
+  bool GetIconForCommandId(int command_id, gfx::Image* icon) const override;
 
  protected:
   // Overriden from ui::SimpleMenuModel:
-  virtual void MenuItemsChanged() OVERRIDE;
+  void MenuItemsChanged() override;
 
   void NotifyMenuStateChanged();
 
@@ -99,8 +98,8 @@ class StatusIconMenuModel
 
  private:
   // Overridden from ui::SimpleMenuModel::Delegate:
-  virtual void CommandIdHighlighted(int command_id) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  void CommandIdHighlighted(int command_id) override;
+  void ExecuteCommand(int command_id, int event_flags) override;
 
   struct ItemState;
 

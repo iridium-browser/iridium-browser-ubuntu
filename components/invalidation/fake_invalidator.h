@@ -18,7 +18,7 @@ namespace syncer {
 class FakeInvalidator : public Invalidator {
  public:
   FakeInvalidator();
-  virtual ~FakeInvalidator();
+  ~FakeInvalidator() override;
 
   bool IsHandlerRegistered(InvalidationHandler* handler) const;
   ObjectIdSet GetRegisteredIds(InvalidationHandler* handler) const;
@@ -30,16 +30,15 @@ class FakeInvalidator : public Invalidator {
   void EmitOnIncomingInvalidation(
       const ObjectIdInvalidationMap& invalidation_map);
 
-  virtual void RegisterHandler(InvalidationHandler* handler) OVERRIDE;
-  virtual void UpdateRegisteredIds(InvalidationHandler* handler,
-                                   const ObjectIdSet& ids) OVERRIDE;
-  virtual void UnregisterHandler(InvalidationHandler* handler) OVERRIDE;
-  virtual InvalidatorState GetInvalidatorState() const OVERRIDE;
-  virtual void UpdateCredentials(
-      const std::string& email, const std::string& token) OVERRIDE;
-  virtual void RequestDetailedStatus(
-    base::Callback<void(const base::DictionaryValue&)> callback) const
-    OVERRIDE;
+  void RegisterHandler(InvalidationHandler* handler) override;
+  void UpdateRegisteredIds(InvalidationHandler* handler,
+                           const ObjectIdSet& ids) override;
+  void UnregisterHandler(InvalidationHandler* handler) override;
+  InvalidatorState GetInvalidatorState() const override;
+  void UpdateCredentials(const std::string& email,
+                         const std::string& token) override;
+  void RequestDetailedStatus(base::Callback<void(const base::DictionaryValue&)>
+                                 callback) const override;
 
  private:
   InvalidatorRegistrar registrar_;

@@ -14,9 +14,11 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/callback_list.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "url/gurl.h"
@@ -33,8 +35,9 @@ class X509Certificate;
 }  // namespace net
 
 namespace safe_browsing {
-class DownloadFeedbackService;
 class BinaryFeatureExtractor;
+class ClientDownloadRequest;
+class DownloadFeedbackService;
 
 // This class provides an asynchronous API to check whether a particular
 // client download is malicious or not.
@@ -51,6 +54,22 @@ class DownloadProtectionService {
 
   // Callback type which is invoked once the download request is done.
   typedef base::Callback<void(DownloadCheckResult)> CheckDownloadCallback;
+
+  // A type of callback run on the main thread when a ClientDownloadRequest has
+  // been formed for a download, or when one has not been formed for a supported
+  // download.
+  typedef base::Callback<void(content::DownloadItem*,
+                              const ClientDownloadRequest*)>
+      ClientDownloadRequestCallback;
+
+  // A list of ClientDownloadRequest callbacks.
+  typedef base::CallbackList<void(content::DownloadItem*,
+                                  const ClientDownloadRequest*)>
+      ClientDownloadRequestCallbackList;
+
+  // A subscription to a registered ClientDownloadRequest callback.
+  typedef scoped_ptr<ClientDownloadRequestCallbackList::Subscription>
+      ClientDownloadRequestSubscription;
 
   // Creates a download service.  The service is initially disabled.  You need
   // to call SetEnabled() to start it.  |sb_service| owns this object; we
@@ -107,6 +126,11 @@ class DownloadProtectionService {
     return feedback_service_.get();
   }
 
+  // Registers a callback that will be run when a ClientDownloadRequest has
+  // been formed.
+  ClientDownloadRequestSubscription RegisterClientDownloadRequestCallback(
+      const ClientDownloadRequestCallback& callback);
+
  protected:
   // Enum to keep track why a particular download verdict was chosen.
   // This is used to keep some stats around.
@@ -133,6 +157,7 @@ class DownloadProtectionService {
     REASON_ARCHIVE_WITHOUT_BINARIES,
     REASON_DOWNLOAD_DANGEROUS_HOST,
     REASON_DOWNLOAD_POTENTIALLY_UNWANTED,
+    REASON_UNSUPPORTED_URL_SCHEME,
     REASON_MAX  // Always add new values before this one.
   };
 
@@ -147,6 +172,10 @@ class DownloadProtectionService {
                            CheckClientDownloadSuccess);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            CheckClientDownloadHTTPS);
+  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
+                           CheckClientDownloadBlob);
+  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
+                           CheckClientDownloadData);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            CheckClientDownloadZip);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
@@ -197,6 +226,10 @@ class DownloadProtectionService {
   int64 download_request_timeout_ms_;
 
   scoped_ptr<DownloadFeedbackService> feedback_service_;
+
+  // A list of callbacks to be run on the main thread when a
+  // ClientDownloadRequest has been formed.
+  ClientDownloadRequestCallbackList client_download_request_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadProtectionService);
 };

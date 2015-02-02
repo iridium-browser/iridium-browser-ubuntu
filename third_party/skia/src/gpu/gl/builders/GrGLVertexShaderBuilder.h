@@ -7,25 +7,19 @@
 
 #ifndef GrGLVertexShader_DEFINED
 #define GrGLVertexShader_DEFINED
+
 #include "GrGLShaderBuilder.h"
 
-class GrGLProgramBuilder;
+class GrGLVarying;
 
-class GrGLVertexShaderBuilder : public GrGLFullShaderBuilder {
+class GrGLVertexBuilder : public GrGLShaderBuilder {
 public:
-    GrGLVertexShaderBuilder(GrGLFullProgramBuilder* program);
-
-    /*
-     * this call is only for GrGLProgramEffects' internal use
-     */
-    void emitAttributes(const GrGeometryProcessor& gp);
+    GrGLVertexBuilder(GrGLProgramBuilder* program);
 
     /**
      * Are explicit local coordinates provided as input to the vertex shader.
      */
-    bool hasExplicitLocalCoords() const { return (fLocalCoordsVar != fPositionVar); }
-
-    const SkString* getEffectAttributeName(int attributeIndex) const;
+    bool hasLocalCoords() const { return (fLocalCoordsVar != fPositionVar); }
 
     /** Returns a vertex attribute that represents the local coords in the VS. This may be the same
         as positionAttribute() or it may not be. It depends upon whether the rendering code
@@ -39,26 +33,24 @@ public:
 
 private:
     /*
-     * Add attribute will push a new attribute onto the end.  It will also assert if there is
-     * a duplicate attribute
+     * Internal call for GrGLProgramBuilder.addVarying
      */
-    bool addAttribute(const GrShaderVar& var);
-
-    /*
-     * Internal call for GrGLFullProgramBuilder.addVarying
-     */
-    void addVarying(GrSLType type,
-                   const char* name,
-                   const char** vsOutName);
+    void addVarying(const char* name, GrGLVarying*);
 
     /*
      * private helpers for compilation by GrGLProgramBuilder
      */
-    void bindProgramLocations(GrGLuint programId);
+    void setupLocalCoords();
+    void transformGLToSkiaCoords();
+    void setupBuiltinVertexAttribute(const char* inName, GrGLSLExpr1* out);
+    void setupBuiltinVertexAttribute(const char* inName, GrGLSLExpr4* out);
+    void emitAttributes(const GrGeometryProcessor& gp);
+    void transformSkiaToGLCoords();
+    void bindVertexAttributes(GrGLuint programID);
     bool compileAndAttachShaders(GrGLuint programId, SkTDArray<GrGLuint>* shaderIds) const;
-    void emitCodeBeforeEffects(GrGLSLExpr4* color, GrGLSLExpr4* coverage);
-    void emitCodeAfterEffects();
 
+    // an internal call which checks for uniquness of a var before adding it to the list of inputs
+    bool addAttribute(const GrShaderVar& var);
     struct AttributePair {
         void set(int index, const SkString& name) {
             fIndex = index; fName = name;
@@ -71,9 +63,9 @@ private:
     GrGLShaderVar*                      fLocalCoordsVar;
     int                                 fEffectAttribOffset;
 
-    friend class GrGLFullProgramBuilder;
+    friend class GrGLProgramBuilder;
 
-    typedef GrGLFullShaderBuilder INHERITED;
+    typedef GrGLShaderBuilder INHERITED;
 };
 
 #endif

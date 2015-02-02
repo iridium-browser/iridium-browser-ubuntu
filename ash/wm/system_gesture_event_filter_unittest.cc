@@ -29,7 +29,7 @@
 #include "ui/events/event.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/test_event_handler.h"
 #include "ui/gfx/screen.h"
@@ -47,13 +47,13 @@ namespace {
 class ResizableWidgetDelegate : public views::WidgetDelegateView {
  public:
   ResizableWidgetDelegate() {}
-  virtual ~ResizableWidgetDelegate() {}
+  ~ResizableWidgetDelegate() override {}
 
  private:
-  virtual bool CanResize() const OVERRIDE { return true; }
-  virtual bool CanMaximize() const OVERRIDE { return true; }
-  virtual bool CanMinimize() const OVERRIDE { return true; }
-  virtual void DeleteDelegate() OVERRIDE { delete this; }
+  bool CanResize() const override { return true; }
+  bool CanMaximize() const override { return true; }
+  bool CanMinimize() const override { return true; }
+  void DeleteDelegate() override { delete this; }
 
   DISALLOW_COPY_AND_ASSIGN(ResizableWidgetDelegate);
 };
@@ -63,15 +63,11 @@ class MaxSizeNCFV : public views::NonClientFrameView {
  public:
   MaxSizeNCFV() {}
  private:
-  virtual gfx::Size GetMaximumSize() const OVERRIDE {
-    return gfx::Size(200, 200);
-  }
-  virtual gfx::Rect GetBoundsForClientView() const OVERRIDE {
-    return gfx::Rect();
-  };
+  gfx::Size GetMaximumSize() const override { return gfx::Size(200, 200); }
+  gfx::Rect GetBoundsForClientView() const override { return gfx::Rect(); };
 
-  virtual gfx::Rect GetWindowBoundsForClientBounds(
-      const gfx::Rect& client_bounds) const OVERRIDE {
+  gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const override {
     return gfx::Rect();
   };
 
@@ -79,15 +75,12 @@ class MaxSizeNCFV : public views::NonClientFrameView {
   // the parent NonClientView because that makes it more difficult to calculate
   // hittests for regions that are partially obscured by the ClientView, e.g.
   // HTSYSMENU.
-  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE {
-    return HTNOWHERE;
-  }
-  virtual void GetWindowMask(const gfx::Size& size,
-                             gfx::Path* window_mask) OVERRIDE {}
-  virtual void ResetWindowControls() OVERRIDE {}
-  virtual void UpdateWindowIcon() OVERRIDE {}
-  virtual void UpdateWindowTitle() OVERRIDE {}
-  virtual void SizeConstraintsChanged() OVERRIDE {}
+  int NonClientHitTest(const gfx::Point& point) override { return HTNOWHERE; }
+  void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) override {}
+  void ResetWindowControls() override {}
+  void UpdateWindowIcon() override {}
+  void UpdateWindowTitle() override {}
+  void SizeConstraintsChanged() override {}
 
   DISALLOW_COPY_AND_ASSIGN(MaxSizeNCFV);
 };
@@ -95,14 +88,15 @@ class MaxSizeNCFV : public views::NonClientFrameView {
 class MaxSizeWidgetDelegate : public views::WidgetDelegateView {
  public:
   MaxSizeWidgetDelegate() {}
-  virtual ~MaxSizeWidgetDelegate() {}
+  ~MaxSizeWidgetDelegate() override {}
 
  private:
-  virtual bool CanResize() const OVERRIDE { return true; }
-  virtual bool CanMaximize() const OVERRIDE { return false; }
-  virtual void DeleteDelegate() OVERRIDE { delete this; }
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE {
+  bool CanResize() const override { return true; }
+  bool CanMaximize() const override { return false; }
+  bool CanMinimize() const override { return true; }
+  void DeleteDelegate() override { delete this; }
+  views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) override {
     return new MaxSizeNCFV;
   }
 
@@ -114,7 +108,7 @@ class MaxSizeWidgetDelegate : public views::WidgetDelegateView {
 class SystemGestureEventFilterTest : public AshTestBase {
  public:
   SystemGestureEventFilterTest() : AshTestBase() {}
-  virtual ~SystemGestureEventFilterTest() {}
+  ~SystemGestureEventFilterTest() override {}
 
   LongPressAffordanceHandler* GetLongPressAffordance() {
     ShellTestApi shell_test(Shell::GetInstance());
@@ -137,7 +131,7 @@ class SystemGestureEventFilterTest : public AshTestBase {
   }
 
   // Overridden from AshTestBase:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // TODO(jonross): TwoFingerDragDelayed() and ThreeFingerGestureStopsDrag()
     // both use hardcoded touch points, assuming that they target empty header
     // space. Window control order now reflects configuration files and can
@@ -296,7 +290,8 @@ TEST_F(SystemGestureEventFilterTest, TwoFingerDrag) {
 
 TEST_F(SystemGestureEventFilterTest, TwoFingerDragTwoWindows) {
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
-  ui::GestureConfiguration::set_max_separation_for_gesture_touches_in_pixels(0);
+  ui::GestureConfiguration::GetInstance()
+      ->set_max_separation_for_gesture_touches_in_pixels(0);
   views::Widget* first = views::Widget::CreateWindowWithContextAndBounds(
       new ResizableWidgetDelegate, root_window, gfx::Rect(10, 0, 50, 100));
   first->Show();

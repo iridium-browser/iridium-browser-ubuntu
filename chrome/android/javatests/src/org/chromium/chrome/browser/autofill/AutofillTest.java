@@ -8,13 +8,14 @@ import android.test.suitebuilder.annotation.SmallTest;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.shell.ChromeShellActivity;
 import org.chromium.chrome.shell.ChromeShellTestBase;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TouchCommon;
-import org.chromium.content.browser.test.util.UiUtils;
+import org.chromium.ui.DropdownItem;
 import org.chromium.ui.autofill.AutofillPopup;
 import org.chromium.ui.autofill.AutofillPopup.AutofillPopupDelegate;
 import org.chromium.ui.autofill.AutofillSuggestion;
@@ -46,16 +47,16 @@ public class AutofillTest extends ChromeShellTestBase {
         final ViewAndroidDelegate viewDelegate =
                 activity.getActiveContentViewCore().getViewAndroidDelegate();
 
-        UiUtils.runOnUiThread(getActivity(), new Runnable() {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
                 mAutofillPopup = new AutofillPopup(mWindowAndroid.getActivity().get(),
                         viewDelegate,
                         mMockAutofillCallback);
+                mAutofillPopup.filterAndShow(new AutofillSuggestion[0], false);
                 mAutofillPopup.setAnchorRect(50, 500, 500, 50);
             }
         });
-
     }
 
     private static final long CALLBACK_TIMEOUT_MS = scaleTimeout(4000);
@@ -88,24 +89,26 @@ public class AutofillTest extends ChromeShellTestBase {
 
     private AutofillSuggestion[] createTwoAutofillSuggestionArray() {
         return new AutofillSuggestion[] {
-            new AutofillSuggestion("Sherlock Holmes", "221B Baker Street", 42),
-            new AutofillSuggestion("Arthur Dent", "West Country", 43),
+            new AutofillSuggestion("Sherlock Holmes", "221B Baker Street", DropdownItem.NO_ICON,
+                42),
+            new AutofillSuggestion("Arthur Dent", "West Country", DropdownItem.NO_ICON, 43),
         };
     }
 
     private AutofillSuggestion[] createFiveAutofillSuggestionArray() {
         return new AutofillSuggestion[] {
-            new AutofillSuggestion("Sherlock Holmes", "221B Baker Street", 42),
-            new AutofillSuggestion("Arthur Dent", "West Country", 43),
-            new AutofillSuggestion("Arthos", "France", 44),
-            new AutofillSuggestion("Porthos", "France", 45),
-            new AutofillSuggestion("Aramis", "France", 46),
+            new AutofillSuggestion("Sherlock Holmes", "221B Baker Street", DropdownItem.NO_ICON,
+                42),
+            new AutofillSuggestion("Arthur Dent", "West Country", DropdownItem.NO_ICON, 43),
+            new AutofillSuggestion("Arthos", "France", DropdownItem.NO_ICON, 44),
+            new AutofillSuggestion("Porthos", "France", DropdownItem.NO_ICON, 45),
+            new AutofillSuggestion("Aramis", "France", DropdownItem.NO_ICON, 46),
         };
     }
 
     public boolean openAutofillPopupAndWaitUntilReady(final AutofillSuggestion[] suggestions)
             throws InterruptedException {
-        UiUtils.runOnUiThread(getActivity(), new Runnable() {
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
                 mAutofillPopup.filterAndShow(suggestions, false);
@@ -136,8 +139,7 @@ public class AutofillTest extends ChromeShellTestBase {
         assertTrue(openAutofillPopupAndWaitUntilReady(suggestions));
         assertEquals(2, mAutofillPopup.getListView().getCount());
 
-        TouchCommon touchCommon = new TouchCommon(this);
-        touchCommon.singleClickViewRelative(mAutofillPopup.getListView(), 10, 10);
+        TouchCommon.singleClickViewRelative(mAutofillPopup.getListView(), 10, 10);
         assertTrue(mMockAutofillCallback.waitForCallback());
 
         assertEquals(0, mMockAutofillCallback.mListIndex);

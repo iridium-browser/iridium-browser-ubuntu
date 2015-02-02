@@ -10,6 +10,7 @@
 
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "media/base/data_source.h"
 #include "media/base/media_export.h"
@@ -35,7 +36,7 @@ class MEDIA_EXPORT BufferedDataSourceHost {
   virtual void AddBufferedByteRange(int64 start, int64 end) = 0;
 
  protected:
-  virtual ~BufferedDataSourceHost() {};
+  virtual ~BufferedDataSourceHost() {}
 };
 
 // A data source capable of loading URLs and buffering the data using an
@@ -70,7 +71,7 @@ class MEDIA_EXPORT BufferedDataSource : public DataSource {
       MediaLog* media_log,
       BufferedDataSourceHost* host,
       const DownloadingCB& downloading_cb);
-  virtual ~BufferedDataSource();
+  ~BufferedDataSource() override;
 
   // Executes |init_cb| with the result of initialization when it has completed.
   //
@@ -108,13 +109,15 @@ class MEDIA_EXPORT BufferedDataSource : public DataSource {
 
   // DataSource implementation.
   // Called from demuxer thread.
-  virtual void Stop() OVERRIDE;
+  void Stop() override;
 
-  virtual void Read(int64 position, int size, uint8* data,
-                    const DataSource::ReadCB& read_cb) OVERRIDE;
-  virtual bool GetSize(int64* size_out) OVERRIDE;
-  virtual bool IsStreaming() OVERRIDE;
-  virtual void SetBitrate(int bitrate) OVERRIDE;
+  void Read(int64 position,
+            int size,
+            uint8* data,
+            const DataSource::ReadCB& read_cb) override;
+  bool GetSize(int64* size_out) override;
+  bool IsStreaming() override;
+  void SetBitrate(int bitrate) override;
 
  protected:
   // A factory method to create a BufferedResourceLoader based on the read

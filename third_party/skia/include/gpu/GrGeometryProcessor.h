@@ -9,7 +9,7 @@
 #define GrGeometryProcessor_DEFINED
 
 #include "GrProcessor.h"
-class GrBackendGeometryProcessorFactory;
+#include "GrShaderVar.h"
 
 /**
  * A GrGeomteryProcessor is used to perform computation in the vertex shader and
@@ -23,7 +23,8 @@ class GrBackendGeometryProcessorFactory;
  */
 class GrGeometryProcessor : public GrProcessor {
 public:
-    GrGeometryProcessor() {}
+    GrGeometryProcessor()
+        : fWillUseGeoShader(false) {}
 
     virtual const GrBackendGeometryProcessorFactory& getFactory() const = 0;
 
@@ -37,6 +38,21 @@ public:
 
     const VertexAttribArray& getVertexAttribs() const { return fVertexAttribs; }
 
+    bool willUseGeoShader() const { return fWillUseGeoShader; }
+
+    /** Returns true if this and other processor conservatively draw identically. It can only return
+        true when the two prcoessors are of the same subclass (i.e. they return the same object from
+        from getFactory()).
+        A return value of true from isEqual() should not be used to test whether the prcoessors
+        would generate the same shader code. To test for identical code generation use the
+        processors' keys computed by the GrBackendEffectFactory. */
+    bool isEqual(const GrGeometryProcessor& that) const {
+        if (&this->getFactory() != &that.getFactory() || !this->hasSameTextureAccesses(that)) {
+            return false;
+        }
+        return this->onIsEqual(that);
+    }
+
 protected:
     /**
      * Subclasses call this from their constructor to register vertex attributes (at most
@@ -48,19 +64,15 @@ protected:
         return fVertexAttribs.push_back(var);
     }
 
+    void setWillUseGeoShader() { fWillUseGeoShader = true; }
+
 private:
+    virtual bool onIsEqual(const GrGeometryProcessor&) const = 0;
+
     SkSTArray<kMaxVertexAttribs, GrShaderVar, true> fVertexAttribs;
+    bool fWillUseGeoShader;
 
     typedef GrProcessor INHERITED;
 };
-
-/**
- * This creates an effect outside of the effect memory pool. The effect's destructor will be called
- * at global destruction time. NAME will be the name of the created GrProcessor.
- */
-#define GR_CREATE_STATIC_GEOMETRY_PROCESSOR(NAME, GP_CLASS, ARGS)                                 \
-static SkAlignedSStorage<sizeof(GP_CLASS)> g_##NAME##_Storage;                                    \
-static GrGeometryProcessor* NAME SkNEW_PLACEMENT_ARGS(g_##NAME##_Storage.get(), GP_CLASS, ARGS);  \
-static SkAutoTDestroy<GrGeometryProcessor> NAME##_ad(NAME);
 
 #endif

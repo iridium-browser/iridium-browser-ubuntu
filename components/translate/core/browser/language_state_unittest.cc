@@ -31,42 +31,36 @@ class MockTranslateDriver : public TranslateDriver {
 
   virtual ~MockTranslateDriver() {}
 
-  virtual void OnIsPageTranslatedChanged() OVERRIDE {
+  void OnIsPageTranslatedChanged() override {
     on_is_page_translated_changed_called_ = true;
   }
 
-  virtual void OnTranslateEnabledChanged() OVERRIDE {
+  void OnTranslateEnabledChanged() override {
     on_translate_enabled_changed_called_ = true;
   }
 
-  virtual bool IsLinkNavigation() OVERRIDE {
-    return false;
-  }
+  bool IsLinkNavigation() override { return false; }
 
-  virtual void TranslatePage(int page_seq_no,
-                             const std::string& translate_script,
-                             const std::string& source_lang,
-                             const std::string& target_lang) OVERRIDE {}
+  void TranslatePage(int page_seq_no,
+                     const std::string& translate_script,
+                     const std::string& source_lang,
+                     const std::string& target_lang) override {}
 
-  virtual void RevertTranslation(int page_seq_no) OVERRIDE {}
+  void RevertTranslation(int page_seq_no) override {}
 
-  virtual bool IsOffTheRecord() OVERRIDE { return false; }
+  bool IsOffTheRecord() override { return false; }
 
-  virtual const std::string& GetContentsMimeType() OVERRIDE {
-    return kHtmlMimeType;
-  }
+  const std::string& GetContentsMimeType() override { return kHtmlMimeType; }
 
-  virtual const GURL& GetLastCommittedURL() OVERRIDE {
-    return GURL::EmptyGURL();
-  }
+  const GURL& GetLastCommittedURL() override { return GURL::EmptyGURL(); }
 
-  virtual const GURL& GetActiveURL() OVERRIDE { return GURL::EmptyGURL(); }
+  const GURL& GetActiveURL() override { return GURL::EmptyGURL(); }
 
-  virtual const GURL& GetVisibleURL() OVERRIDE { return GURL::EmptyGURL(); }
+  const GURL& GetVisibleURL() override { return GURL::EmptyGURL(); }
 
-  virtual bool HasCurrentPage() OVERRIDE { return true; }
+  bool HasCurrentPage() override { return true; }
 
-  virtual void OpenUrlInNewTab(const GURL& url) OVERRIDE {}
+  void OpenUrlInNewTab(const GURL& url) override {}
 
   bool on_is_page_translated_changed_called() const {
     return on_is_page_translated_changed_called_;

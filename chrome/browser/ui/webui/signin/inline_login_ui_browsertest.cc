@@ -91,7 +91,13 @@ class InlineLoginUIBrowserTest : public InProcessBrowserTest {
   InlineLoginUIBrowserTest() {}
 };
 
-IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, DifferentStorageId) {
+#if defined(OS_LINUX)
+// crbug.com/422868
+#define MAYBE_DifferentStorageId DISABLED_DifferentStorageId
+#else
+#define MAYBE_DifferentStorageId DifferentStorageId
+#endif
+IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, MAYBE_DifferentStorageId) {
   GURL test_url = ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(FILE_PATH_LITERAL("title1.html")));
@@ -173,7 +179,7 @@ class InlineLoginUISafeIframeBrowserTest : public InProcessBrowserTest {
   }
 
  private:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
     // EmbeddedTestServer spawns a thread to initialize socket.
@@ -183,7 +189,7 @@ class InlineLoginUISafeIframeBrowserTest : public InProcessBrowserTest {
     InProcessBrowserTest::SetUp();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     const GURL& base_url = embedded_test_server()->base_url();
     command_line->AppendSwitchASCII(::switches::kGaiaUrl, base_url.spec());
     command_line->AppendSwitchASCII(::switches::kLsoUrl, base_url.spec());
@@ -191,7 +197,7 @@ class InlineLoginUISafeIframeBrowserTest : public InProcessBrowserTest {
                                     base_url.spec());
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     embedded_test_server()->RestartThreadAndListen();
 
     content::WebUIControllerFactory::UnregisterFactoryForTesting(
@@ -202,7 +208,7 @@ class InlineLoginUISafeIframeBrowserTest : public InProcessBrowserTest {
         GURL(kFooWebUIURL).host(), &foo_provider_);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     test_factory_->RemoveFactoryOverride(GURL(kFooWebUIURL).host());
     content::WebUIControllerFactory::UnregisterFactoryForTesting(
         test_factory_.get());

@@ -26,8 +26,10 @@
 #include "content/common/content_export.h"
 #include "content/common/drag_event_source_info.h"
 #include "content/common/edit_command.h"
+#include "content/common/frame_message_enums.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/navigation_gesture.h"
+#include "content/common/navigation_params.h"
 #include "content/common/view_message_enums.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/referrer.h"
@@ -76,6 +78,7 @@ class SkBitmap;
 struct PP_NetAddress_Private;
 struct FrameMsg_Navigate_Params;
 struct ViewMsg_PostMessage_Params;
+struct ViewMsg_Resize_Params;
 struct ViewMsg_StopFinding_Params;
 
 namespace base {
@@ -97,7 +100,6 @@ class WebPeerConnection00HandlerClient;
 class WebMouseEvent;
 class WebPeerConnectionHandler;
 class WebPeerConnectionHandlerClient;
-class WebSocketStreamHandle;
 class WebSpeechRecognizer;
 class WebStorageNamespace;
 class WebTouchEvent;
@@ -116,10 +118,6 @@ class WebHitTestResult;
 #endif
 }  // namespace blink
 
-namespace ui {
-struct SelectedFileInfo;
-}
-
 namespace content {
 
 class BrowserPluginManager;
@@ -130,6 +128,7 @@ class HistoryEntry;
 class ImageResourceFetcher;
 class MouseLockDispatcher;
 class NavigationState;
+class PageState;
 class PepperPluginInstanceImpl;
 class RenderViewImplTest;
 class RenderViewObserver;
@@ -141,6 +140,7 @@ class WebPluginDelegateProxy;
 struct DropData;
 struct FaviconURL;
 struct FileChooserParams;
+struct FileChooserFileInfo;
 struct RenderViewImplParams;
 
 #if defined(OS_ANDROID)
@@ -179,7 +179,10 @@ class CONTENT_EXPORT RenderViewImpl
                                 bool hidden,
                                 bool never_visible,
                                 int32 next_page_id,
-                                const blink::WebScreenInfo& screen_info);
+                                const ViewMsg_Resize_Params& initial_size,
+                                bool enable_auto_resize,
+                                const gfx::Size& min_size,
+                                const gfx::Size& max_size);
 
   // Used by content_layouttest_support to hook into the creation of
   // RenderViewImpls.
@@ -330,7 +333,7 @@ class CONTENT_EXPORT RenderViewImpl
 
   // Change the device ICC color profile while running a layout test.
   void SetDeviceColorProfileForTesting(const std::vector<char>& color_profile);
-  virtual void ResetDeviceColorProfileForTesting() OVERRIDE;
+  void ResetDeviceColorProfileForTesting() override;
 
   // Used to force the size of a window when running layout tests.
   void ForceResizeForTesting(const gfx::Size& new_size);
@@ -344,7 +347,7 @@ class CONTENT_EXPORT RenderViewImpl
 
   // IPC::Listener implementation ----------------------------------------------
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
 
   // blink::WebWidgetClient implementation ------------------------------------
 
@@ -359,8 +362,8 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void requestPointerUnlock();
   virtual bool isPointerLocked();
   virtual void didHandleGestureEvent(const blink::WebGestureEvent& event,
-                                     bool event_cancelled) OVERRIDE;
-  virtual void initializeLayerTreeView() OVERRIDE;
+                                     bool event_cancelled) override;
+  virtual void initializeLayerTreeView() override;
 
   // blink::WebViewClient implementation --------------------------------------
 
@@ -390,10 +393,10 @@ class CONTENT_EXPORT RenderViewImpl
                                      const blink::WebString& main_text,
                                      blink::WebTextDirection main_text_hint,
                                      const blink::WebString& sub_text,
-                                     blink::WebTextDirection hint) OVERRIDE;
-  virtual void hideValidationMessage() OVERRIDE;
+                                     blink::WebTextDirection hint) override;
+  virtual void hideValidationMessage() override;
   virtual void moveValidationMessage(
-      const blink::WebRect& anchor_in_root_view) OVERRIDE;
+      const blink::WebRect& anchor_in_root_view) override;
   virtual void setStatusText(const blink::WebString& text);
   virtual void setMouseOverURL(const blink::WebURL& url);
   virtual void setKeyboardFocusURL(const blink::WebURL& url);
@@ -449,37 +452,37 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void didSerializeDataForFrame(
       const blink::WebURL& frame_url,
       const blink::WebCString& data,
-      PageSerializationStatus status) OVERRIDE;
+      PageSerializationStatus status) override;
 
   // RenderView implementation -------------------------------------------------
 
-  virtual bool Send(IPC::Message* message) OVERRIDE;
-  virtual RenderFrameImpl* GetMainRenderFrame() OVERRIDE;
-  virtual int GetRoutingID() const OVERRIDE;
-  virtual gfx::Size GetSize() const OVERRIDE;
-  virtual WebPreferences& GetWebkitPreferences() OVERRIDE;
-  virtual void SetWebkitPreferences(const WebPreferences& preferences) OVERRIDE;
-  virtual blink::WebView* GetWebView() OVERRIDE;
-  virtual blink::WebElement GetFocusedElement() const OVERRIDE;
-  virtual bool IsEditableNode(const blink::WebNode& node) const OVERRIDE;
-  virtual bool NodeContainsPoint(const blink::WebNode& node,
-                                 const gfx::Point& point) const OVERRIDE;
-  virtual bool ShouldDisplayScrollbars(int width, int height) const OVERRIDE;
-  virtual int GetEnabledBindings() const OVERRIDE;
-  virtual bool GetContentStateImmediately() const OVERRIDE;
-  virtual blink::WebPageVisibilityState GetVisibilityState() const OVERRIDE;
-  virtual void DidStartLoading() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
-  virtual void Repaint(const gfx::Size& size) OVERRIDE;
-  virtual void SetEditCommandForNextKeyEvent(const std::string& name,
-                                             const std::string& value) OVERRIDE;
-  virtual void ClearEditCommands() OVERRIDE;
-  virtual SSLStatus GetSSLStatusOfFrame(blink::WebFrame* frame) const OVERRIDE;
-  virtual const std::string& GetAcceptLanguages() const OVERRIDE;
+  bool Send(IPC::Message* message) override;
+  RenderFrameImpl* GetMainRenderFrame() override;
+  int GetRoutingID() const override;
+  gfx::Size GetSize() const override;
+  WebPreferences& GetWebkitPreferences() override;
+  void SetWebkitPreferences(const WebPreferences& preferences) override;
+  blink::WebView* GetWebView() override;
+  blink::WebElement GetFocusedElement() const override;
+  bool IsEditableNode(const blink::WebNode& node) const override;
+  bool NodeContainsPoint(const blink::WebNode& node,
+                         const gfx::Point& point) const override;
+  bool ShouldDisplayScrollbars(int width, int height) const override;
+  int GetEnabledBindings() const override;
+  bool GetContentStateImmediately() const override;
+  blink::WebPageVisibilityState GetVisibilityState() const override;
+  void DidStartLoading() override;
+  void DidStopLoading() override;
+  void Repaint(const gfx::Size& size) override;
+  void SetEditCommandForNextKeyEvent(const std::string& name,
+                                     const std::string& value) override;
+  void ClearEditCommands() override;
+  SSLStatus GetSSLStatusOfFrame(blink::WebFrame* frame) const override;
+  const std::string& GetAcceptLanguages() const override;
 #if defined(OS_ANDROID)
   virtual void UpdateTopControlsState(TopControlsState constraints,
                                       TopControlsState current,
-                                      bool animate) OVERRIDE;
+                                      bool animate) override;
 #endif
   bool uses_temporary_zoom_level() const { return uses_temporary_zoom_level_; }
 
@@ -494,59 +497,55 @@ class CONTENT_EXPORT RenderViewImpl
 
  protected:
   // RenderWidget overrides:
-  virtual void OnClose() OVERRIDE;
-  virtual void Close() OVERRIDE;
-  virtual void OnResize(const ViewMsg_Resize_Params& params) OVERRIDE;
-  virtual void DidInitiatePaint() OVERRIDE;
-  virtual void DidFlushPaint() OVERRIDE;
-  virtual gfx::Vector2d GetScrollOffset() OVERRIDE;
-  virtual void DidHandleKeyEvent() OVERRIDE;
-  virtual bool WillHandleMouseEvent(
-      const blink::WebMouseEvent& event) OVERRIDE;
-  virtual bool WillHandleGestureEvent(
-      const blink::WebGestureEvent& event) OVERRIDE;
-  virtual void DidHandleMouseEvent(const blink::WebMouseEvent& event) OVERRIDE;
-  virtual void DidHandleTouchEvent(const blink::WebTouchEvent& event) OVERRIDE;
-  virtual bool HasTouchEventHandlersAt(const gfx::Point& point) const OVERRIDE;
-  virtual void OnSetFocus(bool enable) OVERRIDE;
-  virtual void OnWasHidden() OVERRIDE;
-  virtual void OnWasShown(bool needs_repainting,
-                          const ui::LatencyInfo& latency_info) OVERRIDE;
-  virtual GURL GetURLForGraphicsContext3D() OVERRIDE;
-  virtual void OnImeSetComposition(
+  void OnClose() override;
+  void Close() override;
+  void OnResize(const ViewMsg_Resize_Params& params) override;
+  void DidInitiatePaint() override;
+  void DidFlushPaint() override;
+  gfx::Vector2d GetScrollOffset() override;
+  void DidHandleKeyEvent() override;
+  bool WillHandleMouseEvent(const blink::WebMouseEvent& event) override;
+  bool WillHandleGestureEvent(const blink::WebGestureEvent& event) override;
+  void DidHandleMouseEvent(const blink::WebMouseEvent& event) override;
+  void DidHandleTouchEvent(const blink::WebTouchEvent& event) override;
+  bool HasTouchEventHandlersAt(const gfx::Point& point) const override;
+  void OnSetFocus(bool enable) override;
+  void OnWasHidden() override;
+  void OnWasShown(bool needs_repainting,
+                  const ui::LatencyInfo& latency_info) override;
+  GURL GetURLForGraphicsContext3D() override;
+  void OnImeSetComposition(
       const base::string16& text,
       const std::vector<blink::WebCompositionUnderline>& underlines,
       int selection_start,
-      int selection_end) OVERRIDE;
-  virtual void OnImeConfirmComposition(const base::string16& text,
-                                       const gfx::Range& replacement_range,
-                                       bool keep_selection) OVERRIDE;
-  virtual void SetDeviceScaleFactor(float device_scale_factor) OVERRIDE;
-  virtual bool SetDeviceColorProfile(
-      const std::vector<char>& color_profile) OVERRIDE;
-  virtual void OnOrientationChange() OVERRIDE;
-  virtual ui::TextInputType GetTextInputType() OVERRIDE;
-  virtual void GetSelectionBounds(gfx::Rect* start, gfx::Rect* end) OVERRIDE;
-#if defined(OS_MACOSX) || defined(USE_AURA)
-  virtual void GetCompositionCharacterBounds(
-      std::vector<gfx::Rect>* character_bounds) OVERRIDE;
-  virtual void GetCompositionRange(gfx::Range* range) OVERRIDE;
+      int selection_end) override;
+  void OnImeConfirmComposition(const base::string16& text,
+                               const gfx::Range& replacement_range,
+                               bool keep_selection) override;
+  void SetDeviceScaleFactor(float device_scale_factor) override;
+  bool SetDeviceColorProfile(const std::vector<char>& color_profile) override;
+  void OnOrientationChange() override;
+  ui::TextInputType GetTextInputType() override;
+  void GetSelectionBounds(gfx::Rect* start, gfx::Rect* end) override;
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
+  void GetCompositionCharacterBounds(
+      std::vector<gfx::Rect>* character_bounds) override;
+  void GetCompositionRange(gfx::Range* range) override;
 #endif
-  virtual bool CanComposeInline() OVERRIDE;
-  virtual void DidCommitCompositorFrame() OVERRIDE;
-  virtual void InstrumentWillBeginFrame(int frame_id) OVERRIDE;
-  virtual void InstrumentDidBeginFrame() OVERRIDE;
-  virtual void InstrumentDidCancelFrame() OVERRIDE;
-  virtual void InstrumentWillComposite() OVERRIDE;
+  bool CanComposeInline() override;
+  void DidCommitCompositorFrame() override;
+  void InstrumentWillBeginFrame(int frame_id) override;
+  void InstrumentDidBeginFrame() override;
+  void InstrumentDidCancelFrame() override;
+  void InstrumentWillComposite() override;
 
  protected:
   explicit RenderViewImpl(RenderViewImplParams* params);
 
   void Initialize(RenderViewImplParams* params);
-  virtual void SetScreenMetricsEmulationParameters(
-      float device_scale_factor,
-      const gfx::Point& root_layer_offset,
-      float root_layer_scale) OVERRIDE;
+  void SetScreenMetricsEmulationParameters(float device_scale_factor,
+                                           const gfx::Point& root_layer_offset,
+                                           float root_layer_scale) override;
 
   // Do not delete directly.  This class is reference counted.
   virtual ~RenderViewImpl();
@@ -624,7 +623,7 @@ class CONTENT_EXPORT RenderViewImpl
   void didUpdateCurrentHistoryItem(blink::WebLocalFrame* frame);
   void didChangeScrollOffset(blink::WebLocalFrame* frame);
 
-  static bool IsReload(const FrameMsg_Navigate_Params& params);
+  static bool IsReload(FrameMsg_Navigate_Type::Value navigation_type);
 
   static Referrer GetReferrerFromRequest(
       blink::WebFrame* frame,
@@ -682,7 +681,7 @@ class CONTENT_EXPORT RenderViewImpl
   void OnEnumerateDirectoryResponse(int id,
                                     const std::vector<base::FilePath>& paths);
   void OnFileChooserResponse(
-      const std::vector<ui::SelectedFileInfo>& files);
+      const std::vector<content::FileChooserFileInfo>& files);
   void OnFind(int request_id,
               const base::string16&,
               const blink::WebFindOptions&);
@@ -751,7 +750,9 @@ class CONTENT_EXPORT RenderViewImpl
 
   // Returns true if the |params| navigation is to an entry that has been
   // cropped due to a recent navigation the browser did not know about.
-  bool IsBackForwardToStaleEntry(const FrameMsg_Navigate_Params& params,
+  bool IsBackForwardToStaleEntry(const PageState& state,
+                                 int pending_history_list_offset,
+                                 int32 page_id,
                                  bool is_reload);
 
   // Make the given |frame| show an empty, unscriptable page.

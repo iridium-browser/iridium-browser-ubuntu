@@ -39,6 +39,7 @@
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/html/HTMLStyleElement.h"
+#include "core/svg/SVGStyleElement.h"
 
 namespace blink {
 
@@ -50,10 +51,10 @@ TreeScope* ScopedStyleResolver::treeScopeFor(Document& document, const CSSStyleS
         return 0;
 
     Node* ownerNode = sheet->ownerNode();
-    if (!isHTMLStyleElement(ownerNode))
+    if (!isHTMLStyleElement(ownerNode) && !isSVGStyleElement(ownerNode))
         return &document;
 
-    HTMLStyleElement& styleElement = toHTMLStyleElement(*ownerNode);
+    Element& styleElement = toElement(*ownerNode);
     if (styleElement.isInShadowTree())
         return styleElement.containingShadowRoot();
     return &document;
@@ -68,16 +69,10 @@ ScopedStyleResolver* ScopedStyleResolver::parent() const
     return 0;
 }
 
-void ScopedStyleResolver::addRulesFromSheet(CSSStyleSheet* cssSheet, const MediaQueryEvaluator& medium, StyleResolver* resolver)
+unsigned ScopedStyleResolver::appendCSSStyleSheet(CSSStyleSheet* cssSheet)
 {
     m_authorStyleSheets.append(cssSheet);
-    unsigned index = m_authorStyleSheets.size() - 1;
-    StyleSheetContents* sheet = cssSheet->contents();
-
-    AddRuleFlags addRuleFlags = resolver->document().securityOrigin()->canRequest(sheet->baseURL()) ? RuleHasDocumentSecurityOrigin : RuleHasNoSpecialState;
-    const RuleSet& ruleSet = sheet->ensureRuleSet(medium, addRuleFlags);
-    resolver->addMediaQueryResults(ruleSet.viewportDependentMediaQueryResults());
-    resolver->processScopedRules(ruleSet, cssSheet, index, treeScope().rootNode());
+    return m_authorStyleSheets.size() - 1;
 }
 
 void ScopedStyleResolver::collectFeaturesTo(RuleFeatureSet& features, HashSet<const StyleSheetContents*>& visitedSharedStyleSheetContents) const
@@ -123,16 +118,14 @@ void ScopedStyleResolver::addKeyframeStyle(PassRefPtrWillBeRawPtr<StyleRuleKeyfr
 
 void ScopedStyleResolver::collectMatchingAuthorRules(ElementRuleCollector& collector, bool includeEmptyRules, CascadeScope cascadeScope, CascadeOrder cascadeOrder)
 {
-    unsigned contextFlags = SelectorChecker::DefaultBehavior;
-
-    // FIXME: This is always true now.
-    contextFlags |= SelectorChecker::ScopeContainsLastMatchedElement;
-
     RuleRange ruleRange = collector.matchedResult().ranges.authorRuleRange();
+    ASSERT(!collector.scopeContainsLastMatchedElement());
+    collector.setScopeContainsLastMatchedElement(true);
     for (size_t i = 0; i < m_authorStyleSheets.size(); ++i) {
         MatchRequest matchRequest(&m_authorStyleSheets[i]->contents()->ruleSet(), includeEmptyRules, &m_scope->rootNode(), m_authorStyleSheets[i], i);
-        collector.collectMatchingRules(matchRequest, ruleRange, static_cast<SelectorChecker::ContextFlags>(contextFlags), cascadeScope, cascadeOrder);
+        collector.collectMatchingRules(matchRequest, ruleRange, cascadeScope, cascadeOrder);
     }
+    collector.setScopeContainsLastMatchedElement(false);
 }
 
 void ScopedStyleResolver::matchPageRules(PageRuleCollector& collector)

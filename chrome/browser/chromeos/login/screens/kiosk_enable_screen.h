@@ -9,28 +9,29 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/screens/kiosk_enable_screen_actor.h"
-#include "chrome/browser/chromeos/login/screens/wizard_screen.h"
 
 namespace chromeos {
 
 // Representation independent class that controls screen for enabling
 // consumer kiosk mode.
-class KioskEnableScreen : public WizardScreen,
+class KioskEnableScreen : public BaseScreen,
                           public KioskEnableScreenActor::Delegate {
  public:
-  KioskEnableScreen(ScreenObserver* observer, KioskEnableScreenActor* actor);
+  KioskEnableScreen(BaseScreenDelegate* base_screen_delegate,
+                    KioskEnableScreenActor* actor);
   virtual ~KioskEnableScreen();
 
-  // WizardScreen implementation:
-  virtual void PrepareToShow() OVERRIDE {}
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE {}
-  virtual std::string GetName() const OVERRIDE;
+  // BaseScreen implementation:
+  virtual void PrepareToShow() override {}
+  virtual void Show() override;
+  virtual void Hide() override {}
+  virtual std::string GetName() const override;
 
   // KioskEnableScreenActor::Delegate implementation:
-  virtual void OnExit() OVERRIDE;
-  virtual void OnActorDestroyed(KioskEnableScreenActor* actor) OVERRIDE;
+  virtual void OnExit() override;
+  virtual void OnActorDestroyed(KioskEnableScreenActor* actor) override;
 
  private:
   KioskEnableScreenActor* actor_;

@@ -11,7 +11,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
-#include "components/autofill/core/common/password_autofill_util.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
@@ -21,6 +20,10 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+
+#if defined(OS_WIN)
+#include "base/prefs/pref_registry_simple.h"
+#endif
 
 using autofill::PasswordForm;
 using autofill::PasswordFormMap;
@@ -41,7 +44,8 @@ typedef autofill::SavePasswordProgressLogger Logger;
 // that this is only ever called from a single thread in order to
 // avoid needing to lock (a static boolean flag is then sufficient to
 // guarantee running only once).
-void ReportMetrics(bool password_manager_enabled) {
+void ReportMetrics(bool password_manager_enabled,
+                   PasswordManagerClient* client) {
   static base::PlatformThreadId initial_thread_id =
       base::PlatformThread::CurrentId();
   DCHECK(initial_thread_id == base::PlatformThread::CurrentId());
@@ -51,6 +55,14 @@ void ReportMetrics(bool password_manager_enabled) {
     return;
   ran_once = true;
 
+  PasswordStore* store = client->GetPasswordStore();
+  // May be NULL in tests.
+  if (store) {
+    store->ReportMetrics(
+        client->GetSyncUsername(),
+        client->IsPasswordSyncEnabled(
+            password_manager::ONLY_CUSTOM_PASSPHRASE));
+  }
   UMA_HISTOGRAM_BOOLEAN("PasswordManager.Enabled", password_manager_enabled);
 }
 
@@ -105,6 +117,14 @@ void PasswordManager::RegisterProfilePrefs(
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
+#if defined(OS_WIN)
+// static
+void PasswordManager::RegisterLocalPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterInt64Pref(prefs::kOsPasswordLastChanged, 0);
+  registry->RegisterBooleanPref(prefs::kOsPasswordBlank, false);
+}
+#endif
+
 PasswordManager::PasswordManager(PasswordManagerClient* client)
     : client_(client), driver_(client->GetDriver()) {
   DCHECK(client_);
@@ -112,7 +132,7 @@ PasswordManager::PasswordManager(PasswordManagerClient* client)
   saving_passwords_enabled_.Init(prefs::kPasswordManagerSavingEnabled,
                                  client_->GetPrefs());
 
-  ReportMetrics(*saving_passwords_enabled_);
+  ReportMetrics(*saving_passwords_enabled_, client_);
 }
 
 PasswordManager::~PasswordManager() {
@@ -258,15 +278,6 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
     return;
   }
 
-  // Always save generated passwords, as the user expresses explicit intent for
-  // Chrome to manage such passwords. For other passwords, respect the
-  // autocomplete attribute if autocomplete='off' is not ignored.
-  if (!autofill::ShouldIgnoreAutocompleteOffForPasswordFields() &&
-      !manager->HasGeneratedPassword() && !form.password_autocomplete_set) {
-    RecordFailure(AUTOCOMPLETE_OFF, form.origin.host(), logger.get());
-    return;
-  }
-
   PasswordForm provisionally_saved_form(form);
   provisionally_saved_form.ssl_valid =
       form.origin.SchemeIsSecure() &&
@@ -324,9 +335,6 @@ void PasswordManager::RecordFailure(ProvisionalSaveFailure failure,
       case INVALID_FORM:
         logger->LogMessage(Logger::STRING_INVALID_FORM);
         break;
-      case AUTOCOMPLETE_OFF:
-        logger->LogMessage(Logger::STRING_AUTOCOMPLETE_OFF);
-        break;
       case SYNC_CREDENTIAL:
         logger->LogMessage(Logger::STRING_SYNC_CREDENTIAL);
         break;
@@ -356,7 +364,9 @@ void PasswordManager::DidNavigateMainFrame(bool is_in_page) {
   // different page.
   if (!is_in_page) {
     pending_login_managers_.clear();
-    driver_->GetPasswordAutofillManager()->Reset();
+    // There is no PasswordAutofillManager on iOS.
+    if (driver_->GetPasswordAutofillManager())
+      driver_->GetPasswordAutofillManager()->Reset();
   }
 }
 
@@ -548,33 +558,18 @@ void PasswordManager::Autofill(const PasswordForm& form_for_autofill,
                                bool wait_for_username) const {
   PossiblyInitializeUsernamesExperiment(best_matches);
 
-  // TODO(tedchoc): Switch to only requesting authentication if the user is
-  //                acting on the autofilled forms (crbug.com/342594) instead
-  //                of on page load.
-  bool authentication_required = preferred_match.use_additional_authentication;
-  for (autofill::PasswordFormMap::const_iterator it = best_matches.begin();
-       !authentication_required && it != best_matches.end();
-       ++it) {
-    if (it->second->use_additional_authentication)
-      authentication_required = true;
-  }
-
   switch (form_for_autofill.scheme) {
     case PasswordForm::SCHEME_HTML: {
       // Note the check above is required because the observers_ for a non-HTML
       // schemed password form may have been freed, so we need to distinguish.
-      scoped_ptr<autofill::PasswordFormFillData> fill_data(
-          new autofill::PasswordFormFillData());
+      autofill::PasswordFormFillData fill_data;
       InitPasswordFormFillData(form_for_autofill,
                                best_matches,
                                &preferred_match,
                                wait_for_username,
                                OtherPossibleUsernamesEnabled(),
-                               fill_data.get());
-      if (authentication_required)
-        client_->AuthenticateAutofillAndFillForm(fill_data.Pass());
-      else
-        driver_->FillPasswordForm(*fill_data.get());
+                               &fill_data);
+      driver_->FillPasswordForm(fill_data);
       break;
     }
     default:

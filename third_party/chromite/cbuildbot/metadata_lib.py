@@ -352,12 +352,6 @@ class CBuildbotMetadata(object):
         details = {'gerrit_number': change.gerrit_number,
                    'patch_number': change.patch_number,
                    'internal': change.internal}
-        for latest_patchset_only in (False, True):
-          prefix = '' if latest_patchset_only else 'total_'
-          for status in (pool.STATUS_FAILED, pool.STATUS_PASSED):
-            count = pool.GetCLStatusCount(pool.bot, change, status,
-                                          latest_patchset_only)
-            details['%s%s' % (prefix, status.lower())] = count
         changes.append(details)
       metadata['changes'] = changes
 
@@ -456,7 +450,7 @@ class BuildData(object):
     build_data_per_url = {}
     def _ReadMetadataURL(url):
       # Read the metadata.json URL and parse json into a dict.
-      metadata_dict = json.loads(gs_ctx.Cat(url, print_cmd=False).output)
+      metadata_dict = json.loads(gs_ctx.Cat(url, print_cmd=False))
 
       # Read the file next to url which indicates whether the metadata has
       # been gathered before, and with what stats version.
@@ -465,7 +459,7 @@ class BuildData(object):
         gathered_url = url + '.gathered'
         if gs_ctx.Exists(gathered_url, print_cmd=False):
           gathered_dict = json.loads(gs_ctx.Cat(gathered_url,
-                                                print_cmd=False).output)
+                                                print_cmd=False))
 
         sheets_version = gathered_dict.get(BuildData.SHEETS_VER_KEY)
         carbon_version = gathered_dict.get(BuildData.CARBON_VER_KEY)
@@ -767,7 +761,7 @@ def FindLatestFullVersion(builder, version):
   base_url = archive_lib.GetBaseUploadURI(config)
   latest_file_url = os.path.join(base_url, 'LATEST-%s' % version)
   try:
-    return gs_ctx.Cat(latest_file_url).output.strip()
+    return gs_ctx.Cat(latest_file_url).strip()
   except gs.GSNoSuchKey:
     return None
 
@@ -791,7 +785,7 @@ def GetBuildMetadata(builder, full_version):
   try:
     archive_url = os.path.join(base_url, full_version)
     metadata_url = os.path.join(archive_url, constants.METADATA_JSON)
-    output = gs_ctx.Cat(metadata_url).output
+    output = gs_ctx.Cat(metadata_url)
     return CBuildbotMetadata(json.loads(output))
   except gs.GSNoSuchKey:
     return None
@@ -813,7 +807,7 @@ def GetLatestMilestone():
 
   cros_build_lib.Info('Getting latest milestone from %s', latest_url)
   try:
-    content = gs_ctx.Cat(latest_url).output.strip()
+    content = gs_ctx.Cat(latest_url).strip()
 
     # Expected syntax is like the following: "R35-1234.5.6-rc7".
     assert content.startswith('R')
@@ -838,7 +832,7 @@ def GetMetadataURLsSince(target, start_date):
   Returns:
     Metadata urls for runs found.
   """
-  urls = []
+  ret = []
   milestone = GetLatestMilestone()
   gs_ctx = gs.GSContext()
   while True:
@@ -847,9 +841,9 @@ def GetMetadataURLsSince(target, start_date):
                         target, milestone, base_url)
 
     try:
-      # Get GS URLs as tuples (url, size, modified datetime).  We want the
-      # datetimes to quickly know when we are done collecting URLs.
-      url_details = gs_ctx.LSWithDetails(base_url)
+      # Get GS URLs.  We want the datetimes to quickly know when we are done
+      # collecting URLs.
+      urls = gs_ctx.List(base_url, details=True)
     except gs.GSNoSuchKey:
       # We ran out of metadata to collect.  Stop searching back in time.
       cros_build_lib.Info('No %s builds found for $%d.  I will not continue'
@@ -857,22 +851,19 @@ def GetMetadataURLsSince(target, start_date):
       break
 
     # Sort by timestamp.
-    url_details = sorted(url_details, key=lambda x: x[2], reverse=True)
+    urls = sorted(urls, key=lambda x: x.creation_time, reverse=True)
 
     # See if we have gone far enough back by checking datetime of oldest URL
     # in the current batch.
-    if url_details[-1][2].date() < start_date:
+    if urls[-1].creation_time.date() < start_date:
       # We want a subset of these URLs, then we are done.
-      urls.extend([url for (url, _size, dt) in url_details
-                   if dt.date() >= start_date])
+      ret.extend([x.url for x in urls if x.creation_time.date() >= start_date])
       break
 
     else:
       # Accept all these URLs, then continue on to the next milestone.
-      urls.extend([url for (url, _size, _dt) in url_details])
+      ret.extend([x.url for x in urls])
       milestone -= 1
       cros_build_lib.Info('Continuing on to R%d.', milestone)
 
-  return urls
-
-
+  return ret

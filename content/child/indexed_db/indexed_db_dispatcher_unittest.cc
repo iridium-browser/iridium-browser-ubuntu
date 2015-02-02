@@ -16,6 +16,7 @@
 #include "third_party/WebKit/public/platform/WebBlobInfo.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebIDBCallbacks.h"
+#include "third_party/WebKit/public/web/WebHeap.h"
 
 using blink::WebBlobInfo;
 using blink::WebData;
@@ -48,7 +49,7 @@ class MockDispatcher : public IndexedDBDispatcher {
   explicit MockDispatcher(ThreadSafeSender* sender)
       : IndexedDBDispatcher(sender) {}
 
-  virtual bool Send(IPC::Message* msg) OVERRIDE {
+  bool Send(IPC::Message* msg) override {
     delete msg;
     return true;
   }
@@ -66,6 +67,8 @@ class IndexedDBDispatcherTest : public testing::Test {
         sync_message_filter_(new IPC::SyncMessageFilter(NULL)),
         thread_safe_sender_(new ThreadSafeSender(message_loop_proxy_.get(),
                                                  sync_message_filter_.get())) {}
+
+  void TearDown() override { blink::WebHeap::collectAllGarbageForTesting(); }
 
  protected:
   scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
@@ -138,12 +141,12 @@ class CursorCallbacks : public WebIDBCallbacks {
       : cursor_(cursor) {}
 
   virtual void onSuccess(const WebData&,
-                         const WebVector<WebBlobInfo>&) OVERRIDE {}
+                         const WebVector<WebBlobInfo>&) override {}
   virtual void onSuccess(WebIDBCursor* cursor,
                          const WebIDBKey& key,
                          const WebIDBKey& primaryKey,
                          const WebData& value,
-                         const WebVector<WebBlobInfo>&) OVERRIDE {
+                         const WebVector<WebBlobInfo>&) override {
     cursor_->reset(cursor);
   }
 
@@ -252,7 +255,7 @@ class MockCursor : public WebIDBCursorImpl {
         reset_count_(0) {}
 
   // This method is virtual so it can be overridden in unit tests.
-  virtual void ResetPrefetchCache() OVERRIDE { ++reset_count_; }
+  void ResetPrefetchCache() override { ++reset_count_; }
 
   int reset_count() const { return reset_count_; }
 

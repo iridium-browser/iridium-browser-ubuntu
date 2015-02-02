@@ -33,7 +33,6 @@
 #include "platform/audio/HRTFDatabaseLoader.h"
 
 #include "platform/Task.h"
-#include "platform/TaskSynchronizer.h"
 #include "public/platform/Platform.h"
 #include "wtf/MainThread.h"
 
@@ -72,23 +71,20 @@ HRTFDatabaseLoader::HRTFDatabaseLoader(float sampleRate)
 HRTFDatabaseLoader::~HRTFDatabaseLoader()
 {
     ASSERT(isMainThread());
-    ASSERT(!m_thread);
+
+    MutexLocker locker(m_lock);
+    waitForLoaderThreadCompletion();
+    m_hrtfDatabase.clear();
 }
 
-void HRTFDatabaseLoader::loadTask()
+void HRTFDatabaseLoader::load()
 {
     ASSERT(!isMainThread());
-    m_thread->attachGC();
-
-    {
-        MutexLocker locker(m_lock);
-        if (!m_hrtfDatabase) {
-            // Load the default HRTF database.
-            m_hrtfDatabase = HRTFDatabase::create(m_databaseSampleRate);
-        }
+    MutexLocker locker(m_lock);
+    if (!m_hrtfDatabase) {
+        // Load the default HRTF database.
+        m_hrtfDatabase = HRTFDatabase::create(m_databaseSampleRate);
     }
-
-    m_thread->detachGC();
 }
 
 void HRTFDatabaseLoader::loadAsynchronously()
@@ -96,10 +92,10 @@ void HRTFDatabaseLoader::loadAsynchronously()
     ASSERT(isMainThread());
 
     MutexLocker locker(m_lock);
-    if (!m_hrtfDatabase && !m_thread) {
+    if (!m_hrtfDatabase && !m_databaseLoaderThread) {
         // Start the asynchronous database loading process.
-        m_thread = WebThreadSupportingGC::create("HRTF database loader");
-        m_thread->postTask(new Task(WTF::bind(&HRTFDatabaseLoader::loadTask, this)));
+        m_databaseLoaderThread = adoptPtr(Platform::current()->createThread("HRTF database loader"));
+        m_databaseLoaderThread->postTask(new Task(WTF::bind(&HRTFDatabaseLoader::load, this)));
     }
 }
 
@@ -109,22 +105,9 @@ bool HRTFDatabaseLoader::isLoaded()
     return m_hrtfDatabase;
 }
 
-// This cleanup task is needed just to make sure that the loader thread finishes
-// the load task and thus the loader thread doesn't touch m_thread any more.
-void HRTFDatabaseLoader::cleanupTask(TaskSynchronizer* sync)
-{
-    sync->taskCompleted();
-}
-
 void HRTFDatabaseLoader::waitForLoaderThreadCompletion()
 {
-    if (!m_thread)
-        return;
-
-    TaskSynchronizer sync;
-    m_thread->postTask(new Task(WTF::bind(&HRTFDatabaseLoader::cleanupTask, this, &sync)));
-    sync.waitForTaskCompletion();
-    m_thread.clear();
+    m_databaseLoaderThread.clear();
 }
 
 } // namespace blink

@@ -29,11 +29,10 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream : public QuicCryptoStream {
                          QuicClientSessionBase* session,
                          ProofVerifyContext* verify_context,
                          QuicCryptoClientConfig* crypto_config);
-  virtual ~QuicCryptoClientStream();
+  ~QuicCryptoClientStream() override;
 
   // CryptoFramerVisitorInterface implementation
-  virtual void OnHandshakeMessage(
-      const CryptoHandshakeMessage& message) OVERRIDE;
+  void OnHandshakeMessage(const CryptoHandshakeMessage& message) override;
 
   // Performs a crypto handshake with the server. Returns true if the crypto
   // handshake is started successfully.
@@ -59,10 +58,10 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream : public QuicCryptoStream {
   class ChannelIDSourceCallbackImpl : public ChannelIDSourceCallback {
    public:
     explicit ChannelIDSourceCallbackImpl(QuicCryptoClientStream* stream);
-    virtual ~ChannelIDSourceCallbackImpl();
+    ~ChannelIDSourceCallbackImpl() override;
 
     // ChannelIDSourceCallback interface.
-    virtual void Run(scoped_ptr<ChannelIDKey>* channel_id_key) OVERRIDE;
+    void Run(scoped_ptr<ChannelIDKey>* channel_id_key) override;
 
     // Cancel causes any future callbacks to be ignored. It must be called on
     // the same thread as the callback will be made on.
@@ -78,12 +77,12 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream : public QuicCryptoStream {
   class ProofVerifierCallbackImpl : public ProofVerifierCallback {
    public:
     explicit ProofVerifierCallbackImpl(QuicCryptoClientStream* stream);
-    virtual ~ProofVerifierCallbackImpl();
+    ~ProofVerifierCallbackImpl() override;
 
     // ProofVerifierCallback interface.
-    virtual void Run(bool ok,
-                     const string& error_details,
-                     scoped_ptr<ProofVerifyDetails>* details) OVERRIDE;
+    void Run(bool ok,
+             const string& error_details,
+             scoped_ptr<ProofVerifyDetails>* details) override;
 
     // Cancel causes any future callbacks to be ignored. It must be called on
     // the same thread as the callback will be made on.
@@ -107,7 +106,7 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream : public QuicCryptoStream {
     STATE_GET_CHANNEL_ID_COMPLETE,
     STATE_RECV_SHLO,
     STATE_INITIALIZE_SCUP,
-    STATE_VERIFY_PROOF_DONE,
+    STATE_NONE,
   };
 
   // Handles new server config and optional source-address token provided by the
@@ -116,22 +115,44 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream : public QuicCryptoStream {
       const CryptoHandshakeMessage& server_config_update);
 
   // DoHandshakeLoop performs a step of the handshake state machine. Note that
-  // |in| may be NULL if the call did not result from a received message.
+  // |in| may be nullptr if the call did not result from a received message.
   void DoHandshakeLoop(const CryptoHandshakeMessage* in);
+
+  // Start the handshake process.
+  void DoInitialize(QuicCryptoClientConfig::CachedState* cached);
+
+  // Send either InchoateClientHello or ClientHello message to the server.
+  void DoSendCHLO(const CryptoHandshakeMessage* in,
+                  QuicCryptoClientConfig::CachedState* cached);
+
+  // Process REJ message from the server.
+  void DoReceiveREJ(const CryptoHandshakeMessage* in,
+                    QuicCryptoClientConfig::CachedState* cached);
+
+  // Start the proof verification process. Returns the QuicAsyncStatus returned
+  // by the ProofVerifier's VerifyProof.
+  QuicAsyncStatus DoVerifyProof(QuicCryptoClientConfig::CachedState* cached);
+
+  // If proof is valid then it sets the proof as valid (which persists the
+  // server config). If not, it closes the connection.
+  void DoVerifyProofComplete(QuicCryptoClientConfig::CachedState* cached);
+
+  // Start the look up of Channel ID process. Returns either QUIC_SUCCESS if
+  // RequiresChannelID returns false or QuicAsyncStatus returned by
+  // GetChannelIDKey.
+  QuicAsyncStatus DoGetChannelID(QuicCryptoClientConfig::CachedState* cached);
+
+  // If there is no channel ID, then close the connection otherwise transtion to
+  // STATE_SEND_CHLO state.
+  void DoGetChannelIDComplete();
+
+  // Process SHLO message from the server.
+  void DoReceiveSHLO(const CryptoHandshakeMessage* in,
+                     QuicCryptoClientConfig::CachedState* cached);
 
   // Start the proof verification if |server_id_| is https and |cached| has
   // signature.
   void DoInitializeServerConfigUpdate(
-      QuicCryptoClientConfig::CachedState* cached);
-
-  // Starts the proof verification. Returns the QuicAsyncStatus returned by the
-  // ProofVerifier's VerifyProof.
-  QuicAsyncStatus DoVerifyProof(QuicCryptoClientConfig::CachedState* cached);
-
-  // If proof is valid then it sets the proof as valid (which persists the
-  // server config) and returns QUIC_NO_ERROR. If not, it closes the connection
-  // and returns QUIC_PROOF_INVALID.
-  QuicErrorCode DoVerifyProofComplete(
       QuicCryptoClientConfig::CachedState* cached);
 
   // Called to set the proof of |cached| valid.  Also invokes the session's

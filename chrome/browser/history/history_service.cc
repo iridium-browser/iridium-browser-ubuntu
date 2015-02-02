@@ -25,7 +25,6 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
@@ -50,6 +49,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/history/core/browser/history_client.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/in_memory_database.h"
 #include "components/history/core/browser/keyword_search_term.h"
@@ -101,13 +101,9 @@ class URLIteratorFromURLRows
         end_(url_rows.end()) {
   }
 
-  virtual const GURL& NextURL() OVERRIDE {
-    return (itr_++)->url();
-  }
+  const GURL& NextURL() override { return (itr_++)->url(); }
 
-  virtual bool HasNextURL() const OVERRIDE {
-    return itr_ != end_;
-  }
+  bool HasNextURL() const override { return itr_ != end_; }
 
  private:
   history::URLRows::const_iterator itr_;
@@ -141,7 +137,7 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
         profile_(profile) {
   }
 
-  virtual void NotifyProfileError(sql::InitStatus init_status) OVERRIDE {
+  void NotifyProfileError(sql::InitStatus init_status) override {
     // Send to the history service on the main thread.
     service_task_runner_->PostTask(
         FROM_HERE,
@@ -149,8 +145,8 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
                    init_status));
   }
 
-  virtual void SetInMemoryBackend(
-      scoped_ptr<history::InMemoryHistoryBackend> backend) OVERRIDE {
+  void SetInMemoryBackend(
+      scoped_ptr<history::InMemoryHistoryBackend> backend) override {
     // Send the backend to the history service on the main thread.
     service_task_runner_->PostTask(
         FROM_HERE,
@@ -158,7 +154,13 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
                    base::Passed(&backend)));
   }
 
-  virtual void NotifyFaviconChanged(const std::set<GURL>& urls) OVERRIDE {
+  void NotifyAddVisit(const history::BriefVisitInfo& info) override {
+    service_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&HistoryService::NotifyAddVisit, history_service_, info));
+  }
+
+  void NotifyFaviconChanged(const std::set<GURL>& urls) override {
     // Send the notification to the history service on the main thread.
     service_task_runner_->PostTask(
         FROM_HERE,
@@ -166,9 +168,22 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
             &HistoryService::NotifyFaviconChanged, history_service_, urls));
   }
 
-  virtual void BroadcastNotifications(
+  void NotifyURLVisited(ui::PageTransition transition,
+                        const history::URLRow& row,
+                        const history::RedirectList& redirects,
+                        base::Time visit_time) override {
+    service_task_runner_->PostTask(FROM_HERE,
+                                   base::Bind(&HistoryService::NotifyURLVisited,
+                                              history_service_,
+                                              transition,
+                                              row,
+                                              redirects,
+                                              visit_time));
+  }
+
+  void BroadcastNotifications(
       int type,
-      scoped_ptr<history::HistoryDetails> details) OVERRIDE {
+      scoped_ptr<history::HistoryDetails> details) override {
     // Send the notification on the history thread.
     if (content::NotificationService::current()) {
       content::Details<history::HistoryDetails> det(details.get());
@@ -182,18 +197,10 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
                    history_service_, type, base::Passed(&details)));
   }
 
-  virtual void DBLoaded() OVERRIDE {
+  void DBLoaded() override {
     service_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&HistoryService::OnDBLoaded, history_service_));
-  }
-
-  virtual void NotifyVisitDBObserversOnAddVisit(
-      const history::BriefVisitInfo& info) OVERRIDE {
-    service_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&HistoryService::NotifyVisitDBObserversOnAddVisit,
-                   history_service_, info));
   }
 
  private:
@@ -332,6 +339,16 @@ void HistoryService::URLsNoLongerBookmarked(const std::set<GURL>& urls) {
   DCHECK(thread_checker_.CalledOnValidThread());
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::URLsNoLongerBookmarked,
                     urls);
+}
+
+void HistoryService::AddObserver(history::HistoryServiceObserver* observer) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  observers_.AddObserver(observer);
+}
+
+void HistoryService::RemoveObserver(history::HistoryServiceObserver* observer) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  observers_.RemoveObserver(observer);
 }
 
 void HistoryService::ScheduleDBTask(scoped_ptr<history::HistoryDBTask> task,
@@ -973,7 +990,7 @@ bool HistoryService::Init(const base::FilePath& history_dir, bool no_db) {
     std::string languages =
         profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
     in_memory_url_index_.reset(new history::InMemoryURLIndex(
-        profile_, history_dir_, languages, history_client_));
+        profile_, this, history_dir_, languages, history_client_));
     in_memory_url_index_->Init();
   }
 
@@ -1096,7 +1113,7 @@ void HistoryService::SetInMemoryBackend(
   in_memory_backend_.reset(mem_backend.release());
 
   // The database requires additional initialization once we own it.
-  in_memory_backend_->AttachToHistoryService(profile_);
+  in_memory_backend_->AttachToHistoryService(profile_, this);
 }
 
 void HistoryService::NotifyProfileError(sql::InitStatus init_status) {
@@ -1221,23 +1238,20 @@ bool HistoryService::GetRowForURL(const GURL& url, history::URLRow* url_row) {
   return db && (db->GetRowForURL(url, url_row) != 0);
 }
 
-void HistoryService::AddVisitDatabaseObserver(
-    history::VisitDatabaseObserver* observer) {
+void HistoryService::NotifyAddVisit(const history::BriefVisitInfo& info) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  visit_database_observers_.AddObserver(observer);
+  FOR_EACH_OBSERVER(
+      history::HistoryServiceObserver, observers_, OnAddVisit(this, info));
 }
 
-void HistoryService::RemoveVisitDatabaseObserver(
-    history::VisitDatabaseObserver* observer) {
+void HistoryService::NotifyURLVisited(ui::PageTransition transition,
+                                      const history::URLRow& row,
+                                      const history::RedirectList& redirects,
+                                      base::Time visit_time) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  visit_database_observers_.RemoveObserver(observer);
-}
-
-void HistoryService::NotifyVisitDBObserversOnAddVisit(
-    const history::BriefVisitInfo& info) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  FOR_EACH_OBSERVER(history::VisitDatabaseObserver, visit_database_observers_,
-                    OnAddVisit(info));
+  FOR_EACH_OBSERVER(history::HistoryServiceObserver,
+                    observers_,
+                    OnURLVisited(this, transition, row, redirects, visit_time));
 }
 
 scoped_ptr<base::CallbackList<void(const std::set<GURL>&)>::Subscription>

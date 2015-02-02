@@ -43,7 +43,10 @@ WebInspector.TextPrompt = function(completions, stopCharacters)
     this._proxyElementDisplay = "inline-block";
     this._loadCompletions = completions;
     this._completionStopCharacters = stopCharacters || " =:[({;,!+-*/&|^<>.";
+    this._autocompletionTimeout = WebInspector.TextPrompt.DefaultAutocompletionTimeout;
 }
+
+WebInspector.TextPrompt.DefaultAutocompletionTimeout = 250;
 
 WebInspector.TextPrompt.Events = {
     ItemApplied: "text-prompt-item-applied",
@@ -51,6 +54,14 @@ WebInspector.TextPrompt.Events = {
 };
 
 WebInspector.TextPrompt.prototype = {
+    /**
+     * @param {number} timeout
+     */
+    setAutocompletionTimeout: function(timeout)
+    {
+        this._autocompletionTimeout = timeout;
+    },
+
     get proxyElement()
     {
         return this._proxyElement;
@@ -123,6 +134,7 @@ WebInspector.TextPrompt.prototype = {
         this._element.addEventListener("mousewheel", this._boundOnMouseWheel, false);
         this._element.addEventListener("selectstart", this._boundSelectStart, false);
         this._element.addEventListener("blur", this._boundRemoveSuggestionAids, false);
+        this._element.ownerDocument.defaultView.addEventListener("resize", this._boundRemoveSuggestionAids, false);
 
         if (this._suggestBoxEnabled)
             this._suggestBox = new WebInspector.SuggestBox(this);
@@ -173,6 +185,7 @@ WebInspector.TextPrompt.prototype = {
         this._element.removeEventListener("input", this._boundOnInput, false);
         this._element.removeEventListener("selectstart", this._boundSelectStart, false);
         this._element.removeEventListener("blur", this._boundRemoveSuggestionAids, false);
+        this._element.ownerDocument.defaultView.removeEventListener("resize", this._boundRemoveSuggestionAids, false);
         if (this._isEditing)
             this._stopEditing();
         if (this._suggestBox)
@@ -354,7 +367,7 @@ WebInspector.TextPrompt.prototype = {
     {
         var immediately = this.isSuggestBoxVisible() || force;
         if (!this._completeTimeout)
-            this._completeTimeout = setTimeout(this.complete.bind(this, force), immediately ? 0 : 250);
+            this._completeTimeout = setTimeout(this.complete.bind(this, force), immediately ? 0 : this._autocompletionTimeout);
     },
 
     /**
@@ -403,7 +416,7 @@ WebInspector.TextPrompt.prototype = {
     _boxForAnchorAtStart: function(selection, textRange)
     {
         var rangeCopy = selection.getRangeAt(0).cloneRange();
-        var anchorElement = document.createElement("span");
+        var anchorElement = createElement("span");
         anchorElement.textContent = "\u200B";
         textRange.insertNode(anchorElement);
         var box = anchorElement.boxInWindow(window);
@@ -434,6 +447,15 @@ WebInspector.TextPrompt.prototype = {
     },
 
     /**
+     * @return {?Range}
+     * @suppressGlobalPropertiesCheck
+     */
+    _createRange: function()
+    {
+        return document.createRange();
+    },
+
+    /**
      * @param {!Selection} selection
      * @param {!Range} originalWordPrefixRange
      * @param {boolean} reverse
@@ -450,7 +472,7 @@ WebInspector.TextPrompt.prototype = {
 
         var selectionRange = selection.getRangeAt(0);
 
-        var fullWordRange = document.createRange();
+        var fullWordRange = this._createRange();
         fullWordRange.setStart(originalWordPrefixRange.startContainer, originalWordPrefixRange.startOffset);
         fullWordRange.setEnd(selectionRange.endContainer, selectionRange.endOffset);
 
@@ -477,12 +499,12 @@ WebInspector.TextPrompt.prototype = {
             var suffixText = completionText.substring(wordPrefixLength);
             this._userEnteredRange.deleteContents();
             this._element.normalize();
-            var finalSelectionRange = document.createRange();
+            var finalSelectionRange = this._createRange();
 
-            var prefixTextNode = document.createTextNode(prefixText);
+            var prefixTextNode = createTextNode(prefixText);
             fullWordRange.insertNode(prefixTextNode);
 
-            this.autoCompleteElement = document.createElementWithClass("span", "auto-complete-text");
+            this.autoCompleteElement = createElementWithClass("span", "auto-complete-text");
             this.autoCompleteElement.textContent = suffixText;
 
             prefixTextNode.parentNode.insertBefore(this.autoCompleteElement, prefixTextNode.nextSibling);
@@ -533,8 +555,8 @@ WebInspector.TextPrompt.prototype = {
 
         this._userEnteredRange.deleteContents();
         this._element.normalize();
-        var finalSelectionRange = document.createRange();
-        var completionTextNode = document.createTextNode(completionText);
+        var finalSelectionRange = this._createRange();
+        var completionTextNode = createTextNode(completionText);
         this._userEnteredRange.insertNode(completionTextNode);
         if (this.autoCompleteElement) {
             this.autoCompleteElement.remove();
@@ -573,11 +595,11 @@ WebInspector.TextPrompt.prototype = {
             return false;
 
         var text = this.autoCompleteElement.textContent;
-        var textNode = document.createTextNode(text);
+        var textNode = createTextNode(text);
         this.autoCompleteElement.parentNode.replaceChild(textNode, this.autoCompleteElement);
         delete this.autoCompleteElement;
 
-        var finalSelectionRange = document.createRange();
+        var finalSelectionRange = this._createRange();
         finalSelectionRange.setStart(textNode, text.length);
         finalSelectionRange.setEnd(textNode, text.length);
 
@@ -700,7 +722,7 @@ WebInspector.TextPrompt.prototype = {
     moveCaretToEndOfPrompt: function()
     {
         var selection = window.getSelection();
-        var selectionRange = document.createRange();
+        var selectionRange = this._createRange();
 
         var offset = this._element.childNodes.length;
         selectionRange.setStart(this._element, offset);
@@ -884,7 +906,7 @@ WebInspector.TextPromptWithHistory.prototype = {
                     this.moveCaretToEndOfPrompt();
                 else {
                     var selection = window.getSelection();
-                    var selectionRange = document.createRange();
+                    var selectionRange = this._createRange();
 
                     selectionRange.setStart(this._element.firstChild, firstNewlineIndex);
                     selectionRange.setEnd(this._element.firstChild, firstNewlineIndex);

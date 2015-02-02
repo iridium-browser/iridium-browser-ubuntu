@@ -6,16 +6,19 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/user_metrics.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/browser/ui/app_list/recommended_apps.h"
+#include "chrome/browser/ui/app_list/speech_recognizer.h"
 #include "chrome/browser/ui/app_list/start_page_observer.h"
 #include "chrome/browser/ui/app_list/start_page_service_factory.h"
 #include "chrome/common/chrome_switches.h"
@@ -56,13 +59,13 @@ class StartPageService::ProfileDestroyObserver
                    chrome::NOTIFICATION_PROFILE_DESTROYED,
                    content::Source<Profile>(service_->profile()));
   }
-  virtual ~ProfileDestroyObserver() {}
+  ~ProfileDestroyObserver() override {}
 
  private:
   // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     DCHECK_EQ(chrome::NOTIFICATION_PROFILE_DESTROYED, type);
     DCHECK_EQ(service_->profile(), content::Source<Profile>(source).ptr());
     service_->Shutdown();
@@ -78,20 +81,19 @@ class StartPageService::StartPageWebContentsDelegate
     : public content::WebContentsDelegate {
  public:
   StartPageWebContentsDelegate() {}
-  virtual ~StartPageWebContentsDelegate() {}
+  ~StartPageWebContentsDelegate() override {}
 
-  virtual void RequestMediaAccessPermission(
+  void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) OVERRIDE {
+      const content::MediaResponseCallback& callback) override {
     if (MediaStreamInfoBarDelegate::Create(web_contents, request, callback))
       NOTREACHED() << "Media stream not allowed for WebUI";
   }
 
-  virtual bool CheckMediaAccessPermission(
-      content::WebContents* web_contents,
-      const GURL& security_origin,
-      content::MediaStreamType type) OVERRIDE {
+  bool CheckMediaAccessPermission(content::WebContents* web_contents,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type) override {
     return MediaCaptureDevicesDispatcher::GetInstance()
         ->CheckMediaAccessPermission(web_contents, security_origin, type);
   }
@@ -111,7 +113,9 @@ StartPageService::StartPageService(Profile* profile)
       recommended_apps_(new RecommendedApps(profile)),
       state_(app_list::SPEECH_RECOGNITION_OFF),
       speech_button_toggled_manually_(false),
-      speech_result_obtained_(false) {
+      speech_result_obtained_(false),
+      webui_finished_loading_(false),
+      weak_factory_(this) {
   // If experimental hotwording is enabled, then we're always "ready".
   // Transitioning into the "hotword recognizing" state is handled by the
   // hotword extension.
@@ -135,34 +139,74 @@ void StartPageService::RemoveObserver(StartPageObserver* observer) {
 void StartPageService::AppListShown() {
   if (!contents_) {
     LoadContents();
-  } else {
-    // If experimental hotwording is enabled, don't enable hotwording in the
-    // start page, since the hotword extension is taking care of this.
-    bool hotword_enabled = HotwordEnabled() &&
-        !HotwordService::IsExperimentalHotwordingEnabled();
+  } else if (contents_->GetWebUI() &&
+             !HotwordService::IsExperimentalHotwordingEnabled()) {
+    // If experimental hotwording is enabled, don't call onAppListShown.
+    // onAppListShown() initializes the web speech API, which is not used with
+    // experimental hotwording.
     contents_->GetWebUI()->CallJavascriptFunction(
         "appList.startPage.onAppListShown",
-        base::FundamentalValue(hotword_enabled));
+        base::FundamentalValue(HotwordEnabled()));
   }
 }
 
 void StartPageService::AppListHidden() {
-  contents_->GetWebUI()->CallJavascriptFunction(
-      "appList.startPage.onAppListHidden");
+  if (contents_->GetWebUI()) {
+    contents_->GetWebUI()->CallJavascriptFunction(
+        "appList.startPage.onAppListHidden");
+  }
   if (!app_list::switches::IsExperimentalAppListEnabled())
     UnloadContents();
+
+  if (HotwordService::IsExperimentalHotwordingEnabled() &&
+      speech_recognizer_) {
+    speech_recognizer_->Stop();
+  }
 }
 
 void StartPageService::ToggleSpeechRecognition() {
+  DCHECK(contents_);
   speech_button_toggled_manually_ = true;
+  if (!contents_->GetWebUI())
+    return;
+
+  if (!webui_finished_loading_) {
+    pending_webui_callbacks_.push_back(
+        base::Bind(&StartPageService::ToggleSpeechRecognition,
+                   base::Unretained(this)));
+    return;
+  }
+
+  if (HotwordService::IsExperimentalHotwordingEnabled()) {
+    if (!speech_recognizer_) {
+      std::string profile_locale;
+#if defined(OS_CHROMEOS)
+      profile_locale = profile_->GetPrefs()->GetString(
+          prefs::kApplicationLocale);
+#endif
+      if (profile_locale.empty())
+        profile_locale = g_browser_process->GetApplicationLocale();
+
+      speech_recognizer_.reset(
+          new SpeechRecognizer(weak_factory_.GetWeakPtr(),
+                               profile_->GetRequestContext(),
+                               profile_locale));
+    }
+
+    speech_recognizer_->Start();
+    return;
+  }
+
   contents_->GetWebUI()->CallJavascriptFunction(
       "appList.startPage.toggleSpeechRecognition");
 }
 
 bool StartPageService::HotwordEnabled() {
   if (HotwordService::IsExperimentalHotwordingEnabled()) {
+    auto prefs = profile_->GetPrefs();
     return HotwordServiceFactory::IsServiceAvailable(profile_) &&
-        profile_->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled);
+        (prefs->GetBoolean(prefs::kHotwordSearchEnabled) ||
+         prefs->GetBoolean(prefs::kHotwordAlwaysOnSearchEnabled));
   }
 #if defined(OS_CHROMEOS)
   return HotwordServiceFactory::IsServiceAvailable(profile_) &&
@@ -197,7 +241,7 @@ void StartPageService::OnSpeechResult(
                     OnSpeechResult(query, is_final));
 }
 
-void StartPageService::OnSpeechSoundLevelChanged(int16 level) {
+void StartPageService::OnSpeechSoundLevelChanged(int16_t level) {
   FOR_EACH_OBSERVER(StartPageObserver,
                     observers_,
                     OnSpeechSoundLevelChanged(level));
@@ -205,6 +249,13 @@ void StartPageService::OnSpeechSoundLevelChanged(int16 level) {
 
 void StartPageService::OnSpeechRecognitionStateChanged(
     SpeechRecognitionState new_state) {
+
+  if (HotwordService::IsExperimentalHotwordingEnabled() &&
+      new_state == SPEECH_RECOGNITION_READY &&
+      speech_recognizer_) {
+    speech_recognizer_->Stop();
+  }
+
   if (!InSpeechRecognition(state_) && InSpeechRecognition(new_state)) {
     if (!speech_button_toggled_manually_ &&
         state_ == SPEECH_RECOGNITION_HOTWORD_LISTENING) {
@@ -224,8 +275,24 @@ void StartPageService::OnSpeechRecognitionStateChanged(
                     OnSpeechRecognitionStateChanged(new_state));
 }
 
+content::WebContents* StartPageService::GetSpeechContents() {
+  return GetSpeechRecognitionContents();
+}
+
 void StartPageService::Shutdown() {
   UnloadContents();
+}
+
+void StartPageService::WebUILoaded() {
+  // There's a race condition between the WebUI loading, and calling its JS
+  // functions. Specifically, calling LoadContents() doesn't mean that the page
+  // has loaded, but several code paths make this assumption. This function
+  // allows us to defer calling JS functions until after the page has finished
+  // loading.
+  webui_finished_loading_ = true;
+  for (const auto& cb : pending_webui_callbacks_)
+    cb.Run();
+  pending_webui_callbacks_.clear();
 }
 
 void StartPageService::LoadContents() {
@@ -250,6 +317,7 @@ void StartPageService::LoadContents() {
 
 void StartPageService::UnloadContents() {
   contents_.reset();
+  webui_finished_loading_ = false;
 }
 
 }  // namespace app_list

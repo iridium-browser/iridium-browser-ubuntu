@@ -71,9 +71,9 @@ class PhishingDOMFeatureExtractorTest : public InProcessBrowserTest {
  protected:
   PhishingDOMFeatureExtractorTest() : weak_factory_(this) {}
 
-  virtual ~PhishingDOMFeatureExtractorTest() {}
+  ~PhishingDOMFeatureExtractorTest() override {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
 #if defined(OS_WIN)
     // Don't want to try to create a GPU process.
@@ -81,7 +81,7 @@ class PhishingDOMFeatureExtractorTest : public InProcessBrowserTest {
 #endif
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     extractor_.reset(new PhishingDOMFeatureExtractor(
         content::RenderView::FromRoutingID(kRenderViewRoutingId), &clock_));
 
@@ -157,7 +157,7 @@ class PhishingDOMFeatureExtractorTest : public InProcessBrowserTest {
     http_response->set_code(net::HTTP_OK);
     http_response->set_content_type("text/html");
     http_response->set_content(it->second);
-    return http_response.PassAs<net::test_server::HttpResponse>();
+    return http_response.Pass();
   }
 
   GURL GetURL(const std::string& host, const std::string& path) {

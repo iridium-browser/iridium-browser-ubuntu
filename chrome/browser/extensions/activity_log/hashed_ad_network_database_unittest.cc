@@ -17,7 +17,7 @@ namespace extensions {
 namespace {
 
 // A list of fake ad networks.
-const char* kAdNetworkHosts[] = {
+const char* const kAdNetworkHosts[] = {
   "alpha.adnetwork",
   "bravo.adnetwork",
   "charlie.delta.adnetwork"
@@ -30,7 +30,7 @@ const size_t kNumAdNetworkHosts = arraysize(kAdNetworkHosts);
 
 class HashedAdNetworkDatabaseUnitTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   AdNetworkDatabase* database() { return database_.get(); }
 

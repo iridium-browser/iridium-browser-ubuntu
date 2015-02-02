@@ -48,8 +48,8 @@ class EmptyMenuMenuItem : public MenuItemView {
     SetEnabled(false);
   }
 
-  virtual bool GetTooltipText(const gfx::Point& p,
-                              base::string16* tooltip) const OVERRIDE {
+  bool GetTooltipText(const gfx::Point& p,
+                      base::string16* tooltip) const override {
     // Empty menu items shouldn't have a tooltip.
     return false;
   }
@@ -623,16 +623,11 @@ void MenuItemView::UpdateMenuPartSizes() {
   int padding = 0;
   if (config.always_use_icon_to_label_padding) {
     padding = config.icon_to_label_padding;
-  } else if (config.render_gutter) {
-    padding = config.item_left_margin;
   } else {
     padding = (has_icons_ || HasChecksOrRadioButtons()) ?
         config.icon_to_label_padding : 0;
   }
   label_start_ += padding;
-
-  if (config.render_gutter)
-    label_start_ += config.gutter_width + config.gutter_to_label;
 
   EmptyMenuMenuItem menu_item(this);
   menu_item.set_controller(GetMenuController());

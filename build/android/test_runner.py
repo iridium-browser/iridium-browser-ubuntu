@@ -14,13 +14,17 @@ import shutil
 import signal
 import sys
 import threading
+import unittest
 
 from pylib import android_commands
 from pylib import constants
 from pylib import forwarder
 from pylib import ports
 from pylib.base import base_test_result
+from pylib.base import environment_factory
 from pylib.base import test_dispatcher
+from pylib.base import test_instance_factory
+from pylib.base import test_run_factory
 from pylib.gtest import gtest_config
 from pylib.gtest import setup as gtest_setup
 from pylib.gtest import test_options as gtest_test_options
@@ -57,9 +61,9 @@ def AddCommonOptions(option_parser):
                    const='Release', dest='build_type',
                    help=('If set, run test suites under out/Release.'
                          ' Default is env var BUILDTYPE or Debug.'))
-  group.add_option('-c', dest='cleanup_test_files',
-                   help='Cleanup test files on the device after run',
-                   action='store_true')
+  group.add_option('--build-directory', dest='build_directory',
+                   help=('Path to the directory in which build files are'
+                         ' located (should not include build type)'))
   group.add_option('--num_retries', dest='num_retries', type='int',
                    default=2,
                    help=('Number of retries for a test before '
@@ -70,29 +74,45 @@ def AddCommonOptions(option_parser):
                    default=0,
                    action='count',
                    help='Verbose level (multiple times for more)')
-  group.add_option('--tool',
-                   dest='tool',
-                   help=('Run the test under a tool '
-                         '(use --tool help to list them)'))
   group.add_option('--flakiness-dashboard-server',
                    dest='flakiness_dashboard_server',
                    help=('Address of the server that is hosting the '
                          'Chrome for Android flakiness dashboard.'))
-  group.add_option('--skip-deps-push', dest='push_deps',
-                   action='store_false', default=True,
-                   help=('Do not push dependencies to the device. '
-                         'Use this at own risk for speeding up test '
-                         'execution on local machine.'))
+  group.add_option('--enable-platform-mode', action='store_true',
+                   help=('Run the test scripts in platform mode, which '
+                         'conceptually separates the test runner from the '
+                         '"device" (local or remote, real or emulated) on '
+                         'which the tests are running. [experimental]'))
+  group.add_option('-e', '--environment', default='local',
+                   help=('Test environment to run in. Must be one of: %s' %
+                         ', '.join(constants.VALID_ENVIRONMENTS)))
+  option_parser.add_option_group(group)
+
+
+def ProcessCommonOptions(options, error_func):
+  """Processes and handles all common options."""
+  run_tests_helper.SetLogLevel(options.verbose_count)
+  constants.SetBuildType(options.build_type)
+  if options.build_directory:
+    constants.SetBuildDirectory(options.build_directory)
+  if options.environment not in constants.VALID_ENVIRONMENTS:
+    error_func('--environment must be one of: %s' %
+               ', '.join(constants.VALID_ENVIRONMENTS))
+
+
+def AddDeviceOptions(option_parser):
+  group = optparse.OptionGroup(option_parser, 'Device Options')
+  group.add_option('-c', dest='cleanup_test_files',
+                   help='Cleanup test files on the device after run',
+                   action='store_true')
+  group.add_option('--tool',
+                   dest='tool',
+                   help=('Run the test under a tool '
+                         '(use --tool help to list them)'))
   group.add_option('-d', '--device', dest='test_device',
                    help=('Target device for the test suite '
                          'to run on.'))
   option_parser.add_option_group(group)
-
-
-def ProcessCommonOptions(options):
-  """Processes and handles all common options."""
-  run_tests_helper.SetLogLevel(options.verbose_count)
-  constants.SetBuildType(options.build_type)
 
 
 def AddGTestOptions(option_parser):
@@ -128,6 +148,7 @@ def AddGTestOptions(option_parser):
   # TODO(gkanwar): Move these to Common Options once we have the plumbing
   # in our other test types to handle these commands
   AddCommonOptions(option_parser)
+  AddDeviceOptions(option_parser)
 
 
 def AddLinkerTestOptions(option_parser):
@@ -138,6 +159,7 @@ def AddLinkerTestOptions(option_parser):
   option_parser.add_option('-f', '--gtest-filter', dest='test_filter',
                            help='googletest-style filter string.')
   AddCommonOptions(option_parser)
+  AddDeviceOptions(option_parser)
 
 
 def ProcessGTestOptions(options):
@@ -221,6 +243,7 @@ def AddInstrumentationTestOptions(option_parser):
 
   AddJavaTestOptions(option_parser)
   AddCommonOptions(option_parser)
+  AddDeviceOptions(option_parser)
 
   option_parser.add_option('-j', '--java-only', action='store_true',
                            default=False, help='Run only the Java tests.')
@@ -291,7 +314,6 @@ def ProcessInstrumentationOptions(options, error_func):
   return instrumentation_test_options.InstrumentationOptions(
       options.tool,
       options.cleanup_test_files,
-      options.push_deps,
       options.annotations,
       options.exclude_annotations,
       options.test_filter,
@@ -329,6 +351,7 @@ def AddUIAutomatorTestOptions(option_parser):
 
   AddJavaTestOptions(option_parser)
   AddCommonOptions(option_parser)
+  AddDeviceOptions(option_parser)
 
 
 def ProcessUIAutomatorOptions(options, error_func):
@@ -369,7 +392,6 @@ def ProcessUIAutomatorOptions(options, error_func):
   return uiautomator_test_options.UIAutomatorOptions(
       options.tool,
       options.cleanup_test_files,
-      options.push_deps,
       options.annotations,
       options.exclude_annotations,
       options.test_filter,
@@ -442,6 +464,7 @@ def AddMonkeyTestOptions(option_parser):
             '[default: "%default"].'))
 
   AddCommonOptions(option_parser)
+  AddDeviceOptions(option_parser)
 
 
 def ProcessMonkeyTestOptions(options, error_func):
@@ -515,6 +538,7 @@ def AddPerfTestOptions(option_parser):
       action='store_true',
       help='Just print the steps without executing.')
   AddCommonOptions(option_parser)
+  AddDeviceOptions(option_parser)
 
 
 def ProcessPerfTestOptions(options, args, error_func):
@@ -542,6 +566,24 @@ def ProcessPerfTestOptions(options, args, error_func):
       options.dry_run, single_step)
 
 
+def AddPythonTestOptions(option_parser):
+  option_parser.add_option('-s', '--suite', dest='suite_name',
+                           help=('Name of the test suite to run'
+                                 '(use -s help to list them).'))
+  AddCommonOptions(option_parser)
+
+
+def ProcessPythonTestOptions(options, error_func):
+  if options.suite_name not in constants.PYTHON_UNIT_TEST_SUITES:
+    available = ('Available test suites: [%s]' %
+                 ', '.join(constants.PYTHON_UNIT_TEST_SUITES.iterkeys()))
+    if options.suite_name == 'help':
+      print available
+    else:
+      error_func('"%s" is not a valid suite. %s' %
+                 (options.suite_name, available))
+
+
 def _RunGTests(options, devices):
   """Subcommand of RunTestsCommands which runs gtests."""
   ProcessGTestOptions(options)
@@ -553,7 +595,6 @@ def _RunGTests(options, devices):
     gtest_options = gtest_test_options.GTestOptions(
         options.tool,
         options.cleanup_test_files,
-        options.push_deps,
         options.test_filter,
         options.run_disabled,
         options.test_arguments,
@@ -732,6 +773,25 @@ def _RunPerfTests(options, args, error_func):
   return 0
 
 
+def _RunPythonTests(options, error_func):
+  """Subcommand of RunTestsCommand which runs python unit tests."""
+  ProcessPythonTestOptions(options, error_func)
+
+  suite_vars = constants.PYTHON_UNIT_TEST_SUITES[options.suite_name]
+  suite_path = suite_vars['path']
+  suite_test_modules = suite_vars['test_modules']
+
+  sys.path = [suite_path] + sys.path
+  try:
+    suite = unittest.TestSuite()
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromName(m)
+                   for m in suite_test_modules)
+    runner = unittest.TextTestRunner(verbosity=1+options.verbose_count)
+    return 0 if runner.run(suite).wasSuccessful() else 1
+  finally:
+    sys.path = sys.path[1:]
+
+
 def _GetAttachedDevices(test_device=None):
   """Get all attached devices.
 
@@ -783,9 +843,15 @@ def RunTestsCommand(command, options, args, option_parser):
       option_parser.error('Unrecognized arguments: %s' % (' '.join(args)))
       return constants.ERROR_EXIT_CODE
 
-  ProcessCommonOptions(options)
+  ProcessCommonOptions(options, option_parser.error)
 
-  devices = _GetAttachedDevices(options.test_device)
+  if options.enable_platform_mode:
+    return RunTestsInPlatformMode(command, options, option_parser)
+
+  if command in constants.LOCAL_MACHINE_TESTS:
+    devices = []
+  else:
+    devices = _GetAttachedDevices(options.test_device)
 
   forwarder.Forwarder.RemoveHostLog()
   if not ports.ResetTestServerPortAllocation():
@@ -805,8 +871,39 @@ def RunTestsCommand(command, options, args, option_parser):
     return _RunMonkeyTests(options, option_parser.error, devices)
   elif command == 'perf':
     return _RunPerfTests(options, args, option_parser.error)
+  elif command == 'python':
+    return _RunPythonTests(options, option_parser.error)
   else:
     raise Exception('Unknown test type.')
+
+
+_SUPPORTED_IN_PLATFORM_MODE = [
+  # TODO(jbudorick): Add support for more test types.
+  'gtest',
+]
+
+
+def RunTestsInPlatformMode(command, options, option_parser):
+
+  if command not in _SUPPORTED_IN_PLATFORM_MODE:
+    option_parser.error('%s is not yet supported in platform mode' % command)
+
+  with environment_factory.CreateEnvironment(
+      command, options, option_parser.error) as env:
+    with test_instance_factory.CreateTestInstance(
+        command, options, option_parser.error) as test:
+      with test_run_factory.CreateTestRun(
+          options, env, test, option_parser.error) as test_run:
+        results = test_run.RunTests()
+
+        report_results.LogFull(
+            results=results,
+            test_type=test.TestType(),
+            test_package=test_run.TestPackage(),
+            annotation=options.annotations,
+            flakiness_server=options.flakiness_dashboard_server)
+
+  return results
 
 
 def HelpCommand(command, _options, args, option_parser):
@@ -867,6 +964,8 @@ VALID_COMMANDS = {
         AddMonkeyTestOptions, RunTestsCommand),
     'perf': CommandFunctionTuple(
         AddPerfTestOptions, RunTestsCommand),
+    'python': CommandFunctionTuple(
+        AddPythonTestOptions, RunTestsCommand),
     'linker': CommandFunctionTuple(
         AddLinkerTestOptions, RunTestsCommand),
     'help': CommandFunctionTuple(lambda option_parser: None, HelpCommand)

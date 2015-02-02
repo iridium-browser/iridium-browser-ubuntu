@@ -40,12 +40,12 @@ public:
 
     virtual ~RefCountedSupplement() { }
 
-    class Wrapper FINAL : public Supplement<T> {
+    class Wrapper final : public Supplement<T> {
     public:
         explicit Wrapper(PassRefPtr<ThisType> wrapped) : m_wrapped(wrapped) { }
         virtual ~Wrapper() { }
 #if ENABLE(SECURITY_ASSERT)
-        virtual bool isRefCountedWrapper() const OVERRIDE { return true; }
+        virtual bool isRefCountedWrapper() const override { return true; }
 #endif
         ThisType* wrapped() const { return m_wrapped.get(); }
 

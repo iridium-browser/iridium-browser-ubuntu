@@ -10,8 +10,7 @@ from telemetry.core import util
 
 
 class TestWait(unittest.TestCase):
-  @staticmethod
-  def testNonTimeout():
+  def testNonTimeout(self):
     def test():
       return True
     util.WaitFor(test, 0.1)

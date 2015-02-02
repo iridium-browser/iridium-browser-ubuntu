@@ -33,25 +33,27 @@ const int kMaxSendBufferSize = 256 * 1024;
 class UdpPacketSocket : public rtc::AsyncPacketSocket {
  public:
   UdpPacketSocket();
-  virtual ~UdpPacketSocket();
+  ~UdpPacketSocket() override;
 
   bool Init(const rtc::SocketAddress& local_address,
-            int min_port, int max_port);
+            uint16 min_port, uint16 max_port);
 
   // rtc::AsyncPacketSocket interface.
-  virtual rtc::SocketAddress GetLocalAddress() const OVERRIDE;
-  virtual rtc::SocketAddress GetRemoteAddress() const OVERRIDE;
-  virtual int Send(const void* data, size_t data_size,
-                   const rtc::PacketOptions& options) OVERRIDE;
-  virtual int SendTo(const void* data, size_t data_size,
-                     const rtc::SocketAddress& address,
-                     const rtc::PacketOptions& options) OVERRIDE;
-  virtual int Close() OVERRIDE;
-  virtual State GetState() const OVERRIDE;
-  virtual int GetOption(rtc::Socket::Option option, int* value) OVERRIDE;
-  virtual int SetOption(rtc::Socket::Option option, int value) OVERRIDE;
-  virtual int GetError() const OVERRIDE;
-  virtual void SetError(int error) OVERRIDE;
+  rtc::SocketAddress GetLocalAddress() const override;
+  rtc::SocketAddress GetRemoteAddress() const override;
+  int Send(const void* data,
+           size_t data_size,
+           const rtc::PacketOptions& options) override;
+  int SendTo(const void* data,
+             size_t data_size,
+             const rtc::SocketAddress& address,
+             const rtc::PacketOptions& options) override;
+  int Close() override;
+  State GetState() const override;
+  int GetOption(rtc::Socket::Option option, int* value) override;
+  int SetOption(rtc::Socket::Option option, int value) override;
+  int GetError() const override;
+  void SetError(int error) override;
 
  private:
   struct PendingPacket {
@@ -113,14 +115,14 @@ UdpPacketSocket::~UdpPacketSocket() {
 }
 
 bool UdpPacketSocket::Init(const rtc::SocketAddress& local_address,
-                           int min_port, int max_port) {
+                           uint16 min_port, uint16 max_port) {
   net::IPEndPoint local_endpoint;
   if (!jingle_glue::SocketAddressToIPEndPoint(
           local_address, &local_endpoint)) {
     return false;
   }
 
-  for (int port = min_port; port <= max_port; ++port) {
+  for (uint16 port = min_port; port <= max_port; ++port) {
     socket_.reset(new net::UDPServerSocket(NULL, net::NetLog::Source()));
     int result = socket_->Listen(
         net::IPEndPoint(local_endpoint.address(), port));
@@ -359,7 +361,7 @@ ChromiumPacketSocketFactory::~ChromiumPacketSocketFactory() {
 
 rtc::AsyncPacketSocket* ChromiumPacketSocketFactory::CreateUdpSocket(
       const rtc::SocketAddress& local_address,
-      int min_port, int max_port) {
+      uint16 min_port, uint16 max_port) {
   scoped_ptr<UdpPacketSocket> result(new UdpPacketSocket());
   if (!result->Init(local_address, min_port, max_port))
     return NULL;
@@ -369,7 +371,7 @@ rtc::AsyncPacketSocket* ChromiumPacketSocketFactory::CreateUdpSocket(
 rtc::AsyncPacketSocket*
 ChromiumPacketSocketFactory::CreateServerTcpSocket(
     const rtc::SocketAddress& local_address,
-    int min_port, int max_port,
+    uint16 min_port, uint16 max_port,
     int opts) {
   // We don't use TCP sockets for remoting connections.
   NOTIMPLEMENTED();

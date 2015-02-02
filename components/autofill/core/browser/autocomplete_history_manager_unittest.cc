@@ -48,10 +48,11 @@ class MockAutofillClient : public TestAutofillClient {
   MockAutofillClient(scoped_refptr<MockWebDataService> web_data_service)
       : web_data_service_(web_data_service),
         prefs_(test::PrefServiceForTesting()) {}
-  virtual ~MockAutofillClient() {}
-  virtual scoped_refptr<AutofillWebDataService>
-      GetDatabase() OVERRIDE { return web_data_service_; }
-  virtual PrefService* GetPrefs() OVERRIDE { return prefs_.get(); }
+  ~MockAutofillClient() override {}
+  scoped_refptr<AutofillWebDataService> GetDatabase() override {
+    return web_data_service_;
+  }
+  PrefService* GetPrefs() override { return prefs_.get(); }
 
  private:
   scoped_refptr<MockWebDataService> web_data_service_;
@@ -66,7 +67,7 @@ class AutocompleteHistoryManagerTest : public testing::Test {
  protected:
   AutocompleteHistoryManagerTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     web_data_service_ = new MockWebDataService();
     autofill_client_.reset(new MockAutofillClient(web_data_service_));
     autofill_driver_.reset(new TestAutofillDriver());
@@ -74,9 +75,7 @@ class AutocompleteHistoryManagerTest : public testing::Test {
         autofill_driver_.get(), autofill_client_.get()));
   }
 
-  virtual void TearDown() OVERRIDE {
-    autocomplete_manager_.reset();
-  }
+  void TearDown() override { autocomplete_manager_.reset(); }
 
   base::MessageLoop message_loop_;
   scoped_refptr<MockWebDataService> web_data_service_;
@@ -163,6 +162,28 @@ TEST_F(AutocompleteHistoryManagerTest, SearchField) {
   form.fields.push_back(search_field);
 
   EXPECT_CALL(*(web_data_service_.get()), AddFormFields(_)).Times(1);
+  autocomplete_manager_->OnFormSubmitted(form);
+}
+
+// Tests that text entered into fields specifying autocomplete="off" is not sent
+// to the WebDatabase to be saved.
+TEST_F(AutocompleteHistoryManagerTest, FieldWithAutocompleteOff) {
+  FormData form;
+  form.name = ASCIIToUTF16("MyForm");
+  form.origin = GURL("http://myform.com/form.html");
+  form.action = GURL("http://myform.com/submit.html");
+  form.user_submitted = true;
+
+  // Field specifying autocomplete="off".
+  FormFieldData field;
+  field.label = ASCIIToUTF16("Something esoteric");
+  field.name = ASCIIToUTF16("esoterica");
+  field.value = ASCIIToUTF16("a truly esoteric value, I assure you");
+  field.form_control_type = "text";
+  field.should_autocomplete = false;
+  form.fields.push_back(field);
+
+  EXPECT_CALL(*web_data_service_.get(), AddFormFields(_)).Times(0);
   autocomplete_manager_->OnFormSubmitted(form);
 }
 

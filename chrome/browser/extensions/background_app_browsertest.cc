@@ -6,7 +6,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/test/base/ui_test_utils.h"
 
 class TestBackgroundModeManager : public BackgroundModeManager {
  public:
@@ -15,10 +14,10 @@ class TestBackgroundModeManager : public BackgroundModeManager {
       : BackgroundModeManager(command_line, profile_cache),
         showed_background_app_installed_notification_for_test_(false) {}
 
-  virtual ~TestBackgroundModeManager() {}
+  ~TestBackgroundModeManager() override {}
 
-  virtual void DisplayAppInstalledNotification(
-      const extensions::Extension* extension) OVERRIDE {
+  void DisplayAppInstalledNotification(
+      const extensions::Extension* extension) override {
     showed_background_app_installed_notification_for_test_ = true;
   }
 

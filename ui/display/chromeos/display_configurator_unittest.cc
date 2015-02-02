@@ -33,6 +33,8 @@ const char kGrab[] = "grab";
 const char kUngrab[] = "ungrab";
 const char kSync[] = "sync";
 const char kForceDPMS[] = "dpms";
+const char kTakeDisplayControl[] = "take";
+const char kRelinquishDisplayControl[] = "relinquish";
 
 // String returned by TestNativeDisplayDelegate::GetActionsAndClear() if no
 // actions were requested.
@@ -154,24 +156,32 @@ class TestNativeDisplayDelegate : public NativeDisplayDelegate {
   void set_hdcp_state(HDCPState state) { hdcp_state_ = state; }
 
   // DisplayConfigurator::Delegate overrides:
-  virtual void Initialize() OVERRIDE { log_->AppendAction(kInitXRandR); }
-  virtual void GrabServer() OVERRIDE { log_->AppendAction(kGrab); }
-  virtual void UngrabServer() OVERRIDE { log_->AppendAction(kUngrab); }
-  virtual void SyncWithServer() OVERRIDE { log_->AppendAction(kSync); }
-  virtual void SetBackgroundColor(uint32_t color_argb) OVERRIDE {
+  virtual void Initialize() override { log_->AppendAction(kInitXRandR); }
+  virtual void GrabServer() override { log_->AppendAction(kGrab); }
+  virtual void UngrabServer() override { log_->AppendAction(kUngrab); }
+  virtual bool TakeDisplayControl() override {
+    log_->AppendAction(kTakeDisplayControl);
+    return true;
+  }
+  virtual bool RelinquishDisplayControl() override {
+    log_->AppendAction(kRelinquishDisplayControl);
+    return true;
+  }
+  virtual void SyncWithServer() override { log_->AppendAction(kSync); }
+  virtual void SetBackgroundColor(uint32_t color_argb) override {
     log_->AppendAction(GetBackgroundAction(color_argb));
   }
-  virtual void ForceDPMSOn() OVERRIDE { log_->AppendAction(kForceDPMS); }
-  virtual std::vector<DisplaySnapshot*> GetDisplays() OVERRIDE {
+  virtual void ForceDPMSOn() override { log_->AppendAction(kForceDPMS); }
+  virtual std::vector<DisplaySnapshot*> GetDisplays() override {
     return outputs_;
   }
   virtual void AddMode(const DisplaySnapshot& output,
-                       const DisplayMode* mode) OVERRIDE {
+                       const DisplayMode* mode) override {
     log_->AppendAction(GetAddOutputModeAction(output, mode));
   }
   virtual bool Configure(const DisplaySnapshot& output,
                          const DisplayMode* mode,
-                         const gfx::Point& origin) OVERRIDE {
+                         const gfx::Point& origin) override {
     log_->AppendAction(GetCrtcAction(output, mode, origin));
 
     if (max_configurable_pixels_ == 0)
@@ -182,38 +192,38 @@ class TestNativeDisplayDelegate : public NativeDisplayDelegate {
 
     return mode->size().GetArea() <= max_configurable_pixels_;
   }
-  virtual void CreateFrameBuffer(const gfx::Size& size) OVERRIDE {
+  virtual void CreateFrameBuffer(const gfx::Size& size) override {
     log_->AppendAction(
         GetFramebufferAction(size,
                              outputs_.size() >= 1 ? outputs_[0] : NULL,
                              outputs_.size() >= 2 ? outputs_[1] : NULL));
   }
   virtual bool GetHDCPState(const DisplaySnapshot& output,
-                            HDCPState* state) OVERRIDE {
+                            HDCPState* state) override {
     *state = hdcp_state_;
     return true;
   }
 
   virtual bool SetHDCPState(const DisplaySnapshot& output,
-                            HDCPState state) OVERRIDE {
+                            HDCPState state) override {
     log_->AppendAction(GetSetHDCPStateAction(output, state));
     return true;
   }
 
   virtual std::vector<ui::ColorCalibrationProfile>
-  GetAvailableColorCalibrationProfiles(const DisplaySnapshot& output) OVERRIDE {
+  GetAvailableColorCalibrationProfiles(const DisplaySnapshot& output) override {
     return std::vector<ui::ColorCalibrationProfile>();
   }
 
   virtual bool SetColorCalibrationProfile(
       const DisplaySnapshot& output,
-      ui::ColorCalibrationProfile new_profile) OVERRIDE {
+      ui::ColorCalibrationProfile new_profile) override {
     return false;
   }
 
-  virtual void AddObserver(NativeDisplayObserver* observer) OVERRIDE {}
+  virtual void AddObserver(NativeDisplayObserver* observer) override {}
 
-  virtual void RemoveObserver(NativeDisplayObserver* observer) OVERRIDE {}
+  virtual void RemoveObserver(NativeDisplayObserver* observer) override {}
 
  private:
   // Outputs to be returned by GetDisplays().
@@ -262,13 +272,13 @@ class TestObserver : public DisplayConfigurator::Observer {
 
   // DisplayConfigurator::Observer overrides:
   virtual void OnDisplayModeChanged(
-      const DisplayConfigurator::DisplayStateList& outputs) OVERRIDE {
+      const DisplayConfigurator::DisplayStateList& outputs) override {
     num_changes_++;
     latest_outputs_ = outputs;
   }
 
   virtual void OnDisplayModeChangeFailed(MultipleDisplayState failed_new_state)
-      OVERRIDE {
+      override {
     num_failures_++;
     latest_failed_state_ = failed_new_state;
   }
@@ -296,11 +306,11 @@ class TestStateController : public DisplayConfigurator::StateController {
 
   // DisplayConfigurator::StateController overrides:
   virtual MultipleDisplayState GetStateForDisplayIds(
-      const std::vector<int64_t>& outputs) const OVERRIDE {
+      const std::vector<int64_t>& outputs) const override {
     return state_;
   }
   virtual bool GetResolutionForDisplayId(int64_t display_id,
-                                         gfx::Size* size) const OVERRIDE {
+                                         gfx::Size* size) const override {
     return false;
   }
 
@@ -316,11 +326,11 @@ class TestMirroringController
   TestMirroringController() : software_mirroring_enabled_(false) {}
   virtual ~TestMirroringController() {}
 
-  virtual void SetSoftwareMirroring(bool enabled) OVERRIDE {
+  virtual void SetSoftwareMirroring(bool enabled) override {
     software_mirroring_enabled_ = enabled;
   }
 
-  virtual bool SoftwareMirroringEnabled() const OVERRIDE {
+  virtual bool SoftwareMirroringEnabled() const override {
     return software_mirroring_enabled_;
   }
 
@@ -339,7 +349,7 @@ class DisplayConfiguratorTest : public testing::Test {
         test_api_(&configurator_) {}
   virtual ~DisplayConfiguratorTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     log_.reset(new ActionLogger());
 
     native_display_delegate_ = new TestNativeDisplayDelegate(log_.get());
@@ -359,7 +369,6 @@ class DisplayConfiguratorTest : public testing::Test {
     o->set_type(DISPLAY_CONNECTION_TYPE_INTERNAL);
     o->set_is_aspect_preserving_scaling(true);
     o->set_display_id(123);
-    o->set_has_proper_display_id(true);
 
     o = &outputs_[1];
     o->set_current_mode(&big_mode_);
@@ -369,7 +378,6 @@ class DisplayConfiguratorTest : public testing::Test {
     o->set_type(DISPLAY_CONNECTION_TYPE_HDMI);
     o->set_is_aspect_preserving_scaling(true);
     o->set_display_id(456);
-    o->set_has_proper_display_id(true);
 
     UpdateOutputs(2, false);
   }
@@ -439,6 +447,9 @@ TEST_F(DisplayConfiguratorTest, FindDisplayModeMatchingSize) {
 
   // Fields are width, height, interlaced, refresh rate.
   modes.push_back(new DisplayMode(gfx::Size(1920, 1200), false, 60.0));
+  DisplayMode* native_mode =
+      new DisplayMode(gfx::Size(1920, 1200), false, 50.0);
+  modes.push_back(native_mode);
   // Different rates.
   modes.push_back(new DisplayMode(gfx::Size(1920, 1080), false, 30.0));
   modes.push_back(new DisplayMode(gfx::Size(1920, 1080), false, 50.0));
@@ -462,40 +473,42 @@ TEST_F(DisplayConfiguratorTest, FindDisplayModeMatchingSize) {
 
   TestDisplaySnapshot output;
   output.set_modes(modes.get());
+  output.set_native_mode(native_mode);
 
-  EXPECT_EQ(modes[0],
+  // Should pick native over highest refresh rate.
+  EXPECT_EQ(modes[1],
             DisplayConfigurator::FindDisplayModeMatchingSize(
                 output, gfx::Size(1920, 1200)));
 
   // Should pick highest refresh rate.
-  EXPECT_EQ(modes[2],
+  EXPECT_EQ(modes[3],
             DisplayConfigurator::FindDisplayModeMatchingSize(
                 output, gfx::Size(1920, 1080)));
 
   // Should pick non-interlaced mode.
-  EXPECT_EQ(modes[6],
+  EXPECT_EQ(modes[7],
             DisplayConfigurator::FindDisplayModeMatchingSize(
                 output, gfx::Size(1280, 720)));
 
   // Interlaced only. Should pick one with the highest refresh rate in
   // interlaced mode.
-  EXPECT_EQ(modes[9],
+  EXPECT_EQ(modes[10],
             DisplayConfigurator::FindDisplayModeMatchingSize(
                 output, gfx::Size(1024, 768)));
 
   // Mixed: Should pick one with the highest refresh rate in
   // interlaced mode.
-  EXPECT_EQ(modes[12],
+  EXPECT_EQ(modes[13],
             DisplayConfigurator::FindDisplayModeMatchingSize(
                 output, gfx::Size(1024, 600)));
 
   // Just one interlaced mode.
-  EXPECT_EQ(modes[13],
+  EXPECT_EQ(modes[14],
             DisplayConfigurator::FindDisplayModeMatchingSize(
                 output, gfx::Size(640, 480)));
 
   // Refresh rate not available.
-  EXPECT_EQ(modes[14],
+  EXPECT_EQ(modes[15],
             DisplayConfigurator::FindDisplayModeMatchingSize(
                 output, gfx::Size(320, 200)));
 
@@ -1004,18 +1017,7 @@ TEST_F(DisplayConfiguratorTest, InvalidMultipleDisplayStates) {
   EXPECT_EQ(2, observer_.num_failures());
 }
 
-TEST_F(DisplayConfiguratorTest, GetMultipleDisplayStateForDisplaysWithoutId) {
-  outputs_[0].set_has_proper_display_id(false);
-  UpdateOutputs(2, false);
-  configurator_.Init(false);
-  state_controller_.set_state(MULTIPLE_DISPLAY_STATE_DUAL_MIRROR);
-  configurator_.ForceInitialConfigure(0);
-  EXPECT_EQ(MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED,
-            configurator_.display_state());
-}
-
-TEST_F(DisplayConfiguratorTest, GetMultipleDisplayStateForDisplaysWithId) {
-  outputs_[0].set_has_proper_display_id(true);
+TEST_F(DisplayConfiguratorTest, GetMultipleDisplayStateForMirroredDisplays) {
   UpdateOutputs(2, false);
   configurator_.Init(false);
   state_controller_.set_state(MULTIPLE_DISPLAY_STATE_DUAL_MIRROR);
@@ -1334,6 +1336,87 @@ TEST_F(DisplayConfiguratorTest, SaveDisplayPowerStateOnConfigFailure) {
           GetFramebufferAction(small_mode_.size(), &outputs_[0], NULL).c_str(),
           GetCrtcAction(outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
           kUngrab,
+          NULL),
+      log_->GetActionsAndClear());
+}
+
+// Tests that the SetDisplayPowerState() task posted by HandleResume() doesn't
+// use a stale state if a new state is requested before it runs:
+// http://crosbug.com/p/32393
+TEST_F(DisplayConfiguratorTest, DontRestoreStalePowerStateAfterResume) {
+  // Start out with two displays in mirrored mode.
+  state_controller_.set_state(MULTIPLE_DISPLAY_STATE_DUAL_MIRROR);
+  configurator_.Init(false);
+  configurator_.ForceInitialConfigure(0);
+  log_->GetActionsAndClear();
+
+  // Turn off the internal display, simulating docked mode.
+  EXPECT_TRUE(configurator_.SetDisplayPower(
+      chromeos::DISPLAY_POWER_INTERNAL_OFF_EXTERNAL_ON,
+      DisplayConfigurator::kSetDisplayPowerNoFlags));
+  EXPECT_EQ(
+      JoinActions(
+          kGrab,
+          GetFramebufferAction(big_mode_.size(), &outputs_[0], &outputs_[1])
+              .c_str(),
+          GetCrtcAction(outputs_[0], NULL, gfx::Point(0, 0)).c_str(),
+          GetCrtcAction(outputs_[1], &big_mode_, gfx::Point(0, 0)).c_str(),
+          kForceDPMS,
+          kUngrab,
+          NULL),
+      log_->GetActionsAndClear());
+
+  // Suspend and resume the system. Resuming should post a task to restore the
+  // previous power state, additionally forcing a probe.
+  configurator_.SuspendDisplays();
+  configurator_.ResumeDisplays();
+
+  // Before the task runs, exit docked mode.
+  EXPECT_TRUE(configurator_.SetDisplayPower(
+      chromeos::DISPLAY_POWER_ALL_ON,
+      DisplayConfigurator::kSetDisplayPowerNoFlags));
+  EXPECT_EQ(
+      JoinActions(
+          kGrab,
+          GetFramebufferAction(small_mode_.size(), &outputs_[0], &outputs_[1])
+              .c_str(),
+          GetCrtcAction(outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
+          GetCrtcAction(outputs_[1], &small_mode_, gfx::Point(0, 0)).c_str(),
+          kForceDPMS,
+          kUngrab,
+          NULL),
+      log_->GetActionsAndClear());
+
+  // Check that the task doesn't restore the old internal-off-external-on power
+  // state.
+  EXPECT_TRUE(test_api_.TriggerConfigureTimeout());
+  EXPECT_EQ(
+      JoinActions(
+          kGrab,
+          GetFramebufferAction(small_mode_.size(), &outputs_[0], &outputs_[1])
+              .c_str(),
+          GetCrtcAction(outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
+          GetCrtcAction(outputs_[1], &small_mode_, gfx::Point(0, 0)).c_str(),
+          kForceDPMS,
+          kUngrab,
+          NULL),
+      log_->GetActionsAndClear());
+}
+
+TEST_F(DisplayConfiguratorTest, ExternalControl) {
+  InitWithSingleOutput();
+  state_controller_.set_state(MULTIPLE_DISPLAY_STATE_SINGLE);
+  configurator_.RelinquishControl();
+  EXPECT_EQ(
+      JoinActions(
+          kRelinquishDisplayControl,
+          NULL),
+      log_->GetActionsAndClear());
+  configurator_.TakeControl();
+  EXPECT_EQ(
+      JoinActions(
+          kTakeDisplayControl,
+          GetCrtcAction(outputs_[0], &small_mode_, gfx::Point(0, 0)).c_str(),
           NULL),
       log_->GetActionsAndClear());
 }

@@ -13,8 +13,10 @@
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_manager_client.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "sql/connection.h"
@@ -25,7 +27,7 @@ using autofill::PasswordForm;
 
 namespace password_manager {
 
-static const int kCurrentVersionNumber = 7;
+static const int kCurrentVersionNumber = 9;
 static const int kCompatibleVersionNumber = 1;
 
 Pickle SerializeVector(const std::vector<base::string16>& vec) {
@@ -68,7 +70,6 @@ enum LoginTableColumns {
   COLUMN_POSSIBLE_USERNAMES,
   COLUMN_TIMES_USED,
   COLUMN_FORM_DATA,
-  COLUMN_USE_ADDITIONAL_AUTH,
   COLUMN_DATE_SYNCED,
   COLUMN_DISPLAY_NAME,
   COLUMN_AVATAR_URL,
@@ -90,7 +91,7 @@ void BindAddStatement(const PasswordForm& form,
   s->BindString(COLUMN_SIGNON_REALM, form.signon_realm);
   s->BindInt(COLUMN_SSL_VALID, form.ssl_valid);
   s->BindInt(COLUMN_PREFERRED, form.preferred);
-  s->BindInt64(COLUMN_DATE_CREATED, form.date_created.ToTimeT());
+  s->BindInt64(COLUMN_DATE_CREATED, form.date_created.ToInternalValue());
   s->BindInt(COLUMN_BLACKLISTED_BY_USER, form.blacklisted_by_user);
   s->BindInt(COLUMN_SCHEME, form.scheme);
   s->BindInt(COLUMN_PASSWORD_TYPE, form.type);
@@ -104,7 +105,6 @@ void BindAddStatement(const PasswordForm& form,
   s->BindBlob(COLUMN_FORM_DATA,
               form_data_pickle.data(),
               form_data_pickle.size());
-  s->BindInt(COLUMN_USE_ADDITIONAL_AUTH, form.use_additional_authentication);
   s->BindInt64(COLUMN_DATE_SYNCED, form.date_synced.ToInternalValue());
   s->BindString16(COLUMN_DISPLAY_NAME, form.display_name);
   s->BindString(COLUMN_AVATAR_URL, form.avatar_url.spec());
@@ -115,6 +115,30 @@ void BindAddStatement(const PasswordForm& form,
 void AddCallback(int err, sql::Statement* /*stmt*/) {
   if (err == 19 /*SQLITE_CONSTRAINT*/)
     DLOG(WARNING) << "LoginDatabase::AddLogin updated an existing form";
+}
+
+// UMA_* macros assume that the name never changes. This is a helper function
+// where this assumption doesn't hold.
+void LogDynamicUMAStat(const std::string& name,
+                       int sample,
+                       int min,
+                       int max,
+                       int bucket_size) {
+  base::HistogramBase* counter = base::Histogram::FactoryGet(
+      name,
+      min,
+      max,
+      bucket_size,
+      base::HistogramBase::kUmaTargetedHistogramFlag);
+  counter->Add(sample);
+}
+
+void LogAccountStat(const std::string& name, int sample) {
+  LogDynamicUMAStat(name, sample, 0, 32, 6);
+}
+
+void LogTimesUsedStat(const std::string& name, int sample) {
+  LogDynamicUMAStat(name, sample, 0, 100, 10);
 }
 
 }  // namespace
@@ -226,6 +250,26 @@ bool LoginDatabase::MigrateOldVersionsAsNeeded() {
       }
       meta_table_.SetVersionNumber(7);
       // Fall through.
+    case 7:
+      // Keep version 8 around even though no changes are made. See
+      // crbug.com/423716 for context.
+      meta_table_.SetVersionNumber(8);
+      // Fall through.
+      // TODO(gcasto): Remove use_additional_auth by copying table.
+      // https://www.sqlite.org/lang_altertable.html
+    case 8: {
+      sql::Statement s;
+      s.Assign(db_.GetCachedStatement(SQL_FROM_HERE,
+                                      "UPDATE logins SET "
+                                      "date_created = "
+                                      "(date_created * ?) + ?"));
+      s.BindInt64(0, base::Time::kMicrosecondsPerSecond);
+      s.BindInt64(1, base::Time::kTimeTToMicrosecondsOffset);
+      if (!s.Run())
+        return false;
+      meta_table_.SetVersionNumber(9);
+      // Fall through.
+    }
     case kCurrentVersionNumber:
       // Already up to date
       return true;
@@ -255,7 +299,6 @@ bool LoginDatabase::InitLoginsTable() {
                      "possible_usernames BLOB,"
                      "times_used INTEGER,"
                      "form_data BLOB,"
-                     "use_additional_auth INTEGER,"
                      "date_synced INTEGER,"
                      "display_name VARCHAR,"
                      "avatar_url VARCHAR,"
@@ -277,32 +320,57 @@ bool LoginDatabase::InitLoginsTable() {
   return true;
 }
 
-void LoginDatabase::ReportMetrics(const std::string& sync_username) {
+void LoginDatabase::ReportMetrics(const std::string& sync_username,
+                                  bool custom_passphrase_sync_enabled) {
   sql::Statement s(db_.GetCachedStatement(
       SQL_FROM_HERE,
-      "SELECT signon_realm, blacklisted_by_user, COUNT(username_value) "
-      "FROM logins GROUP BY signon_realm, blacklisted_by_user"));
+      "SELECT signon_realm, password_type, blacklisted_by_user,"
+      "COUNT(username_value) FROM logins GROUP BY "
+      "signon_realm, password_type, blacklisted_by_user"));
 
   if (!s.is_valid())
     return;
 
-  int total_accounts = 0;
+  std::string custom_passphrase = "WithoutCustomPassphrase";
+  if (custom_passphrase_sync_enabled) {
+    custom_passphrase = "WithCustomPassphrase";
+  }
+
+  int total_user_created_accounts = 0;
+  int total_generated_accounts = 0;
   int blacklisted_sites = 0;
   while (s.Step()) {
-    int blacklisted = s.ColumnInt(1);
-    int accounts_per_site = s.ColumnInt(2);
+    PasswordForm::Type password_type =
+        static_cast<PasswordForm::Type>(s.ColumnInt(1));
+    int blacklisted = s.ColumnInt(2);
+    int accounts_per_site = s.ColumnInt(3);
     if (blacklisted) {
       ++blacklisted_sites;
+    } else if (password_type == PasswordForm::TYPE_GENERATED) {
+      total_generated_accounts += accounts_per_site;
+      LogAccountStat(
+          base::StringPrintf("PasswordManager.AccountsPerSite.AutoGenerated.%s",
+                             custom_passphrase.c_str()),
+          accounts_per_site);
     } else {
-      total_accounts += accounts_per_site;
-      UMA_HISTOGRAM_CUSTOM_COUNTS("PasswordManager.AccountsPerSite",
-                                  accounts_per_site, 0, 32, 6);
+      total_user_created_accounts += accounts_per_site;
+      LogAccountStat(
+          base::StringPrintf("PasswordManager.AccountsPerSite.UserCreated.%s",
+                             custom_passphrase.c_str()),
+          accounts_per_site);
     }
   }
-  UMA_HISTOGRAM_CUSTOM_COUNTS("PasswordManager.TotalAccounts",
-                              total_accounts, 0, 32, 6);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("PasswordManager.BlacklistedSites",
-                              blacklisted_sites, 0, 32, 6);
+  LogAccountStat(
+      base::StringPrintf("PasswordManager.TotalAccounts.UserCreated.%s",
+                         custom_passphrase.c_str()),
+      total_user_created_accounts);
+  LogAccountStat(
+      base::StringPrintf("PasswordManager.TotalAccounts.AutoGenerated.%s",
+                         custom_passphrase.c_str()),
+      total_generated_accounts);
+  LogAccountStat(base::StringPrintf("PasswordManager.BlacklistedSites.%s",
+                                    custom_passphrase.c_str()),
+                 blacklisted_sites);
 
   sql::Statement usage_statement(db_.GetCachedStatement(
       SQL_FROM_HERE,
@@ -316,13 +384,15 @@ void LoginDatabase::ReportMetrics(const std::string& sync_username) {
         usage_statement.ColumnInt(0));
 
     if (type == PasswordForm::TYPE_GENERATED) {
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "PasswordManager.TimesGeneratedPasswordUsed",
-          usage_statement.ColumnInt(1), 0, 100, 10);
+      LogTimesUsedStat(base::StringPrintf(
+                           "PasswordManager.TimesPasswordUsed.AutoGenerated.%s",
+                           custom_passphrase.c_str()),
+                       usage_statement.ColumnInt(1));
     } else {
-      UMA_HISTOGRAM_CUSTOM_COUNTS(
-          "PasswordManager.TimesPasswordUsed",
-          usage_statement.ColumnInt(1), 0, 100, 10);
+      LogTimesUsedStat(
+          base::StringPrintf("PasswordManager.TimesPasswordUsed.UserCreated.%s",
+                             custom_passphrase.c_str()),
+          usage_statement.ColumnInt(1));
     }
   }
 
@@ -365,9 +435,9 @@ PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
       " password_element, password_value, submit_element, "
       " signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       " scheme, password_type, possible_usernames, times_used, form_data, "
-      " use_additional_auth, date_synced, display_name, avatar_url,"
+      " date_synced, display_name, avatar_url,"
       " federation_url, is_zero_click) VALUES "
-      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
   BindAddStatement(form, encrypted_password, &s);
   db_.set_error_callback(base::Bind(&AddCallback));
   const bool success = s.Run();
@@ -383,9 +453,9 @@ PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form) {
       " password_element, password_value, submit_element, "
       " signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       " scheme, password_type, possible_usernames, times_used, form_data, "
-      " use_additional_auth, date_synced, display_name, avatar_url,"
+      " date_synced, display_name, avatar_url,"
       " federation_url, is_zero_click) VALUES "
-      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+      "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
   BindAddStatement(form, encrypted_password, &s);
   if (s.Run()) {
     list.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE, form));
@@ -435,7 +505,7 @@ PasswordStoreChangeList LoginDatabase::UpdateLogin(const PasswordForm& form) {
   s.BindInt(5, form.times_used);
   s.BindString16(6, form.submit_element);
   s.BindInt64(7, form.date_synced.ToInternalValue());
-  s.BindInt64(8, form.date_created.ToTimeT());
+  s.BindInt64(8, form.date_created.ToInternalValue());
   s.BindInt(9, form.blacklisted_by_user);
   s.BindInt(10, form.scheme);
   s.BindInt(11, form.type);
@@ -486,9 +556,9 @@ bool LoginDatabase::RemoveLoginsCreatedBetween(base::Time delete_begin,
   sql::Statement s(db_.GetCachedStatement(SQL_FROM_HERE,
       "DELETE FROM logins WHERE "
       "date_created >= ? AND date_created < ?"));
-  s.BindInt64(0, delete_begin.ToTimeT());
+  s.BindInt64(0, delete_begin.ToInternalValue());
   s.BindInt64(1, delete_end.is_null() ? std::numeric_limits<int64>::max()
-                                      : delete_end.ToTimeT());
+                                      : delete_end.ToInternalValue());
 
   return s.Run();
 }
@@ -530,8 +600,8 @@ LoginDatabase::EncryptionResult LoginDatabase::InitPasswordFormFromStatement(
   form->signon_realm = tmp;
   form->ssl_valid = (s.ColumnInt(COLUMN_SSL_VALID) > 0);
   form->preferred = (s.ColumnInt(COLUMN_PREFERRED) > 0);
-  form->date_created = base::Time::FromTimeT(
-      s.ColumnInt64(COLUMN_DATE_CREATED));
+  form->date_created =
+      base::Time::FromInternalValue(s.ColumnInt64(COLUMN_DATE_CREATED));
   form->blacklisted_by_user = (s.ColumnInt(COLUMN_BLACKLISTED_BY_USER) > 0);
   int scheme_int = s.ColumnInt(COLUMN_SCHEME);
   DCHECK((scheme_int >= 0) && (scheme_int <= PasswordForm::SCHEME_OTHER));
@@ -553,8 +623,6 @@ LoginDatabase::EncryptionResult LoginDatabase::InitPasswordFormFromStatement(
     PickleIterator form_data_iter(form_data_pickle);
     autofill::DeserializeFormData(&form_data_iter, &form->form_data);
   }
-  form->use_additional_authentication =
-      (s.ColumnInt(COLUMN_USE_ADDITIONAL_AUTH) > 0);
   form->date_synced = base::Time::FromInternalValue(
       s.ColumnInt64(COLUMN_DATE_SYNCED));
   form->display_name = s.ColumnString16(COLUMN_DISPLAY_NAME);
@@ -573,16 +641,17 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
       "password_element, password_value, submit_element, "
       "signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "date_synced, display_name, avatar_url, "
       "federation_url, is_zero_click FROM logins WHERE signon_realm == ? ";
   sql::Statement s;
   const GURL signon_realm(form.signon_realm);
   std::string registered_domain = GetRegistryControlledDomain(signon_realm);
   PSLDomainMatchMetric psl_domain_match_metric = PSL_DOMAIN_MATCH_NONE;
   const bool should_PSL_matching_apply =
+      form.scheme == PasswordForm::SCHEME_HTML &&
       ShouldPSLDomainMatchingApply(registered_domain);
   // PSL matching only applies to HTML forms.
-  if (form.scheme == PasswordForm::SCHEME_HTML && should_PSL_matching_apply) {
+  if (should_PSL_matching_apply) {
     // We are extending the original SQL query with one that includes more
     // possible matches based on public suffix domain matching. Using a regexp
     // here is just an optimization to not have to parse all the stored entries
@@ -668,13 +737,13 @@ bool LoginDatabase::GetLoginsCreatedBetween(
       "password_element, password_value, submit_element, "
       "signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "date_synced, display_name, avatar_url, "
       "federation_url, is_zero_click FROM logins "
       "WHERE date_created >= ? AND date_created < ?"
       "ORDER BY origin_url"));
-  s.BindInt64(0, begin.ToTimeT());
+  s.BindInt64(0, begin.ToInternalValue());
   s.BindInt64(1, end.is_null() ? std::numeric_limits<int64>::max()
-                               : end.ToTimeT());
+                               : end.ToInternalValue());
 
   while (s.Step()) {
     scoped_ptr<PasswordForm> new_form(new PasswordForm());
@@ -700,7 +769,7 @@ bool LoginDatabase::GetLoginsSyncedBetween(
       "password_element, password_value, submit_element, signon_realm, "
       "ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "date_synced, display_name, avatar_url, "
       "federation_url, is_zero_click FROM logins "
       "WHERE date_synced >= ? AND date_synced < ?"
       "ORDER BY origin_url"));
@@ -742,7 +811,7 @@ bool LoginDatabase::GetAllLoginsWithBlacklistSetting(
       "password_element, password_value, submit_element, "
       "signon_realm, ssl_valid, preferred, date_created, blacklisted_by_user, "
       "scheme, password_type, possible_usernames, times_used, form_data, "
-      "use_additional_auth, date_synced, display_name, avatar_url, "
+      "date_synced, display_name, avatar_url, "
       "federation_url, is_zero_click FROM logins "
       "WHERE blacklisted_by_user == ? ORDER BY origin_url"));
   s.BindInt(0, blacklisted ? 1 : 0);

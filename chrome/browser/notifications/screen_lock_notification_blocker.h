@@ -16,14 +16,14 @@ class ScreenLockNotificationBlocker
  public:
   explicit ScreenLockNotificationBlocker(
       message_center::MessageCenter* message_center);
-  virtual ~ScreenLockNotificationBlocker();
+  ~ScreenLockNotificationBlocker() override;
 
   bool is_locked() const { return is_locked_; }
 
   // message_center::NotificationBlocker overrides:
-  virtual void CheckState() OVERRIDE;
-  virtual bool ShouldShowNotificationAsPopup(
-      const message_center::NotifierId& notifier_id) const OVERRIDE;
+  void CheckState() override;
+  bool ShouldShowNotificationAsPopup(
+      const message_center::NotifierId& notifier_id) const override;
 
  private:
   bool is_locked_;

@@ -6,10 +6,15 @@
 
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "ash/wm/window_animations.h"
 #include "base/command_line.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+
+#if defined(USE_ATHENA)
+#include "athena/screen/public/screen_manager.h"
+#include "athena/util/container_priorities.h"
+#include "athena/util/fill_layout_manager.h"
+#endif
 
 namespace chromeos {
 
@@ -58,14 +63,29 @@ void LockWindowAura::Init() {
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.delegate = this;
   params.show_state = ui::SHOW_STATE_FULLSCREEN;
+#if defined(USE_ATHENA)
+  // Don't set TRANSLUCENT_WINDOW because we don't have wallpaper manager yet.
+  // TODO(dpolukhin): fix this code when crbug.com/408734 fixed.
+  athena::ScreenManager::ContainerParams container_params(
+      "LoginScreen", athena::CP_LOGIN_SCREEN);
+  container_params.can_activate_children = true;
+  container_params.block_events = true;
+  container_params.modal_container_priority =
+      athena::CP_LOGIN_SCREEN_SYSTEM_MODAL;
+  lock_screen_container_.reset(
+      athena::ScreenManager::Get()->CreateContainer(container_params));
+  params.parent = lock_screen_container_.get();
+  lock_screen_container_->SetLayoutManager(
+      new athena::FillLayoutManager(lock_screen_container_.get()));
+#else
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   // TODO(oshima): move the lock screen harness to ash.
   params.parent =
       ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
                                ash::kShellWindowId_LockScreenContainer);
+#endif
   views::Widget::Init(params);
-  wm::SetWindowVisibilityAnimationTransition(
-      GetNativeView(), wm::ANIMATE_NONE);
+  SetVisibilityAnimationTransition(views::Widget::ANIMATE_NONE);
 }
 
 }  // namespace chromeos

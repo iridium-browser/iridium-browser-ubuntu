@@ -23,13 +23,13 @@ class QueueMessageSwapPromise : public cc::SwapPromise {
                           scoped_refptr<FrameSwapMessageQueue> message_queue,
                           int source_frame_number);
 
-  virtual ~QueueMessageSwapPromise();
+  ~QueueMessageSwapPromise() override;
 
-  virtual void DidSwap(cc::CompositorFrameMetadata* metadata) OVERRIDE;
+  void DidSwap(cc::CompositorFrameMetadata* metadata) override;
 
-  virtual void DidNotSwap(DidNotSwapReason reason) OVERRIDE;
+  void DidNotSwap(DidNotSwapReason reason) override;
 
-  virtual int64 TraceId() const OVERRIDE;
+  int64 TraceId() const override;
 
  private:
   void PromiseCompleted();

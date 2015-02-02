@@ -4,10 +4,15 @@
 
 #import "chrome/browser/ui/cocoa/browser_window_layout.h"
 
+#include <math.h>
+#include <string.h>
+
 #include "base/logging.h"
+#import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 
 namespace chrome {
 
+// The height of the tab strip.
 const CGFloat kTabStripHeight = 37;
 
 }  // namespace chrome
@@ -20,6 +25,16 @@ namespace {
 const CGFloat kLocBarLeftRightInset = 1;
 const CGFloat kLocBarTopInset = 0;
 const CGFloat kLocBarBottomInset = 1;
+
+// Space between the incognito badge and the right edge of the window.
+const CGFloat kAvatarRightOffset = 4;
+
+// Space between the location bar and the right edge of the window, when there
+// are no extension buttons present.
+// When there is a fullscreen button to the right of the new style profile
+// button, we align the profile button with the location bar (although it won't
+// be aligned when there are extension buttons).
+const CGFloat kLocationBarRightOffset = 35;
 
 }  // namespace
 
@@ -81,6 +96,26 @@ const CGFloat kLocBarBottomInset = 1;
   parameters_.hasTabStrip = hasTabStrip;
 }
 
+- (void)setFullscreenButtonFrame:(NSRect)frame {
+  parameters_.fullscreenButtonFrame = frame;
+}
+
+- (void)setShouldShowAvatar:(BOOL)shouldShowAvatar {
+  parameters_.shouldShowAvatar = shouldShowAvatar;
+}
+
+- (void)setShouldUseNewAvatar:(BOOL)shouldUseNewAvatar {
+  parameters_.shouldUseNewAvatar = shouldUseNewAvatar;
+}
+
+- (void)setAvatarSize:(NSSize)avatarSize {
+  parameters_.avatarSize = avatarSize;
+}
+
+- (void)setAvatarLineWidth:(CGFloat)avatarLineWidth {
+  parameters_.avatarLineWidth = avatarLineWidth;
+}
+
 - (void)setHasToolbar:(BOOL)hasToolbar {
   parameters_.hasToolbar = hasToolbar;
 }
@@ -140,15 +175,78 @@ const CGFloat kLocBarBottomInset = 1;
 }
 
 - (void)computeTabStripLayout {
-  if (parameters_.hasTabStrip) {
-    maxY_ = parameters_.windowSize.height + fullscreenYOffset_;
-    CGFloat width = parameters_.contentViewSize.width;
-    output_.tabStripFrame = NSMakeRect(
-        0, maxY_ - chrome::kTabStripHeight, width, chrome::kTabStripHeight);
-    maxY_ = NSMinY(output_.tabStripFrame);
-  } else {
+  if (!parameters_.hasTabStrip) {
     maxY_ = parameters_.contentViewSize.height + fullscreenYOffset_;
+    return;
   }
+
+  // Temporary variable to hold the output.
+  chrome::TabStripLayout layout = {};
+
+  // Lay out the tab strip.
+  maxY_ = parameters_.windowSize.height + fullscreenYOffset_;
+  CGFloat width = parameters_.contentViewSize.width;
+  layout.frame = NSMakeRect(
+      0, maxY_ - chrome::kTabStripHeight, width, chrome::kTabStripHeight);
+  maxY_ = NSMinY(layout.frame);
+
+  // In Yosemite fullscreen, manually add the traffic light buttons to the tab
+  // strip.
+  layout.addCustomWindowControls =
+      parameters_.inAnyFullscreen && base::mac::IsOSYosemiteOrLater();
+
+  // Set left indentation based on fullscreen mode status.
+  if (!parameters_.inAnyFullscreen || layout.addCustomWindowControls)
+    layout.leftIndent = [TabStripController defaultLeftIndentForControls];
+
+  // Lay out the icognito/avatar badge because calculating the indentation on
+  // the right depends on it.
+  if (parameters_.shouldShowAvatar) {
+    CGFloat badgeXOffset = -kAvatarRightOffset;
+    CGFloat badgeYOffset = 0;
+    CGFloat buttonHeight = parameters_.avatarSize.height;
+
+    if (parameters_.shouldUseNewAvatar) {
+      // The fullscreen icon (if present) is displayed to the right of the
+      // new style profile button.
+      if (!NSIsEmptyRect(parameters_.fullscreenButtonFrame))
+        badgeXOffset = -kLocationBarRightOffset;
+
+      // Center the button, but make sure that it's pixel aligned on non-retina
+      // displays. Use trunc() instead of round() to mimic the behavior of
+      // autoresizesSubviews.
+      badgeYOffset = trunc((chrome::kTabStripHeight - buttonHeight) / 2);
+    } else {
+      // Actually place the badge *above* |maxY|, by +2 to miss the divider.
+      badgeYOffset = 2 * parameters_.avatarLineWidth;
+    }
+
+    NSSize size = NSMakeSize(parameters_.avatarSize.width,
+                             std::min(buttonHeight, chrome::kTabStripHeight));
+    NSPoint origin =
+        NSMakePoint(width - parameters_.avatarSize.width + badgeXOffset,
+                    maxY_ + badgeYOffset);
+    layout.avatarFrame =
+        NSMakeRect(origin.x, origin.y, size.width, size.height);
+  }
+
+  // Calculate the right indentation.
+  // On 10.7 Lion to 10.9 Mavericks, there will be a fullscreen button when not
+  // in fullscreen mode.
+  // There may also be a profile button, which can be on the right of the
+  // fullscreen button (old style), or to its left (new style).
+  // The right indentation is calculated to prevent the tab strip from
+  // overlapping these buttons.
+  CGFloat maxX = width;
+  if (!NSIsEmptyRect(parameters_.fullscreenButtonFrame)) {
+    maxX = NSMinX(parameters_.fullscreenButtonFrame);
+  }
+  if (parameters_.shouldShowAvatar) {
+    maxX = std::min(maxX, NSMinX(layout.avatarFrame));
+  }
+  layout.rightIndent = width - maxX;
+
+  output_.tabStripLayout = layout;
 }
 
 - (void)computeContentViewLayout {
@@ -203,13 +301,19 @@ const CGFloat kLocBarBottomInset = 1;
     maxY = parameters_.windowSize.height;
   }
 
-  // Lay out the info bar. It is never hidden. The frame needs to be high
-  // enough to accomodate the top arrow, which might stretch all the way to the
-  // page info bubble icon.
+  // Lay out the info bar. It is never hidden.
   if (parameters_.infoBarHeight != 0) {
-    CGFloat infoBarMaxY =
-        NSMinY(output_.toolbarFrame) + parameters.pageInfoBubblePointY;
+    CGFloat infoBarMaxY = maxY;
     CGFloat infoBarMinY = maxY - parameters_.infoBarHeight;
+
+    // If there's a toolbar, then the frame needs to be high enough to
+    // accomodate the top arrow, which might stretch all the way to the page
+    // info bubble icon.
+    if (parameters_.hasToolbar) {
+      infoBarMaxY =
+          NSMinY(output_.toolbarFrame) + parameters.pageInfoBubblePointY;
+    }
+
     output_.infoBarFrame =
         NSMakeRect(0, infoBarMinY, width, infoBarMaxY - infoBarMinY);
     output_.infoBarMaxTopArrowHeight =
@@ -246,7 +350,8 @@ const CGFloat kLocBarBottomInset = 1;
     // not be further shifted by the appearance/disappearance of the AppKit
     // menu bar.
     maxY = parameters_.windowSize.height;
-    maxY -= NSHeight(output_.toolbarFrame) + NSHeight(output_.tabStripFrame) +
+    maxY -= NSHeight(output_.toolbarFrame) +
+            NSHeight(output_.tabStripLayout.frame) +
             NSHeight(output_.bookmarkFrame) + parameters.infoBarHeight;
   }
 

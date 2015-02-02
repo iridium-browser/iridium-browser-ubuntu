@@ -53,7 +53,7 @@ class InputMethodUtilTest : public testing::Test {
         base::Bind(&InputMethodUtilTest::GetDisplayLanguageName));
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     InputMethodDescriptors input_methods;
 
     std::vector<std::string> layouts;
@@ -159,12 +159,13 @@ TEST_F(InputMethodUtilTest, GetInputMethodShortNameTest) {
   }
   {
     InputMethodDescriptor desc =
-        GetDesc(pinyin_ime_id, "us", "zh-CN", "");
+        GetDesc(pinyin_ime_id, "us", "zh-CN", "\xe6\x8b\xbc");
     EXPECT_EQ(base::UTF8ToUTF16("\xe6\x8b\xbc"),
               util_.GetInputMethodShortName(desc));
   }
   {
-    InputMethodDescriptor desc = GetDesc(zhuyin_ime_id, "us", "zh-TW", "");
+    InputMethodDescriptor desc =
+        GetDesc(zhuyin_ime_id, "us", "zh-TW", "\xE6\xB3\xA8");
     EXPECT_EQ(base::UTF8ToUTF16("\xE6\xB3\xA8"),
               util_.GetInputMethodShortName(desc));
   }
@@ -182,7 +183,7 @@ TEST_F(InputMethodUtilTest, GetInputMethodMediumNameTest) {
       "xkb:es:cat:cat",
       "xkb:gb:dvorak:eng",
     };
-    const int len = ARRAYSIZE_UNSAFE(input_method_id);
+    const int len = arraysize(input_method_id);
     for (int i=0; i<len; ++i) {
       InputMethodDescriptor desc = GetDesc(input_method_id[i], "", "", "");
       base::string16 medium_name = util_.GetInputMethodMediumName(desc);
@@ -196,7 +197,7 @@ TEST_F(InputMethodUtilTest, GetInputMethodMediumNameTest) {
       pinyin_ime_id,
       zhuyin_ime_id,
     };
-    const int len = ARRAYSIZE_UNSAFE(input_method_id);
+    const int len = arraysize(input_method_id);
     for (int i=0; i<len; ++i) {
       InputMethodDescriptor desc = GetDesc(input_method_id[i], "", "", "");
       base::string16 medium_name = util_.GetInputMethodMediumName(desc);
@@ -478,6 +479,24 @@ TEST_F(InputMethodUtilTest, TestInputMethodIDMigration) {
         extension_ime_util::GetInputMethodIDByEngineID(migration_cases[i][1]),
         input_method_ids[i]);
   }
+}
+
+// Test getting hardware input method IDs.
+TEST_F(InputMethodUtilTest, TestHardwareInputMethodIDs) {
+  util_.SetHardwareKeyboardLayoutForTesting("xkb:ru::rus");
+  std::vector<std::string> input_method_ids = util_.GetHardwareInputMethodIds();
+  std::vector<std::string> login_input_method_ids =
+      util_.GetHardwareLoginInputMethodIds();
+
+  EXPECT_EQ(2U, input_method_ids.size());
+  EXPECT_EQ(1U, login_input_method_ids.size());
+
+  EXPECT_EQ("xkb:us::eng", extension_ime_util::GetComponentIDByInputMethodID(
+      input_method_ids[0]));
+  EXPECT_EQ("xkb:ru::rus", extension_ime_util::GetComponentIDByInputMethodID(
+      input_method_ids[1]));
+  EXPECT_EQ("xkb:us::eng", extension_ime_util::GetComponentIDByInputMethodID(
+      login_input_method_ids[0]));
 }
 
 }  // namespace input_method

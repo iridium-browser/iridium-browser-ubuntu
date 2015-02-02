@@ -15,11 +15,11 @@ namespace metrics {
 class GPUMetricsProvider : public MetricsProvider {
  public:
   GPUMetricsProvider();
-  virtual ~GPUMetricsProvider();
+  ~GPUMetricsProvider() override;
 
   // MetricsProvider:
-  virtual void ProvideSystemProfileMetrics(
-      SystemProfileProto* system_profile_proto) OVERRIDE;
+  void ProvideSystemProfileMetrics(
+      SystemProfileProto* system_profile_proto) override;
 
  protected:
   // Exposed for the sake of mocking in test code.

@@ -18,14 +18,14 @@ class FirstRunBubble : public views::BubbleDelegateView,
 
  protected:
   // views::BubbleDelegateView overrides:
-  virtual void Init() OVERRIDE;
+  void Init() override;
 
  private:
   FirstRunBubble(Browser* browser, views::View* anchor_view);
-  virtual ~FirstRunBubble();
+  ~FirstRunBubble() override;
 
   // views::LinkListener overrides:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   Browser* browser_;
 

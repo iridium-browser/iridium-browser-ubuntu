@@ -7,7 +7,6 @@
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/worker_pool.h"
@@ -54,7 +53,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
 
  private:
   // URLFetcherDelegate overrides:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) override {
     DCHECK(url_fetcher_.get() == source);
 
     bool success = source->GetStatus().is_success() &&

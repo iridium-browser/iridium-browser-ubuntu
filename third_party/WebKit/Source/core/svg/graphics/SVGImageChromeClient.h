@@ -34,18 +34,20 @@
 
 namespace blink {
 
-class SVGImageChromeClient FINAL : public EmptyChromeClient {
+class SVGImage;
+
+class SVGImageChromeClient final : public EmptyChromeClient {
     WTF_MAKE_NONCOPYABLE(SVGImageChromeClient); WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit SVGImageChromeClient(SVGImage*);
-    virtual bool isSVGImageChromeClient() const OVERRIDE;
+    virtual bool isSVGImageChromeClient() const override;
 
     SVGImage* image() const { return m_image; }
 
 private:
-    virtual void chromeDestroyed() OVERRIDE;
-    virtual void invalidateContentsAndRootView(const IntRect&) OVERRIDE;
-    virtual void scheduleAnimation() OVERRIDE;
+    virtual void chromeDestroyed() override;
+    virtual void invalidateContentsAndRootView(const IntRect&) override;
+    virtual void scheduleAnimation() override;
 
     void animationTimerFired(Timer<SVGImageChromeClient>*);
 

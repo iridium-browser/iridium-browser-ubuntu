@@ -6,6 +6,7 @@
 
 #include <math.h>
 
+#include "base/i18n/rtl.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
@@ -29,6 +30,10 @@
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/text_utils.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/android/chromium_application.h"
+#endif
 
 namespace autofill {
 
@@ -177,6 +182,13 @@ void PasswordGenerationPopupControllerImpl::Show(bool display_password) {
 
   if (!view_) {
     view_ = PasswordGenerationPopupView::Create(this);
+
+    // Treat popup as being hidden if creation fails.
+    if (!view_) {
+      Hide();
+      return;
+    }
+
     CalculateBounds();
     view_->Show();
   } else {
@@ -213,9 +225,13 @@ void PasswordGenerationPopupControllerImpl::ViewDestroyed() {
 }
 
 void PasswordGenerationPopupControllerImpl::OnSavedPasswordsLinkClicked() {
+#if defined(OS_ANDROID)
+  chrome::android::ChromiumApplication::ShowPasswordSettings();
+#else
   chrome::ShowSettingsSubPage(
       chrome::FindBrowserWithWebContents(controller_common_.web_contents()),
       chrome::kPasswordManagerSubPage);
+#endif
 }
 
 void PasswordGenerationPopupControllerImpl::SetSelectionAtPoint(
@@ -241,6 +257,15 @@ gfx::NativeView PasswordGenerationPopupControllerImpl::container_view() {
 
 const gfx::Rect& PasswordGenerationPopupControllerImpl::popup_bounds() const {
   return popup_bounds_;
+}
+
+const gfx::RectF& PasswordGenerationPopupControllerImpl::element_bounds()
+    const {
+  return controller_common_.element_bounds();
+}
+
+bool PasswordGenerationPopupControllerImpl::IsRTL() const {
+  return base::i18n::IsRTL();
 }
 
 bool PasswordGenerationPopupControllerImpl::display_password() const {

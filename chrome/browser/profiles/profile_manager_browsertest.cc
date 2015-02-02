@@ -20,10 +20,10 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
+#include "content/public/test/test_utils.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/path_service.h"
@@ -69,7 +69,7 @@ class ProfileRemovalObserver : public ProfileInfoCacheObserver {
         this);
   }
 
-  virtual ~ProfileRemovalObserver() {
+  ~ProfileRemovalObserver() override {
     g_browser_process->profile_manager()->GetProfileInfoCache().RemoveObserver(
         this);
   }
@@ -77,8 +77,7 @@ class ProfileRemovalObserver : public ProfileInfoCacheObserver {
   std::string last_used_profile_name() { return last_used_profile_name_; }
 
   // ProfileInfoCacheObserver overrides:
-  virtual void OnProfileWillBeRemoved(
-      const base::FilePath& profile_path) OVERRIDE {
+  void OnProfileWillBeRemoved(const base::FilePath& profile_path) override {
     last_used_profile_name_ = g_browser_process->local_state()->GetString(
         prefs::kProfileLastUsed);
   }
@@ -96,8 +95,8 @@ class PasswordStoreConsumerVerifier :
  public:
   PasswordStoreConsumerVerifier() : called_(false) {}
 
-  virtual void OnGetPasswordStoreResults(
-      const std::vector<autofill::PasswordForm*>& results) OVERRIDE {
+  void OnGetPasswordStoreResults(
+      const std::vector<autofill::PasswordForm*>& results) override {
     EXPECT_FALSE(called_);
     called_ = true;
     password_entries_.clear();
@@ -123,7 +122,7 @@ class PasswordStoreConsumerVerifier :
 // platforms.
 class ProfileManagerBrowserTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
 #if defined(OS_CHROMEOS)
     command_line->AppendSwitch(
         chromeos::switches::kIgnoreUserProfileMappingForTests);
@@ -216,7 +215,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DISABLED_DeleteAllProfiles) {
 
 class ProfileManagerCrOSBrowserTest : public ProfileManagerBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     // Use a user hash other than the default chrome::kTestUserProfileDir
     // so that the prefix case is tested.
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile,

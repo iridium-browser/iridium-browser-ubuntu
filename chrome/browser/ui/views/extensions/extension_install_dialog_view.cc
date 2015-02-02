@@ -17,12 +17,15 @@
 #include "chrome/browser/extensions/api/experience_sampling_private/experience_sampling.h"
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt_experiment.h"
+#include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/extension.h"
@@ -166,13 +169,16 @@ CheckboxedView::CheckboxedView(views::View* view,
 }
 
 void ShowExtensionInstallDialogImpl(
-    const ExtensionInstallPrompt::ShowParams& show_params,
+    ExtensionInstallPromptShowParams* show_params,
     ExtensionInstallPrompt::Delegate* delegate,
     scoped_refptr<ExtensionInstallPrompt::Prompt> prompt) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  CreateBrowserModalDialogViews(
-      new ExtensionInstallDialogView(show_params.navigator, delegate, prompt),
-      show_params.parent_window)->Show();
+  ExtensionInstallDialogView* dialog =
+      new ExtensionInstallDialogView(show_params->profile(),
+                                     show_params->GetParentWebContents(),
+                                     delegate,
+                                     prompt);
+  CreateBrowserModalDialogViews(dialog, show_params->GetParentWindow())->Show();
 }
 
 CustomScrollableView::CustomScrollableView() {}
@@ -184,10 +190,12 @@ void CustomScrollableView::Layout() {
 }
 
 ExtensionInstallDialogView::ExtensionInstallDialogView(
+    Profile* profile,
     content::PageNavigator* navigator,
     ExtensionInstallPrompt::Delegate* delegate,
     scoped_refptr<ExtensionInstallPrompt::Prompt> prompt)
-    : navigator_(navigator),
+    : profile_(profile),
+      navigator_(navigator),
       delegate_(delegate),
       prompt_(prompt),
       scroll_view_(NULL),
@@ -405,42 +413,76 @@ void ExtensionInstallDialogView::InitView() {
     }
   }
 
-  if (prompt_->GetRetainedFileCount()) {
-    // Slide in under the permissions, if there are any. If there are
-    // either, the retained files prompt stretches all the way to the
-    // right of the dialog. If there are no permissions, the retained
-    // files prompt just takes up the left column.
-    int space_for_files = left_column_width;
+  int space_for_files_and_devices = left_column_width;
+  if (prompt_->GetRetainedFileCount() || prompt_->GetRetainedDeviceCount()) {
+    // Slide in under the permissions, if there are any. If there are either,
+    // the retained files and devices prompts stretch all the way to the right
+    // of the dialog. If there are no permissions, the retained files and
+    // devices prompts just take up the left column.
+
     if (has_permissions) {
-      space_for_files += kIconSize;
+      space_for_files_and_devices += kIconSize;
       views::ColumnSet* column_set = layout->AddColumnSet(++column_set_id);
       column_set->AddColumn(views::GridLayout::FILL,
                             views::GridLayout::FILL,
                             1,
                             views::GridLayout::USE_PREF,
                             0,  // no fixed width
-                            space_for_files);
+                            space_for_files_and_devices);
     }
+  }
 
+  if (prompt_->GetRetainedFileCount()) {
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
     layout->StartRow(0, column_set_id);
-    views::Label* retained_files_header = NULL;
-    retained_files_header =
+    views::Label* retained_files_header =
         new views::Label(prompt_->GetRetainedFilesHeading());
     retained_files_header->SetMultiLine(true);
     retained_files_header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    retained_files_header->SizeToFit(space_for_files);
+    retained_files_header->SizeToFit(space_for_files_and_devices);
     layout->AddView(retained_files_header);
 
     layout->StartRow(0, column_set_id);
     PermissionDetails details;
-    for (size_t i = 0; i < prompt_->GetRetainedFileCount(); ++i)
+    for (size_t i = 0; i < prompt_->GetRetainedFileCount(); ++i) {
       details.push_back(prompt_->GetRetainedFile(i));
+    }
     ExpandableContainerView* issue_advice_view =
-        new ExpandableContainerView(
-            this, base::string16(), details, space_for_files,
-            false, true, false);
+        new ExpandableContainerView(this,
+                                    base::string16(),
+                                    details,
+                                    space_for_files_and_devices,
+                                    false,
+                                    true,
+                                    false);
+    layout->AddView(issue_advice_view);
+  }
+
+  if (prompt_->GetRetainedDeviceCount()) {
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+
+    layout->StartRow(0, column_set_id);
+    views::Label* retained_devices_header =
+        new views::Label(prompt_->GetRetainedDevicesHeading());
+    retained_devices_header->SetMultiLine(true);
+    retained_devices_header->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    retained_devices_header->SizeToFit(space_for_files_and_devices);
+    layout->AddView(retained_devices_header);
+
+    layout->StartRow(0, column_set_id);
+    PermissionDetails details;
+    for (size_t i = 0; i < prompt_->GetRetainedDeviceCount(); ++i) {
+      details.push_back(prompt_->GetRetainedDeviceMessageString(i));
+    }
+    ExpandableContainerView* issue_advice_view =
+        new ExpandableContainerView(this,
+                                    base::string16(),
+                                    details,
+                                    space_for_files_and_devices,
+                                    false,
+                                    true,
+                                    false);
     layout->AddView(issue_advice_view);
   }
 
@@ -712,6 +754,7 @@ void ExtensionInstallDialogView::ContentsChanged() {
 
 void ExtensionInstallDialogView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
+  views::DialogDelegateView::ViewHierarchyChanged(details);
   // Since we want the links to show up in the same visual row as the accept
   // and cancel buttons, which is provided by the framework, we must add the
   // buttons to the non-client view, which is the parent of this view.
@@ -817,7 +860,14 @@ void ExtensionInstallDialogView::LinkClicked(views::Link* source,
         store_url, Referrer(), NEW_FOREGROUND_TAB,
         ui::PAGE_TRANSITION_LINK,
         false);
-    navigator_->OpenURL(params);
+
+    if (navigator_) {
+      navigator_->OpenURL(params);
+    } else {
+      chrome::ScopedTabbedBrowserDisplayer displayer(
+          profile_, chrome::GetActiveDesktop());
+      displayer.browser()->OpenURL(params);
+    }
     GetWidget()->Close();
   }
 }

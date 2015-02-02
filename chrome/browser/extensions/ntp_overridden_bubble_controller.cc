@@ -9,7 +9,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
-#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "grit/components_strings.h"
@@ -20,6 +19,10 @@ using extensions::NtpOverriddenBubbleController;
 
 namespace {
 
+// Whether the user has been notified about extension overriding the new tab
+// page.
+const char kNtpBubbleAcknowledged[] = "ack_ntp_bubble";
+
 ////////////////////////////////////////////////////////////////////////////////
 // NtpOverriddenBubbleDelegate
 
@@ -27,38 +30,31 @@ class NtpOverriddenBubbleDelegate
     : public extensions::ExtensionMessageBubbleController::Delegate {
  public:
   NtpOverriddenBubbleDelegate(ExtensionService* service, Profile* profile);
-  virtual ~NtpOverriddenBubbleDelegate();
+  ~NtpOverriddenBubbleDelegate() override;
 
   // ExtensionMessageBubbleController::Delegate methods.
-  virtual bool ShouldIncludeExtension(const std::string& extension_id) OVERRIDE;
-  virtual void AcknowledgeExtension(
+  bool ShouldIncludeExtension(const std::string& extension_id) override;
+  void AcknowledgeExtension(
       const std::string& extension_id,
-      extensions::ExtensionMessageBubbleController::BubbleAction
-          user_action) OVERRIDE;
-  virtual void PerformAction(const extensions::ExtensionIdList& list) OVERRIDE;
-  virtual base::string16 GetTitle() const OVERRIDE;
-  virtual base::string16 GetMessageBody(
-      bool anchored_to_browser_action) const OVERRIDE;
-  virtual base::string16 GetOverflowText(
-      const base::string16& overflow_count) const OVERRIDE;
-  virtual base::string16 GetLearnMoreLabel() const OVERRIDE;
-  virtual GURL GetLearnMoreUrl() const OVERRIDE;
-  virtual base::string16 GetActionButtonLabel() const OVERRIDE;
-  virtual base::string16 GetDismissButtonLabel() const OVERRIDE;
-  virtual bool ShouldShowExtensionList() const OVERRIDE;
-  virtual void RestrictToSingleExtension(
-      const std::string& extension_id) OVERRIDE;
-  virtual void LogExtensionCount(size_t count) OVERRIDE;
-  virtual void LogAction(
-      extensions::ExtensionMessageBubbleController::BubbleAction
-          action) OVERRIDE;
+      extensions::ExtensionMessageBubbleController::BubbleAction user_action)
+      override;
+  void PerformAction(const extensions::ExtensionIdList& list) override;
+  base::string16 GetTitle() const override;
+  base::string16 GetMessageBody(bool anchored_to_browser_action) const override;
+  base::string16 GetOverflowText(
+      const base::string16& overflow_count) const override;
+  GURL GetLearnMoreUrl() const override;
+  base::string16 GetActionButtonLabel() const override;
+  base::string16 GetDismissButtonLabel() const override;
+  bool ShouldShowExtensionList() const override;
+  void RestrictToSingleExtension(const std::string& extension_id) override;
+  void LogExtensionCount(size_t count) override;
+  void LogAction(extensions::ExtensionMessageBubbleController::BubbleAction
+                     action) override;
 
  private:
   // Our extension service. Weak, not owned by us.
   ExtensionService* service_;
-
-  // A weak pointer to the profile we are associated with. Not owned by us.
-  Profile* profile_;
 
   // The ID of the extension we are showing the bubble for.
   std::string extension_id_;
@@ -69,7 +65,10 @@ class NtpOverriddenBubbleDelegate
 NtpOverriddenBubbleDelegate::NtpOverriddenBubbleDelegate(
     ExtensionService* service,
     Profile* profile)
-    : service_(service), profile_(profile) {}
+    : extensions::ExtensionMessageBubbleController::Delegate(profile),
+      service_(service) {
+  set_acknowledged_flag_pref_name(kNtpBubbleAcknowledged);
+}
 
 NtpOverriddenBubbleDelegate::~NtpOverriddenBubbleDelegate() {}
 
@@ -79,14 +78,13 @@ bool NtpOverriddenBubbleDelegate::ShouldIncludeExtension(
     return false;
 
   using extensions::ExtensionRegistry;
-  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
   const extensions::Extension* extension =
       registry->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
   if (!extension)
     return false;  // The extension provided is no longer enabled.
 
-  extensions::ExtensionPrefs* prefs = extensions::ExtensionPrefs::Get(profile_);
-  if (prefs->HasNtpOverriddenBubbleBeenAcknowledged(extension_id))
+  if (HasBubbleInfoBeenAcknowledged(extension_id))
     return false;
 
   return true;
@@ -95,11 +93,8 @@ bool NtpOverriddenBubbleDelegate::ShouldIncludeExtension(
 void NtpOverriddenBubbleDelegate::AcknowledgeExtension(
     const std::string& extension_id,
     ExtensionMessageBubbleController::BubbleAction user_action) {
-  if (user_action != ExtensionMessageBubbleController::ACTION_EXECUTE) {
-    extensions::ExtensionPrefs* prefs =
-        extensions::ExtensionPrefs::Get(profile_);
-    prefs->SetNtpOverriddenBubbleBeenAcknowledged(extension_id, true);
-  }
+  if (user_action != ExtensionMessageBubbleController::ACTION_EXECUTE)
+    SetBubbleInfoBeenAcknowledged(extension_id, true);
 }
 
 void NtpOverriddenBubbleDelegate::PerformAction(
@@ -129,10 +124,6 @@ base::string16 NtpOverriddenBubbleDelegate::GetOverflowText(
   // Does not have more than one extension in the list at a time.
   NOTREACHED();
   return base::string16();
-}
-
-base::string16 NtpOverriddenBubbleDelegate::GetLearnMoreLabel() const {
-  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
 }
 
 GURL NtpOverriddenBubbleDelegate::GetLearnMoreUrl() const {

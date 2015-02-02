@@ -28,6 +28,7 @@
 #include "config.h"
 #include "modules/webdatabase/SQLStatement.h"
 
+#include "core/inspector/InspectorInstrumentation.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseManager.h"
 #include "modules/webdatabase/SQLError.h"
@@ -42,17 +43,20 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<SQLStatement> SQLStatement::create(Database* database,
+SQLStatement* SQLStatement::create(Database* database,
     SQLStatementCallback* callback, SQLStatementErrorCallback* errorCallback)
 {
-    return adoptPtrWillBeNoop(new SQLStatement(database, callback, errorCallback));
+    return new SQLStatement(database, callback, errorCallback);
 }
 
 SQLStatement::SQLStatement(Database* database, SQLStatementCallback* callback,
     SQLStatementErrorCallback* errorCallback)
     : m_statementCallback(callback)
     , m_statementErrorCallback(errorCallback)
+    , m_asyncOperationId(0)
 {
+    if (hasCallback() || hasErrorCallback())
+        m_asyncOperationId = InspectorInstrumentation::traceAsyncOperationStarting(database->executionContext(), "SQLStatement");
 }
 
 SQLStatement::~SQLStatement()
@@ -92,17 +96,18 @@ bool SQLStatement::performCallback(SQLTransaction* transaction)
     SQLStatementErrorCallback* errorCallback = m_statementErrorCallback.release();
     SQLErrorData* error = m_backend->sqlError();
 
+    InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncOperationCompletedCallbackStarting(transaction->database()->executionContext(), m_asyncOperationId);
+
     // Call the appropriate statement callback and track if it resulted in an error,
     // because then we need to jump to the transaction error callback.
     if (error) {
-        if (errorCallback) {
-            RefPtrWillBeRawPtr<SQLError> sqlError = SQLError::create(*error);
-            callbackError = errorCallback->handleEvent(transaction, sqlError.get());
-        }
+        if (errorCallback)
+            callbackError = errorCallback->handleEvent(transaction, SQLError::create(*error));
     } else if (callback) {
-        RefPtrWillBeRawPtr<SQLResultSet> resultSet = m_backend->sqlResultSet();
-        callbackError = !callback->handleEvent(transaction, resultSet.get());
+        callbackError = !callback->handleEvent(transaction, m_backend->sqlResultSet());
     }
+
+    InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
 
     return callbackError;
 }

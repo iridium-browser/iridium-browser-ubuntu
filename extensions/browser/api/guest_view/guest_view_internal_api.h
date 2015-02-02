@@ -16,12 +16,27 @@ class GuestViewInternalCreateGuestFunction : public AsyncExtensionFunction {
   GuestViewInternalCreateGuestFunction();
 
  protected:
-  virtual ~GuestViewInternalCreateGuestFunction() {}
-  virtual bool RunAsync() OVERRIDE FINAL;
+  ~GuestViewInternalCreateGuestFunction() override {}
+  bool RunAsync() final;
 
  private:
   void CreateGuestCallback(content::WebContents* guest_web_contents);
   DISALLOW_COPY_AND_ASSIGN(GuestViewInternalCreateGuestFunction);
+};
+
+class GuestViewInternalDestroyGuestFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("guestViewInternal.destroyGuest",
+                             GUESTVIEWINTERNAL_DESTROYGUEST);
+  GuestViewInternalDestroyGuestFunction();
+
+ protected:
+  ~GuestViewInternalDestroyGuestFunction() override;
+  bool RunAsync() final;
+
+ private:
+  void DestroyGuestCallback(content::WebContents* guest_web_contents);
+  DISALLOW_COPY_AND_ASSIGN(GuestViewInternalDestroyGuestFunction);
 };
 
 class GuestViewInternalSetAutoSizeFunction : public AsyncExtensionFunction {
@@ -32,8 +47,8 @@ class GuestViewInternalSetAutoSizeFunction : public AsyncExtensionFunction {
   GuestViewInternalSetAutoSizeFunction();
 
  protected:
-  virtual ~GuestViewInternalSetAutoSizeFunction();
-  virtual bool RunAsync() OVERRIDE FINAL;
+  ~GuestViewInternalSetAutoSizeFunction() override;
+  bool RunAsync() final;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GuestViewInternalSetAutoSizeFunction);

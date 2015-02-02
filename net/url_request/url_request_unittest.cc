@@ -31,6 +31,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/capturing_net_log.h"
+#include "net/base/chunked_upload_data_stream.h"
+#include "net/base/elements_upload_data_stream.h"
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
@@ -70,6 +72,8 @@
 #include "net/url_request/static_http_user_agent_settings.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_http_job.h"
+#include "net/url_request/url_request_intercepting_job_factory.h"
+#include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_redirect_job.h"
 #include "net/url_request/url_request_test_job.h"
@@ -242,10 +246,10 @@ bool ContainsString(const std::string& haystack, const char* needle) {
   return it != haystack.end();
 }
 
-UploadDataStream* CreateSimpleUploadData(const char* data) {
+scoped_ptr<UploadDataStream> CreateSimpleUploadData(const char* data) {
   scoped_ptr<UploadElementReader> reader(
       new UploadBytesElementReader(data, strlen(data)));
-  return UploadDataStream::CreateWithReader(reader.Pass(), 0);
+  return ElementsUploadDataStream::CreateWithReader(reader.Pass(), 0);
 }
 
 // Verify that the SSLInfo of a successful SSL connection has valid values.
@@ -365,26 +369,26 @@ class BlockingNetworkDelegate : public TestNetworkDelegate {
                        const AuthCallback& callback);
 
   // TestNetworkDelegate implementation.
-  virtual int OnBeforeURLRequest(URLRequest* request,
-                                 const CompletionCallback& callback,
-                                 GURL* new_url) OVERRIDE;
+  int OnBeforeURLRequest(URLRequest* request,
+                         const CompletionCallback& callback,
+                         GURL* new_url) override;
 
-  virtual int OnBeforeSendHeaders(URLRequest* request,
-                                  const CompletionCallback& callback,
-                                  HttpRequestHeaders* headers) OVERRIDE;
+  int OnBeforeSendHeaders(URLRequest* request,
+                          const CompletionCallback& callback,
+                          HttpRequestHeaders* headers) override;
 
-  virtual int OnHeadersReceived(
+  int OnHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
-      GURL* allowed_unsafe_redirect_url) OVERRIDE;
+      GURL* allowed_unsafe_redirect_url) override;
 
-  virtual NetworkDelegate::AuthRequiredResponse OnAuthRequired(
+  NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       URLRequest* request,
       const AuthChallengeInfo& auth_info,
       const AuthCallback& callback,
-      AuthCredentials* credentials) OVERRIDE;
+      AuthCredentials* credentials) override;
 
   // Resets the callbacks and |stage_blocked_for_callback_|.
   void Reset();
@@ -594,7 +598,7 @@ class TestURLRequestContextWithProxy : public TestURLRequestContext {
     set_network_delegate(delegate);
     Init();
   }
-  virtual ~TestURLRequestContextWithProxy() {}
+  ~TestURLRequestContextWithProxy() override {}
 };
 
 }  // namespace
@@ -605,31 +609,52 @@ class URLRequestTest : public PlatformTest {
   URLRequestTest() : default_context_(true) {
     default_context_.set_network_delegate(&default_network_delegate_);
     default_context_.set_net_log(&net_log_);
-    job_factory_.SetProtocolHandler("data", new DataProtocolHandler);
-#if !defined(DISABLE_FILE_SUPPORT)
-    job_factory_.SetProtocolHandler(
-        "file", new FileProtocolHandler(base::MessageLoopProxy::current()));
-#endif
-    default_context_.set_job_factory(&job_factory_);
-    default_context_.Init();
+    job_factory_impl_ = new URLRequestJobFactoryImpl();
+    job_factory_.reset(job_factory_impl_);
   }
-  virtual ~URLRequestTest() {
+
+  ~URLRequestTest() override {
     // URLRequestJobs may post clean-up tasks on destruction.
     base::RunLoop().RunUntilIdle();
   }
 
+  virtual void SetUp() {
+    SetUpFactory();
+    default_context_.set_job_factory(job_factory_.get());
+    default_context_.Init();
+    PlatformTest::SetUp();
+  }
+
+  virtual void SetUpFactory() {
+    job_factory_impl_->SetProtocolHandler("data", new DataProtocolHandler);
+#if !defined(DISABLE_FILE_SUPPORT)
+    job_factory_impl_->SetProtocolHandler(
+        "file", new FileProtocolHandler(base::MessageLoopProxy::current()));
+#endif
+  }
+
+  TestNetworkDelegate* default_network_delegate() {
+    return &default_network_delegate_;
+  }
+
+  const TestURLRequestContext& default_context() const {
+    return default_context_;
+  }
+
+
   // Adds the TestJobInterceptor to the default context.
   TestJobInterceptor* AddTestInterceptor() {
     TestJobInterceptor* protocol_handler_ = new TestJobInterceptor();
-    job_factory_.SetProtocolHandler("http", NULL);
-    job_factory_.SetProtocolHandler("http", protocol_handler_);
+    job_factory_impl_->SetProtocolHandler("http", NULL);
+    job_factory_impl_->SetProtocolHandler("http", protocol_handler_);
     return protocol_handler_;
   }
 
  protected:
   CapturingNetLog net_log_;
   TestNetworkDelegate default_network_delegate_;  // Must outlive URLRequest.
-  URLRequestJobFactoryImpl job_factory_;
+  URLRequestJobFactoryImpl* job_factory_impl_;
+  scoped_ptr<URLRequestJobFactory> job_factory_;
   TestURLRequestContext default_context_;
 };
 
@@ -1103,11 +1128,9 @@ class RestartTestJob : public URLRequestTestJob {
   RestartTestJob(URLRequest* request, NetworkDelegate* network_delegate)
     : URLRequestTestJob(request, network_delegate, true) {}
  protected:
-  virtual void StartAsync() OVERRIDE {
-    this->NotifyRestartRequired();
-  }
+  void StartAsync() override { this->NotifyRestartRequired(); }
  private:
-  virtual ~RestartTestJob() {}
+  ~RestartTestJob() override {}
 };
 
 class CancelTestJob : public URLRequestTestJob {
@@ -1115,11 +1138,9 @@ class CancelTestJob : public URLRequestTestJob {
   explicit CancelTestJob(URLRequest* request, NetworkDelegate* network_delegate)
     : URLRequestTestJob(request, network_delegate, true) {}
  protected:
-  virtual void StartAsync() OVERRIDE {
-    request_->Cancel();
-  }
+  void StartAsync() override { request_->Cancel(); }
  private:
-  virtual ~CancelTestJob() {}
+  ~CancelTestJob() override {}
 };
 
 class CancelThenRestartTestJob : public URLRequestTestJob {
@@ -1129,12 +1150,12 @@ class CancelThenRestartTestJob : public URLRequestTestJob {
       : URLRequestTestJob(request, network_delegate, true) {
   }
  protected:
-  virtual void StartAsync() OVERRIDE {
+  void StartAsync() override {
     request_->Cancel();
     this->NotifyRestartRequired();
   }
  private:
-  virtual ~CancelThenRestartTestJob() {}
+  ~CancelThenRestartTestJob() override {}
 };
 
 // An Interceptor for use with interceptor tests
@@ -1154,13 +1175,12 @@ class TestInterceptor : URLRequest::Interceptor {
     URLRequest::Deprecated::RegisterRequestInterceptor(this);
   }
 
-  virtual ~TestInterceptor() {
+  ~TestInterceptor() override {
     URLRequest::Deprecated::UnregisterRequestInterceptor(this);
   }
 
-  virtual URLRequestJob* MaybeIntercept(
-      URLRequest* request,
-      NetworkDelegate* network_delegate) OVERRIDE {
+  URLRequestJob* MaybeIntercept(URLRequest* request,
+                                NetworkDelegate* network_delegate) override {
     if (restart_main_request_) {
       restart_main_request_ = false;
       did_restart_main_ = true;
@@ -1195,10 +1215,9 @@ class TestInterceptor : URLRequest::Interceptor {
     return job;
   }
 
-  virtual URLRequestJob* MaybeInterceptRedirect(
-      URLRequest* request,
-      NetworkDelegate* network_delegate,
-      const GURL& location) OVERRIDE {
+  URLRequestJob* MaybeInterceptRedirect(URLRequest* request,
+                                        NetworkDelegate* network_delegate,
+                                        const GURL& location) override {
     if (cancel_redirect_request_) {
       cancel_redirect_request_ = false;
       did_cancel_redirect_ = true;
@@ -1215,8 +1234,9 @@ class TestInterceptor : URLRequest::Interceptor {
                                  true);
   }
 
-  virtual URLRequestJob* MaybeInterceptResponse(
-      URLRequest* request, NetworkDelegate* network_delegate) OVERRIDE {
+  URLRequestJob* MaybeInterceptResponse(
+      URLRequest* request,
+      NetworkDelegate* network_delegate) override {
     if (cancel_final_request_) {
       cancel_final_request_ = false;
       did_cancel_final_ = true;
@@ -1577,29 +1597,570 @@ TEST_F(URLRequestTest, InterceptRespectsCancelInRestart) {
   EXPECT_EQ(URLRequestStatus::CANCELED, req->status().status());
 }
 
-LoadTimingInfo RunLoadTimingTest(const LoadTimingInfo& job_load_timing,
-                                 URLRequestContext* context) {
-  TestInterceptor interceptor;
-  interceptor.intercept_main_request_ = true;
-  interceptor.main_request_load_timing_info_ = job_load_timing;
+// An Interceptor for use with interceptor tests.
+class MockURLRequestInterceptor : public URLRequestInterceptor {
+ public:
+  // Static getters for canned response header and data strings.
+  static std::string ok_data() {
+    return URLRequestTestJob::test_data_1();
+  }
+
+  static std::string ok_headers() {
+    return URLRequestTestJob::test_headers();
+  }
+
+  static std::string redirect_data() {
+    return std::string();
+  }
+
+  static std::string redirect_headers() {
+    return URLRequestTestJob::test_redirect_headers();
+  }
+
+  static std::string error_data() {
+    return std::string("ohhh nooooo mr. bill!");
+  }
+
+  static std::string error_headers() {
+    return URLRequestTestJob::test_error_headers();
+  }
+
+  MockURLRequestInterceptor()
+      : intercept_main_request_(false), restart_main_request_(false),
+        cancel_main_request_(false), cancel_then_restart_main_request_(false),
+        simulate_main_network_error_(false),
+        intercept_redirect_(false), cancel_redirect_request_(false),
+        intercept_final_response_(false), cancel_final_request_(false),
+        use_url_request_http_job_(false),
+        did_intercept_main_(false), did_restart_main_(false),
+        did_cancel_main_(false), did_cancel_then_restart_main_(false),
+        did_simulate_error_main_(false),
+        did_intercept_redirect_(false), did_cancel_redirect_(false),
+        did_intercept_final_(false), did_cancel_final_(false) {
+  }
+
+  ~MockURLRequestInterceptor() override {
+  }
+
+  // URLRequestInterceptor implementation:
+  URLRequestJob* MaybeInterceptRequest(
+      URLRequest* request,
+      NetworkDelegate* network_delegate) const override {
+    if (restart_main_request_) {
+      restart_main_request_ = false;
+      did_restart_main_ = true;
+      return new RestartTestJob(request, network_delegate);
+    }
+    if (cancel_main_request_) {
+      cancel_main_request_ = false;
+      did_cancel_main_ = true;
+      return new CancelTestJob(request, network_delegate);
+    }
+    if (cancel_then_restart_main_request_) {
+      cancel_then_restart_main_request_ = false;
+      did_cancel_then_restart_main_ = true;
+      return new CancelThenRestartTestJob(request, network_delegate);
+    }
+    if (simulate_main_network_error_) {
+      simulate_main_network_error_ = false;
+      did_simulate_error_main_ = true;
+      if (use_url_request_http_job_) {
+        return URLRequestHttpJob::Factory(request, network_delegate, "http");
+      }
+      // This job will result in error since the requested URL is not one of the
+      // URLs supported by these tests.
+      return new URLRequestTestJob(request, network_delegate, true);
+    }
+    if (!intercept_main_request_)
+      return nullptr;
+    intercept_main_request_ = false;
+    did_intercept_main_ = true;
+    URLRequestTestJob* job =  new URLRequestTestJob(request,
+                                                    network_delegate,
+                                                    main_headers_,
+                                                    main_data_,
+                                                    true);
+    job->set_load_timing_info(main_request_load_timing_info_);
+    return job;
+  }
+
+  URLRequestJob* MaybeInterceptRedirect(URLRequest* request,
+                                        NetworkDelegate* network_delegate,
+                                        const GURL& location) const override {
+    if (cancel_redirect_request_) {
+      cancel_redirect_request_ = false;
+      did_cancel_redirect_ = true;
+      return new CancelTestJob(request, network_delegate);
+    }
+    if (!intercept_redirect_)
+      return nullptr;
+    intercept_redirect_ = false;
+    did_intercept_redirect_ = true;
+    if (use_url_request_http_job_) {
+      return URLRequestHttpJob::Factory(request, network_delegate, "http");
+    }
+    return new URLRequestTestJob(request,
+                                 network_delegate,
+                                 redirect_headers_,
+                                 redirect_data_,
+                                 true);
+  }
+
+  URLRequestJob* MaybeInterceptResponse(
+      URLRequest* request,
+      NetworkDelegate* network_delegate) const override {
+    if (cancel_final_request_) {
+      cancel_final_request_ = false;
+      did_cancel_final_ = true;
+      return new CancelTestJob(request, network_delegate);
+    }
+    if (!intercept_final_response_)
+      return nullptr;
+    intercept_final_response_ = false;
+    did_intercept_final_ = true;
+    if (use_url_request_http_job_) {
+      return URLRequestHttpJob::Factory(request, network_delegate, "http");
+    }
+    return new URLRequestTestJob(request,
+                                 network_delegate,
+                                 final_headers_,
+                                 final_data_,
+                                 true);
+  }
+
+  void set_intercept_main_request(bool intercept_main_request) {
+    intercept_main_request_ = intercept_main_request;
+  }
+
+  void set_main_headers(const std::string& main_headers) {
+    main_headers_ = main_headers;
+  }
+
+  void set_main_data(const std::string& main_data) {
+    main_data_ = main_data;
+  }
+
+  void set_main_request_load_timing_info(
+      const LoadTimingInfo& main_request_load_timing_info) {
+    main_request_load_timing_info_ = main_request_load_timing_info;
+  }
+
+  void set_restart_main_request(bool restart_main_request) {
+    restart_main_request_ = restart_main_request;
+  }
+
+  void set_cancel_main_request(bool cancel_main_request) {
+    cancel_main_request_ = cancel_main_request;
+  }
+
+  void set_cancel_then_restart_main_request(
+      bool cancel_then_restart_main_request) {
+    cancel_then_restart_main_request_ = cancel_then_restart_main_request;
+  }
+
+  void set_simulate_main_network_error(bool simulate_main_network_error) {
+    simulate_main_network_error_ = simulate_main_network_error;
+  }
+
+  void set_intercept_redirect(bool intercept_redirect) {
+    intercept_redirect_ = intercept_redirect;
+  }
+
+  void set_redirect_headers(const std::string& redirect_headers) {
+    redirect_headers_ = redirect_headers;
+  }
+
+  void set_redirect_data(const std::string& redirect_data) {
+    redirect_data_ = redirect_data;
+  }
+
+  void set_cancel_redirect_request(bool cancel_redirect_request) {
+    cancel_redirect_request_ = cancel_redirect_request;
+  }
+
+  void set_intercept_final_response(bool intercept_final_response) {
+    intercept_final_response_ = intercept_final_response;
+  }
+
+  void set_final_headers(const std::string& final_headers) {
+    final_headers_ = final_headers;
+  }
+
+  void set_final_data(const std::string& final_data) {
+    final_data_ = final_data;
+  }
+
+  void set_cancel_final_request(bool cancel_final_request) {
+    cancel_final_request_ = cancel_final_request;
+  }
+
+  void set_use_url_request_http_job(bool use_url_request_http_job) {
+    use_url_request_http_job_ = use_url_request_http_job;
+  }
+
+  bool did_intercept_main() const {
+    return did_intercept_main_;
+  }
+
+  bool did_restart_main() const {
+    return did_restart_main_;
+  }
+
+  bool did_cancel_main() const {
+    return did_cancel_main_;
+  }
+
+  bool did_cancel_then_restart_main() const {
+    return did_cancel_then_restart_main_;
+  }
+
+  bool did_simulate_error_main() const {
+    return did_simulate_error_main_;
+  }
+
+  bool did_intercept_redirect() const {
+    return did_intercept_redirect_;
+  }
+
+  bool did_cancel_redirect() const {
+    return did_cancel_redirect_;
+  }
+
+  bool did_intercept_final() const {
+    return did_intercept_final_;
+  }
+
+  bool did_cancel_final() const {
+    return did_cancel_final_;
+  }
+
+ private:
+  // Indicate whether to intercept the main request, and if so specify the
+  // response to return and the LoadTimingInfo to use.
+  mutable bool intercept_main_request_;
+  mutable std::string main_headers_;
+  mutable std::string main_data_;
+  mutable LoadTimingInfo main_request_load_timing_info_;
+
+  // These indicate actions that can be taken within MaybeInterceptRequest.
+  mutable bool restart_main_request_;
+  mutable bool cancel_main_request_;
+  mutable bool cancel_then_restart_main_request_;
+  mutable bool simulate_main_network_error_;
+
+  // Indicate whether to intercept redirects, and if so specify the response to
+  // return.
+  mutable bool intercept_redirect_;
+  mutable std::string redirect_headers_;
+  mutable std::string redirect_data_;
+
+  // Cancel the request within MaybeInterceptRedirect.
+  mutable bool cancel_redirect_request_;
+
+  // Indicate whether to intercept the final response, and if so specify the
+  // response to return.
+  mutable bool intercept_final_response_;
+  mutable std::string final_headers_;
+  mutable std::string final_data_;
+
+  // Cancel the final request within MaybeInterceptResponse.
+  mutable bool cancel_final_request_;
+
+  // Instruct the interceptor to use a real URLRequestHTTPJob.
+  mutable bool use_url_request_http_job_;
+
+  // These indicate if the interceptor did something or not.
+  mutable bool did_intercept_main_;
+  mutable bool did_restart_main_;
+  mutable bool did_cancel_main_;
+  mutable bool did_cancel_then_restart_main_;
+  mutable bool did_simulate_error_main_;
+  mutable bool did_intercept_redirect_;
+  mutable bool did_cancel_redirect_;
+  mutable bool did_intercept_final_;
+  mutable bool did_cancel_final_;
+};
+
+// Inherit PlatformTest since we require the autorelease pool on Mac OS X.
+class URLRequestInterceptorTest : public URLRequestTest {
+ public:
+  URLRequestInterceptorTest() : URLRequestTest(), interceptor_(NULL) {
+  }
+
+  ~URLRequestInterceptorTest() override {
+    // URLRequestJobs may post clean-up tasks on destruction.
+    base::RunLoop().RunUntilIdle();
+  }
+
+  void SetUpFactory() override {
+    interceptor_ = new MockURLRequestInterceptor();
+    job_factory_.reset(new URLRequestInterceptingJobFactory(
+        job_factory_.Pass(), make_scoped_ptr(interceptor_)));
+  }
+
+  MockURLRequestInterceptor* interceptor() const {
+    return interceptor_;
+  }
+
+ private:
+  MockURLRequestInterceptor* interceptor_;
+};
+
+TEST_F(URLRequestInterceptorTest, Intercept) {
+  // Intercept the main request and respond with a simple response.
+  interceptor()->set_intercept_main_request(true);
+  interceptor()->set_main_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_main_data(MockURLRequestInterceptor::ok_data());
   TestDelegate d;
-  scoped_ptr<URLRequest> req(context->CreateRequest(
-      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, NULL));
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  base::SupportsUserData::Data* user_data0 = new base::SupportsUserData::Data();
+  base::SupportsUserData::Data* user_data1 = new base::SupportsUserData::Data();
+  base::SupportsUserData::Data* user_data2 = new base::SupportsUserData::Data();
+  req->SetUserData(nullptr, user_data0);
+  req->SetUserData(&user_data1, user_data1);
+  req->SetUserData(&user_data2, user_data2);
+  req->set_method("GET");
   req->Start();
   base::RunLoop().Run();
 
-  LoadTimingInfo resulting_load_timing;
-  req->GetLoadTimingInfo(&resulting_load_timing);
+  // Make sure we can retrieve our specific user data.
+  EXPECT_EQ(user_data0, req->GetUserData(nullptr));
+  EXPECT_EQ(user_data1, req->GetUserData(&user_data1));
+  EXPECT_EQ(user_data2, req->GetUserData(&user_data2));
 
-  // None of these should be modified by the URLRequest.
-  EXPECT_EQ(job_load_timing.socket_reused, resulting_load_timing.socket_reused);
-  EXPECT_EQ(job_load_timing.socket_log_id, resulting_load_timing.socket_log_id);
-  EXPECT_EQ(job_load_timing.send_start, resulting_load_timing.send_start);
-  EXPECT_EQ(job_load_timing.send_end, resulting_load_timing.send_end);
-  EXPECT_EQ(job_load_timing.receive_headers_end,
-            resulting_load_timing.receive_headers_end);
+  // Check that we got one good response.
+  EXPECT_TRUE(req->status().is_success());
+  EXPECT_EQ(200, req->response_headers()->response_code());
+  EXPECT_EQ(MockURLRequestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
 
-  return resulting_load_timing;
+TEST_F(URLRequestInterceptorTest, InterceptRedirect) {
+  // Intercept the main request and respond with a redirect.
+  interceptor()->set_intercept_main_request(true);
+  interceptor()->set_main_headers(
+      MockURLRequestInterceptor::redirect_headers());
+  interceptor()->set_main_data(MockURLRequestInterceptor::redirect_data());
+
+  // Intercept that redirect and respond with a final OK response.
+  interceptor()->set_intercept_redirect(true);
+  interceptor()->set_redirect_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_redirect_data(MockURLRequestInterceptor::ok_data());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_intercept_main());
+  EXPECT_TRUE(interceptor()->did_intercept_redirect());
+
+  // Check that we got one good response.
+  EXPECT_TRUE(req->status().is_success());
+  if (req->status().is_success())
+    EXPECT_EQ(200, req->response_headers()->response_code());
+
+  EXPECT_EQ(MockURLRequestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestInterceptorTest, InterceptServerError) {
+  // Intercept the main request to generate a server error response.
+  interceptor()->set_intercept_main_request(true);
+  interceptor()->set_main_headers(MockURLRequestInterceptor::error_headers());
+  interceptor()->set_main_data(MockURLRequestInterceptor::error_data());
+
+  // Intercept that error and respond with an OK response.
+  interceptor()->set_intercept_final_response(true);
+  interceptor()->set_final_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_final_data(MockURLRequestInterceptor::ok_data());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_intercept_main());
+  EXPECT_TRUE(interceptor()->did_intercept_final());
+
+  // Check that we got one good response.
+  EXPECT_TRUE(req->status().is_success());
+  EXPECT_EQ(200, req->response_headers()->response_code());
+  EXPECT_EQ(MockURLRequestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestInterceptorTest, InterceptNetworkError) {
+  // Intercept the main request to simulate a network error.
+  interceptor()->set_simulate_main_network_error(true);
+
+  // Intercept that error and respond with an OK response.
+  interceptor()->set_intercept_final_response(true);
+  interceptor()->set_final_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_final_data(MockURLRequestInterceptor::ok_data());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_simulate_error_main());
+  EXPECT_TRUE(interceptor()->did_intercept_final());
+
+  // Check that we received one good response.
+  EXPECT_TRUE(req->status().is_success());
+  EXPECT_EQ(200, req->response_headers()->response_code());
+  EXPECT_EQ(MockURLRequestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestInterceptorTest, InterceptRestartRequired) {
+  // Restart the main request.
+  interceptor()->set_restart_main_request(true);
+
+  // then intercept the new main request and respond with an OK response
+  interceptor()->set_intercept_main_request(true);
+  interceptor()->set_main_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_main_data(MockURLRequestInterceptor::ok_data());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_restart_main());
+  EXPECT_TRUE(interceptor()->did_intercept_main());
+
+  // Check that we received one good response.
+  EXPECT_TRUE(req->status().is_success());
+  if (req->status().is_success())
+    EXPECT_EQ(200, req->response_headers()->response_code());
+
+  EXPECT_EQ(MockURLRequestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+}
+
+TEST_F(URLRequestInterceptorTest, InterceptRespectsCancelMain) {
+  // Intercept the main request and cancel from within the restarted job.
+  interceptor()->set_cancel_main_request(true);
+
+  // Set up to intercept the final response and override it with an OK response.
+  interceptor()->set_intercept_final_response(true);
+  interceptor()->set_final_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_final_data(MockURLRequestInterceptor::ok_data());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_cancel_main());
+  EXPECT_FALSE(interceptor()->did_intercept_final());
+
+  // Check that we see a canceled request.
+  EXPECT_FALSE(req->status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req->status().status());
+}
+
+TEST_F(URLRequestInterceptorTest, InterceptRespectsCancelRedirect) {
+  // Intercept the main request and respond with a redirect.
+  interceptor()->set_intercept_main_request(true);
+  interceptor()->set_main_headers(
+      MockURLRequestInterceptor::redirect_headers());
+  interceptor()->set_main_data(MockURLRequestInterceptor::redirect_data());
+
+  // Intercept the redirect and cancel from within that job.
+  interceptor()->set_cancel_redirect_request(true);
+
+  // Set up to intercept the final response and override it with an OK response.
+  interceptor()->set_intercept_final_response(true);
+  interceptor()->set_final_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_final_data(MockURLRequestInterceptor::ok_data());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_intercept_main());
+  EXPECT_TRUE(interceptor()->did_cancel_redirect());
+  EXPECT_FALSE(interceptor()->did_intercept_final());
+
+  // Check that we see a canceled request.
+  EXPECT_FALSE(req->status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req->status().status());
+}
+
+TEST_F(URLRequestInterceptorTest, InterceptRespectsCancelFinal) {
+  // Intercept the main request to simulate a network error.
+  interceptor()->set_simulate_main_network_error(true);
+
+  // Set up to intercept final the response and cancel from within that job.
+  interceptor()->set_cancel_final_request(true);
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_simulate_error_main());
+  EXPECT_TRUE(interceptor()->did_cancel_final());
+
+  // Check that we see a canceled request.
+  EXPECT_FALSE(req->status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req->status().status());
+}
+
+TEST_F(URLRequestInterceptorTest, InterceptRespectsCancelInRestart) {
+  // Intercept the main request and cancel then restart from within that job.
+  interceptor()->set_cancel_then_restart_main_request(true);
+
+  // Set up to intercept the final response and override it with an OK response.
+  interceptor()->set_intercept_final_response(true);
+  interceptor()->set_final_headers(TestInterceptor::ok_headers());
+  interceptor()->set_final_data(TestInterceptor::ok_data());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  // Check that the interceptor got called as expected.
+  EXPECT_TRUE(interceptor()->did_cancel_then_restart_main());
+  EXPECT_FALSE(interceptor()->did_intercept_final());
+
+  // Check that we see a canceled request.
+  EXPECT_FALSE(req->status().is_success());
+  EXPECT_EQ(URLRequestStatus::CANCELED, req->status().status());
 }
 
 // "Normal" LoadTimingInfo as returned by a job.  Everything is in order, not
@@ -1652,14 +2213,41 @@ LoadTimingInfo NormalLoadTimingInfoReused(base::TimeTicks now,
   return load_timing;
 }
 
+LoadTimingInfo RunURLRequestInterceptorLoadTimingTest(
+    const LoadTimingInfo& job_load_timing,
+    const URLRequestContext& context,
+    MockURLRequestInterceptor* interceptor) {
+  interceptor->set_intercept_main_request(true);
+  interceptor->set_main_request_load_timing_info(job_load_timing);
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(context.CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d, nullptr));
+  req->Start();
+  base::RunLoop().Run();
+
+  LoadTimingInfo resulting_load_timing;
+  req->GetLoadTimingInfo(&resulting_load_timing);
+
+  // None of these should be modified by the URLRequest.
+  EXPECT_EQ(job_load_timing.socket_reused, resulting_load_timing.socket_reused);
+  EXPECT_EQ(job_load_timing.socket_log_id, resulting_load_timing.socket_log_id);
+  EXPECT_EQ(job_load_timing.send_start, resulting_load_timing.send_start);
+  EXPECT_EQ(job_load_timing.send_end, resulting_load_timing.send_end);
+  EXPECT_EQ(job_load_timing.receive_headers_end,
+            resulting_load_timing.receive_headers_end);
+
+  return resulting_load_timing;
+}
+
 // Basic test that the intercept + load timing tests work.
-TEST_F(URLRequestTest, InterceptLoadTiming) {
+TEST_F(URLRequestInterceptorTest, InterceptLoadTiming) {
   base::TimeTicks now = base::TimeTicks::Now();
   LoadTimingInfo job_load_timing =
       NormalLoadTimingInfo(now, CONNECT_TIMING_HAS_DNS_TIMES, false);
 
   LoadTimingInfo load_timing_result =
-      RunLoadTimingTest(job_load_timing, &default_context_);
+      RunURLRequestInterceptorLoadTimingTest(
+          job_load_timing, default_context(), interceptor());
 
   // Nothing should have been changed by the URLRequest.
   EXPECT_EQ(job_load_timing.proxy_resolve_start,
@@ -1684,13 +2272,14 @@ TEST_F(URLRequestTest, InterceptLoadTiming) {
 }
 
 // Another basic test, with proxy and SSL times, but no DNS times.
-TEST_F(URLRequestTest, InterceptLoadTimingProxy) {
+TEST_F(URLRequestInterceptorTest, InterceptLoadTimingProxy) {
   base::TimeTicks now = base::TimeTicks::Now();
   LoadTimingInfo job_load_timing =
       NormalLoadTimingInfo(now, CONNECT_TIMING_HAS_SSL_TIMES, true);
 
   LoadTimingInfo load_timing_result =
-      RunLoadTimingTest(job_load_timing, &default_context_);
+      RunURLRequestInterceptorLoadTimingTest(
+          job_load_timing, default_context(), interceptor());
 
   // Nothing should have been changed by the URLRequest.
   EXPECT_EQ(job_load_timing.proxy_resolve_start,
@@ -1721,7 +2310,7 @@ TEST_F(URLRequestTest, InterceptLoadTimingProxy) {
 // reused in this test (May be a preconnect).
 //
 // To mix things up from the test above, assumes DNS times but no SSL times.
-TEST_F(URLRequestTest, InterceptLoadTimingEarlyProxyResolution) {
+TEST_F(URLRequestInterceptorTest, InterceptLoadTimingEarlyProxyResolution) {
   base::TimeTicks now = base::TimeTicks::Now();
   LoadTimingInfo job_load_timing =
       NormalLoadTimingInfo(now, CONNECT_TIMING_HAS_DNS_TIMES, true);
@@ -1735,7 +2324,8 @@ TEST_F(URLRequestTest, InterceptLoadTimingEarlyProxyResolution) {
       now - base::TimeDelta::FromDays(1);
 
   LoadTimingInfo load_timing_result =
-      RunLoadTimingTest(job_load_timing, &default_context_);
+      RunURLRequestInterceptorLoadTimingTest(
+          job_load_timing, default_context(), interceptor());
 
   // Proxy times, connect times, and DNS times should all be replaced with
   // request_start.
@@ -1758,14 +2348,16 @@ TEST_F(URLRequestTest, InterceptLoadTimingEarlyProxyResolution) {
 }
 
 // Same as above, but in the reused case.
-TEST_F(URLRequestTest, InterceptLoadTimingEarlyProxyResolutionReused) {
+TEST_F(URLRequestInterceptorTest,
+       InterceptLoadTimingEarlyProxyResolutionReused) {
   base::TimeTicks now = base::TimeTicks::Now();
   LoadTimingInfo job_load_timing = NormalLoadTimingInfoReused(now, true);
   job_load_timing.proxy_resolve_start = now - base::TimeDelta::FromDays(4);
   job_load_timing.proxy_resolve_end = now - base::TimeDelta::FromDays(3);
 
   LoadTimingInfo load_timing_result =
-      RunLoadTimingTest(job_load_timing, &default_context_);
+      RunURLRequestInterceptorLoadTimingTest(
+          job_load_timing, default_context(), interceptor());
 
   // Proxy times and connect times should all be replaced with request_start.
   EXPECT_EQ(load_timing_result.request_start,
@@ -1782,7 +2374,7 @@ TEST_F(URLRequestTest, InterceptLoadTimingEarlyProxyResolutionReused) {
 // not considered reused in this test (May be a preconnect).
 //
 // To mix things up, the request has SSL times, but no DNS times.
-TEST_F(URLRequestTest, InterceptLoadTimingEarlyConnect) {
+TEST_F(URLRequestInterceptorTest, InterceptLoadTimingEarlyConnect) {
   base::TimeTicks now = base::TimeTicks::Now();
   LoadTimingInfo job_load_timing =
       NormalLoadTimingInfo(now, CONNECT_TIMING_HAS_SSL_TIMES, false);
@@ -1794,7 +2386,8 @@ TEST_F(URLRequestTest, InterceptLoadTimingEarlyConnect) {
       now - base::TimeDelta::FromDays(4);
 
   LoadTimingInfo load_timing_result =
-      RunLoadTimingTest(job_load_timing, &default_context_);
+      RunURLRequestInterceptorLoadTimingTest(
+          job_load_timing, default_context(), interceptor());
 
   // Connect times, and SSL times should be replaced with request_start.
   EXPECT_EQ(load_timing_result.request_start,
@@ -1816,7 +2409,7 @@ TEST_F(URLRequestTest, InterceptLoadTimingEarlyConnect) {
 // test (May be a preconnect).
 //
 // In this test, there are no SSL or DNS times.
-TEST_F(URLRequestTest, InterceptLoadTimingEarlyConnectWithProxy) {
+TEST_F(URLRequestInterceptorTest, InterceptLoadTimingEarlyConnectWithProxy) {
   base::TimeTicks now = base::TimeTicks::Now();
   LoadTimingInfo job_load_timing =
       NormalLoadTimingInfo(now, CONNECT_TIMING_HAS_CONNECT_TIMES_ONLY, true);
@@ -1826,7 +2419,8 @@ TEST_F(URLRequestTest, InterceptLoadTimingEarlyConnectWithProxy) {
       now - base::TimeDelta::FromDays(2);
 
   LoadTimingInfo load_timing_result =
-      RunLoadTimingTest(job_load_timing, &default_context_);
+      RunURLRequestInterceptorLoadTimingTest(
+          job_load_timing, default_context(), interceptor());
 
   // Connect times should be replaced with proxy_resolve_end.
   EXPECT_EQ(load_timing_result.proxy_resolve_end,
@@ -2394,15 +2988,15 @@ class FixedDateNetworkDelegate : public TestNetworkDelegate {
  public:
   explicit FixedDateNetworkDelegate(const std::string& fixed_date)
       : fixed_date_(fixed_date) {}
-  virtual ~FixedDateNetworkDelegate() {}
+  ~FixedDateNetworkDelegate() override {}
 
   // NetworkDelegate implementation
-  virtual int OnHeadersReceived(
+  int OnHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
-      GURL* allowed_unsafe_redirect_url) OVERRIDE;
+      GURL* allowed_unsafe_redirect_url) override;
 
  private:
   std::string fixed_date_;
@@ -2556,7 +3150,7 @@ class URLRequestTestHTTP : public URLRequestTest {
         redirect_url, DEFAULT_PRIORITY, &d, NULL));
     req->set_method(request_method);
     if (include_data) {
-      req->set_upload(make_scoped_ptr(CreateSimpleUploadData(kData)));
+      req->set_upload(CreateSimpleUploadData(kData));
       HttpRequestHeaders headers;
       headers.SetHeader(HttpRequestHeaders::kContentLength,
                         base::UintToString(arraysize(kData) - 1));
@@ -2602,7 +3196,7 @@ class URLRequestTestHTTP : public URLRequestTest {
           test_server_.GetURL("echo"), DEFAULT_PRIORITY, &d, NULL));
       r->set_method(method.c_str());
 
-      r->set_upload(make_scoped_ptr(CreateSimpleUploadData(uploadBytes)));
+      r->set_upload(CreateSimpleUploadData(uploadBytes));
 
       r->Start();
       EXPECT_TRUE(r->is_pending());
@@ -2668,6 +3262,11 @@ class URLRequestTestHTTP : public URLRequestTest {
     return is_success;
   }
 
+  LocalHttpTestServer* test_server() {
+    return &test_server_;
+  }
+
+ protected:
   LocalHttpTestServer test_server_;
 };
 
@@ -3015,7 +3614,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateRedirectRequestPost) {
     scoped_ptr<URLRequest> r(context.CreateRequest(
         original_url, DEFAULT_PRIORITY, &d, NULL));
     r->set_method("POST");
-    r->set_upload(make_scoped_ptr(CreateSimpleUploadData(kData)));
+    r->set_upload(CreateSimpleUploadData(kData));
     HttpRequestHeaders headers;
     headers.SetHeader(HttpRequestHeaders::kContentLength,
                       base::UintToString(arraysize(kData) - 1));
@@ -3989,29 +4588,29 @@ class AsyncDelegateLogger : public base::RefCounted<AsyncDelegateLogger> {
 class AsyncLoggingNetworkDelegate : public TestNetworkDelegate {
  public:
   AsyncLoggingNetworkDelegate() {}
-  virtual ~AsyncLoggingNetworkDelegate() {}
+  ~AsyncLoggingNetworkDelegate() override {}
 
   // NetworkDelegate implementation.
-  virtual int OnBeforeURLRequest(URLRequest* request,
-                                 const CompletionCallback& callback,
-                                 GURL* new_url) OVERRIDE {
+  int OnBeforeURLRequest(URLRequest* request,
+                         const CompletionCallback& callback,
+                         GURL* new_url) override {
     TestNetworkDelegate::OnBeforeURLRequest(request, callback, new_url);
     return RunCallbackAsynchronously(request, callback);
   }
 
-  virtual int OnBeforeSendHeaders(URLRequest* request,
-                                  const CompletionCallback& callback,
-                                  HttpRequestHeaders* headers) OVERRIDE {
+  int OnBeforeSendHeaders(URLRequest* request,
+                          const CompletionCallback& callback,
+                          HttpRequestHeaders* headers) override {
     TestNetworkDelegate::OnBeforeSendHeaders(request, callback, headers);
     return RunCallbackAsynchronously(request, callback);
   }
 
-  virtual int OnHeadersReceived(
+  int OnHeadersReceived(
       URLRequest* request,
       const CompletionCallback& callback,
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
-      GURL* allowed_unsafe_redirect_url) OVERRIDE {
+      GURL* allowed_unsafe_redirect_url) override {
     TestNetworkDelegate::OnHeadersReceived(request,
                                            callback,
                                            original_response_headers,
@@ -4020,11 +4619,11 @@ class AsyncLoggingNetworkDelegate : public TestNetworkDelegate {
     return RunCallbackAsynchronously(request, callback);
   }
 
-  virtual NetworkDelegate::AuthRequiredResponse OnAuthRequired(
+  NetworkDelegate::AuthRequiredResponse OnAuthRequired(
       URLRequest* request,
       const AuthChallengeInfo& auth_info,
       const AuthCallback& callback,
-      AuthCredentials* credentials) OVERRIDE {
+      AuthCredentials* credentials) override {
     AsyncDelegateLogger::Run(
         request,
         LOAD_STATE_WAITING_FOR_DELEGATE,
@@ -4081,12 +4680,12 @@ class AsyncLoggingUrlRequestDelegate : public TestDelegate {
     else if (cancel_stage == CANCEL_ON_READ_COMPLETED)
       set_cancel_in_received_data(true);
   }
-  virtual ~AsyncLoggingUrlRequestDelegate() {}
+  ~AsyncLoggingUrlRequestDelegate() override {}
 
   // URLRequest::Delegate implementation:
-  void virtual OnReceivedRedirect(URLRequest* request,
-                                  const RedirectInfo& redirect_info,
-                                  bool* defer_redirect) OVERRIDE {
+  void OnReceivedRedirect(URLRequest* request,
+                          const RedirectInfo& redirect_info,
+                          bool* defer_redirect) override {
     *defer_redirect = true;
     AsyncDelegateLogger::Run(
         request,
@@ -4098,7 +4697,7 @@ class AsyncLoggingUrlRequestDelegate : public TestDelegate {
             base::Unretained(this), request, redirect_info));
   }
 
-  virtual void OnResponseStarted(URLRequest* request) OVERRIDE {
+  void OnResponseStarted(URLRequest* request) override {
     AsyncDelegateLogger::Run(
       request,
       LOAD_STATE_WAITING_FOR_DELEGATE,
@@ -4109,8 +4708,7 @@ class AsyncLoggingUrlRequestDelegate : public TestDelegate {
           base::Unretained(this), request));
   }
 
-  virtual void OnReadCompleted(URLRequest* request,
-                               int bytes_read) OVERRIDE {
+  void OnReadCompleted(URLRequest* request, int bytes_read) override {
     AsyncDelegateLogger::Run(
         request,
         LOAD_STATE_IDLE,
@@ -4576,9 +5174,9 @@ const char kExtraHeader[] = "Allow-Snafu";
 const char kExtraValue[] = "fubar";
 
 class RedirectWithAdditionalHeadersDelegate : public TestDelegate {
-  virtual void OnReceivedRedirect(URLRequest* request,
-                                  const RedirectInfo& redirect_info,
-                                  bool* defer_redirect) OVERRIDE {
+  void OnReceivedRedirect(URLRequest* request,
+                          const RedirectInfo& redirect_info,
+                          bool* defer_redirect) override {
     TestDelegate::OnReceivedRedirect(request, redirect_info, defer_redirect);
     request->SetExtraRequestHeaderByName(kExtraHeader, kExtraValue, false);
   }
@@ -4613,9 +5211,9 @@ namespace {
 const char kExtraHeaderToRemove[] = "To-Be-Removed";
 
 class RedirectWithHeaderRemovalDelegate : public TestDelegate {
-  virtual void OnReceivedRedirect(URLRequest* request,
-                                  const RedirectInfo& redirect_info,
-                                  bool* defer_redirect) OVERRIDE {
+  void OnReceivedRedirect(URLRequest* request,
+                          const RedirectInfo& redirect_info,
+                          bool* defer_redirect) override {
     TestDelegate::OnReceivedRedirect(request, redirect_info, defer_redirect);
     request->RemoveRequestHeaderByName(kExtraHeaderToRemove);
   }
@@ -4828,8 +5426,8 @@ TEST_F(URLRequestTestHTTP, PostFileTest) {
                                     0,
                                     kuint64max,
                                     base::Time()));
-    r->set_upload(make_scoped_ptr(
-        new UploadDataStream(element_readers.Pass(), 0)));
+    r->set_upload(make_scoped_ptr<UploadDataStream>(
+        new ElementsUploadDataStream(element_readers.Pass(), 0)));
 
     r->Start();
     EXPECT_TRUE(r->is_pending());
@@ -4871,8 +5469,8 @@ TEST_F(URLRequestTestHTTP, PostUnreadableFileTest) {
         0,
         kuint64max,
         base::Time()));
-    r->set_upload(make_scoped_ptr(
-        new UploadDataStream(element_readers.Pass(), 0)));
+    r->set_upload(make_scoped_ptr<UploadDataStream>(
+        new ElementsUploadDataStream(element_readers.Pass(), 0)));
 
     r->Start();
     EXPECT_TRUE(r->is_pending());
@@ -5170,7 +5768,7 @@ TEST_F(URLRequestTestHTTP, ProtocolHandlerAndFactoryRestrictDataRedirects) {
   EXPECT_FALSE(data_protocol_handler.IsSafeRedirectTarget(data_url));
 
   // Test URLRequestJobFactoryImpl::IsSafeRedirectTarget().
-  EXPECT_FALSE(job_factory_.IsSafeRedirectTarget(data_url));
+  EXPECT_FALSE(job_factory_->IsSafeRedirectTarget(data_url));
 }
 
 #if !defined(DISABLE_FILE_SUPPORT)
@@ -5181,7 +5779,7 @@ TEST_F(URLRequestTestHTTP, ProtocolHandlerAndFactoryRestrictFileRedirects) {
   EXPECT_FALSE(file_protocol_handler.IsSafeRedirectTarget(file_url));
 
   // Test URLRequestJobFactoryImpl::IsSafeRedirectTarget().
-  EXPECT_FALSE(job_factory_.IsSafeRedirectTarget(file_url));
+  EXPECT_FALSE(job_factory_->IsSafeRedirectTarget(file_url));
 }
 
 TEST_F(URLRequestTestHTTP, RestrictFileRedirects) {
@@ -5949,7 +6547,7 @@ TEST_F(URLRequestTestHTTP, Post302RedirectGet) {
       test_server_.GetURL("files/redirect-to-echoall"), DEFAULT_PRIORITY, &d,
       NULL));
   req->set_method("POST");
-  req->set_upload(make_scoped_ptr(CreateSimpleUploadData(kData)));
+  req->set_upload(CreateSimpleUploadData(kData));
 
   // Set headers (some of which are specific to the POST).
   HttpRequestHeaders headers;
@@ -6136,7 +6734,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost302RedirectGet) {
   scoped_ptr<URLRequest> req(default_context_.CreateRequest(
       test_server_.GetURL("empty.html"), DEFAULT_PRIORITY, &d, NULL));
   req->set_method("POST");
-  req->set_upload(make_scoped_ptr(CreateSimpleUploadData(kData)));
+  req->set_upload(CreateSimpleUploadData(kData));
   HttpRequestHeaders headers;
   headers.SetHeader(HttpRequestHeaders::kContentLength,
                     base::UintToString(arraysize(kData) - 1));
@@ -6161,7 +6759,7 @@ TEST_F(URLRequestTestHTTP, InterceptPost307RedirectPost) {
   scoped_ptr<URLRequest> req(default_context_.CreateRequest(
       test_server_.GetURL("empty.html"), DEFAULT_PRIORITY, &d, NULL));
   req->set_method("POST");
-  req->set_upload(make_scoped_ptr(CreateSimpleUploadData(kData)));
+  req->set_upload(CreateSimpleUploadData(kData));
   HttpRequestHeaders headers;
   headers.SetHeader(HttpRequestHeaders::kContentLength,
                     base::UintToString(arraysize(kData) - 1));
@@ -6340,7 +6938,7 @@ TEST_F(URLRequestTestHTTP, EmptyHttpUserAgentSettings) {
                 { "echoheader?Accept-Charset", "None" },
                 { "echoheader?User-Agent", "" } };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); i++) {
+  for (size_t i = 0; i < arraysize(tests); i++) {
     TestDelegate d;
     scoped_ptr<URLRequest> req(context.CreateRequest(
         test_server_.GetURL(tests[i].request), DEFAULT_PRIORITY, &d, NULL));
@@ -6450,13 +7048,131 @@ TEST_F(URLRequestTestHTTP, NetworkSuspendTestNoCache) {
   EXPECT_EQ(ERR_NETWORK_IO_SUSPENDED, req->status().error());
 }
 
+class URLRequestInterceptorTestHTTP : public URLRequestTestHTTP {
+ public:
+  // TODO(bengr): Merge this with the URLRequestInterceptorHTTPTest fixture,
+  // ideally remove the dependency on URLRequestTestJob, and maybe move these
+  // tests into the factory tests.
+  URLRequestInterceptorTestHTTP() : URLRequestTestHTTP(), interceptor_(NULL) {
+  }
+
+  void SetUpFactory() override {
+    interceptor_ = new MockURLRequestInterceptor();
+    job_factory_.reset(new URLRequestInterceptingJobFactory(
+        job_factory_.Pass(), make_scoped_ptr(interceptor_)));
+  }
+
+  MockURLRequestInterceptor* interceptor() const {
+    return interceptor_;
+  }
+
+ private:
+  MockURLRequestInterceptor* interceptor_;
+};
+
+TEST_F(URLRequestInterceptorTestHTTP,
+       NetworkDelegateNotificationOnRedirectIntercept) {
+  interceptor()->set_intercept_redirect(true);
+  interceptor()->set_redirect_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_redirect_data(MockURLRequestInterceptor::ok_data());
+
+  ASSERT_TRUE(test_server()->Start());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      test_server()->GetURL("files/redirect-test.html"), DEFAULT_PRIORITY,
+      &d, nullptr));
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_TRUE(interceptor()->did_intercept_redirect());
+  // Check we got one good response
+  EXPECT_TRUE(req->status().is_success());
+  if (req->status().is_success())
+    EXPECT_EQ(200, req->response_headers()->response_code());
+
+  EXPECT_EQ(MockURLRequestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+
+  EXPECT_EQ(1, default_network_delegate()->created_requests());
+  EXPECT_EQ(1, default_network_delegate()->before_send_headers_count());
+  EXPECT_EQ(1, default_network_delegate()->headers_received_count());
+}
+
+TEST_F(URLRequestInterceptorTestHTTP,
+       NetworkDelegateNotificationOnErrorIntercept) {
+  // Intercept that error and respond with an OK response.
+  interceptor()->set_intercept_final_response(true);
+  interceptor()->set_final_headers(MockURLRequestInterceptor::ok_headers());
+  interceptor()->set_final_data(MockURLRequestInterceptor::ok_data());
+  default_network_delegate()->set_can_be_intercepted_on_error(true);
+
+  ASSERT_TRUE(test_server()->Start());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      test_server()->GetURL("files/two-content-lengths.html"), DEFAULT_PRIORITY,
+      &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_TRUE(interceptor()->did_intercept_final());
+
+  // Check we received one good response.
+  EXPECT_TRUE(req->status().is_success());
+  if (req->status().is_success())
+    EXPECT_EQ(200, req->response_headers()->response_code());
+  EXPECT_EQ(MockURLRequestInterceptor::ok_data(), d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+
+  EXPECT_EQ(1, default_network_delegate()->created_requests());
+  EXPECT_EQ(1, default_network_delegate()->before_send_headers_count());
+  EXPECT_EQ(0, default_network_delegate()->headers_received_count());
+}
+
+TEST_F(URLRequestInterceptorTestHTTP,
+       NetworkDelegateNotificationOnResponseIntercept) {
+  // Intercept that error and respond with an OK response.
+  interceptor()->set_intercept_final_response(true);
+
+  // Intercept with a real URLRequestHttpJob.
+  interceptor()->set_use_url_request_http_job(true);
+
+  ASSERT_TRUE(test_server()->Start());
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context().CreateRequest(
+      test_server()->GetURL("files/simple.html"), DEFAULT_PRIORITY,
+      &d, nullptr));
+  req->set_method("GET");
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_TRUE(interceptor()->did_intercept_final());
+
+  // Check we received one good response.
+  EXPECT_TRUE(req->status().is_success());
+  if (req->status().is_success())
+    EXPECT_EQ(200, req->response_headers()->response_code());
+  EXPECT_EQ("hello", d.data_received());
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_EQ(0, d.received_redirect_count());
+
+  EXPECT_EQ(1, default_network_delegate()->created_requests());
+  EXPECT_EQ(2, default_network_delegate()->before_send_headers_count());
+  EXPECT_EQ(2, default_network_delegate()->headers_received_count());
+}
+
 class HTTPSRequestTest : public testing::Test {
  public:
   HTTPSRequestTest() : default_context_(true) {
     default_context_.set_network_delegate(&default_network_delegate_);
     default_context_.Init();
   }
-  virtual ~HTTPSRequestTest() {}
+  ~HTTPSRequestTest() override {}
 
  protected:
   TestNetworkDelegate default_network_delegate_;  // Must outlive URLRequest.
@@ -6720,7 +7436,7 @@ TEST_F(HTTPSRequestTest, HSTSPreservesPosts) {
                                   test_server.host_port_pair().port())),
       DEFAULT_PRIORITY, &d, NULL));
   req->set_method("POST");
-  req->set_upload(make_scoped_ptr(CreateSimpleUploadData(kData)));
+  req->set_upload(CreateSimpleUploadData(kData));
 
   req->Start();
   base::RunLoop().Run();
@@ -6809,9 +7525,8 @@ class SSLClientAuthTestDelegate : public TestDelegate {
  public:
   SSLClientAuthTestDelegate() : on_certificate_requested_count_(0) {
   }
-  virtual void OnCertificateRequested(
-      URLRequest* request,
-      SSLCertRequestInfo* cert_request_info) OVERRIDE {
+  void OnCertificateRequested(URLRequest* request,
+                              SSLCertRequestInfo* cert_request_info) override {
     on_certificate_requested_count_++;
     base::MessageLoop::current()->Quit();
   }
@@ -7040,8 +7755,7 @@ bool IsECDSACipherSuite(uint16_t cipher_suite) {
 
 // Test that ECDSA is disabled on Windows XP, where ECDSA certificates cannot be
 // verified.
-// Test seems flaky, see http://crbug.com/411827.
-TEST_F(HTTPSRequestTest, DISABLED_DisableECDSAOnXP) {
+TEST_F(HTTPSRequestTest, DisableECDSAOnXP) {
   if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     LOG(INFO) << "Skipping test on this version.";
     return;
@@ -7084,14 +7798,19 @@ class TestSSLConfigService : public SSLConfigService {
         online_rev_checking_(online_rev_checking),
         rev_checking_required_local_anchors_(
             rev_checking_required_local_anchors),
-        fallback_min_version_(0) {}
+        min_version_(kDefaultSSLVersionMin),
+        fallback_min_version_(kDefaultSSLVersionFallbackMin) {}
+
+  void set_min_version(uint16 version) {
+    min_version_ = version;
+  }
 
   void set_fallback_min_version(uint16 version) {
     fallback_min_version_ = version;
   }
 
   // SSLConfigService:
-  virtual void GetSSLConfig(SSLConfig* config) OVERRIDE {
+  void GetSSLConfig(SSLConfig* config) override {
     *config = SSLConfig();
     config->rev_checking_enabled = online_rev_checking_;
     config->verify_ev_cert = ev_enabled_;
@@ -7100,15 +7819,19 @@ class TestSSLConfigService : public SSLConfigService {
     if (fallback_min_version_) {
       config->version_fallback_min = fallback_min_version_;
     }
+    if (min_version_) {
+      config->version_min = min_version_;
+    }
   }
 
  protected:
-  virtual ~TestSSLConfigService() {}
+  ~TestSSLConfigService() override {}
 
  private:
   const bool ev_enabled_;
   const bool online_rev_checking_;
   const bool rev_checking_required_local_anchors_;
+  uint16 min_version_;
   uint16 fallback_min_version_;
 };
 
@@ -7123,6 +7846,7 @@ class FallbackTestURLRequestContext : public TestURLRequestContext {
                                  false /* online revocation checking */,
                                  false /* require rev. checking for local
                                           anchors */);
+    ssl_config_service->set_min_version(SSL_PROTOCOL_VERSION_SSL3);
     ssl_config_service->set_fallback_min_version(version);
     set_ssl_config_service(ssl_config_service);
   }
@@ -7131,7 +7855,7 @@ class FallbackTestURLRequestContext : public TestURLRequestContext {
 class HTTPSFallbackTest : public testing::Test {
  public:
   HTTPSFallbackTest() : context_(true) {}
-  virtual ~HTTPSFallbackTest() {}
+  ~HTTPSFallbackTest() override {}
 
  protected:
   void DoFallbackTest(const SpawnedTestServer::SSLOptions& ssl_options) {
@@ -7258,7 +7982,7 @@ TEST_F(HTTPSFallbackTest, SSLv3Fallback) {
       SpawnedTestServer::SSLOptions::TLS_INTOLERANT_ALL;
 
   ASSERT_NO_FATAL_FAILURE(DoFallbackTest(ssl_options));
-  ExpectFailure(ERR_SSL_FALLBACK_BEYOND_MINIMUM_VERSION);
+  ExpectFailure(ERR_SSL_VERSION_OR_CIPHER_MISMATCH);
 }
 
 // Tests that the SSLv3 fallback works when explicitly enabled.
@@ -7313,6 +8037,7 @@ TEST_F(HTTPSRequestTest, SSLv3FallbackNoCache) {
     TestDelegate delegate;
     FallbackTestURLRequestContext context(true);
 
+    context.set_fallback_min_version(SSL_PROTOCOL_VERSION_TLS1);
     context.Init();
     scoped_ptr<URLRequest> request(context.CreateRequest(
         test_server.GetURL(std::string()), DEFAULT_PRIORITY, &delegate, NULL));
@@ -7383,7 +8108,7 @@ class HTTPSSessionTest : public testing::Test {
     default_context_.set_cert_verifier(&cert_verifier_);
     default_context_.Init();
   }
-  virtual ~HTTPSSessionTest() {}
+  ~HTTPSSessionTest() override {}
 
  protected:
   MockCertVerifier cert_verifier_;
@@ -7482,7 +8207,7 @@ class HTTPSOCSPTest : public HTTPSRequestTest {
                                    kOCSPTestCertPolicy)) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     SetupContext(&context_);
     context_.Init();
 
@@ -7519,7 +8244,7 @@ class HTTPSOCSPTest : public HTTPSRequestTest {
     *out_cert_status = r->ssl_info().cert_status;
   }
 
-  virtual ~HTTPSOCSPTest() {
+  ~HTTPSOCSPTest() override {
 #if defined(USE_NSS) || defined(OS_IOS)
     ShutdownNSSHttpIO();
 #endif
@@ -7663,7 +8388,7 @@ TEST_F(HTTPSOCSPTest, Invalid) {
 
 class HTTPSHardFailTest : public HTTPSOCSPTest {
  protected:
-  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+  void SetupContext(URLRequestContext* context) override {
     context->set_ssl_config_service(
         new TestSSLConfigService(false /* check for EV */,
                                  false /* online revocation checking */,
@@ -7701,7 +8426,7 @@ TEST_F(HTTPSHardFailTest, FailsOnOCSPInvalid) {
 
 class HTTPSEVCRLSetTest : public HTTPSOCSPTest {
  protected:
-  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+  void SetupContext(URLRequestContext* context) override {
     context->set_ssl_config_service(
         new TestSSLConfigService(true /* check for EV */,
                                  false /* online revocation checking */,
@@ -7886,7 +8611,7 @@ TEST_F(HTTPSEVCRLSetTest, ExpiredCRLSetAndRevokedNonEVCert) {
 
 class HTTPSCRLSetTest : public HTTPSOCSPTest {
  protected:
-  virtual void SetupContext(URLRequestContext* context) OVERRIDE {
+  void SetupContext(URLRequestContext* context) override {
     context->set_ssl_config_service(
         new TestSSLConfigService(false /* check for EV */,
                                  false /* online revocation checking */,

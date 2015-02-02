@@ -27,8 +27,6 @@ component("gfx") {
     "android/gfx_jni_registrar.h",
     "android/java_bitmap.cc",
     "android/java_bitmap.h",
-    "android/scroller.cc",
-    "android/scroller.h",
     "android/shared_device_display_info.cc",
     "android/shared_device_display_info.h",
     "android/view_configuration.cc",
@@ -206,6 +204,8 @@ component("gfx") {
     "utf16_indexing.cc",
     "utf16_indexing.h",
     "vsync_provider.h",
+    "win/direct_write.cc",
+    "win/direct_write.h",
     "win/dpi.cc",
     "win/dpi.h",
     "win/hwnd_util.cc",
@@ -275,7 +275,6 @@ component("gfx") {
     sources -= [
       "animation/throb_animation.cc",
       "canvas_skia.cc",
-      "display_observer.cc",
       "selection_model.cc",
     ]
 
@@ -289,6 +288,11 @@ component("gfx") {
     #if (!is_android_webview_build) {
     #  deps += [ "//base:base_java" ]
     #}
+
+    if (!is_debug) {
+      configs -= [ "//build/config/compiler:optimize" ]
+      configs += [ "//build/config/compiler:optimize_max" ]
+    }
 
     deps += [ ":gfx_jni_headers" ]
     libs = [
@@ -339,6 +343,9 @@ component("gfx") {
   if (use_x11) {
     deps += [
       "//ui/gfx/x",
+    ]
+    configs += [
+      "//build/config/linux:x11",
     ]
   } else {
     sources -= [
@@ -428,6 +435,7 @@ test("gfx_unittests") {
       "codec/jpeg_codec_unittest.cc",
       "codec/png_codec_unittest.cc",
       "color_analysis_unittest.cc",
+      "color_profile_mac_unittest.mm",
       "color_utils_unittest.cc",
       "display_change_notifier_unittest.cc",
       "display_unittest.cc",
@@ -442,6 +450,7 @@ test("gfx_unittests") {
       "geometry/r_tree_unittest.cc",
       "geometry/rect_unittest.cc",
       "geometry/safe_integer_conversions_unittest.cc",
+      "geometry/scroll_offset_unittest.cc",
       "geometry/size_unittest.cc",
       "geometry/vector2d_unittest.cc",
       "geometry/vector3d_unittest.cc",

@@ -14,7 +14,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/kill.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
@@ -31,6 +31,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_shutdown.h"
@@ -167,6 +168,7 @@ void AttemptUserExit() {
 #else
   // Reset the restart bit that might have been set in cancelled restart
   // request.
+  UserManager::Hide();
   PrefService* pref_service = g_browser_process->local_state();
   pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, false);
   AttemptExitInternal(false);
@@ -309,7 +311,7 @@ void SessionEnding() {
     // termination as soon as it hides or destroys its windows. Since any
     // execution past that point will be non-deterministically cut short, we
     // might as well put ourselves out of that misery deterministically.
-    base::KillProcess(base::Process::Current().handle(), 0, false);
+    base::KillProcess(base::GetCurrentProcessHandle(), 0, false);
   }
 }
 

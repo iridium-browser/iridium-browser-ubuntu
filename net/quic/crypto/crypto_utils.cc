@@ -55,7 +55,7 @@ bool CryptoUtils::IsValidSNI(StringPiece sni) {
   url::CanonHostInfo host_info;
   string canonicalized_host(CanonicalizeHost(sni.as_string(), &host_info));
   return !host_info.IsIPAddress() &&
-      IsCanonicalizedHostCompliant(canonicalized_host, std::string()) &&
+      IsCanonicalizedHostCompliant(canonicalized_host) &&
       sni.find_last_of('.') != string::npos;
 }
 
@@ -91,7 +91,7 @@ bool CryptoUtils::DeriveKeys(StringPiece premaster_secret,
   size_t key_bytes = crypters->encrypter->GetKeySize();
   size_t nonce_prefix_bytes = crypters->encrypter->GetNoncePrefixSize();
   size_t subkey_secret_bytes =
-      subkey_secret == NULL ? 0 : premaster_secret.length();
+      subkey_secret == nullptr ? 0 : premaster_secret.length();
 
   StringPiece nonce = client_nonce;
   string nonce_storage;
@@ -117,7 +117,7 @@ bool CryptoUtils::DeriveKeys(StringPiece premaster_secret,
       return false;
     }
   }
-  if (subkey_secret != NULL) {
+  if (subkey_secret != nullptr) {
     hkdf.subkey_secret().CopyToString(subkey_secret);
   }
 

@@ -11,7 +11,7 @@
 #include "ipc/ipc_platform_file.h"
 #include "printing/pdf_render_settings.h"
 
-#if !defined(ENABLE_FULL_PRINTING) && !defined(OS_WIN)
+#if !defined(ENABLE_PRINT_PREVIEW) && !defined(OS_WIN)
 #error "Windows or full printing must be enabled"
 #endif
 
@@ -25,12 +25,12 @@ struct PageRange;
 class PrintingHandler : public UtilityMessageHandler {
  public:
   PrintingHandler();
-  virtual ~PrintingHandler();
+  ~PrintingHandler() override;
 
   static void PreSandboxStartup();
 
   // IPC::Listener:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
  private:
   // IPC message handlers.
@@ -42,21 +42,21 @@ class PrintingHandler : public UtilityMessageHandler {
       IPC::PlatformFileForTransit output_file);
   void OnRenderPDFPagesToMetafileStop();
 #endif  // OS_WIN
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   void OnRenderPDFPagesToPWGRaster(
       IPC::PlatformFileForTransit pdf_transit,
       const printing::PdfRenderSettings& settings,
       const printing::PwgRasterSettings& bitmap_settings,
       IPC::PlatformFileForTransit bitmap_transit);
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
 
 #if defined(OS_WIN)
   int LoadPDF(base::File pdf_file);
   bool RenderPdfPageToMetafile(int page_number,
                                base::File output_file,
-                               double* scale_factor);
+                               float* scale_factor);
 #endif  // OS_WIN
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   bool RenderPDFPagesToPWGRaster(
       base::File pdf_file,
       const printing::PdfRenderSettings& settings,
@@ -65,7 +65,7 @@ class PrintingHandler : public UtilityMessageHandler {
 
   void OnGetPrinterCapsAndDefaults(const std::string& printer_name);
   void OnGetPrinterSemanticCapsAndDefaults(const std::string& printer_name);
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
 
 #if defined(OS_WIN)
   std::vector<char> pdf_data_;

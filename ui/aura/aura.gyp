@@ -111,6 +111,7 @@
         '../wm/public/transient_window_client.h',
         '../wm/public/window_move_client.cc',
         '../wm/public/window_move_client.h',
+        '../wm/public/window_types.h',
       ],
       'conditions': [
         ['use_x11==1', {
@@ -190,6 +191,8 @@
         'test/window_event_dispatcher_test_api.h',
         'test/window_test_api.cc',
         'test/window_test_api.h',
+        'test/x11_event_sender.cc',
+        'test/x11_event_sender.h',
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],

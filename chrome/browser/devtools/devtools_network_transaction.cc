@@ -4,6 +4,7 @@
 
 #include "chrome/browser/devtools/devtools_network_transaction.h"
 
+#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/devtools/devtools_network_controller.h"
 #include "chrome/browser/devtools/devtools_network_interceptor.h"
 #include "net/base/net_errors.h"
@@ -11,13 +12,14 @@
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_request_info.h"
 
-namespace {
-
-const char kDevToolsRequestInitiator[] = "X-DevTools-Request-Initiator";
-const char kDevToolsEmulateNetworkConditionsClientId[] =
-    "X-DevTools-Emulate-Network-Conditions-Client-Id";
-
-}  // namespace
+// Keep in sync with kDevToolsRequestInitiator and
+// kDevToolsEmulateNetworkConditionsClientId defined in
+// InspectorResourceAgent.cpp.
+const char DevToolsNetworkTransaction::kDevToolsRequestInitiator[] =
+    "X-DevTools-Request-Initiator";
+const char
+    DevToolsNetworkTransaction::kDevToolsEmulateNetworkConditionsClientId[] =
+        "X-DevTools-Emulate-Network-Conditions-Client-Id";
 
 DevToolsNetworkTransaction::DevToolsNetworkTransaction(
     DevToolsNetworkController* controller,
@@ -51,6 +53,11 @@ void DevToolsNetworkTransaction::Throttle(int result) {
 }
 
 void DevToolsNetworkTransaction::OnCallback(int rv) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424359 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "424359 DevToolsNetworkTransaction::OnCallback"));
+
   if (failed_)
     return;
   DCHECK(!callback_.is_null());

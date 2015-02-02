@@ -58,6 +58,12 @@ public:
         V8CacheOptionsCode
     };
 
+    enum V8ScriptStreamingMode {
+        V8ScriptStreamingModeAll,
+        V8ScriptStreamingModeOnlyAsyncAndDefer,
+        V8ScriptStreamingModeAllPlusBlockParsingBlocking,
+    };
+
     // Bit field values to tell Blink what kind of pointer/hover types are
     // available on the system. These must match the enums in
     // core/css/PointerProperties.h and their equality is compile-time asserted
@@ -94,6 +100,7 @@ public:
     // FrameLoaderClient set to the frame may override the value set by this
     // method.
     virtual void setAccessibilityEnabled(bool) = 0;
+    virtual void setAccessibilityPasswordValuesEnabled(bool) = 0;
     virtual void setAllowDisplayOfInsecureContent(bool) = 0;
     virtual void setAllowFileAccessFromFileURLs(bool) = 0;
     virtual void setAllowCustomScrollbarInMainFrame(bool) = 0;
@@ -111,6 +118,7 @@ public:
     virtual void setAllowScriptsToCloseWindows(bool) = 0;
     virtual void setAllowUniversalAccessFromFileURLs(bool) = 0;
     virtual void setAntialiased2dCanvasEnabled(bool) = 0;
+    virtual void setAntialiasedClips2dCanvasEnabled(bool) = 0;
     virtual void setAsynchronousSpellCheckingEnabled(bool) = 0;
     virtual void setAutoZoomFocusedNodeToLegibleScale(bool) = 0;
     virtual void setCaretBrowsingEnabled(bool) = 0;
@@ -125,9 +133,7 @@ public:
     virtual void setDefaultFontSize(int) = 0;
     virtual void setDefaultTextEncodingName(const WebString&) = 0;
     virtual void setDefaultVideoPosterURL(const WebString&) = 0;
-    virtual void setDisallowFullscreenForNonMediaElements(bool) = 0;
     void setDeferred2dCanvasEnabled(bool) { } // temporary stub
-    virtual void setDeferredFiltersEnabled(bool) = 0;
     virtual void setDeferredImageDecodingEnabled(bool) = 0;
     virtual void setDeviceScaleAdjustment(float) = 0;
     virtual void setDeviceSupportsMouse(bool) = 0;
@@ -179,6 +185,7 @@ public:
     virtual void setPrimaryHoverType(HoverType) = 0;
     virtual void setRenderVSyncNotificationEnabled(bool) = 0;
     virtual void setReportScreenSizeInPhysicalPixelsQuirk(bool) = 0;
+    virtual void setRootLayerScrolls(bool) = 0;
     virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
     virtual void setSelectTrailingWhitespaceEnabled(bool) = 0;
     virtual void setSelectionIncludesAltImageText(bool) = 0;
@@ -217,6 +224,7 @@ public:
     virtual void setUsesEncodingDetector(bool) = 0;
     virtual void setV8CacheOptions(V8CacheOptions) = 0;
     virtual void setV8ScriptStreamingEnabled(bool) = 0;
+    virtual void setV8ScriptStreamingMode(V8ScriptStreamingMode) = 0;
     virtual void setValidationMessageTimerMagnification(int) = 0;
     virtual void setViewportEnabled(bool) = 0;
     virtual void setViewportMetaEnabled(bool) = 0;

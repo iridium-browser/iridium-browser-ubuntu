@@ -14,17 +14,18 @@ class MultiProfileAppWindowLauncherController
  public:
   explicit MultiProfileAppWindowLauncherController(
       ChromeLauncherController* owner);
-  virtual ~MultiProfileAppWindowLauncherController();
+  ~MultiProfileAppWindowLauncherController() override;
 
   // Overridden from AppWindowLauncherController:
-  virtual void ActiveUserChanged(const std::string& user_email) OVERRIDE;
-  virtual void AdditionalUserAddedToSession(Profile* profile) OVERRIDE;
+  void ActiveUserChanged(const std::string& user_email) override;
+  void AdditionalUserAddedToSession(Profile* profile) override;
 
   // Overridden from AppWindowRegistry::Observer:
-  virtual void OnAppWindowAdded(extensions::AppWindow* app_window) OVERRIDE;
-  virtual void OnAppWindowRemoved(extensions::AppWindow* app_window) OVERRIDE;
-  virtual void OnAppWindowShown(extensions::AppWindow* app_window) OVERRIDE;
-  virtual void OnAppWindowHidden(extensions::AppWindow* app_window) OVERRIDE;
+  void OnAppWindowAdded(extensions::AppWindow* app_window) override;
+  void OnAppWindowRemoved(extensions::AppWindow* app_window) override;
+  void OnAppWindowShown(extensions::AppWindow* app_window,
+                        bool was_hidden) override;
+  void OnAppWindowHidden(extensions::AppWindow* app_window) override;
 
  private:
   typedef std::vector<extensions::AppWindow*> AppWindowList;

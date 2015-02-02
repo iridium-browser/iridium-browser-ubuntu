@@ -43,7 +43,6 @@ class WebFileSystem;
 
 namespace blink {
 
-class DirectoryEntry;
 class DirectoryReaderBase;
 class EntriesCallback;
 class EntryBase;
@@ -81,7 +80,7 @@ public:
     virtual void removePendingCallbacks() { }
 
     // Overridden by subclasses to handle sync vs async error-handling.
-    virtual void reportError(ErrorCallback*, PassRefPtrWillBeRawPtr<FileError>) = 0;
+    virtual void reportError(ErrorCallback*, FileError*) = 0;
 
     const String& name() const { return m_name; }
     FileSystemType type() const { return m_type; }
@@ -103,7 +102,7 @@ public:
     KURL createFileSystemURL(const String& fullPath) const;
     static bool pathToAbsolutePath(FileSystemType, const EntryBase*, String path, String& absolutePath);
     static bool pathPrefixToFileSystemType(const String& pathPrefix, FileSystemType&);
-    static PassRefPtrWillBeRawPtr<File> createFile(const FileMetadata&, const KURL& fileSystemURL, FileSystemType, const String name);
+    static File* createFile(const FileMetadata&, const KURL& fileSystemURL, FileSystemType, const String name);
 
     // Actual FileSystem API implementations. All the validity checks on virtual paths are done at this level.
     void getMetadata(const EntryBase*, MetadataCallback*, ErrorCallback*, SynchronousType = Asynchronous);

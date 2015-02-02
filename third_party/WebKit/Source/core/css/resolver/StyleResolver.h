@@ -90,7 +90,7 @@ public:
 };
 
 // This class selects a RenderStyle for a given element based on a collection of stylesheets.
-class StyleResolver FINAL : public NoBaseWillBeGarbageCollectedFinalized<StyleResolver> {
+class StyleResolver final : public NoBaseWillBeGarbageCollectedFinalized<StyleResolver> {
     WTF_MAKE_NONCOPYABLE(StyleResolver); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     explicit StyleResolver(Document&);
@@ -117,10 +117,6 @@ public:
     PassRefPtr<RenderStyle> styleForText(Text*);
 
     static PassRefPtr<RenderStyle> styleForDocument(Document&);
-
-    // FIXME: This only has 5 callers and should be removed. Callers should be explicit about
-    // their dependency on Document* instead of grabbing one through StyleResolver.
-    Document& document() { return *m_document; }
 
     // FIXME: It could be better to call appendAuthorStyleSheets() directly after we factor StyleResolver further.
     // https://bugs.webkit.org/show_bug.cgi?id=108890
@@ -216,13 +212,14 @@ private:
     void adjustRenderStyle(StyleResolverState&, Element*);
 
     void appendCSSStyleSheet(CSSStyleSheet*);
+    void addRulesFromSheet(CSSStyleSheet*, TreeScope*, unsigned);
 
     void collectPseudoRulesForElement(Element*, ElementRuleCollector&, PseudoId, unsigned rulesToInclude);
-    void matchUARules(ElementRuleCollector&, RuleSet*);
+    void matchRuleSet(ElementRuleCollector&, RuleSet*);
+    void matchUARules(ElementRuleCollector&);
     void matchAuthorRules(Element*, ElementRuleCollector&, bool includeEmptyRules);
     void matchAuthorRulesForShadowHost(Element*, ElementRuleCollector&, bool includeEmptyRules, WillBeHeapVector<RawPtrWillBeMember<ScopedStyleResolver>, 8>& resolvers, WillBeHeapVector<RawPtrWillBeMember<ScopedStyleResolver>, 8>& resolversInShadowTree);
     void matchAllRules(StyleResolverState&, ElementRuleCollector&, bool includeSMILProperties);
-    void matchUARules(ElementRuleCollector&);
     void collectFeatures();
     void resetRuleFeatures();
 
@@ -264,6 +261,8 @@ private:
     String pageName(int pageIndex) const;
 
     bool pseudoStyleForElementInternal(Element&, const PseudoStyleRequest&, RenderStyle* parentStyle, StyleResolverState&);
+
+    Document& document() { return *m_document; }
 
     // FIXME: This likely belongs on RuleSet.
     typedef WillBeHeapHashMap<StringImpl*, RefPtrWillBeMember<StyleRuleKeyframes> > KeyframesRuleMap;

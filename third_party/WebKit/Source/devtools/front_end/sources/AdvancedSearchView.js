@@ -52,6 +52,10 @@ WebInspector.AdvancedSearchView = function()
     WebInspector.AdvancedSearchView._instance = this;
     /** @type {!WebInspector.SearchScope} */
     this._searchScope = new WebInspector.SourcesSearchScope();
+    if (WebInspector.AdvancedSearchView._pendingQuery) {
+        this._toggle(WebInspector.AdvancedSearchView._pendingQuery);
+        delete WebInspector.AdvancedSearchView._pendingQuery;
+    }
 }
 
 WebInspector.AdvancedSearchView.prototype = {
@@ -321,7 +325,7 @@ WebInspector.AdvancedSearchView.prototype = {
 WebInspector.SearchResultsPane = function(searchConfig)
 {
     this._searchConfig = searchConfig;
-    this.element = document.createElement("div");
+    this.element = createElement("div");
 }
 
 WebInspector.SearchResultsPane.prototype = {
@@ -350,6 +354,8 @@ WebInspector.AdvancedSearchView.ToggleDrawerViewActionDelegate = function()
 WebInspector.AdvancedSearchView.ToggleDrawerViewActionDelegate.prototype = {
     /**
      * @return {boolean}
+     * // FIXME: remove this suppression.
+     * @suppressGlobalPropertiesCheck
      */
     handleAction: function()
     {
@@ -360,9 +366,12 @@ WebInspector.AdvancedSearchView.ToggleDrawerViewActionDelegate.prototype = {
             if (selection.rangeCount)
                 queryCandidate = selection.toString().replace(/\r?\n.*/, "");
 
-            WebInspector.inspectorView.showPanel("sources");
+            WebInspector.inspectorView.setCurrentPanel(WebInspector.SourcesPanel.instance());
             WebInspector.inspectorView.showViewInDrawer("sources.search");
-            WebInspector.AdvancedSearchView._instance._toggle(queryCandidate);
+            if (WebInspector.AdvancedSearchView._instance)
+                WebInspector.AdvancedSearchView._instance._toggle(queryCandidate);
+            else
+                WebInspector.AdvancedSearchView._pendingQuery = queryCandidate;
         } else {
             WebInspector.inspectorView.closeDrawer();
         }

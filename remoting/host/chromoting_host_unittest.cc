@@ -70,7 +70,7 @@ class ChromotingHostTest : public testing::Test {
   ChromotingHostTest() {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     task_runner_ = new AutoThreadTaskRunner(
         message_loop_.message_loop_proxy(),
         base::Bind(&ChromotingHostTest::QuitMainMessageLoop,
@@ -90,7 +90,7 @@ class ChromotingHostTest : public testing::Test {
     host_.reset(new ChromotingHost(
         &signal_strategy_,
         desktop_environment_factory_.get(),
-        scoped_ptr<protocol::SessionManager>(session_manager_),
+        make_scoped_ptr(session_manager_),
         task_runner_,   // Audio
         task_runner_,   // Input
         task_runner_,   // Video capture
@@ -182,8 +182,8 @@ class ChromotingHostTest : public testing::Test {
   void SimulateClientConnection(int connection_index, bool authenticate,
                                 bool reject) {
     scoped_ptr<protocol::ConnectionToClient> connection =
-        ((connection_index == 0) ? owned_connection1_ : owned_connection2_).
-        PassAs<protocol::ConnectionToClient>();
+        ((connection_index == 0) ? owned_connection1_ : owned_connection2_)
+            .Pass();
     protocol::ConnectionToClient* connection_ptr = connection.get();
     scoped_ptr<ClientSession> client(new ClientSession(
         host_.get(),
@@ -225,7 +225,7 @@ class ChromotingHostTest : public testing::Test {
     host_->clients_.push_back(client.release());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Make sure that the host has been properly deleted.
     DCHECK(host_.get() == NULL);
   }

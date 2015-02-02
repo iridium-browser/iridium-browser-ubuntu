@@ -82,9 +82,11 @@ struct ParamTraits<ContentSettingsPattern> {
 
 IPC_ENUM_TRAITS_MAX_VALUE(ChromeViewHostMsg_GetPluginInfo_Status::Value,
                           ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized)
-IPC_ENUM_TRAITS(OmniboxFocusChangeReason)
-IPC_ENUM_TRAITS(OmniboxFocusState)
-IPC_ENUM_TRAITS(search_provider::OSDDType)
+IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusChangeReason,
+                          OMNIBOX_FOCUS_CHANGE_REASON_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(OmniboxFocusState, OMNIBOX_FOCUS_STATE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(search_provider::OSDDType,
+                          search_provider::OSDD_TYPE_LAST)
 IPC_ENUM_TRAITS(search_provider::InstallState)
 IPC_ENUM_TRAITS(ThemeBackgroundImageAlignment)
 IPC_ENUM_TRAITS(ThemeBackgroundImageTiling)
@@ -121,6 +123,14 @@ IPC_STRUCT_TRAITS_BEGIN(ContentSettingPatternSource)
   IPC_STRUCT_TRAITS_MEMBER(setting)
   IPC_STRUCT_TRAITS_MEMBER(source)
   IPC_STRUCT_TRAITS_MEMBER(incognito)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(EmbeddedSearchRequestParams)
+  IPC_STRUCT_TRAITS_MEMBER(search_query)
+  IPC_STRUCT_TRAITS_MEMBER(original_query)
+  IPC_STRUCT_TRAITS_MEMBER(rlz_parameter_value)
+  IPC_STRUCT_TRAITS_MEMBER(input_encoding)
+  IPC_STRUCT_TRAITS_MEMBER(assisted_query_stats)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(InstantSuggestion)
@@ -186,7 +196,7 @@ IPC_STRUCT_TRAITS_BEGIN(blink::WebCache::UsageStats)
 IPC_STRUCT_TRAITS_END()
 
 IPC_ENUM_TRAITS_MAX_VALUE(NTPLoggingEventType,
-                          NTP_NUM_EVENT_TYPES)
+                          NTP_EVENT_TYPE_LAST)
 
 IPC_ENUM_TRAITS_MAX_VALUE(WebApplicationInfo::MobileCapable,
                           WebApplicationInfo::MOBILE_CAPABLE_APPLE)
@@ -265,8 +275,9 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSetInputInProgress,
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSetSuggestionToPrefetch,
                     InstantSuggestion /* suggestion */)
 
-IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxSubmit,
-                    base::string16 /* value */)
+IPC_MESSAGE_ROUTED2(ChromeViewMsg_SearchBoxSubmit,
+                    base::string16 /* value */,
+                    EmbeddedSearchRequestParams /* params */)
 
 IPC_MESSAGE_ROUTED1(ChromeViewMsg_SearchBoxThemeChanged,
                     ThemeBackgroundInfo /* value */)
@@ -380,8 +391,9 @@ IPC_MESSAGE_CONTROL1(ChromeViewHostMsg_UpdatedCacheStats,
 
 // Tells the browser that content in the current page was blocked due to the
 // user's content settings.
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_ContentBlocked,
-                    ContentSettingsType /* type of blocked content */)
+IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_ContentBlocked,
+                    ContentSettingsType /* type of blocked content */,
+                    base::string16 /* details on blocked content */)
 
 // Sent by the renderer process to check whether access to web databases is
 // granted by content settings.

@@ -16,7 +16,7 @@ namespace extensions {
 
 struct AppIsolationInfo : public Extension::ManifestData {
   explicit AppIsolationInfo(bool isolated_storage);
-  virtual ~AppIsolationInfo();
+  ~AppIsolationInfo() override;
 
   static bool HasIsolatedStorage(const Extension* extension);
 
@@ -28,13 +28,13 @@ struct AppIsolationInfo : public Extension::ManifestData {
 class AppIsolationHandler : public ManifestHandler {
  public:
   AppIsolationHandler();
-  virtual ~AppIsolationHandler();
+  ~AppIsolationHandler() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
-  virtual bool AlwaysParseForType(Manifest::Type type) const OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
+  bool AlwaysParseForType(Manifest::Type type) const override;
 
  private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 
   DISALLOW_COPY_AND_ASSIGN(AppIsolationHandler);
 };

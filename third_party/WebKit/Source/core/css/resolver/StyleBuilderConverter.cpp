@@ -27,6 +27,7 @@
 #include "config.h"
 #include "core/css/resolver/StyleBuilderConverter.h"
 
+#include "core/css/BasicShapeFunctions.h"
 #include "core/css/CSSFontFeatureValue.h"
 #include "core/css/CSSFunctionValue.h"
 #include "core/css/CSSGridLineNamesValue.h"
@@ -100,6 +101,77 @@ LengthBox StyleBuilderConverter::convertClip(StyleResolverState& state, CSSValue
         convertLengthOrAuto(state, rect->right()),
         convertLengthOrAuto(state, rect->bottom()),
         convertLengthOrAuto(state, rect->left()));
+}
+
+static FontDescription::GenericFamilyType convertGenericFamily(CSSValueID valueID)
+{
+    switch (valueID) {
+    case CSSValueWebkitBody:
+        return FontDescription::StandardFamily;
+    case CSSValueSerif:
+        return FontDescription::SerifFamily;
+    case CSSValueSansSerif:
+        return FontDescription::SansSerifFamily;
+    case CSSValueCursive:
+        return FontDescription::CursiveFamily;
+    case CSSValueFantasy:
+        return FontDescription::FantasyFamily;
+    case CSSValueMonospace:
+        return FontDescription::MonospaceFamily;
+    case CSSValueWebkitPictograph:
+        return FontDescription::PictographFamily;
+    default:
+        return FontDescription::NoFamily;
+    }
+}
+
+static bool convertFontFamilyName(StyleResolverState& state, CSSPrimitiveValue* primitiveValue,
+    FontDescription::GenericFamilyType& genericFamily, AtomicString& familyName)
+{
+    if (primitiveValue->isString()) {
+        genericFamily = FontDescription::NoFamily;
+        familyName = AtomicString(primitiveValue->getStringValue());
+    } else if (state.document().settings()) {
+        genericFamily = convertGenericFamily(primitiveValue->getValueID());
+        familyName = state.fontBuilder().genericFontFamilyName(genericFamily);
+    }
+
+    return !familyName.isEmpty();
+}
+
+FontDescription::FamilyDescription StyleBuilderConverter::convertFontFamily(StyleResolverState& state, CSSValue* value)
+{
+    ASSERT(value->isValueList());
+
+    FontDescription::FamilyDescription desc(FontDescription::NoFamily);
+    FontFamily* currFamily = nullptr;
+
+    for (CSSValueListIterator i = value; i.hasMore(); i.advance()) {
+        CSSValue* item = i.value();
+        if (!item->isPrimitiveValue())
+            continue;
+
+        FontDescription::GenericFamilyType genericFamily = FontDescription::NoFamily;
+        AtomicString familyName;
+
+        if (!convertFontFamilyName(state, toCSSPrimitiveValue(item), genericFamily, familyName))
+            continue;
+
+        if (!currFamily) {
+            currFamily = &desc.family;
+        } else {
+            RefPtr<SharedFontFamily> newFamily = SharedFontFamily::create();
+            currFamily->appendFamily(newFamily);
+            currFamily = newFamily.get();
+        }
+
+        currFamily->setFamily(familyName);
+
+        if (genericFamily != FontDescription::NoFamily)
+            desc.genericFamily = genericFamily;
+    }
+
+    return desc;
 }
 
 PassRefPtr<FontFeatureSettings> StyleBuilderConverter::convertFontFeatureSettings(StyleResolverState& state, CSSValue* value)
@@ -267,6 +339,43 @@ EGlyphOrientation StyleBuilderConverter::convertGlyphOrientation(StyleResolverSt
     return GO_270DEG;
 }
 
+GridAutoFlow StyleBuilderConverter::convertGridAutoFlow(StyleResolverState&, CSSValue* value)
+{
+    CSSValueList* list = toCSSValueList(value);
+
+    ASSERT(list->length() >= 1);
+    CSSPrimitiveValue* first = toCSSPrimitiveValue(list->item(0));
+    CSSPrimitiveValue* second = list->length() == 2 ? toCSSPrimitiveValue(list->item(1)) : nullptr;
+
+    switch (first->getValueID()) {
+    case CSSValueRow:
+        if (second) {
+            if (second->getValueID() == CSSValueDense)
+                return AutoFlowRowDense;
+            return AutoFlowStackRow;
+        }
+        return AutoFlowRow;
+    case CSSValueColumn:
+        if (second) {
+            if (second->getValueID() == CSSValueDense)
+                return AutoFlowColumnDense;
+            return AutoFlowStackColumn;
+        }
+        return AutoFlowColumn;
+    case CSSValueDense:
+        if (second && second->getValueID() == CSSValueColumn)
+            return AutoFlowColumnDense;
+        return AutoFlowRowDense;
+    case CSSValueStack:
+        if (second && second->getValueID() == CSSValueColumn)
+            return AutoFlowStackColumn;
+        return AutoFlowStackRow;
+    default:
+        ASSERT_NOT_REACHED();
+        return RenderStyle::initialGridAutoFlow();
+    }
+}
+
 GridPosition StyleBuilderConverter::convertGridPosition(StyleResolverState&, CSSValue* value)
 {
     // We accept the specification's grammar:
@@ -374,16 +483,15 @@ bool StyleBuilderConverter::convertGridTrackList(CSSValue* value, Vector<GridTra
 
 void StyleBuilderConverter::createImplicitNamedGridLinesFromGridArea(const NamedGridAreaMap& namedGridAreas, NamedGridLinesMap& namedGridLines, GridTrackSizingDirection direction)
 {
-    NamedGridAreaMap::const_iterator end = namedGridAreas.end();
-    for (NamedGridAreaMap::const_iterator it = namedGridAreas.begin(); it != end; ++it) {
-        GridSpan areaSpan = direction == ForRows ? it->value.rows : it->value.columns;
+    for (const auto& namedGridAreaEntry : namedGridAreas) {
+        GridSpan areaSpan = direction == ForRows ? namedGridAreaEntry.value.rows : namedGridAreaEntry.value.columns;
         {
-            NamedGridLinesMap::AddResult startResult = namedGridLines.add(it->key + "-start", Vector<size_t>());
+            NamedGridLinesMap::AddResult startResult = namedGridLines.add(namedGridAreaEntry.key + "-start", Vector<size_t>());
             startResult.storedValue->value.append(areaSpan.resolvedInitialPosition.toInt());
             std::sort(startResult.storedValue->value.begin(), startResult.storedValue->value.end());
         }
         {
-            NamedGridLinesMap::AddResult endResult = namedGridLines.add(it->key + "-end", Vector<size_t>());
+            NamedGridLinesMap::AddResult endResult = namedGridLines.add(namedGridAreaEntry.key + "-end", Vector<size_t>());
             endResult.storedValue->value.append(areaSpan.resolvedFinalPosition.toInt() + 1);
             std::sort(endResult.storedValue->value.begin(), endResult.storedValue->value.end());
         }
@@ -468,16 +576,68 @@ float StyleBuilderConverter::convertNumberOrPercentage(StyleResolverState& state
     return primitiveValue->getFloatValue() / 100.0f;
 }
 
+static float convertPerspectiveLength(StyleResolverState& state, CSSPrimitiveValue* primitiveValue)
+{
+    return std::max(primitiveValue->computeLength<float>(state.cssToLengthConversionData()), 0.0f);
+}
+
+float StyleBuilderConverter::convertPerspective(StyleResolverState& state, CSSValue* value)
+{
+    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
+
+    if (primitiveValue->getValueID() == CSSValueNone)
+        return RenderStyle::initialPerspective();
+
+    // CSSPropertyWebkitPerspective accepts unitless numbers.
+    if (primitiveValue->isNumber()) {
+        RefPtrWillBeRawPtr<CSSPrimitiveValue> px = CSSPrimitiveValue::create(primitiveValue->getDoubleValue(), CSSPrimitiveValue::CSS_PX);
+        return convertPerspectiveLength(state, px.get());
+    }
+
+    return convertPerspectiveLength(state, primitiveValue);
+}
+
+template <CSSValueID cssValueFor0, CSSValueID cssValueFor100>
+static Length convertOriginLength(StyleResolverState& state, CSSPrimitiveValue* primitiveValue)
+{
+    if (primitiveValue->isValueID()) {
+        switch (primitiveValue->getValueID()) {
+        case cssValueFor0:
+            return Length(0, Percent);
+        case cssValueFor100:
+            return Length(100, Percent);
+        case CSSValueCenter:
+            return Length(50, Percent);
+        default:
+            ASSERT_NOT_REACHED();
+        }
+    }
+
+    return StyleBuilderConverter::convertLength(state, primitiveValue);
+}
+
+LengthPoint StyleBuilderConverter::convertPerspectiveOrigin(StyleResolverState& state, CSSValue* value)
+{
+    CSSValueList* list = toCSSValueList(value);
+    ASSERT(list->length() == 2);
+
+    CSSPrimitiveValue* primitiveValueX = toCSSPrimitiveValue(list->item(0));
+    CSSPrimitiveValue* primitiveValueY = toCSSPrimitiveValue(list->item(1));
+
+    return LengthPoint(
+        convertOriginLength<CSSValueLeft, CSSValueRight>(state, primitiveValueX),
+        convertOriginLength<CSSValueTop, CSSValueBottom>(state, primitiveValueY)
+    );
+}
+
 EPaintOrder StyleBuilderConverter::convertPaintOrder(StyleResolverState&, CSSValue* cssPaintOrder)
 {
     if (cssPaintOrder->isValueList()) {
         int paintOrder = 0;
-        CSSValueListInspector iter(cssPaintOrder);
-        for (size_t i = 0; i < iter.length(); i++) {
-            CSSPrimitiveValue* value = toCSSPrimitiveValue(iter.item(i));
-
+        const CSSValueList& list = *toCSSValueList(cssPaintOrder);
+        for (size_t i = 0; i < list.length(); ++i) {
             EPaintOrderType paintOrderType = PT_NONE;
-            switch (value->getValueID()) {
+            switch (toCSSPrimitiveValue(list.item(i))->getValueID()) {
             case CSSValueFill:
                 paintOrderType = PT_FILL;
                 break;
@@ -559,6 +719,34 @@ PassRefPtr<ShadowList> StyleBuilderConverter::convertShadow(StyleResolverState& 
     return ShadowList::adopt(shadows);
 }
 
+PassRefPtr<ShapeValue> StyleBuilderConverter::convertShapeValue(StyleResolverState& state, CSSValue* value)
+{
+    if (value->isPrimitiveValue()) {
+        ASSERT(toCSSPrimitiveValue(value)->getValueID() == CSSValueNone);
+        return nullptr;
+    }
+
+    if (value->isImageValue() || value->isImageGeneratorValue() || value->isImageSetValue())
+        return ShapeValue::createImageValue(state.styleImage(CSSPropertyShapeOutside, value));
+
+    RefPtr<BasicShape> shape;
+    CSSBoxType cssBox = BoxMissing;
+    CSSValueList* valueList = toCSSValueList(value);
+    for (unsigned i = 0; i < valueList->length(); ++i) {
+        CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(valueList->item(i));
+        if (primitiveValue->isShape())
+            shape = basicShapeForValue(state, primitiveValue->getShapeValue());
+        else
+            cssBox = CSSBoxType(*primitiveValue);
+    }
+
+    if (shape)
+        return ShapeValue::createShapeValue(shape.release(), cssBox);
+
+    ASSERT(cssBox != BoxMissing);
+    return ShapeValue::createBoxShapeValue(cssBox);
+}
+
 float StyleBuilderConverter::convertSpacing(StyleResolverState& state, CSSValue* value)
 {
     CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
@@ -619,6 +807,22 @@ float StyleBuilderConverter::convertTextStrokeWidth(StyleResolverState& state, C
         return CSSPrimitiveValue::create(multiplier / 48, CSSPrimitiveValue::CSS_EMS)->computeLength<float>(state.cssToLengthConversionData());
     }
     return primitiveValue->computeLength<float>(state.cssToLengthConversionData());
+}
+
+TransformOrigin StyleBuilderConverter::convertTransformOrigin(StyleResolverState& state, CSSValue* value)
+{
+    CSSValueList* list = toCSSValueList(value);
+    ASSERT(list->length() == 3);
+
+    CSSPrimitiveValue* primitiveValueX = toCSSPrimitiveValue(list->item(0));
+    CSSPrimitiveValue* primitiveValueY = toCSSPrimitiveValue(list->item(1));
+    CSSPrimitiveValue* primitiveValueZ = toCSSPrimitiveValue(list->item(2));
+
+    return TransformOrigin(
+        convertOriginLength<CSSValueLeft, CSSValueRight>(state, primitiveValueX),
+        convertOriginLength<CSSValueTop, CSSValueBottom>(state, primitiveValueY),
+        StyleBuilderConverter::convertComputedLength<float>(state, primitiveValueZ)
+    );
 }
 
 } // namespace blink

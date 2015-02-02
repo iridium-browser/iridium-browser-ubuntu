@@ -7,23 +7,34 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
+#include "extensions/browser/install/extension_install_ui.h"
+
+namespace content {
+class BrowserContext;
+}
 
 class Profile;
 
-class ExtensionInstallUIDefault : public ExtensionInstallUI {
+class ExtensionInstallUIDefault : public extensions::ExtensionInstallUI {
  public:
-  explicit ExtensionInstallUIDefault(Profile* profile);
-  virtual ~ExtensionInstallUIDefault();
+  explicit ExtensionInstallUIDefault(content::BrowserContext* context);
+  ~ExtensionInstallUIDefault() override;
 
   // ExtensionInstallUI:
-  virtual void OnInstallSuccess(const extensions::Extension* extension,
-                                const SkBitmap* icon) OVERRIDE;
-  virtual void OnInstallFailure(
-      const extensions::CrxInstallerError& error) OVERRIDE;
-  virtual void SetUseAppInstalledBubble(bool use_bubble) OVERRIDE;
+  void OnInstallSuccess(const extensions::Extension* extension,
+                        const SkBitmap* icon) override;
+  void OnInstallFailure(const extensions::CrxInstallerError& error) override;
+  void SetUseAppInstalledBubble(bool use_bubble) override;
+  void OpenAppInstalledUI(const std::string& app_id) override;
+  void SetSkipPostInstallUI(bool skip_ui) override;
+  gfx::NativeWindow GetDefaultInstallDialogParent() override;
 
  private:
+  Profile* profile_;
+
+  // Whether or not to show the default UI after completing the installation.
+  bool skip_post_install_ui_;
+
   // Used to undo theme installation.
   std::string previous_theme_id_;
   bool previous_using_system_theme_;
@@ -32,7 +43,7 @@ class ExtensionInstallUIDefault : public ExtensionInstallUI {
   // action of opening a new tab page.
   bool use_app_installed_bubble_;
 
-  DISALLOW_IMPLICIT_CONSTRUCTORS(ExtensionInstallUIDefault);
+  DISALLOW_COPY_AND_ASSIGN(ExtensionInstallUIDefault);
 };
 
 #endif  // CHROME_BROWSER_UI_EXTENSIONS_EXTENSION_INSTALL_UI_DEFAULT_H_

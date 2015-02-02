@@ -152,11 +152,6 @@ enum BackgroundEdgeOrigin { TopEdge, RightEdge, BottomEdge, LeftEdge };
 // CSS Mask Source Types
 enum EMaskSourceType { MaskAlpha, MaskLuminance };
 
-// CSS3 Marquee Properties
-
-enum EMarqueeBehavior { MNONE, MSCROLL, MSLIDE, MALTERNATE };
-enum EMarqueeDirection { MAUTO = 0, MLEFT = 1, MRIGHT = -1, MUP = 2, MDOWN = -2, MFORWARD = 3, MBACKWARD = -3 };
-
 // Deprecated Flexible Box Properties
 
 enum EBoxPack { Start, Center, End, Justify };
@@ -170,7 +165,6 @@ enum EBoxDirection { BNORMAL, BREVERSE };
 enum EAlignContent { AlignContentFlexStart, AlignContentFlexEnd, AlignContentCenter, AlignContentSpaceBetween, AlignContentSpaceAround, AlignContentStretch };
 enum EFlexDirection { FlowRow, FlowRowReverse, FlowColumn, FlowColumnReverse };
 enum EFlexWrap { FlexNoWrap, FlexWrap, FlexWrapReverse };
-enum EJustifyContent { JustifyFlexStart, JustifyFlexEnd, JustifyCenter, JustifySpaceBetween, JustifySpaceAround };
 
 enum ETextSecurity {
     TSNONE, TSDISC, TSCIRCLE, TSSQUARE
@@ -303,8 +297,6 @@ enum EListStyleType {
 enum QuoteType {
     OPEN_QUOTE, CLOSE_QUOTE, NO_OPEN_QUOTE, NO_CLOSE_QUOTE
 };
-
-enum EBorderFit { BorderFitBorder, BorderFitLines };
 
 enum EAnimPlayState {
     AnimPlayStatePlaying,
@@ -542,6 +534,27 @@ enum OverflowAlignment {
 enum ItemPositionType {
     NonLegacyPosition,
     LegacyPosition
+};
+
+enum ContentPosition {
+    ContentPositionAuto,
+    ContentPositionBaseline,
+    ContentPositionLastBaseline,
+    ContentPositionCenter,
+    ContentPositionStart,
+    ContentPositionEnd,
+    ContentPositionFlexStart,
+    ContentPositionFlexEnd,
+    ContentPositionLeft,
+    ContentPositionRight
+};
+
+enum ContentDistributionType {
+    ContentDistributionDefault,
+    ContentDistributionSpaceBetween,
+    ContentDistributionSpaceAround,
+    ContentDistributionSpaceEvenly,
+    ContentDistributionStretch
 };
 
 // Reasonable maximum to prevent insane font sizes from causing crashes on some platforms (such as Windows).

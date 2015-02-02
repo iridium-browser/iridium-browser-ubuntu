@@ -32,7 +32,6 @@
     Custom=ToV8,
     ImplementedAs=LocalDOMWindow,
     PrimaryGlobal,
-    WillBeGarbageCollected,
 ] interface Window : EventTarget {
     // DOM Level 0
     readonly attribute Screen screen;
@@ -123,7 +122,7 @@
     // Self referential attributes
     [Replaceable, DoNotCheckSecurity] readonly attribute Window self;
     [DoNotCheckSecurity, Unforgeable] readonly attribute Window window;
-    [Replaceable, DoNotCheckSecurity] readonly attribute  Window frames;
+    [Replaceable, DoNotCheckSecurity] readonly attribute Window frames;
 
     [DoNotCheckSecurity, Custom=Setter] attribute Window opener;
     [Replaceable, DoNotCheckSecurity] readonly attribute Window parent;

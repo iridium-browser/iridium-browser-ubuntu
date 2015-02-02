@@ -35,6 +35,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/fetch/CachedMetadata.h"
 #include "core/fetch/ScriptResource.h"
+#include "platform/ScriptForbiddenScope.h"
 #include "platform/TraceEvent.h"
 
 namespace blink {
@@ -47,7 +48,7 @@ namespace {
 // throwStackOverflowException and call it.
 void throwStackOverflowException(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    V8ThrowException::throwRangeError("Maximum call stack size exceeded.", info.GetIsolate());
+    V8ThrowException::throwRangeError(info.GetIsolate(), "Maximum call stack size exceeded.");
 }
 
 v8::Local<v8::Value> throwStackOverflowExceptionIfNeeded(v8::Isolate* isolate)
@@ -126,7 +127,9 @@ v8::Local<v8::Script> V8ScriptRunner::compileScript(v8::Handle<v8::String> code,
         const v8::ScriptCompiler::CachedData* newCachedData = streamer->source()->GetCachedData();
         if (newCachedData) {
             resource->clearCachedMetadata();
-            resource->setCachedMetadata(streamer->cachedDataType(), reinterpret_cast<const char*>(newCachedData->data), newCachedData->length);
+            // Temporarily disable cached metadata for streaming; it's
+            // producing broken data. FIXME: enable it again.
+            // resource->setCachedMetadata(streamer->cachedDataType(), reinterpret_cast<const char*>(newCachedData->data), newCachedData->length);
         }
     } else if (!resource || !resource->url().protocolIsInHTTPFamily() || code->Length() < 1024) {
         v8::ScriptCompiler::Source source(code, origin);
@@ -160,7 +163,7 @@ v8::Local<v8::Script> V8ScriptRunner::compileScript(v8::Handle<v8::String> code,
     return script;
 }
 
-v8::Local<v8::Value> V8ScriptRunner::runCompiledScript(v8::Handle<v8::Script> script, ExecutionContext* context, v8::Isolate* isolate)
+v8::Local<v8::Value> V8ScriptRunner::runCompiledScript(v8::Isolate* isolate, v8::Handle<v8::Script> script, ExecutionContext* context)
 {
     if (script.IsEmpty())
         return v8::Local<v8::Value>();
@@ -175,6 +178,8 @@ v8::Local<v8::Value> V8ScriptRunner::runCompiledScript(v8::Handle<v8::Script> sc
     // Run the script and keep track of the current recursion depth.
     v8::Local<v8::Value> result;
     {
+        if (ScriptForbiddenScope::isScriptForbidden())
+            return v8::Local<v8::Value>();
         V8RecursionScope recursionScope(isolate);
         result = script->Run();
     }
@@ -200,7 +205,7 @@ v8::Local<v8::Value> V8ScriptRunner::compileAndRunInternalScript(v8::Handle<v8::
     return result;
 }
 
-v8::Local<v8::Value> V8ScriptRunner::runCompiledInternalScript(v8::Handle<v8::Script> script, v8::Isolate* isolate)
+v8::Local<v8::Value> V8ScriptRunner::runCompiledInternalScript(v8::Isolate* isolate, v8::Handle<v8::Script> script)
 {
     TRACE_EVENT0("v8", "v8.run");
     TRACE_EVENT_SCOPED_SAMPLING_STATE("v8", "V8Execution");
@@ -220,6 +225,8 @@ v8::Local<v8::Value> V8ScriptRunner::callFunction(v8::Handle<v8::Function> funct
 
     RELEASE_ASSERT(!context->isIteratingOverObservers());
 
+    if (ScriptForbiddenScope::isScriptForbidden())
+        return v8::Local<v8::Value>();
     V8RecursionScope recursionScope(isolate);
     v8::Local<v8::Value> result = function->Call(receiver, argc, args);
     crashIfV8IsDead();
@@ -273,6 +280,8 @@ v8::Local<v8::Object> V8ScriptRunner::instantiateObjectInDocument(v8::Isolate* i
 {
     TRACE_EVENT0("v8", "v8.newInstance");
     TRACE_EVENT_SCOPED_SAMPLING_STATE("v8", "V8Execution");
+    if (ScriptForbiddenScope::isScriptForbidden())
+        return v8::Local<v8::Object>();
     V8RecursionScope scope(isolate);
     v8::Local<v8::Object> result = function->NewInstance(argc, argv);
     crashIfV8IsDead();

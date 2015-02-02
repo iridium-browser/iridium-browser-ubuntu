@@ -47,30 +47,30 @@ class WebSocketChannel;
 class WebSocketChannelClientProxy;
 class WebURL;
 
-class WebSocketImpl FINAL : public WebSocket {
+class WebSocketImpl final : public WebSocket {
 public:
     WebSocketImpl(const WebDocument&, WebSocketClient*);
     virtual ~WebSocketImpl();
 
     bool isNull() const { return !m_private; }
 
-    virtual BinaryType binaryType() const OVERRIDE;
-    virtual bool setBinaryType(BinaryType) OVERRIDE;
-    virtual void connect(const WebURL&, const WebString& protocol) OVERRIDE;
-    virtual WebString subprotocol() OVERRIDE;
-    virtual WebString extensions() OVERRIDE;
-    virtual bool sendText(const WebString&) OVERRIDE;
-    virtual bool sendArrayBuffer(const WebArrayBuffer&) OVERRIDE;
-    virtual unsigned long bufferedAmount() const OVERRIDE;
-    virtual void close(int code, const WebString& reason) OVERRIDE;
-    virtual void fail(const WebString& reason) OVERRIDE;
-    virtual void disconnect() OVERRIDE;
+    virtual BinaryType binaryType() const override;
+    virtual bool setBinaryType(BinaryType) override;
+    virtual void connect(const WebURL&, const WebString& protocol) override;
+    virtual WebString subprotocol() override;
+    virtual WebString extensions() override;
+    virtual bool sendText(const WebString&) override;
+    virtual bool sendArrayBuffer(const WebArrayBuffer&) override;
+    virtual unsigned long bufferedAmount() const override;
+    virtual void close(int code, const WebString& reason) override;
+    virtual void fail(const WebString& reason) override;
+    virtual void disconnect() override;
 
     // WebSocketChannelClient methods proxied by WebSocketChannelClientProxy.
     void didConnect(const String& subprotocol, const String& extensions);
-    void didReceiveMessage(const String& message);
-    void didReceiveBinaryData(PassOwnPtr<Vector<char> > binaryData);
-    void didReceiveMessageError();
+    void didReceiveTextMessage(const String& payload);
+    void didReceiveBinaryMessage(PassOwnPtr<Vector<char> > payload);
+    void didError();
     void didConsumeBufferedAmount(unsigned long consumed);
     void didStartClosingHandshake();
     void didClose(WebSocketChannelClient::ClosingHandshakeCompletionStatus, unsigned short code, const String& reason);

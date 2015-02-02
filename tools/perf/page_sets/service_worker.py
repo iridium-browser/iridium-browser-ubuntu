@@ -2,26 +2,29 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.page import page
-from telemetry.page import page_set
+from telemetry.page import page as page
+from telemetry.page import page_set as page_set
 
 
 archive_data_file_path = 'data/service_worker.json'
 
 
-class ServiceWorkerPage(page.Page):
-  def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage()
-    action_runner.WaitForJavaScriptCondition('window.done')
-
-
 class ServiceWorkerPageSet(page_set.PageSet):
-  """ServiceWorker performance tests"""
+  """Page set of applications using ServiceWorker"""
 
   def __init__(self):
     super(ServiceWorkerPageSet, self).__init__(
         archive_data_file=archive_data_file_path,
         make_javascript_deterministic=False,
-        bucket=page_set.PUBLIC_BUCKET)
+        bucket=page_set.PARTNER_BUCKET)
 
-    self.AddPage(ServiceWorkerPage('http://localhost:8091/index.html', self))
+    # Why: the first application using ServiceWorker
+    # 1st time: registration
+    self.AddPage(page.Page(
+        'https://jakearchibald.github.io/trained-to-thrill/', self))
+    # 2st time: 1st onfetch with caching
+    self.AddPage(page.Page(
+        'https://jakearchibald.github.io/trained-to-thrill/', self))
+    # 3rd time: 2nd onfetch from cache
+    self.AddPage(page.Page(
+        'https://jakearchibald.github.io/trained-to-thrill/', self))

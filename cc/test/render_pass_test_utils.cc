@@ -11,7 +11,7 @@
 #include "cc/test/render_pass_test_common.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace cc {
 
@@ -22,7 +22,7 @@ TestRenderPass* AddRenderPass(RenderPassList* pass_list,
   scoped_ptr<TestRenderPass> pass(TestRenderPass::Create());
   pass->SetNew(id, output_rect, output_rect, root_transform);
   TestRenderPass* saved = pass.get();
-  pass_list->push_back(pass.PassAs<RenderPass>());
+  pass_list->push_back(pass.Pass());
   return saved;
 }
 
@@ -100,7 +100,8 @@ void AddRenderPassQuad(TestRenderPass* to_pass,
                output_rect,
                contributing_pass->id,
                0,
-               gfx::RectF(),
+               gfx::Vector2dF(),
+               gfx::Size(),
                FilterOperations(),
                gfx::Vector2dF(),
                FilterOperations());
@@ -110,7 +111,8 @@ void AddRenderPassQuad(TestRenderPass* to_pass,
                        TestRenderPass* contributing_pass,
                        ResourceProvider::ResourceId mask_resource_id,
                        const FilterOperations& filters,
-                       gfx::Transform transform) {
+                       gfx::Transform transform,
+                       SkXfermode::Mode blend_mode) {
   gfx::Rect output_rect = contributing_pass->output_rect;
   SharedQuadState* shared_state = to_pass->CreateAndAppendSharedQuadState();
   shared_state->SetAll(transform,
@@ -119,16 +121,18 @@ void AddRenderPassQuad(TestRenderPass* to_pass,
                        output_rect,
                        false,
                        1,
-                       SkXfermode::kSrcOver_Mode,
+                       blend_mode,
                        0);
   RenderPassDrawQuad* quad =
       to_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
+  gfx::Size arbitrary_nonzero_size(1, 1);
   quad->SetNew(shared_state,
                output_rect,
                output_rect,
                contributing_pass->id,
                mask_resource_id,
-               gfx::RectF(),
+               gfx::Vector2dF(1.f, 1.f),
+               arbitrary_nonzero_size,
                filters,
                gfx::Vector2dF(),
                FilterOperations());

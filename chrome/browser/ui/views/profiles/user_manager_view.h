@@ -25,32 +25,29 @@ class UserManagerView : public views::DialogDelegateView {
   // Creates a new UserManagerView instance for the |guest_profile| and
   // shows the |url|.
   static void OnGuestProfileCreated(scoped_ptr<UserManagerView> instance,
-                                    const base::FilePath& profile_path_to_focus,
                                     Profile* guest_profile,
                                     const std::string& url);
 
  private:
-  virtual ~UserManagerView();
+  ~UserManagerView() override;
 
   friend struct base::DefaultDeleter<UserManagerView>;
 
   // Creates dialog and initializes UI.
-  void Init(const base::FilePath& profile_path_to_focus,
-            Profile* guest_profile,
-            const GURL& url);
+  void Init(Profile* guest_profile, const GURL& url);
 
   // views::View:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  gfx::Size GetPreferredSize() const override;
 
   // views::DialogDelegateView:
-  virtual bool CanResize() const OVERRIDE;
-  virtual bool CanMaximize() const OVERRIDE;
-  virtual bool CanMinimize() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual bool UseNewStyleForThisDialog() const OVERRIDE;
+  bool CanResize() const override;
+  bool CanMaximize() const override;
+  bool CanMinimize() const override;
+  base::string16 GetWindowTitle() const override;
+  int GetDialogButtons() const override;
+  void WindowClosing() override;
+  bool UseNewStyleForThisDialog() const override;
 
   views::WebView* web_view_;
 

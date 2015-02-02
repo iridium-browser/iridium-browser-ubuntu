@@ -56,7 +56,7 @@
 #include "core/loader/ThreadableLoader.h"
 #include "core/loader/ThreadableLoaderClient.h"
 #include "core/page/Page.h"
-#include "core/xml/XMLHttpRequest.h"
+#include "core/xmlhttprequest/XMLHttpRequest.h"
 #include "platform/JSONValues.h"
 #include "platform/network/HTTPHeaderMap.h"
 #include "platform/network/ResourceError.h"
@@ -95,7 +95,7 @@ static PassRefPtr<JSONObject> buildObjectForHeaders(const HTTPHeaderMap& headers
     return headersObject;
 }
 
-class InspectorThreadableLoaderClient FINAL : public ThreadableLoaderClient {
+class InspectorThreadableLoaderClient final : public ThreadableLoaderClient {
     WTF_MAKE_NONCOPYABLE(InspectorThreadableLoaderClient);
 public:
     InspectorThreadableLoaderClient(PassRefPtrWillBeRawPtr<LoadResourceForFrontendCallback> callback)
@@ -104,8 +104,9 @@ public:
 
     virtual ~InspectorThreadableLoaderClient() { }
 
-    virtual void didReceiveResponse(unsigned long identifier, const ResourceResponse& response) OVERRIDE
+    virtual void didReceiveResponse(unsigned long identifier, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle) override
     {
+        ASSERT_UNUSED(handle, !handle);
         WTF::TextEncoding textEncoding(response.textEncodingName());
         bool useDetector = false;
         if (!textEncoding.isValid()) {
@@ -117,18 +118,15 @@ public:
         m_responseHeaders = response.httpHeaderFields();
     }
 
-    virtual void didReceiveData(const char* data, int dataLength) OVERRIDE
+    virtual void didReceiveData(const char* data, unsigned dataLength) override
     {
         if (!dataLength)
             return;
 
-        if (dataLength == -1)
-            dataLength = strlen(data);
-
         m_responseText = m_responseText.concatenateWith(m_decoder->decode(data, dataLength));
     }
 
-    virtual void didFinishLoading(unsigned long /*identifier*/, double /*finishTime*/) OVERRIDE
+    virtual void didFinishLoading(unsigned long /*identifier*/, double /*finishTime*/) override
     {
         if (m_decoder)
             m_responseText = m_responseText.concatenateWith(m_decoder->flush());
@@ -136,13 +134,13 @@ public:
         dispose();
     }
 
-    virtual void didFail(const ResourceError&) OVERRIDE
+    virtual void didFail(const ResourceError&) override
     {
         m_callback->sendFailure("Loading resource for inspector failed");
         dispose();
     }
 
-    virtual void didFailRedirectCheck() OVERRIDE
+    virtual void didFailRedirectCheck() override
     {
         m_callback->sendFailure("Loading resource for inspector failed redirect check");
         dispose();
@@ -319,8 +317,17 @@ void InspectorResourceAgent::willSendRequest(unsigned long identifier, DocumentL
     if (initiatorInfo.name == FetchInitiatorTypeNames::internal)
         return;
 
+    if (initiatorInfo.name == FetchInitiatorTypeNames::document && loader && loader->substituteData().isValid())
+        return;
+
     String requestId = IdentifiersFactory::requestId(identifier);
     m_resourcesData->resourceCreated(requestId, m_pageAgent->loaderId(loader));
+
+    InspectorPageAgent::ResourceType type = InspectorPageAgent::OtherResource;
+    if (initiatorInfo.name == FetchInitiatorTypeNames::xmlhttprequest) {
+        type = InspectorPageAgent::XHRResource;
+        m_resourcesData->setResourceType(requestId, type);
+    }
 
     RefPtr<JSONObject> headers = m_state->getObject(ResourceAgentState::extraRequestHeaders);
 
@@ -352,7 +359,8 @@ void InspectorResourceAgent::willSendRequest(unsigned long identifier, DocumentL
     if (!m_hostId.isEmpty())
         request.addHTTPHeaderField(kDevToolsEmulateNetworkConditionsClientId, AtomicString(m_hostId));
 
-    m_frontend->requestWillBeSent(requestId, frameId, m_pageAgent->loaderId(loader), urlWithoutFragment(loader->url()).string(), requestInfo.release(), currentTime(), initiatorObject, buildObjectForResourceResponse(redirectResponse, loader));
+    TypeBuilder::Page::ResourceType::Enum resourceType = InspectorPageAgent::resourceTypeJson(type);
+    m_frontend->requestWillBeSent(requestId, frameId, m_pageAgent->loaderId(loader), urlWithoutFragment(loader->url()).string(), requestInfo.release(), currentTime(), initiatorObject, buildObjectForResourceResponse(redirectResponse, loader), &resourceType);
 }
 
 void InspectorResourceAgent::markResourceAsCached(unsigned long identifier)
@@ -385,23 +393,28 @@ void InspectorResourceAgent::didReceiveResourceResponse(LocalFrame* frame, unsig
     if (!cachedResource || cachedResource->type() == Resource::MainResource)
         cachedResource = InspectorPageAgent::cachedResource(frame, response.url());
 
-    if (cachedResource) {
+    if (cachedResource && resourceResponse && response.mimeType().isEmpty()) {
         // Use mime type from cached resource in case the one in response is empty.
-        if (resourceResponse && response.mimeType().isEmpty())
-            resourceResponse->setString(TypeBuilder::Network::Response::MimeType, cachedResource->response().mimeType());
-        m_resourcesData->addResource(requestId, cachedResource);
+        resourceResponse->setString(TypeBuilder::Network::Response::MimeType, cachedResource->response().mimeType());
     }
 
     InspectorPageAgent::ResourceType type = cachedResource ? InspectorPageAgent::cachedResourceType(*cachedResource) : InspectorPageAgent::OtherResource;
-    // Workaround for worker scripts that use RawResources for loading.
-    if (m_resourcesData->resourceType(requestId) == InspectorPageAgent::ScriptResource)
-        type = InspectorPageAgent::ScriptResource;
+    // Workaround for worker scripts and XHRs that use RawResources for loading.
+    InspectorPageAgent::ResourceType savedType = m_resourcesData->resourceType(requestId);
+    if (savedType == InspectorPageAgent::ScriptResource || savedType == InspectorPageAgent::XHRResource)
+        type = savedType;
     // Workaround for background: url() in inline style.
     if (loader && equalIgnoringFragmentIdentifier(response.url(), loader->url()) && !loader->isCommitted())
         type = InspectorPageAgent::DocumentResource;
 
+    if (type == InspectorPageAgent::DocumentResource && loader && loader->substituteData().isValid())
+        return;
+
+    if (cachedResource)
+        m_resourcesData->addResource(requestId, cachedResource);
     m_resourcesData->responseReceived(requestId, m_pageAgent->frameId(frame), response);
     m_resourcesData->setResourceType(requestId, type);
+
 
     if (!isResponseEmpty(resourceResponse))
         m_frontend->responseReceived(requestId, m_pageAgent->frameId(frame), m_pageAgent->loaderId(loader), currentTime(), InspectorPageAgent::resourceTypeJson(type), resourceResponse);
@@ -511,7 +524,7 @@ void InspectorResourceAgent::didFailXHRLoading(XMLHttpRequest* xhr, ThreadableLo
     delayedRemoveReplayXHR(xhr);
 }
 
-void InspectorResourceAgent::didFinishXHRLoading(XMLHttpRequest* xhr, ThreadableLoaderClient* client, unsigned long identifier, ScriptString sourceString, const AtomicString&, const String&, const String&, unsigned)
+void InspectorResourceAgent::didFinishXHRLoading(XMLHttpRequest* xhr, ThreadableLoaderClient* client, unsigned long identifier, ScriptString sourceString, const AtomicString&, const String&)
 {
     m_pendingXHRReplayData.remove(client);
 
@@ -735,9 +748,7 @@ void InspectorResourceAgent::replayXHR(ErrorString*, const String& requestId)
 
     RefPtrWillBeRawPtr<XMLHttpRequest> xhr = XMLHttpRequest::create(executionContext);
 
-    Resource* cachedResource = memoryCache()->resourceForURL(xhrReplayData->url());
-    if (cachedResource)
-        memoryCache()->remove(cachedResource);
+    memoryCache()->removeURLFromCache(executionContext, xhrReplayData->url());
 
     xhr->open(xhrReplayData->method(), xhrReplayData->url(), xhrReplayData->async(), IGNORE_EXCEPTION);
     HTTPHeaderMap::const_iterator end = xhrReplayData->headers().end();
@@ -853,7 +864,7 @@ bool InspectorResourceAgent::fetchResourceContent(Document* document, const KURL
     // First try to fetch content from the cached resource.
     Resource* cachedResource = document->fetcher()->cachedResource(url);
     if (!cachedResource)
-        cachedResource = memoryCache()->resourceForURL(url);
+        cachedResource = memoryCache()->resourceForURL(url, document->fetcher()->getCacheIdentifier());
     if (cachedResource && InspectorPageAgent::cachedResourceContent(cachedResource, content, base64Encoded))
         return true;
 

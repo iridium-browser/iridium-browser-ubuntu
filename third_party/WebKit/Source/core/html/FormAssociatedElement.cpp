@@ -42,8 +42,8 @@ class FormAttributeTargetObserver : public IdTargetObserver {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     static PassOwnPtrWillBeRawPtr<FormAttributeTargetObserver> create(const AtomicString& id, FormAssociatedElement*);
-    virtual void trace(Visitor*) OVERRIDE;
-    virtual void idTargetChanged() OVERRIDE;
+    virtual void trace(Visitor*) override;
+    virtual void idTargetChanged() override;
 
 private:
     FormAttributeTargetObserver(const AtomicString& id, FormAssociatedElement*);
@@ -239,6 +239,11 @@ bool FormAssociatedElement::tooLong() const
     return false;
 }
 
+bool FormAssociatedElement::tooShort() const
+{
+    return false;
+}
+
 bool FormAssociatedElement::typeMismatch() const
 {
     return false;
@@ -247,7 +252,8 @@ bool FormAssociatedElement::typeMismatch() const
 bool FormAssociatedElement::valid() const
 {
     bool someError = typeMismatch() || stepMismatch() || rangeUnderflow() || rangeOverflow()
-        || tooLong() || patternMismatch() || valueMissing() || hasBadInput() || customError();
+        || tooLong() || tooShort() || patternMismatch() || valueMissing() || hasBadInput()
+        || customError();
     return !someError;
 }
 

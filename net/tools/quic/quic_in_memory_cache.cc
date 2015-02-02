@@ -29,24 +29,14 @@ namespace {
 class CachingBalsaVisitor : public NoOpBalsaVisitor {
  public:
   CachingBalsaVisitor() : done_framing_(false) {}
-  virtual void ProcessBodyData(const char* input, size_t size) OVERRIDE {
+  void ProcessBodyData(const char* input, size_t size) override {
     AppendToBody(input, size);
   }
-  virtual void MessageDone() OVERRIDE {
-    done_framing_ = true;
-  }
-  virtual void HandleHeaderError(BalsaFrame* framer) OVERRIDE {
-    UnhandledError();
-  }
-  virtual void HandleHeaderWarning(BalsaFrame* framer) OVERRIDE {
-    UnhandledError();
-  }
-  virtual void HandleChunkingError(BalsaFrame* framer) OVERRIDE {
-    UnhandledError();
-  }
-  virtual void HandleBodyError(BalsaFrame* framer) OVERRIDE {
-    UnhandledError();
-  }
+  void MessageDone() override { done_framing_ = true; }
+  void HandleHeaderError(BalsaFrame* framer) override { UnhandledError(); }
+  void HandleHeaderWarning(BalsaFrame* framer) override { UnhandledError(); }
+  void HandleChunkingError(BalsaFrame* framer) override { UnhandledError(); }
+  void HandleBodyError(BalsaFrame* framer) override { UnhandledError(); }
   void UnhandledError() {
     LOG(DFATAL) << "Unhandled error framing HTTP.";
   }
@@ -72,7 +62,7 @@ const QuicInMemoryCache::Response* QuicInMemoryCache::GetResponse(
     const BalsaHeaders& request_headers) const {
   ResponseMap::const_iterator it = responses_.find(GetKey(request_headers));
   if (it == responses_.end()) {
-    return NULL;
+    return nullptr;
   }
   return it->second;
 }

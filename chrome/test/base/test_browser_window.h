@@ -26,166 +26,161 @@ class Extension;
 class TestBrowserWindow : public BrowserWindow {
  public:
   TestBrowserWindow();
-  virtual ~TestBrowserWindow();
+  ~TestBrowserWindow() override;
 
   // BrowserWindow:
-  virtual void Show() OVERRIDE {}
-  virtual void ShowInactive() OVERRIDE {}
-  virtual void Hide() OVERRIDE {}
-  virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE {}
-  virtual void Close() OVERRIDE {}
-  virtual void Activate() OVERRIDE {}
-  virtual void Deactivate() OVERRIDE {}
-  virtual bool IsActive() const OVERRIDE;
-  virtual void FlashFrame(bool flash) OVERRIDE {}
-  virtual bool IsAlwaysOnTop() const OVERRIDE;
-  virtual void SetAlwaysOnTop(bool always_on_top) OVERRIDE {}
-  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
-  virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
-  virtual StatusBubble* GetStatusBubble() OVERRIDE;
-  virtual void UpdateTitleBar() OVERRIDE {}
-  virtual void BookmarkBarStateChanged(
-      BookmarkBar::AnimateChangeType change_type) OVERRIDE {}
-  virtual void UpdateDevTools() OVERRIDE {}
-  virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE {}
-  virtual void SetStarredState(bool is_starred) OVERRIDE {}
-  virtual void SetTranslateIconToggled(bool is_lit) OVERRIDE {}
-  virtual void OnActiveTabChanged(content::WebContents* old_contents,
-                                  content::WebContents* new_contents,
-                                  int index,
-                                  int reason) OVERRIDE {}
-  virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE {}
-  virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
-  virtual ui::WindowShowState GetRestoredState() const OVERRIDE;
-  virtual gfx::Rect GetBounds() const OVERRIDE;
-  virtual bool IsMaximized() const OVERRIDE;
-  virtual bool IsMinimized() const OVERRIDE;
-  virtual void Maximize() OVERRIDE {}
-  virtual void Minimize() OVERRIDE {}
-  virtual void Restore() OVERRIDE {}
-  virtual void EnterFullscreen(
-      const GURL& url, FullscreenExitBubbleType type) OVERRIDE {}
-  virtual void ExitFullscreen() OVERRIDE {}
-  virtual void UpdateFullscreenExitBubbleContent(
+  void Show() override {}
+  void ShowInactive() override {}
+  void Hide() override {}
+  void SetBounds(const gfx::Rect& bounds) override {}
+  void Close() override {}
+  void Activate() override {}
+  void Deactivate() override {}
+  bool IsActive() const override;
+  void FlashFrame(bool flash) override {}
+  bool IsAlwaysOnTop() const override;
+  void SetAlwaysOnTop(bool always_on_top) override {}
+  gfx::NativeWindow GetNativeWindow() const override;
+  BrowserWindowTesting* GetBrowserWindowTesting() override;
+  StatusBubble* GetStatusBubble() override;
+  void UpdateTitleBar() override {}
+  void BookmarkBarStateChanged(
+      BookmarkBar::AnimateChangeType change_type) override {}
+  void UpdateDevTools() override {}
+  void UpdateLoadingAnimations(bool should_animate) override {}
+  void SetStarredState(bool is_starred) override {}
+  void SetTranslateIconToggled(bool is_lit) override {}
+  void OnActiveTabChanged(content::WebContents* old_contents,
+                          content::WebContents* new_contents,
+                          int index,
+                          int reason) override {}
+  void ZoomChangedForActiveTab(bool can_show_bubble) override {}
+  gfx::Rect GetRestoredBounds() const override;
+  ui::WindowShowState GetRestoredState() const override;
+  gfx::Rect GetBounds() const override;
+  bool IsMaximized() const override;
+  bool IsMinimized() const override;
+  void Maximize() override {}
+  void Minimize() override {}
+  void Restore() override {}
+  void EnterFullscreen(const GURL& url,
+                       FullscreenExitBubbleType type) override {}
+  void ExitFullscreen() override {}
+  void UpdateFullscreenExitBubbleContent(
       const GURL& url,
-      FullscreenExitBubbleType bubble_type) OVERRIDE {}
-  virtual bool ShouldHideUIForFullscreen() const OVERRIDE;
-  virtual bool IsFullscreen() const OVERRIDE;
+      FullscreenExitBubbleType bubble_type) override {}
+  bool ShouldHideUIForFullscreen() const override;
+  bool IsFullscreen() const override;
 #if defined(OS_WIN)
-  virtual void SetMetroSnapMode(bool enable) OVERRIDE {}
-  virtual bool IsInMetroSnapMode() const;
+  virtual void SetMetroSnapMode(bool enable) override {}
+  virtual bool IsInMetroSnapMode() const override;
 #endif
-  virtual bool IsFullscreenBubbleVisible() const OVERRIDE;
-  virtual LocationBar* GetLocationBar() const OVERRIDE;
-  virtual void SetFocusToLocationBar(bool select_all) OVERRIDE {}
-  virtual void UpdateReloadStopState(bool is_loading, bool force) OVERRIDE {}
-  virtual void UpdateToolbar(content::WebContents* contents) OVERRIDE {}
-  virtual void FocusToolbar() OVERRIDE {}
-  virtual void FocusAppMenu() OVERRIDE {}
-  virtual void FocusBookmarksToolbar() OVERRIDE {}
-  virtual void FocusInfobars() OVERRIDE {}
-  virtual void RotatePaneFocus(bool forwards) OVERRIDE {}
-  virtual void ShowAppMenu() OVERRIDE {}
-  virtual bool PreHandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event,
-      bool* is_keyboard_shortcut) OVERRIDE;
-  virtual void HandleKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event) OVERRIDE {}
+  bool IsFullscreenBubbleVisible() const override;
+  LocationBar* GetLocationBar() const override;
+  void SetFocusToLocationBar(bool select_all) override {}
+  void UpdateReloadStopState(bool is_loading, bool force) override {}
+  void UpdateToolbar(content::WebContents* contents) override {}
+  void FocusToolbar() override {}
+  void FocusAppMenu() override {}
+  void FocusBookmarksToolbar() override {}
+  void FocusInfobars() override {}
+  void RotatePaneFocus(bool forwards) override {}
+  void ShowAppMenu() override {}
+  bool PreHandleKeyboardEvent(const content::NativeWebKeyboardEvent& event,
+                              bool* is_keyboard_shortcut) override;
+  void HandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) override {}
 
-  virtual bool IsBookmarkBarVisible() const OVERRIDE;
-  virtual bool IsBookmarkBarAnimating() const OVERRIDE;
-  virtual bool IsTabStripEditable() const OVERRIDE;
-  virtual bool IsToolbarVisible() const OVERRIDE;
-  virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
-  virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
-                                        Profile* profile) OVERRIDE {}
-  virtual void ShowUpdateChromeDialog() OVERRIDE {}
-  virtual void ShowBookmarkBubble(const GURL& url,
-                                  bool already_bookmarked) OVERRIDE {}
-  virtual void ShowBookmarkAppBubble(
-      const WebApplicationInfo& web_app_info,
-      const std::string& extension_id) OVERRIDE {}
-  virtual void ShowTranslateBubble(
-      content::WebContents* contents,
-      translate::TranslateStep step,
-      translate::TranslateErrors::Type error_type,
-      bool is_user_gesture) OVERRIDE {}
+  bool IsBookmarkBarVisible() const override;
+  bool IsBookmarkBarAnimating() const override;
+  bool IsTabStripEditable() const override;
+  bool IsToolbarVisible() const override;
+  gfx::Rect GetRootWindowResizerRect() const override;
+  void ConfirmAddSearchProvider(TemplateURL* template_url,
+                                Profile* profile) override {}
+  void ShowUpdateChromeDialog() override {}
+  void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override {}
+  void ShowBookmarkAppBubble(const WebApplicationInfo& web_app_info,
+                             const std::string& extension_id) override {}
+  void ShowTranslateBubble(content::WebContents* contents,
+                           translate::TranslateStep step,
+                           translate::TranslateErrors::Type error_type,
+                           bool is_user_gesture) override {}
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
-  virtual void ShowOneClickSigninBubble(
+  void ShowOneClickSigninBubble(
       OneClickSigninBubbleType type,
       const base::string16& email,
       const base::string16& error_message,
-      const StartSyncCallback& start_sync_callback) OVERRIDE {}
+      const StartSyncCallback& start_sync_callback) override {}
 #endif
-  virtual bool IsDownloadShelfVisible() const OVERRIDE;
-  virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
-  virtual void ConfirmBrowserCloseWithPendingDownloads(
+  bool IsDownloadShelfVisible() const override;
+  DownloadShelf* GetDownloadShelf() override;
+  void ConfirmBrowserCloseWithPendingDownloads(
       int download_count,
       Browser::DownloadClosePreventionType dialog_type,
       bool app_modal,
-      const base::Callback<void(bool)>& callback) OVERRIDE {}
-  virtual void UserChangedTheme() OVERRIDE {}
-  virtual int GetExtraRenderViewHeight() const OVERRIDE;
-  virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE {}
-  virtual void ShowWebsiteSettings(Profile* profile,
-                                   content::WebContents* web_contents,
-                                   const GURL& url,
-                                   const content::SSLStatus& ssl) OVERRIDE {}
-  virtual void Cut() OVERRIDE {}
-  virtual void Copy() OVERRIDE {}
-  virtual void Paste() OVERRIDE {}
+      const base::Callback<void(bool)>& callback) override {}
+  void UserChangedTheme() override {}
+  int GetExtraRenderViewHeight() const override;
+  void WebContentsFocused(content::WebContents* contents) override {}
+  void ShowWebsiteSettings(Profile* profile,
+                           content::WebContents* web_contents,
+                           const GURL& url,
+                           const content::SSLStatus& ssl) override {}
+  void Cut() override {}
+  void Copy() override {}
+  void Paste() override {}
 #if defined(OS_MACOSX)
-  virtual void EnterFullscreenWithChrome() OVERRIDE {}
-  virtual void EnterFullscreenWithoutChrome() OVERRIDE {}
-  virtual bool IsFullscreenWithChrome() OVERRIDE;
-  virtual bool IsFullscreenWithoutChrome() OVERRIDE;
+  void EnterFullscreenWithChrome() override {}
+  void EnterFullscreenWithoutChrome() override {}
+  bool IsFullscreenWithChrome() override;
+  bool IsFullscreenWithoutChrome() override;
 #endif
 
-  virtual WindowOpenDisposition GetDispositionForPopupBounds(
-      const gfx::Rect& bounds) OVERRIDE;
-  virtual FindBar* CreateFindBar() OVERRIDE;
-  virtual web_modal::WebContentsModalDialogHost*
-      GetWebContentsModalDialogHost() OVERRIDE;
-  virtual void ShowAvatarBubble(content::WebContents* web_contents,
-                                const gfx::Rect& rect) OVERRIDE {}
-  virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode,
-      const signin::ManageAccountsParams& manage_accounts_params) OVERRIDE {}
-  virtual int GetRenderViewHeightInsetWithDetachedBookmarkBar() OVERRIDE;
-  virtual void ExecuteExtensionCommand(
-      const extensions::Extension* extension,
-      const extensions::Command& command) OVERRIDE;
+  WindowOpenDisposition GetDispositionForPopupBounds(
+      const gfx::Rect& bounds) override;
+  FindBar* CreateFindBar() override;
+  web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
+      override;
+  void ShowAvatarBubble(content::WebContents* web_contents,
+                        const gfx::Rect& rect) override {}
+  void ShowAvatarBubbleFromAvatarButton(
+      AvatarBubbleMode mode,
+      const signin::ManageAccountsParams& manage_accounts_params) override {}
+  int GetRenderViewHeightInsetWithDetachedBookmarkBar() override;
+  void ExecuteExtensionCommand(const extensions::Extension* extension,
+                               const extensions::Command& command) override;
 
  protected:
-  virtual void DestroyBrowser() OVERRIDE {}
+  void DestroyBrowser() override {}
 
  private:
   class TestLocationBar : public LocationBar {
    public:
     TestLocationBar() : LocationBar(NULL) {}
-    virtual ~TestLocationBar() {}
+    ~TestLocationBar() override {}
 
     // LocationBar:
-    virtual void ShowFirstRunBubble() OVERRIDE {}
-    virtual GURL GetDestinationURL() const OVERRIDE;
-    virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
-    virtual ui::PageTransition GetPageTransition() const OVERRIDE;
-    virtual void AcceptInput() OVERRIDE {}
-    virtual void FocusLocation(bool select_all) OVERRIDE {}
-    virtual void FocusSearch() OVERRIDE {}
-    virtual void UpdateContentSettingsIcons() OVERRIDE {}
-    virtual void UpdateManagePasswordsIconAndBubble() OVERRIDE {}
-    virtual void UpdatePageActions() OVERRIDE {}
-    virtual void InvalidatePageActions() OVERRIDE {}
-    virtual void UpdateBookmarkStarVisibility() OVERRIDE {}
-    virtual bool ShowPageActionPopup(const extensions::Extension* extension,
-                                     bool grant_active_tab) OVERRIDE;
-    virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE {}
-    virtual void UpdateGeneratedCreditCardView() OVERRIDE {}
-    virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE {}
-    virtual void Revert() OVERRIDE {}
-    virtual const OmniboxView* GetOmniboxView() const OVERRIDE;
-    virtual OmniboxView* GetOmniboxView() OVERRIDE;
-    virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
+    void ShowFirstRunBubble() override {}
+    GURL GetDestinationURL() const override;
+    WindowOpenDisposition GetWindowOpenDisposition() const override;
+    ui::PageTransition GetPageTransition() const override;
+    void AcceptInput() override {}
+    void FocusLocation(bool select_all) override {}
+    void FocusSearch() override {}
+    void UpdateContentSettingsIcons() override {}
+    void UpdateManagePasswordsIconAndBubble() override {}
+    void UpdatePageActions() override {}
+    void UpdateBookmarkStarVisibility() override {}
+    bool ShowPageActionPopup(const extensions::Extension* extension,
+                             bool grant_active_tab) override;
+    void UpdateOpenPDFInReaderPrompt() override {}
+    void UpdateGeneratedCreditCardView() override {}
+    void SaveStateToContents(content::WebContents* contents) override {}
+    void Revert() override {}
+    const OmniboxView* GetOmniboxView() const override;
+    OmniboxView* GetOmniboxView() override;
+    LocationBarTesting* GetLocationBarForTesting() override;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(TestLocationBar);

@@ -71,8 +71,6 @@ std::string GetStringFromID(SavePasswordProgressLogger::StringID id) {
       return "Password generated";
     case SavePasswordProgressLogger::STRING_TIMES_USED:
       return "Times used";
-    case SavePasswordProgressLogger::STRING_USE_ADDITIONAL_AUTHENTICATION:
-      return "Use additional authentication";
     case SavePasswordProgressLogger::STRING_PSL_MATCH:
       return "PSL match";
     case SavePasswordProgressLogger::STRING_NAME_OR_ID:
@@ -135,8 +133,6 @@ std::string GetStringFromID(SavePasswordProgressLogger::StringID id) {
       return "Form blacklisted.";
     case SavePasswordProgressLogger::STRING_INVALID_FORM:
       return "Invalid form.";
-    case SavePasswordProgressLogger::STRING_AUTOCOMPLETE_OFF:
-      return "Autocomplete=off.";
     case SavePasswordProgressLogger::STRING_SYNC_CREDENTIAL:
       return "Credential is used for syncing passwords.";
     case SavePasswordProgressLogger::STRING_PROVISIONALLY_SAVED_FORM:
@@ -251,8 +247,6 @@ void SavePasswordProgressLogger::LogPasswordForm(
   log.SetBoolean(GetStringFromID(STRING_PASSWORD_GENERATED),
                  form.type == PasswordForm::TYPE_GENERATED);
   log.SetInteger(GetStringFromID(STRING_TIMES_USED), form.times_used);
-  log.SetBoolean(GetStringFromID(STRING_USE_ADDITIONAL_AUTHENTICATION),
-                 form.use_additional_authentication);
   log.SetBoolean(GetStringFromID(STRING_PSL_MATCH), form.IsPublicSuffixMatch());
   LogValue(label, log);
 }

@@ -36,17 +36,17 @@ const int kScriptIdleTimeoutInMs = 200;
 class ScriptInjectionManager::RVOHelper : public content::RenderViewObserver {
  public:
   RVOHelper(content::RenderView* render_view, ScriptInjectionManager* manager);
-  virtual ~RVOHelper();
+  ~RVOHelper() override;
 
  private:
   // RenderViewObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidCreateDocumentElement(blink::WebLocalFrame* frame) OVERRIDE;
-  virtual void DidFinishDocumentLoad(blink::WebLocalFrame* frame) OVERRIDE;
-  virtual void DidFinishLoad(blink::WebLocalFrame* frame) OVERRIDE;
-  virtual void DidStartProvisionalLoad(blink::WebLocalFrame* frame) OVERRIDE;
-  virtual void FrameDetached(blink::WebFrame* frame) OVERRIDE;
-  virtual void OnDestruct() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void DidCreateDocumentElement(blink::WebLocalFrame* frame) override;
+  void DidFinishDocumentLoad(blink::WebLocalFrame* frame) override;
+  void DidFinishLoad(blink::WebLocalFrame* frame) override;
+  void DidStartProvisionalLoad(blink::WebLocalFrame* frame) override;
+  void FrameDetached(blink::WebFrame* frame) override;
+  void OnDestruct() override;
 
   virtual void OnExecuteCode(const ExtensionMsg_ExecuteCode_Params& params);
   virtual void OnExecuteDeclarativeScript(int tab_id,

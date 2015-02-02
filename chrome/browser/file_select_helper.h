@@ -19,6 +19,7 @@
 class Profile;
 
 namespace content {
+struct FileChooserFileInfo;
 class RenderViewHost;
 class WebContents;
 }
@@ -48,8 +49,9 @@ class FileSelectHelper
  private:
   friend class base::RefCountedThreadSafe<FileSelectHelper>;
   FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, IsAcceptTypeValid);
+  FRIEND_TEST_ALL_PREFIXES(FileSelectHelperTest, ZipPackage);
   explicit FileSelectHelper(Profile* profile);
-  virtual ~FileSelectHelper();
+  ~FileSelectHelper() override;
 
   // Utility class which can listen for directory lister events and relay
   // them to the main object with the correct tracking id.
@@ -59,10 +61,11 @@ class FileSelectHelper
     DirectoryListerDispatchDelegate(FileSelectHelper* parent, int id)
         : parent_(parent),
           id_(id) {}
-    virtual ~DirectoryListerDispatchDelegate() {}
-    virtual void OnListFile(
-        const net::DirectoryLister::DirectoryListerData& data) OVERRIDE;
-    virtual void OnListDone(int error) OVERRIDE;
+    ~DirectoryListerDispatchDelegate() override {}
+    void OnListFile(
+        const net::DirectoryLister::DirectoryListerData& data) override;
+    void OnListDone(int error) override;
+
    private:
     // This FileSelectHelper owns this object.
     FileSelectHelper* parent_;
@@ -84,23 +87,23 @@ class FileSelectHelper
   void RunFileChooserEnd();
 
   // SelectFileDialog::Listener overrides.
-  virtual void FileSelected(
-      const base::FilePath& path, int index, void* params) OVERRIDE;
-  virtual void FileSelectedWithExtraInfo(
-      const ui::SelectedFileInfo& file,
-      int index,
-      void* params) OVERRIDE;
-  virtual void MultiFilesSelected(const std::vector<base::FilePath>& files,
-                                  void* params) OVERRIDE;
-  virtual void MultiFilesSelectedWithExtraInfo(
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
+  void FileSelectedWithExtraInfo(const ui::SelectedFileInfo& file,
+                                 int index,
+                                 void* params) override;
+  void MultiFilesSelected(const std::vector<base::FilePath>& files,
+                          void* params) override;
+  void MultiFilesSelectedWithExtraInfo(
       const std::vector<ui::SelectedFileInfo>& files,
-      void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE;
+      void* params) override;
+  void FileSelectionCanceled(void* params) override;
 
   // content::NotificationObserver overrides.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   void EnumerateDirectory(int request_id,
                           content::RenderViewHost* render_view_host,
@@ -120,6 +123,37 @@ class FileSelectHelper
   // Cleans up and releases this instance. This must be called after the last
   // callback is received from the enumeration code.
   void EnumerateDirectoryEnd();
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  // Must be called on the FILE_USER_BLOCKING thread. Each selected file that is
+  // a package will be zipped, and the zip will be passed to the render view
+  // host in place of the package.
+  void ProcessSelectedFilesMac(const std::vector<ui::SelectedFileInfo>& files);
+
+  // Saves the paths of |zipped_files| for later deletion. Passes |files| to the
+  // render view host.
+  void ProcessSelectedFilesMacOnUIThread(
+      const std::vector<ui::SelectedFileInfo>& files,
+      const std::vector<base::FilePath>& zipped_files);
+
+  // Zips the package at |path| into a temporary destination. Returns the
+  // temporary destination, if the zip was successful. Otherwise returns an
+  // empty path.
+  static base::FilePath ZipPackage(const base::FilePath& path);
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
+  // Utility method that passes |files| to the render view host, and ends the
+  // file chooser.
+  void NotifyRenderViewHostAndEnd(
+      const std::vector<ui::SelectedFileInfo>& files);
+
+  // Sends the result to the render process, and call |RunFileChooserEnd|.
+  void NotifyRenderViewHostAndEndAfterConversion(
+      const std::vector<content::FileChooserFileInfo>& list);
+
+  // Schedules the deletion of the files in |temporary_files_| and clears the
+  // vector.
+  void DeleteTemporaryFiles();
 
   // Helper method to get allowed extensions for select file dialog from
   // the specified accept types as defined in the spec:
@@ -160,6 +194,10 @@ class FileSelectHelper
 
   // Registrar for notifications regarding our RenderViewHost.
   content::NotificationRegistrar notification_registrar_;
+
+  // Temporary files only used on OSX. This class is responsible for deleting
+  // these files when they are no longer needed.
+  std::vector<base::FilePath> temporary_files_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSelectHelper);
 };

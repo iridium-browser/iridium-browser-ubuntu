@@ -20,7 +20,7 @@ namespace test {
 class TestWindowDelegate : public WindowDelegate {
  public:
   TestWindowDelegate();
-  virtual ~TestWindowDelegate();
+  ~TestWindowDelegate() override;
 
   // Returns a TestWindowDelegate that delete itself when
   // the associated window is destroyed.
@@ -42,24 +42,24 @@ class TestWindowDelegate : public WindowDelegate {
   void set_can_focus(bool can_focus) { can_focus_ = can_focus; }
 
   // Overridden from WindowDelegate:
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual gfx::Size GetMaximumSize() const OVERRIDE;
-  virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
-                               const gfx::Rect& new_bounds) OVERRIDE;
-  virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
-  virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
-  virtual bool ShouldDescendIntoChildForEventHandling(
+  gfx::Size GetMinimumSize() const override;
+  gfx::Size GetMaximumSize() const override;
+  void OnBoundsChanged(const gfx::Rect& old_bounds,
+                       const gfx::Rect& new_bounds) override;
+  gfx::NativeCursor GetCursor(const gfx::Point& point) override;
+  int GetNonClientComponent(const gfx::Point& point) const override;
+  bool ShouldDescendIntoChildForEventHandling(
       Window* child,
-      const gfx::Point& location) OVERRIDE;
-  virtual bool CanFocus() OVERRIDE;
-  virtual void OnCaptureLost() OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
-  virtual void OnWindowDestroying(Window* window) OVERRIDE;
-  virtual void OnWindowDestroyed(Window* window) OVERRIDE;
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE;
-  virtual bool HasHitTestMask() const OVERRIDE;
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
+      const gfx::Point& location) override;
+  bool CanFocus() override;
+  void OnCaptureLost() override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override;
+  void OnWindowDestroying(Window* window) override;
+  void OnWindowDestroyed(Window* window) override;
+  void OnWindowTargetVisibilityChanged(bool visible) override;
+  bool HasHitTestMask() const override;
+  void GetHitTestMask(gfx::Path* mask) const override;
 
  private:
   int window_component_;
@@ -76,14 +76,14 @@ class TestWindowDelegate : public WindowDelegate {
 class ColorTestWindowDelegate : public TestWindowDelegate {
  public:
   explicit ColorTestWindowDelegate(SkColor color);
-  virtual ~ColorTestWindowDelegate();
+  ~ColorTestWindowDelegate() override;
 
   ui::KeyboardCode last_key_code() const { return last_key_code_; }
 
   // Overridden from TestWindowDelegate:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual void OnWindowDestroyed(Window* window) OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  void OnKeyEvent(ui::KeyEvent* event) override;
+  void OnWindowDestroyed(Window* window) override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
  private:
   SkColor color_;
@@ -98,8 +98,8 @@ class MaskedWindowDelegate : public TestWindowDelegate {
   explicit MaskedWindowDelegate(const gfx::Rect mask_rect);
 
   // Overridden from TestWindowDelegate:
-  virtual bool HasHitTestMask() const OVERRIDE;
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
+  bool HasHitTestMask() const override;
+  void GetHitTestMask(gfx::Path* mask) const override;
 
  private:
   gfx::Rect mask_rect_;
@@ -113,9 +113,9 @@ class EventCountDelegate : public TestWindowDelegate {
   EventCountDelegate();
 
   // Overridden from TestWindowDelegate:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnKeyEvent(ui::KeyEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // Returns the counts of mouse motion events in the
   // form of "<enter> <move> <leave>".

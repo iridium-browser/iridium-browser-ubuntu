@@ -21,7 +21,6 @@
 
 namespace gpu {
 
-class IdAllocatorInterface;
 class TransferBufferManagerInterface;
 
 namespace gles2 {
@@ -35,6 +34,7 @@ class RenderbufferManager;
 class ProgramManager;
 class ShaderManager;
 class TextureManager;
+class ValuebufferManager;
 class MemoryTracker;
 struct DisallowedFeatures;
 
@@ -127,6 +127,10 @@ class GPU_EXPORT ContextGroup : public base::RefCounted<ContextGroup> {
     return renderbuffer_manager_.get();
   }
 
+  ValuebufferManager* valuebuffer_manager() const {
+    return valuebuffer_manager_.get();
+  }
+
   TextureManager* texture_manager() const {
     return texture_manager_.get();
   }
@@ -150,8 +154,6 @@ class GPU_EXPORT ContextGroup : public base::RefCounted<ContextGroup> {
   TransferBufferManagerInterface* transfer_buffer_manager() const {
     return transfer_buffer_manager_.get();
   }
-
-  IdAllocatorInterface* GetIdAllocator(unsigned namespace_id);
 
   uint32 GetMemRepresented() const;
 
@@ -202,14 +204,13 @@ class GPU_EXPORT ContextGroup : public base::RefCounted<ContextGroup> {
 
   scoped_ptr<RenderbufferManager> renderbuffer_manager_;
 
+  scoped_ptr<ValuebufferManager> valuebuffer_manager_;
+
   scoped_ptr<TextureManager> texture_manager_;
 
   scoped_ptr<ProgramManager> program_manager_;
 
   scoped_ptr<ShaderManager> shader_manager_;
-
-  linked_ptr<IdAllocatorInterface>
-      id_namespaces_[id_namespaces::kNumIdNamespaces];
 
   scoped_refptr<FeatureInfo> feature_info_;
 

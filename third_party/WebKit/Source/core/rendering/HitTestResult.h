@@ -146,8 +146,8 @@ private:
     LayoutPoint m_localPoint; // A point in the local coordinate space of m_innerNonSharedNode's renderer. Allows us to efficiently
                               // determine where inside the renderer we hit on subsequent operations.
     RefPtrWillBeMember<Element> m_innerURLElement;
-    RefPtr<Scrollbar> m_scrollbar;
-    bool m_isOverWidget; // Returns true if we are over a widget (and not in the border/padding area of a RenderWidget for example).
+    RefPtrWillBeMember<Scrollbar> m_scrollbar;
+    bool m_isOverWidget; // Returns true if we are over a widget (and not in the border/padding area of a RenderPart for example).
     bool m_isFirstLetter;
 
     mutable OwnPtrWillBeMember<NodeSet> m_rectBasedTestResult;

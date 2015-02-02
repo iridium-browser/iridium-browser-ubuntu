@@ -16,8 +16,6 @@
 #include "components/autofill/core/common/password_generation_util.h"
 #include "content/public/renderer/render_view.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "third_party/WebKit/public/platform/WebCString.h"
-#include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
@@ -44,10 +42,7 @@ bool GetAccountCreationPasswordFields(
   for (size_t i = 0; i < control_elements.size(); i++) {
     blink::WebInputElement* input_element =
         toWebInputElement(&control_elements[i]);
-    // Only pay attention to visible password fields.
-    if (input_element &&
-        input_element->isTextField() &&
-        input_element->hasNonEmptyBoundingBox()) {
+    if (input_element && input_element->isTextField()) {
       num_input_elements++;
       if (input_element->isPasswordField())
         passwords->push_back(*input_element);
@@ -74,24 +69,23 @@ bool ContainsURL(const std::vector<GURL>& urls, const GURL& url) {
   return std::find(urls.begin(), urls.end(), url) != urls.end();
 }
 
-// Returns true if the |form1| is essentially equal to |form2|.
-bool FormsAreEqual(const autofill::FormData& form1,
-                   const PasswordForm& form2) {
-  // TODO(zysxqn): use more signals than just origin to compare.
-  // Note that FormData strips the fragement from the url while PasswordForm
-  // strips both the fragement and the path, so we can't just compare these
-  // two directly.
-  return form1.origin.GetOrigin() == form2.origin.GetOrigin();
-}
-
 bool ContainsForm(const std::vector<autofill::FormData>& forms,
                   const PasswordForm& form) {
   for (std::vector<autofill::FormData>::const_iterator it =
            forms.begin(); it != forms.end(); ++it) {
-    if (FormsAreEqual(*it, form))
+    if (*it == form.form_data)
       return true;
   }
   return false;
+}
+
+void CopyValueToAllInputElements(
+    const blink::WebString value,
+    std::vector<blink::WebInputElement>* elements) {
+  for (std::vector<blink::WebInputElement>::iterator it = elements->begin();
+       it != elements->end(); ++it) {
+    it->setValue(value, true /* sendEvents */);
+  }
 }
 
 }  // namespace
@@ -102,6 +96,8 @@ PasswordGenerationAgent::PasswordGenerationAgent(
       render_view_(render_view),
       password_is_generated_(false),
       password_edited_(false),
+      generation_popup_shown_(false),
+      editing_popup_shown_(false),
       enabled_(password_generation::IsPasswordGenerationEnabled()) {
   DVLOG(2) << "Password Generation is " << (enabled_ ? "Enabled" : "Disabled");
 }
@@ -121,6 +117,15 @@ void PasswordGenerationAgent::DidFinishDocumentLoad(
     generation_enabled_forms_.clear();
     generation_element_.reset();
     possible_account_creation_form_.reset(new PasswordForm());
+
+    // Log statistics after navigation so that we only log once per page.
+    if (password_elements_.empty()) {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::NO_SIGN_UP_DETECTED);
+    } else {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::SIGN_UP_DETECTED);
+    }
     password_elements_.clear();
     password_is_generated_ = false;
     if (password_edited_) {
@@ -128,16 +133,41 @@ void PasswordGenerationAgent::DidFinishDocumentLoad(
           password_generation::PASSWORD_EDITED);
     }
     password_edited_ = false;
+
+    if (generation_popup_shown_) {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::GENERATION_POPUP_SHOWN);
+    }
+    generation_popup_shown_ = false;
+
+    if (editing_popup_shown_) {
+      password_generation::LogPasswordGenerationEvent(
+          password_generation::EDITING_POPUP_SHOWN);
+    }
+    editing_popup_shown_ = false;
   }
 }
 
+void PasswordGenerationAgent::OnDynamicFormsSeen(blink::WebLocalFrame* frame) {
+  FindPossibleGenerationForm(frame);
+}
+
 void PasswordGenerationAgent::DidFinishLoad(blink::WebLocalFrame* frame) {
+  FindPossibleGenerationForm(frame);
+}
+
+void PasswordGenerationAgent::FindPossibleGenerationForm(
+    blink::WebLocalFrame* frame) {
   if (!enabled_)
     return;
 
   // We don't want to generate passwords if the browser won't store or sync
   // them.
   if (!ShouldAnalyzeDocument(frame->document()))
+    return;
+
+  // If we have already found a signup form for this page, no need to continue.
+  if (!password_elements_.empty())
     return;
 
   blink::WebVector<blink::WebFormElement> forms;
@@ -164,8 +194,6 @@ void PasswordGenerationAgent::DidFinishLoad(blink::WebLocalFrame* frame) {
     std::vector<blink::WebInputElement> passwords;
     if (GetAccountCreationPasswordFields(forms[i], &passwords)) {
       DVLOG(2) << "Account creation form detected";
-      password_generation::LogPasswordGenerationEvent(
-          password_generation::SIGN_UP_DETECTED);
       password_elements_ = passwords;
       possible_account_creation_form_.swap(password_form);
       DetermineGenerationElement();
@@ -173,8 +201,6 @@ void PasswordGenerationAgent::DidFinishLoad(blink::WebLocalFrame* frame) {
       return;
     }
   }
-  password_generation::LogPasswordGenerationEvent(
-      password_generation::NO_SIGN_UP_DETECTED);
 }
 
 bool PasswordGenerationAgent::ShouldAnalyzeDocument(
@@ -217,7 +243,7 @@ void PasswordGenerationAgent::OnPasswordAccepted(
   for (std::vector<blink::WebInputElement>::iterator it =
            password_elements_.begin();
        it != password_elements_.end(); ++it) {
-    it->setValue(password);
+    it->setValue(password, true /* sendEvents */);
     it->setAutofilled(true);
     // Advance focus to the next input field. We assume password fields in
     // an account creation form are always adjacent.
@@ -262,6 +288,7 @@ void PasswordGenerationAgent::DetermineGenerationElement() {
 
   DVLOG(2) << "Password generation eligible form found";
   generation_element_ = password_elements_[0];
+  generation_element_.setAttribute("aria-autocomplete", "list");
   password_generation::LogPasswordGenerationEvent(
       password_generation::GENERATION_AVAILABLE);
 }
@@ -311,6 +338,7 @@ bool PasswordGenerationAgent::TextDidChangeInTextField(
       // User generated a password and then deleted it.
       password_generation::LogPasswordGenerationEvent(
           password_generation::PASSWORD_DELETED);
+      CopyValueToAllInputElements(element.value(), &password_elements_);
     }
 
     // Do not treat the password as generated.
@@ -323,11 +351,7 @@ bool PasswordGenerationAgent::TextDidChangeInTextField(
   } else if (password_is_generated_) {
     password_edited_ = true;
     // Mirror edits to any confirmation password fields.
-    for (std::vector<blink::WebInputElement>::iterator it =
-             password_elements_.begin();
-         it != password_elements_.end(); ++it) {
-      it->setValue(element.value());
-    }
+    CopyValueToAllInputElements(element.value(), &password_elements_);
   } else if (element.value().length() > kMaximumOfferSize) {
     // User has rejected the feature and has started typing a password.
     HidePopup();
@@ -352,8 +376,7 @@ void PasswordGenerationAgent::ShowGenerationPopup() {
       generation_element_.maxLength(),
       *possible_account_creation_form_));
 
-  password_generation::LogPasswordGenerationEvent(
-      password_generation::GENERATION_POPUP_SHOWN);
+  generation_popup_shown_ = true;
 }
 
 void PasswordGenerationAgent::ShowEditingPopup() {
@@ -366,8 +389,7 @@ void PasswordGenerationAgent::ShowEditingPopup() {
       bounding_box_scaled,
       *possible_account_creation_form_));
 
-  password_generation::LogPasswordGenerationEvent(
-      password_generation::EDITING_POPUP_SHOWN);
+  editing_popup_shown_ = true;
 }
 
 void PasswordGenerationAgent::HidePopup() {

@@ -27,13 +27,6 @@
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/common/form_data.h"
 
-class GURL;
-
-namespace content {
-class RenderViewHost;
-class WebContents;
-}
-
 namespace gfx {
 class Rect;
 class RectF;
@@ -59,7 +52,6 @@ class FormStructureBrowserTest;
 
 struct FormData;
 struct FormFieldData;
-struct PasswordFormFillData;
 
 // Manages saving and restoring the user's personal information entered into web
 // forms.
@@ -81,7 +73,7 @@ class AutofillManager : public AutofillDownloadManager::Observer {
                   AutofillClient* client,
                   const std::string& app_locale,
                   AutofillDownloadManagerState enable_download_manager);
-  virtual ~AutofillManager();
+  ~AutofillManager() override;
 
   // Sets an external delegate.
   void SetExternalDelegate(AutofillExternalDelegate* delegate);
@@ -171,8 +163,8 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   //     the same browsing session as it was originally submitted (as we may
   //     not have the necessary information to classify the form at that time)
   //     so it bypasses the cache and doesn't log the same quality UMA metrics.
-  bool UploadPasswordForm(const FormData& form,
-                          const ServerFieldType& pasword_type);
+  virtual bool UploadPasswordForm(const FormData& form,
+                                  const ServerFieldType& pasword_type);
 
   // Resets cache.
   virtual void Reset();
@@ -222,8 +214,7 @@ class AutofillManager : public AutofillDownloadManager::Observer {
 
  private:
   // AutofillDownloadManager::Observer:
-  virtual void OnLoadedServerPredictions(
-      const std::string& response_xml) OVERRIDE;
+  void OnLoadedServerPredictions(const std::string& response_xml) override;
 
   // Returns false if Autofill is disabled or if no Autofill data is available.
   bool RefreshDataModels() const;
@@ -381,6 +372,10 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, UserHappinessFormInteraction);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            FormSubmittedAutocompleteEnabled);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           AutocompleteOffRespected);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           AutocompleteOffRespectedWithFlag);
   DISALLOW_COPY_AND_ASSIGN(AutofillManager);
 };
 

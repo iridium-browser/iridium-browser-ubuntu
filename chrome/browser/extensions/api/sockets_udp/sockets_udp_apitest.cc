@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/memory/ref_counted.h"
-#include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -12,7 +11,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "extensions/browser/api/dns/host_resolver_wrapper.h"
 #include "extensions/browser/api/dns/mock_host_resolver_creator.h"
 #include "extensions/browser/api/sockets_udp/sockets_udp_api.h"
@@ -42,12 +40,12 @@ class SocketsUdpApiTest : public ExtensionApiTest {
                             new extensions::MockHostResolverCreator()) {
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     extensions::HostResolverWrapper::GetInstance()->SetHostResolverForTesting(
         resolver_creator_->CreateMockHostResolver());
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     extensions::HostResolverWrapper::GetInstance()->
         SetHostResolverForTesting(NULL);
     resolver_creator_->DeleteMockHostResolver();

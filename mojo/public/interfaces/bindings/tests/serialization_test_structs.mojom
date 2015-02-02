@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 [JavaPackage="org.chromium.mojo.bindings.test.mojom.mojo"]
-module mojo.test {
+module mojo.test;
 
 struct Struct1 {
   uint8 i;
@@ -18,11 +18,11 @@ struct Struct3 {
 };
 
 struct Struct4 {
-  Struct1[] array;
+  array<Struct1> data;
 };
 
 struct Struct5 {
-  Struct1[2] pair;
+  array<Struct1, 2> pair;
 };
 
 struct Struct6 {
@@ -34,5 +34,3 @@ struct StructOfNullables {
   Struct1? struct_1;
   string? str;
 };
-
-}

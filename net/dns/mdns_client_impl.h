@@ -26,10 +26,9 @@ namespace net {
 class MDnsSocketFactoryImpl : public MDnsSocketFactory {
  public:
   MDnsSocketFactoryImpl() {};
-  virtual ~MDnsSocketFactoryImpl() {};
+  ~MDnsSocketFactoryImpl() override{};
 
-  virtual void CreateSockets(
-      ScopedVector<DatagramServerSocket>* sockets) OVERRIDE;
+  void CreateSockets(ScopedVector<DatagramServerSocket>* sockets) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MDnsSocketFactoryImpl);
@@ -111,7 +110,7 @@ class NET_EXPORT_PRIVATE MDnsClientImpl : public MDnsClient {
   class Core : public base::SupportsWeakPtr<Core>, MDnsConnection::Delegate {
    public:
     explicit Core(MDnsClientImpl* client);
-    virtual ~Core();
+    ~Core() override;
 
     // Initialize the core. Returns true on success.
     bool Init(MDnsSocketFactory* socket_factory);
@@ -128,9 +127,9 @@ class NET_EXPORT_PRIVATE MDnsClientImpl : public MDnsClient {
                     std::vector<const RecordParsed*>* records) const;
 
     // Parse the response and alert relevant listeners.
-    virtual void HandlePacket(DnsResponse* response, int bytes_read) OVERRIDE;
+    void HandlePacket(DnsResponse* response, int bytes_read) override;
 
-    virtual void OnConnectionError(int error) OVERRIDE;
+    void OnConnectionError(int error) override;
 
    private:
     typedef std::pair<std::string, uint16> ListenerKey;
@@ -170,23 +169,23 @@ class NET_EXPORT_PRIVATE MDnsClientImpl : public MDnsClient {
   };
 
   MDnsClientImpl();
-  virtual ~MDnsClientImpl();
+  ~MDnsClientImpl() override;
 
   // MDnsClient implementation:
-  virtual scoped_ptr<MDnsListener> CreateListener(
+  scoped_ptr<MDnsListener> CreateListener(
       uint16 rrtype,
       const std::string& name,
-      MDnsListener::Delegate* delegate) OVERRIDE;
+      MDnsListener::Delegate* delegate) override;
 
-  virtual scoped_ptr<MDnsTransaction> CreateTransaction(
+  scoped_ptr<MDnsTransaction> CreateTransaction(
       uint16 rrtype,
       const std::string& name,
       int flags,
-      const MDnsTransaction::ResultCallback& callback) OVERRIDE;
+      const MDnsTransaction::ResultCallback& callback) override;
 
-  virtual bool StartListening(MDnsSocketFactory* socket_factory) OVERRIDE;
-  virtual void StopListening() OVERRIDE;
-  virtual bool IsListening() const OVERRIDE;
+  bool StartListening(MDnsSocketFactory* socket_factory) override;
+  void StopListening() override;
+  bool IsListening() const override;
 
   Core* core() { return core_.get(); }
 
@@ -204,17 +203,17 @@ class MDnsListenerImpl : public MDnsListener,
                    MDnsListener::Delegate* delegate,
                    MDnsClientImpl* client);
 
-  virtual ~MDnsListenerImpl();
+  ~MDnsListenerImpl() override;
 
   // MDnsListener implementation:
-  virtual bool Start() OVERRIDE;
+  bool Start() override;
 
   // Actively refresh any received records.
-  virtual void SetActiveRefresh(bool active_refresh) OVERRIDE;
+  void SetActiveRefresh(bool active_refresh) override;
 
-  virtual const std::string& GetName() const OVERRIDE;
+  const std::string& GetName() const override;
 
-  virtual uint16 GetType() const OVERRIDE;
+  uint16 GetType() const override;
 
   MDnsListener::Delegate* delegate() { return delegate_; }
 
@@ -252,20 +251,20 @@ class MDnsTransactionImpl : public base::SupportsWeakPtr<MDnsTransactionImpl>,
                       int flags,
                       const MDnsTransaction::ResultCallback& callback,
                       MDnsClientImpl* client);
-  virtual ~MDnsTransactionImpl();
+  ~MDnsTransactionImpl() override;
 
   // MDnsTransaction implementation:
-  virtual bool Start() OVERRIDE;
+  bool Start() override;
 
-  virtual const std::string& GetName() const OVERRIDE;
-  virtual uint16 GetType() const OVERRIDE;
+  const std::string& GetName() const override;
+  uint16 GetType() const override;
 
   // MDnsListener::Delegate implementation:
-  virtual void OnRecordUpdate(MDnsListener::UpdateType update,
-                              const RecordParsed* record) OVERRIDE;
-  virtual void OnNsecRecord(const std::string& name, unsigned type) OVERRIDE;
+  void OnRecordUpdate(MDnsListener::UpdateType update,
+                      const RecordParsed* record) override;
+  void OnNsecRecord(const std::string& name, unsigned type) override;
 
-  virtual void OnCachePurged() OVERRIDE;
+  void OnCachePurged() override;
 
  private:
   bool is_active() { return !callback_.is_null(); }

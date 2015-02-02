@@ -10,13 +10,18 @@ source_set("lib") {
     "//media",
     "//media/mojo/interfaces",
     "//mojo/common",
+    "//mojo/converters/geometry",
     "//mojo/environment:chromium",
     "//mojo/public/c/system:for_component",
+    "//mojo/services/public/interfaces/geometry",
+    "//skia",
   ]
 
   sources = [
     "media_type_converters.cc",
     "media_type_converters.h",
+    "mojo_demuxer_stream_adapter.cc",
+    "mojo_demuxer_stream_adapter.h",
   ]
 }
 
@@ -43,9 +48,9 @@ source_set("renderer_impl_lib") {
 }
 
 # mojo media::Renderer application.
-# GYP version: media/media.gyp:media_mojo_renderer_app
+# GYP version: media/media.gyp:mojo_media_renderer_app
 shared_library("renderer_app") {
-  output_name = "media_mojo_renderer_app"
+  output_name = "mojo_media_renderer_app"
 
   deps = [
     "//base",
@@ -59,14 +64,17 @@ shared_library("renderer_app") {
   ]
 
   sources = [
-    "mojo_demuxer_stream_adapter.cc",
-    "mojo_demuxer_stream_adapter.h",
+    "demuxer_stream_provider_shim.cc",
+    "demuxer_stream_provider_shim.h",
     "mojo_renderer_service.cc",
     "mojo_renderer_service.h",
+    "renderer_config.cc",
+    "renderer_config.h",
+    "renderer_config_default.cc",
   ]
 }
 
-test("media_mojo_lib_unittests") {
+test("mojo_media_lib_unittests") {
   sources = [
     "media_type_converters_unittest.cc",
   ]
@@ -76,19 +84,19 @@ test("media_mojo_lib_unittests") {
     "//base/test:test_support",
     "//media",
     "//media/mojo/interfaces",
-    "//mojo/common/test:run_all_unittests",
+    "//mojo/edk/system",
+    "//mojo/edk/test:run_all_unittests",
     "//mojo/environment:chromium",
-    "//mojo/system",
     "//testing/gtest",
     ":lib"
   ]
 }
 
-# GYP version: media/media.gyp:media_mojo_renderer_apptest
+# GYP version: media/media.gyp:mojo_media_renderer_apptest
 # Not a 'test' because this is loaded via mojo_shell as an app.
 shared_library("renderer_apptest") {
   testonly = true
-  output_name = "media_mojo_renderer_apptest"
+  output_name = "mojo_media_renderer_apptest"
 
   deps = [
     "//base",
@@ -121,7 +129,7 @@ group("services") {
 group("tests") {
   testonly = true
   deps = [
-    ":media_mojo_lib_unittests",
+    ":mojo_media_lib_unittests",
     ":renderer_apptest",
   ]
 }

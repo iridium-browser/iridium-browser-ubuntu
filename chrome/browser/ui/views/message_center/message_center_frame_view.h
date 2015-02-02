@@ -19,23 +19,22 @@ namespace message_center {
 class MessageCenterFrameView : public views::NonClientFrameView {
  public:
   explicit MessageCenterFrameView();
-  virtual ~MessageCenterFrameView();
+  ~MessageCenterFrameView() override;
 
   // NonClientFrameView overrides:
-  virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
-  virtual gfx::Rect GetWindowBoundsForClientBounds(
-      const gfx::Rect& client_bounds) const OVERRIDE;
-  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
-  virtual void GetWindowMask(const gfx::Size& size,
-                             gfx::Path* window_mask) OVERRIDE;
-  virtual void ResetWindowControls() OVERRIDE;
-  virtual void UpdateWindowIcon() OVERRIDE;
-  virtual void UpdateWindowTitle() OVERRIDE;
-  virtual void SizeConstraintsChanged() OVERRIDE;
+  gfx::Rect GetBoundsForClientView() const override;
+  gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const override;
+  int NonClientHitTest(const gfx::Point& point) override;
+  void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) override;
+  void ResetWindowControls() override;
+  void UpdateWindowIcon() override;
+  void UpdateWindowTitle() override;
+  void SizeConstraintsChanged() override;
 
   // View overrides:
-  virtual gfx::Insets GetInsets() const OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
+  gfx::Insets GetInsets() const override;
+  const char* GetClassName() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MessageCenterFrameView);

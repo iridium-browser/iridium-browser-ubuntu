@@ -7,10 +7,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/supervised_user/supervised_user_url_filter.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
 #include "content/public/browser/resource_throttle.h"
-
-class SupervisedUserURLFilter;
 
 namespace net {
 class URLRequest;
@@ -21,24 +20,29 @@ class SupervisedUserResourceThrottle : public content::ResourceThrottle {
   SupervisedUserResourceThrottle(const net::URLRequest* request,
                                  bool is_main_frame,
                                  const SupervisedUserURLFilter* url_filter);
-  virtual ~SupervisedUserResourceThrottle();
+  ~SupervisedUserResourceThrottle() override;
 
   // content::ResourceThrottle implementation:
-  virtual void WillStartRequest(bool* defer) OVERRIDE;
+  void WillStartRequest(bool* defer) override;
 
-  virtual void WillRedirectRequest(const GURL& new_url, bool* defer) OVERRIDE;
+  void WillRedirectRequest(const GURL& new_url, bool* defer) override;
 
-  virtual const char* GetNameForLogging() const OVERRIDE;
+  const char* GetNameForLogging() const override;
 
  private:
-  void ShowInterstitialIfNeeded(bool is_redirect,
-                                const GURL& url,
-                                bool* defer);
+  void ShowInterstitialIfNeeded(bool is_redirect, const GURL& url, bool* defer);
+  void ShowInterstitial(const GURL& url);
+  void OnCheckDone(const GURL& url,
+                   SupervisedUserURLFilter::FilteringBehavior behavior,
+                   SupervisedUserURLFilter::FilteringBehaviorSource source,
+                   bool uncertain);
   void OnInterstitialResult(bool continue_request);
 
   const net::URLRequest* request_;
   bool is_main_frame_;
   const SupervisedUserURLFilter* url_filter_;
+  bool deferred_;
+  SupervisedUserURLFilter::FilteringBehavior behavior_;
   base::WeakPtrFactory<SupervisedUserResourceThrottle> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SupervisedUserResourceThrottle);

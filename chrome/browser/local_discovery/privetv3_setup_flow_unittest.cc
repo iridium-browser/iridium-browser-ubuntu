@@ -47,19 +47,19 @@ class MockPrivetHTTPClient : public PrivetHTTPClient {
       PrivetJSONOperation*(const PrivetJSONOperation::ResultCallback&));
 
   virtual void RefreshPrivetToken(
-      const PrivetURLFetcher::TokenCallback& callback) OVERRIDE {
+      const PrivetURLFetcher::TokenCallback& callback) override {
     callback.Run("x-privet-token");
   }
 
   virtual scoped_ptr<PrivetJSONOperation> CreateInfoOperation(
-      const PrivetJSONOperation::ResultCallback& callback) OVERRIDE {
+      const PrivetJSONOperation::ResultCallback& callback) override {
     return make_scoped_ptr(CreateInfoOperationPtr(callback));
   }
 
   virtual scoped_ptr<PrivetURLFetcher> CreateURLFetcher(
       const GURL& url,
       net::URLFetcher::RequestType request_type,
-      PrivetURLFetcher::Delegate* delegate) OVERRIDE {
+      PrivetURLFetcher::Delegate* delegate) override {
     return make_scoped_ptr(new PrivetURLFetcher(
         url, request_type, request_context_.get(), delegate));
   }
@@ -75,7 +75,7 @@ class MockDelegate : public PrivetV3SetupFlow::Delegate {
    public:
     explicit MockGCDApiFlow(MockDelegate* delegate) : delegate_(delegate) {}
 
-    virtual void Start(scoped_ptr<Request> request) OVERRIDE {
+    void Start(scoped_ptr<Request> request) override {
       ASSERT_FALSE(delegate_->gcd_request_);
       delegate_->gcd_request_ = request.Pass();
       delegate_->ReplyWithToken();
@@ -89,20 +89,18 @@ class MockDelegate : public PrivetV3SetupFlow::Delegate {
   MOCK_METHOD1(SwitchToSetupWiFi, void(const ResultCallback&));
   virtual void CreatePrivetV3Client(
       const std::string& service_name,
-      const PrivetClientCallback& callback) OVERRIDE {
+      const PrivetClientCallback& callback) override {
     scoped_ptr<MockPrivetHTTPClient> privet_client(new MockPrivetHTTPClient());
     privet_client_ptr_ = privet_client.get();
-    callback.Run(privet_client.PassAs<PrivetHTTPClient>());
+    callback.Run(privet_client.Pass());
   }
-  MOCK_METHOD2(ConfirmSecurityCode,
-               void(const std::string&, const ResultCallback&));
+  MOCK_METHOD1(ConfirmSecurityCode, void(const ResultCallback&));
   MOCK_METHOD1(RestoreWifi, void(const ResultCallback&));
   MOCK_METHOD0(OnSetupDone, void());
   MOCK_METHOD0(OnSetupError, void());
 
-  virtual scoped_ptr<GCDApiFlow> CreateApiFlow() OVERRIDE {
-    scoped_ptr<MockGCDApiFlow> mock_gcd(new MockGCDApiFlow(this));
-    return mock_gcd.PassAs<GCDApiFlow>();
+  virtual scoped_ptr<GCDApiFlow> CreateApiFlow() override {
+    return make_scoped_ptr(new MockGCDApiFlow(this));
   }
 
   void ReplyWithToken() {
@@ -130,11 +128,11 @@ class PrivetV3SetupFlowTest : public testing::Test {
   }
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     quit_closure_ = run_loop_.QuitClosure();
     EXPECT_CALL(delegate_, GetWiFiCredentials(_)).Times(0);
     EXPECT_CALL(delegate_, SwitchToSetupWiFi(_)).Times(0);
-    EXPECT_CALL(delegate_, ConfirmSecurityCode(_, _)).Times(0);
+    EXPECT_CALL(delegate_, ConfirmSecurityCode(_)).Times(0);
     EXPECT_CALL(delegate_, RestoreWifi(_)).Times(0);
     EXPECT_CALL(delegate_, OnSetupDone()).Times(0);
     EXPECT_CALL(delegate_, OnSetupError()).Times(0);
@@ -168,10 +166,11 @@ TEST_F(PrivetV3SetupFlowTest, InvalidTicket) {
   setup_.Register(kServiceName);
 }
 
-TEST_F(PrivetV3SetupFlowTest, InvalidDeviceResponce) {
+TEST_F(PrivetV3SetupFlowTest, InvalidDeviceResponse) {
   EXPECT_CALL(delegate_, OnSetupError()).Times(1);
-  EXPECT_CALL(delegate_, ConfirmSecurityCode(_, _)).Times(1).WillOnce(
-      WithArgs<1>(Invoke(this, &PrivetV3SetupFlowTest::ConfirmCode)));
+  EXPECT_CALL(delegate_, ConfirmSecurityCode(_))
+      .Times(1)
+      .WillOnce(WithArgs<0>(Invoke(this, &PrivetV3SetupFlowTest::ConfirmCode)));
   delegate_.gcd_server_response_ = kRegistrationTicketResponse;
   setup_.Register(kServiceName);
   run_loop_.Run();
@@ -180,8 +179,9 @@ TEST_F(PrivetV3SetupFlowTest, InvalidDeviceResponce) {
 
 TEST_F(PrivetV3SetupFlowTest, Success) {
   EXPECT_CALL(delegate_, OnSetupDone()).Times(1);
-  EXPECT_CALL(delegate_, ConfirmSecurityCode(_, _)).Times(1).WillOnce(
-      WithArgs<1>(Invoke(this, &PrivetV3SetupFlowTest::ConfirmCode)));
+  EXPECT_CALL(delegate_, ConfirmSecurityCode(_))
+      .Times(1)
+      .WillOnce(WithArgs<0>(Invoke(this, &PrivetV3SetupFlowTest::ConfirmCode)));
   delegate_.gcd_server_response_ = kRegistrationTicketResponse;
   setup_.Register(kServiceName);
   run_loop_.Run();

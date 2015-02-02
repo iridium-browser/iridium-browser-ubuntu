@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/files/scoped_file.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
@@ -106,13 +107,13 @@ class NaClIPCAdapter : public base::RefCountedThreadSafe<NaClIPCAdapter>,
   NaClDesc* MakeNaClDesc();
 
 #if defined(OS_POSIX)
-  int TakeClientFileDescriptor();
+  base::ScopedFD TakeClientFileDescriptor();
 #endif
 
   // Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void OnChannelConnected(int32 peer_pid) override;
+  void OnChannelError() override;
 
   typedef base::Callback<void(IPC::PlatformFileForTransit, base::FilePath)>
       ResolveFileTokenReplyCallback;
@@ -174,7 +175,7 @@ class NaClIPCAdapter : public base::RefCountedThreadSafe<NaClIPCAdapter>,
     PendingSyncMsgMap pending_sync_msgs_;
   };
 
-  virtual ~NaClIPCAdapter();
+  ~NaClIPCAdapter() override;
 
   void OnFileTokenResolved(const IPC::Message& orig_msg,
                            IPC::PlatformFileForTransit ipc_fd,

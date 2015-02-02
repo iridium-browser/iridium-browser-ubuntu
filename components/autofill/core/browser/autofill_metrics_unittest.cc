@@ -87,7 +87,7 @@ class TestPersonalDataManager : public PersonalDataManager {
 
   // Overridden to avoid a trip to the database. This should be a no-op except
   // for the side-effect of logging the profile count.
-  virtual void LoadProfiles() OVERRIDE {
+  virtual void LoadProfiles() override {
     std::vector<AutofillProfile*> profiles;
     web_profiles_.release(&profiles);
     WDResult<std::vector<AutofillProfile*> > result(AUTOFILL_PROFILES_RESULT,
@@ -96,7 +96,7 @@ class TestPersonalDataManager : public PersonalDataManager {
   }
 
   // Overridden to avoid a trip to the database.
-  virtual void LoadCreditCards() OVERRIDE {}
+  virtual void LoadCreditCards() override {}
 
   const MockAutofillMetrics* metric_logger() const {
     return static_cast<const MockAutofillMetrics*>(
@@ -107,7 +107,7 @@ class TestPersonalDataManager : public PersonalDataManager {
     autofill_enabled_ = autofill_enabled;
   }
 
-  virtual bool IsAutofillEnabled() const OVERRIDE {
+  virtual bool IsAutofillEnabled() const override {
     return autofill_enabled_;
   }
 
@@ -141,7 +141,7 @@ class TestPersonalDataManager : public PersonalDataManager {
 class TestFormStructure : public FormStructure {
  public:
   explicit TestFormStructure(const FormData& form) : FormStructure(form) {}
-  virtual ~TestFormStructure() {}
+  ~TestFormStructure() override {}
 
   void SetFieldTypes(const std::vector<ServerFieldType>& heuristic_types,
                      const std::vector<ServerFieldType>& server_types) {
@@ -171,9 +171,9 @@ class TestAutofillManager : public AutofillManager {
         autofill_enabled_(true) {
     set_metric_logger(new testing::NiceMock<MockAutofillMetrics>);
   }
-  virtual ~TestAutofillManager() {}
+  ~TestAutofillManager() override {}
 
-  virtual bool IsAutofillEnabled() const OVERRIDE { return autofill_enabled_; }
+  bool IsAutofillEnabled() const override { return autofill_enabled_; }
 
   void set_autofill_enabled(bool autofill_enabled) {
     autofill_enabled_ = autofill_enabled;
@@ -207,11 +207,11 @@ class TestAutofillManager : public AutofillManager {
     run_loop_->Run();
   }
 
-  virtual void UploadFormDataAsyncCallback(
+  void UploadFormDataAsyncCallback(
       const FormStructure* submitted_form,
       const base::TimeTicks& load_time,
       const base::TimeTicks& interaction_time,
-      const base::TimeTicks& submission_time) OVERRIDE {
+      const base::TimeTicks& submission_time) override {
     run_loop_->Quit();
 
     AutofillManager::UploadFormDataAsyncCallback(submitted_form,
@@ -231,10 +231,10 @@ class TestAutofillManager : public AutofillManager {
 
 class AutofillMetricsTest : public testing::Test {
  public:
-  virtual ~AutofillMetricsTest();
+  ~AutofillMetricsTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   base::MessageLoop message_loop_;

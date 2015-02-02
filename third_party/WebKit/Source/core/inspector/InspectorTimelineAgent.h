@@ -61,7 +61,6 @@ class Event;
 class ExecutionContext;
 class FloatQuad;
 class LocalFrame;
-class FrameHost;
 class GraphicsContext;
 class GraphicsLayer;
 class InspectorClient;
@@ -69,7 +68,6 @@ class InspectorFrontend;
 class InspectorOverlay;
 class InspectorPageAgent;
 class InspectorLayerTreeAgent;
-class InstrumentingAgents;
 class KURL;
 class ScriptState;
 class Node;
@@ -79,8 +77,6 @@ class ResourceError;
 class ResourceLoader;
 class ResourceRequest;
 class ResourceResponse;
-class ScriptArguments;
-class ScriptCallStack;
 class TimelineRecordStack;
 class WebSocketHandshakeRequest;
 class WebSocketHandshakeResponse;
@@ -88,7 +84,7 @@ class XMLHttpRequest;
 
 typedef String ErrorString;
 
-class InspectorTimelineAgent FINAL
+class InspectorTimelineAgent final
     : public InspectorBaseAgent<InspectorTimelineAgent>
     , public ScriptGCEventListener
     , public InspectorBackendDispatcher::TimelineCommandHandler
@@ -120,16 +116,16 @@ public:
     }
 
     virtual ~InspectorTimelineAgent();
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
-    virtual void setFrontend(InspectorFrontend*) OVERRIDE;
-    virtual void clearFrontend() OVERRIDE;
-    virtual void restore() OVERRIDE;
+    virtual void setFrontend(InspectorFrontend*) override;
+    virtual void clearFrontend() override;
+    virtual void restore() override;
 
-    virtual void enable(ErrorString*) OVERRIDE;
-    virtual void disable(ErrorString*) OVERRIDE;
-    virtual void start(ErrorString*, const int* maxCallStackDepth, const bool* bufferEvents, const String* liveEvents, const bool* includeCounters, const bool* includeGPUEvents) OVERRIDE;
-    virtual void stop(ErrorString*) OVERRIDE;
+    virtual void enable(ErrorString*) override;
+    virtual void disable(ErrorString*) override;
+    virtual void start(ErrorString*, const int* maxCallStackDepth, const bool* bufferEvents, const String* liveEvents, const bool* includeCounters, const bool* includeGPUEvents) override;
+    virtual void stop(ErrorString*) override;
 
     void setLayerTreeId(int layerTreeId) { m_layerTreeId = layerTreeId; }
     int id() const { return m_id; }
@@ -219,13 +215,13 @@ public:
     void processGPUEvent(const GPUEvent&);
 
     // ScriptGCEventListener methods.
-    virtual void didGC(double, double, size_t) OVERRIDE;
+    virtual void didGC(double, double, size_t) override;
 
     // PlatformInstrumentationClient methods.
-    virtual void willDecodeImage(const String& imageType) OVERRIDE;
-    virtual void didDecodeImage() OVERRIDE;
-    virtual void willResizeImage(bool shouldCache) OVERRIDE;
-    virtual void didResizeImage() OVERRIDE;
+    virtual void willDecodeImage(const String& imageType) override;
+    virtual void didDecodeImage() override;
+    virtual void willResizeImage(bool shouldCache) override;
+    virtual void didResizeImage() override;
 
 private:
 

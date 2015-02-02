@@ -14,7 +14,6 @@
 #include "cc/resources/raster_buffer.h"
 #include "cc/resources/resource.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "third_party/skia/include/utils/SkNullCanvas.h"
 
 namespace cc {
 namespace {
@@ -25,39 +24,33 @@ class RasterBufferImpl : public RasterBuffer {
                    const Resource* resource)
       : resource_provider_(resource_provider),
         resource_(resource),
-        buffer_(NULL),
+        memory_(NULL),
         stride_(0) {
     resource_provider_->AcquirePixelBuffer(resource_->id());
-    buffer_ = resource_provider_->MapPixelBuffer(resource_->id(), &stride_);
+    memory_ = resource_provider_->MapPixelBuffer(resource_->id(), &stride_);
   }
 
-  virtual ~RasterBufferImpl() {
+  ~RasterBufferImpl() override {
     resource_provider_->ReleasePixelBuffer(resource_->id());
   }
 
   // Overridden from RasterBuffer:
-  virtual skia::RefPtr<SkCanvas> AcquireSkCanvas() OVERRIDE {
-    if (!buffer_)
-      return skia::AdoptRef(SkCreateNullCanvas());
-
-    RasterWorkerPool::AcquireBitmapForBuffer(
-        &bitmap_, buffer_, resource_->format(), resource_->size(), stride_);
-    return skia::AdoptRef(new SkCanvas(bitmap_));
-  }
-  virtual void ReleaseSkCanvas(const skia::RefPtr<SkCanvas>& canvas) OVERRIDE {
-    if (!buffer_)
+  void Playback(const RasterSource* raster_source,
+                const gfx::Rect& rect,
+                float scale) override {
+    if (!memory_)
       return;
 
-    RasterWorkerPool::ReleaseBitmapForBuffer(
-        &bitmap_, buffer_, resource_->format());
+    RasterWorkerPool::PlaybackToMemory(memory_, resource_->format(),
+                                       resource_->size(), stride_,
+                                       raster_source, rect, scale);
   }
 
  private:
   ResourceProvider* resource_provider_;
   const Resource* resource_;
-  uint8_t* buffer_;
+  uint8_t* memory_;
   int stride_;
-  SkBitmap bitmap_;
 
   DISALLOW_COPY_AND_ASSIGN(RasterBufferImpl);
 };
@@ -170,7 +163,7 @@ void PixelBufferRasterWorkerPool::Shutdown() {
   CheckForCompletedRasterizerTasks();
   CheckForCompletedUploads();
 
-  check_for_completed_raster_task_notifier_.Cancel();
+  check_for_completed_raster_task_notifier_.Shutdown();
 
   for (RasterTaskState::Vector::iterator it = raster_task_states_.begin();
        it != raster_task_states_.end();
@@ -448,11 +441,6 @@ void PixelBufferRasterWorkerPool::CheckForCompletedUploads() {
     task->WillComplete();
     task->CompleteOnOriginThread(this);
     task->DidComplete();
-
-    // Async set pixels commands are not necessarily processed in-sequence with
-    // drawing commands. Read lock fences are required to ensure that async
-    // commands don't access the resource while used for drawing.
-    resource_provider_->EnableReadLockFences(task->resource()->id());
 
     DCHECK(std::find(completed_raster_tasks_.begin(),
                      completed_raster_tasks_.end(),

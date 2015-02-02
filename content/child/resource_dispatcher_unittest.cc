@@ -9,7 +9,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop.h"
-#include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -54,45 +53,43 @@ class TestRequestPeer : public RequestPeer {
          bridge_(bridge) {
   }
 
-  virtual void OnUploadProgress(uint64 position, uint64 size) OVERRIDE {
-  }
+  void OnUploadProgress(uint64 position, uint64 size) override {}
 
-  virtual bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                                  const ResourceResponseInfo& info) OVERRIDE {
+  bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
+                          const ResourceResponseInfo& info) override {
     ++seen_redirects_;
     if (defer_on_redirect_)
       bridge_->SetDefersLoading(true);
     return follow_redirects_;
   }
 
-  virtual void OnReceivedResponse(const ResourceResponseInfo& info) OVERRIDE {
+  void OnReceivedResponse(const ResourceResponseInfo& info) override {
     EXPECT_FALSE(received_response_);
     received_response_ = true;
     if (cancel_on_receive_response_)
       bridge_->Cancel();
   }
 
-  virtual void OnDownloadedData(int len, int encoded_data_length) OVERRIDE {
+  void OnDownloadedData(int len, int encoded_data_length) override {
     total_downloaded_data_length_ += len;
     total_encoded_data_length_ += encoded_data_length;
   }
 
-  virtual void OnReceivedData(const char* data,
-                              int data_length,
-                              int encoded_data_length) OVERRIDE {
+  void OnReceivedData(const char* data,
+                      int data_length,
+                      int encoded_data_length) override {
     EXPECT_TRUE(received_response_);
     EXPECT_FALSE(complete_);
     data_.append(data, data_length);
     total_encoded_data_length_ += encoded_data_length;
   }
 
-  virtual void OnCompletedRequest(
-      int error_code,
-      bool was_ignored_by_handler,
-      bool stale_copy_in_cache,
-      const std::string& security_info,
-      const base::TimeTicks& completion_time,
-      int64 total_transfer_size) OVERRIDE {
+  void OnCompletedRequest(int error_code,
+                          bool was_ignored_by_handler,
+                          bool stale_copy_in_cache,
+                          const std::string& security_info,
+                          const base::TimeTicks& completion_time,
+                          int64 total_transfer_size) override {
     EXPECT_TRUE(received_response_);
     EXPECT_FALSE(complete_);
     complete_ = true;
@@ -157,14 +154,14 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
  public:
   ResourceDispatcherTest() : dispatcher_(this) {}
 
-  virtual ~ResourceDispatcherTest() {
+  ~ResourceDispatcherTest() override {
     STLDeleteContainerPairSecondPointers(shared_memory_map_.begin(),
                                          shared_memory_map_.end());
   }
 
   // Emulates IPC send operations (IPC::Sender) by adding
   // pending messages to the queue.
-  virtual bool Send(IPC::Message* msg) OVERRIDE {
+  bool Send(IPC::Message* msg) override {
     message_queue_.push_back(IPC::Message(*msg));
     delete msg;
     return true;
@@ -276,8 +273,8 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
     EXPECT_TRUE(shared_memory->CreateAndMapAnonymous(buffer_size));
 
     base::SharedMemoryHandle duplicate_handle;
-    EXPECT_TRUE(shared_memory->ShareToProcess(
-        base::Process::Current().handle(), &duplicate_handle));
+    EXPECT_TRUE(shared_memory->ShareToProcess(base::GetCurrentProcessHandle(),
+                                              &duplicate_handle));
     EXPECT_TRUE(dispatcher_.OnMessageReceived(
         ResourceMsg_SetDataBuffer(request_id, duplicate_handle,
                                   shared_memory->requested_size(), 0)));
@@ -704,7 +701,7 @@ TEST_F(ResourceDispatcherTest, SerializedPostData) {
 class TimeConversionTest : public ResourceDispatcherTest,
                            public RequestPeer {
  public:
-  virtual bool Send(IPC::Message* msg) OVERRIDE {
+  bool Send(IPC::Message* msg) override {
     delete msg;
     return true;
   }
@@ -718,34 +715,29 @@ class TimeConversionTest : public ResourceDispatcherTest,
   }
 
   // RequestPeer methods.
-  virtual void OnUploadProgress(uint64 position, uint64 size) OVERRIDE {
-  }
+  void OnUploadProgress(uint64 position, uint64 size) override {}
 
-  virtual bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                                  const ResourceResponseInfo& info) OVERRIDE {
+  bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
+                          const ResourceResponseInfo& info) override {
     return true;
   }
 
-  virtual void OnReceivedResponse(const ResourceResponseInfo& info) OVERRIDE {
+  void OnReceivedResponse(const ResourceResponseInfo& info) override {
     response_info_ = info;
   }
 
-  virtual void OnDownloadedData(int len, int encoded_data_length) OVERRIDE {
-  }
+  void OnDownloadedData(int len, int encoded_data_length) override {}
 
-  virtual void OnReceivedData(const char* data,
-                              int data_length,
-                              int encoded_data_length) OVERRIDE {
-  }
+  void OnReceivedData(const char* data,
+                      int data_length,
+                      int encoded_data_length) override {}
 
-  virtual void OnCompletedRequest(
-      int error_code,
-      bool was_ignored_by_handler,
-      bool stale_copy_in_cache,
-      const std::string& security_info,
-      const base::TimeTicks& completion_time,
-      int64 total_transfer_size) OVERRIDE {
-  }
+  void OnCompletedRequest(int error_code,
+                          bool was_ignored_by_handler,
+                          bool stale_copy_in_cache,
+                          const std::string& security_info,
+                          const base::TimeTicks& completion_time,
+                          int64 total_transfer_size) override {}
 
   const ResourceResponseInfo& response_info() const { return response_info_; }
 

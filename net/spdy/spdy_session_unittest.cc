@@ -121,9 +121,7 @@ class SpdySessionTest : public PlatformTest,
         HttpNetworkSession::NORMAL_SOCKET_POOL, old_max_group_sockets_);
   }
 
-  virtual void SetUp() OVERRIDE {
-    g_time_delta = base::TimeDelta();
-  }
+  void SetUp() override { g_time_delta = base::TimeDelta(); }
 
   void CreateDeterministicNetworkSession() {
     http_session_ =
@@ -207,7 +205,7 @@ class StreamRequestDestroyingCallback : public TestCompletionCallbackBase {
  public:
   StreamRequestDestroyingCallback() {}
 
-  virtual ~StreamRequestDestroyingCallback() {}
+  ~StreamRequestDestroyingCallback() override {}
 
   void SetRequestToDestroy(scoped_ptr<SpdyStreamRequest> request) {
     request_ = request.Pass();
@@ -885,7 +883,7 @@ TEST_P(SpdySessionTest, ClientPing) {
   session->CheckPingStatus(before_ping_time);
 
   EXPECT_EQ(0, session->pings_in_flight());
-  EXPECT_GE(session->next_ping_id(), static_cast<uint32>(1));
+  EXPECT_GE(session->next_ping_id(), 1U);
   EXPECT_FALSE(session->check_ping_status_pending());
   EXPECT_GE(session->last_activity_time(), before_ping_time);
 
@@ -1302,7 +1300,7 @@ TEST_P(SpdySessionTest, FailedPing) {
   // Send a PING frame.
   session->WritePingFrame(1, false);
   EXPECT_LT(0, session->pings_in_flight());
-  EXPECT_GE(session->next_ping_id(), static_cast<uint32>(1));
+  EXPECT_GE(session->next_ping_id(), 1U);
   EXPECT_TRUE(session->check_ping_status_pending());
 
   // Assert session is not closed.
@@ -2303,9 +2301,9 @@ class SessionClosingDelegate : public test::StreamDelegateDoNothing {
       : StreamDelegateDoNothing(stream),
         session_to_close_(session_to_close) {}
 
-  virtual ~SessionClosingDelegate() {}
+  ~SessionClosingDelegate() override {}
 
-  virtual void OnClose(int status) OVERRIDE {
+  void OnClose(int status) override {
     session_to_close_->CloseSessionOnError(ERR_SPDY_PROTOCOL_ERROR, "Error");
   }
 
@@ -3379,9 +3377,9 @@ class StreamCreatingDelegate : public test::StreamDelegateDoNothing {
       : StreamDelegateDoNothing(stream),
         session_(session) {}
 
-  virtual ~StreamCreatingDelegate() {}
+  ~StreamCreatingDelegate() override {}
 
-  virtual void OnClose(int status) OVERRIDE {
+  void OnClose(int status) override {
     GURL url(kDefaultURL);
     ignore_result(
         CreateStreamSynchronously(SPDY_REQUEST_RESPONSE_STREAM,
@@ -3658,10 +3656,10 @@ class DropReceivedDataDelegate : public test::StreamDelegateSendImmediate {
                            base::StringPiece data)
       : StreamDelegateSendImmediate(stream, data) {}
 
-  virtual ~DropReceivedDataDelegate() {}
+  ~DropReceivedDataDelegate() override {}
 
   // Drop any received data.
-  virtual void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) OVERRIDE {}
+  void OnDataReceived(scoped_ptr<SpdyBuffer> buffer) override {}
 };
 
 // Send data back and forth but use a delegate that drops its received
@@ -4243,13 +4241,13 @@ class StreamClosingDelegate : public test::StreamDelegateWithBody {
                         base::StringPiece data)
       : StreamDelegateWithBody(stream, data) {}
 
-  virtual ~StreamClosingDelegate() {}
+  ~StreamClosingDelegate() override {}
 
   void set_stream_to_close(const base::WeakPtr<SpdyStream>& stream_to_close) {
     stream_to_close_ = stream_to_close;
   }
 
-  virtual void OnDataSent() OVERRIDE {
+  void OnDataSent() override {
     test::StreamDelegateWithBody::OnDataSent();
     if (stream_to_close_.get()) {
       stream_to_close_->Close();

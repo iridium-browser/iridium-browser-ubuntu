@@ -36,6 +36,13 @@ var canvas;
 var gl;
 var ext = null;
 
+var extConstants = {
+  "SRGB_EXT": 0x8C40,
+  "SRGB_ALPHA_EXT": 0x8C42,
+  "SRGB8_ALPHA8_EXT": 0x8C43,
+  "FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT": 0x8210
+};
+
 function getExtension() {
   ext = gl.getExtension("EXT_sRGB");
 }
@@ -43,14 +50,6 @@ function getExtension() {
 function listsExtension() {
   var supported = gl.getSupportedExtensions();
   return (supported.indexOf("EXT_sRGB") >= 0);
-}
-
-function readLocation(x, y) {
-  var pixel = new Uint8Array(1 * 1 * 4);
-  var px = Math.floor(x * canvas.drawingBufferWidth);
-  var py = Math.floor(y * canvas.drawingBufferHeight);
-  gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-  return pixel;
 }
 
 function toVec3String(val) {
@@ -73,26 +72,36 @@ function expectResult(target) {
                       e);
 }
 
-function createGreysRGBTexture(gl, color) {
+function createGreysRGBTexture(gl, color, format) {
   var numPixels = gl.drawingBufferWidth * gl.drawingBufferHeight;
-  var size = numPixels * 3;
+  var elements;
+  switch (format) {
+    case ext.SRGB_EXT: elements = 3; break;
+    case ext.SRGB_ALPHA_EXT: elements = 4; break;
+    default: return null;
+  }
+
+  var size = numPixels * elements;
   var buf = new Uint8Array(size);
   for (var ii = 0; ii < numPixels; ++ii) {
-    var off = ii * 3;
+    var off = ii * elements;
     buf[off + 0] = color;
     buf[off + 1] = color;
     buf[off + 2] = color;
+    if (format == ext.SRGB_ALPHA_EXT) {
+      buf[off + 3] = 255;
+    }
   }
 
   var tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D,
                 0,
-                ext.SRGB_EXT,
+                format,
                 gl.drawingBufferWidth,
                 gl.drawingBufferHeight,
                 0,
-                ext.SRGB_EXT,
+                format,
                 gl.UNSIGNED_BYTE,
                 buf);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -102,12 +111,16 @@ function createGreysRGBTexture(gl, color) {
   return tex;
 }
 
-function testValidFormat(fn, internalFormat, formatName) {
-  fn(internalFormat);
-  wtu.glErrorShouldBe(gl, gl.NO_ERROR, "was able to create type " + formatName);
+function testValidFormat(fn, internalFormat, formatName, enabled) {
+  if (enabled) {
+    fn(internalFormat);
+    wtu.glErrorShouldBe(gl, gl.NO_ERROR, "was able to create type " + formatName);
+  } else {
+    testInvalidFormat(fn, internalFormat, formatName, enabled);
+  }
 }
 
-function testInvalidFormat(fn, internalFormat, formatName) {
+function testInvalidFormat(fn, internalFormat, formatName, enabled) {
   fn(internalFormat);
   var err = gl.getError();
   if (err == gl.NO_ERROR) {
@@ -186,6 +199,12 @@ if (!gl) {
   testPassed("context exists");
 
   debug("");
+  debug("Checking sRGB texture support with extension disabled");
+
+  runFormatTest(textureFormatFixture, false);
+  runFormatTest(renderbufferFormatFixture, false);
+
+  debug("");
   debug("Checking sRGB texture support");
 
   // Query the extension and store globally so shouldBe can access it
@@ -202,11 +221,30 @@ if (!gl) {
 
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
-    runFormatTest(textureFormatFixture);
-    runFormatTest(renderbufferFormatFixture);
+    runConstantsTest();
+    runFormatTest(textureFormatFixture, true);
+    runFormatTest(renderbufferFormatFixture, true);
     runTextureReadConversionTest();
-    runFramebufferTextureConversionTest();
+    runFramebufferTextureConversionTest(ext.SRGB_EXT);
+    runFramebufferTextureConversionTest(ext.SRGB_ALPHA_EXT);
     runFramebufferRenderbufferConversionTest();
+  }
+}
+
+function runConstantsTest() {
+  debug("");
+  debug("Checking extension constants values");
+
+  for (var constant in extConstants) {
+    if (constant in ext) {
+      if (extConstants[constant] != ext[constant]) {
+        testFailed("Value of " + constant + " should be: " + extConstants[constant] + ", was: " + ext[constant]);
+      } else {
+        testPassed("Value of " + constant + " was expected value: " + extConstants[constant]);
+      }
+    } else {
+      testFailed(constant + " not found in extension object");
+    }
   }
 }
 
@@ -226,7 +264,7 @@ function runSupportedTest(extensionEnabled) {
   }
 }
 
-function runFormatTest(fixture) {
+function runFormatTest(fixture, enabled) {
   debug("");
   debug(fixture.desc);
 
@@ -236,7 +274,7 @@ function runFormatTest(fixture) {
 
     for (var ii = 0; ii < test.formats.length; ++ii) {
       var formatName = test.formats[ii];
-      test.fn(fixture.create, ext[formatName], "ext." + formatName);
+      test.fn(fixture.create, extConstants[formatName], "ext." + formatName, enabled);
     }
 
     if (tt != fixture.tests.length - 1)
@@ -261,41 +299,62 @@ function runTextureReadConversionTest() {
   gl.uniform1i(gl.getUniformLocation(program, "tex2d"), 0);
 
   for (var ii = 0; ii < conversions.length; ii++) {
-    var tex = createGreysRGBTexture(gl, conversions[ii][0]);
+    var tex = createGreysRGBTexture(gl, conversions[ii][0], ext.SRGB_EXT);
     wtu.drawUnitQuad(gl);
     expectResult(conversions[ii][1]);
   }
 }
 
-function runFramebufferTextureConversionTest() {
+function runFramebufferTextureConversionTest(format) {
+  var formatString;
+  var validFormat;
+  switch (format) {
+    case ext.SRGB_EXT: formatString = "sRGB"; validFormat = false; break;
+    case ext.SRGB_ALPHA_EXT: formatString = "sRGB_ALPHA"; validFormat = true; break;
+    default: return null;
+  }
   debug("");
-  debug("Test the conversion of colors from linear to sRGB on framebuffer (texture) write");
+  debug("Test " + formatString + " framebuffer attachments." + (validFormat ? "" : " (Invalid)"));
 
   var program = wtu.setupProgram(gl, ['vertexShader', 'fragmentShader'], ['aPosition'], [0]);
-  var tex = createGreysRGBTexture(gl, 0);
+  var tex = createGreysRGBTexture(gl, 0, format);
   var fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
   wtu.glErrorShouldBe(gl, gl.NO_ERROR);
 
   shouldBe('gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, ext.FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT)', 'ext.SRGB_EXT');
-  shouldBe("gl.checkFramebufferStatus(gl.FRAMEBUFFER)", "gl.FRAMEBUFFER_COMPLETE");
+  
+  if (validFormat) {
+    shouldBe("gl.checkFramebufferStatus(gl.FRAMEBUFFER)", "gl.FRAMEBUFFER_COMPLETE");
 
-  // Draw
-  var conversions = [
-    [   0,   0 ],
-    [  13,  63 ],
-    [  54, 127 ],
-    [ 133, 191 ],
-    [ 255, 255 ]
-  ];
+    debug("");
+    debug("Test the conversion of colors from linear to " + formatString + " on framebuffer (texture) write");
 
-  wtu.setupUnitQuad(gl, 0);
+    // Draw
+    var conversions = [
+      [   0,   0 ],
+      [  13,  63 ],
+      [  54, 127 ],
+      [ 133, 191 ],
+      [ 255, 255 ]
+    ];
 
-  for (var ii = 0; ii < conversions.length; ii++) {
-    gl.uniform1f(gl.getUniformLocation(program, "uColor"), conversions[ii][0]/255.0);
+    wtu.setupUnitQuad(gl, 0);
+
+    for (var ii = 0; ii < conversions.length; ii++) {
+      gl.uniform1f(gl.getUniformLocation(program, "uColor"), conversions[ii][0]/255.0);
+      wtu.drawUnitQuad(gl, [0, 0, 0, 0]);
+      wtu.glErrorShouldBe(gl, gl.NO_ERROR);
+      expectResult(conversions[ii][1]);
+    }
+  } else {
+    shouldBe("gl.checkFramebufferStatus(gl.FRAMEBUFFER)", "gl.FRAMEBUFFER_INCOMPLETE_ATTACHMENT");
+
+    wtu.setupUnitQuad(gl, 0);
+    gl.uniform1f(gl.getUniformLocation(program, "uColor"), 0.5);
     wtu.drawUnitQuad(gl, [0, 0, 0, 0]);
-    expectResult(conversions[ii][1]);
+    wtu.glErrorShouldBe(gl, gl.INVALID_FRAMEBUFFER_OPERATION);
   }
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);

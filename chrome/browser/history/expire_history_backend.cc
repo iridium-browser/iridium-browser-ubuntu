@@ -14,9 +14,7 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/thumbnail_database.h"
 #include "components/history/core/browser/history_client.h"
 
@@ -44,10 +42,10 @@ const int kEarlyExpirationAdvanceDays = 3;
 // time. This is the most general reader.
 class AllVisitsReader : public ExpiringVisitsReader {
  public:
-  virtual bool Read(base::Time end_time,
-                    HistoryDatabase* db,
-                    VisitVector* visits,
-                    int max_visits) const OVERRIDE {
+  bool Read(base::Time end_time,
+            HistoryDatabase* db,
+            VisitVector* visits,
+            int max_visits) const override {
     DCHECK(db) << "must have a database to operate upon";
     DCHECK(visits) << "visit vector has to exist in order to populate it";
 
@@ -66,10 +64,10 @@ class AllVisitsReader : public ExpiringVisitsReader {
 //   but not past the current time.
 class AutoSubframeVisitsReader : public ExpiringVisitsReader {
  public:
-  virtual bool Read(base::Time end_time,
-                    HistoryDatabase* db,
-                    VisitVector* visits,
-                    int max_visits) const OVERRIDE {
+  bool Read(base::Time end_time,
+            HistoryDatabase* db,
+            VisitVector* visits,
+            int max_visits) const override {
     DCHECK(db) << "must have a database to operate upon";
     DCHECK(visits) << "visit vector has to exist in order to populate it";
 
@@ -127,7 +125,7 @@ ExpireHistoryBackend::DeleteEffects::~DeleteEffects() {
 // ExpireHistoryBackend -------------------------------------------------------
 
 ExpireHistoryBackend::ExpireHistoryBackend(
-    BroadcastNotificationDelegate* delegate,
+    ExpireHistoryBackendDelegate* delegate,
     HistoryClient* history_client)
     : delegate_(delegate),
       main_db_(NULL),
@@ -317,23 +315,13 @@ void ExpireHistoryBackend::DeleteFaviconsIfPossible(DeleteEffects* effects) {
 void ExpireHistoryBackend::BroadcastNotifications(DeleteEffects* effects,
                                                   DeletionType type) {
   if (!effects->modified_urls.empty()) {
-    scoped_ptr<URLsModifiedDetails> details(new URLsModifiedDetails);
-    details->changed_urls = effects->modified_urls;
-    delegate_->NotifySyncURLsModified(&details->changed_urls);
-    delegate_->BroadcastNotifications(
-        chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-        details.PassAs<HistoryDetails>());
+    delegate_->NotifyURLsModified(effects->modified_urls);
   }
   if (!effects->deleted_urls.empty()) {
-    scoped_ptr<URLsDeletedDetails> details(new URLsDeletedDetails);
-    details->all_history = false;
-    details->expired = (type == DELETION_EXPIRED);
-    details->rows = effects->deleted_urls;
-    details->favicon_urls = effects->deleted_favicons;
-    delegate_->NotifySyncURLsDeleted(details->all_history, details->expired,
-                                     &details->rows);
-    delegate_->BroadcastNotifications(chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-                                      details.PassAs<HistoryDetails>());
+    delegate_->NotifyURLsDeleted(false,
+                                 type == DELETION_EXPIRED,
+                                 effects->deleted_urls,
+                                 effects->deleted_favicons);
   }
 }
 

@@ -21,7 +21,7 @@ function createReceiver() {
     var dataReceiver = modules[1];
     var dataStream = modules[2];
     return new dataReceiver.DataReceiver(
-        serviceProvider.connectToService(dataStream.DataSourceProxy.NAME_),
+        serviceProvider.connectToService(dataStream.DataSource.name),
         BUFFER_SIZE,
         FATAL_ERROR);
   });
@@ -172,13 +172,6 @@ unittestBindings.exportTests([
         .then(closeReceiver)
         .then(serializeRoundTrip)
         .then(receiveAfterClose)
-        .then(test.succeed, test.fail);
-  },
-
-  function testSourceShutdown() {
-    createReceiver()
-        .then(receiveAndCheckError(FATAL_ERROR))
-        .then(closeReceiver)
         .then(test.succeed, test.fail);
   },
 

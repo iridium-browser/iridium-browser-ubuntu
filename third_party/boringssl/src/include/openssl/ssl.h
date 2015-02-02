@@ -359,42 +359,13 @@ struct ssl_method_st
 	long (*ssl_ctx_callback_ctrl)(SSL_CTX *s, int cb_id, void (*fp)(void));
 	};
 
-/* Lets make this into an ASN.1 type structure as follows
- * SSL_SESSION_ID ::= SEQUENCE {
- *	version 		INTEGER,	-- structure version number
- *	SSLversion 		INTEGER,	-- SSL version number
- *	Cipher 			OCTET STRING,	-- the 3 byte cipher ID
- *	Session_ID 		OCTET STRING,	-- the Session ID
- *	Master_key 		OCTET STRING,	-- the master key
- *	Key_Arg [ 0 ] IMPLICIT	OCTET STRING,	-- the optional Key argument
- *	Time [ 1 ] EXPLICIT	INTEGER,	-- optional Start Time
- *	Timeout [ 2 ] EXPLICIT	INTEGER,	-- optional Timeout ins seconds
- *	Peer [ 3 ] EXPLICIT	X509,		-- optional Peer Certificate
- *	Session_ID_context [ 4 ] EXPLICIT OCTET STRING,   -- the Session ID context
- *	Verify_result [ 5 ] EXPLICIT INTEGER,   -- X509_V_... code for `Peer'
- *	HostName [ 6 ] EXPLICIT OCTET STRING,   -- optional HostName from servername TLS extension 
- *	PSK_identity_hint [ 7 ] EXPLICIT OCTET STRING, -- optional PSK identity hint
- *	PSK_identity [ 8 ] EXPLICIT OCTET STRING,  -- optional PSK identity
- *	Ticket_lifetime_hint [9] EXPLICIT INTEGER, -- server's lifetime hint for session ticket
- *	Ticket [10]             EXPLICIT OCTET STRING, -- session ticket (clients only)
- *	Compression_meth [11]   EXPLICIT OCTET STRING, -- optional compression method
- *	SRP_username [ 12 ] EXPLICIT OCTET STRING -- optional SRP username
- *	Peer SHA256 [13]        EXPLICIT OCTET STRING, -- optional SHA256 hash of Peer certifiate
- *	original handshake hash [14] EXPLICIT OCTET STRING, -- optional original handshake hash
- *	tlsext_signed_cert_timestamp_list [15] EXPLICIT OCTET STRING, -- optional signed cert timestamp list extension
- *	ocsp_response [16] EXPLICIT OCTET STRING, -- optional saved OCSP response from the server
- *	}
- * Look in ssl/ssl_asn1.c for more details
- * I'm using EXPLICIT tags so I can read the damn things using asn1parse :-).
- */
+/* An SSL_SESSION represents an SSL session that may be resumed in an
+ * abbreviated handshake. */
 struct ssl_session_st
 	{
 	int ssl_version;	/* what ssl version session info is
 				 * being kept in here? */
 
-	/* only really used in SSLv2 */
-	unsigned int key_arg_length;
-	unsigned char key_arg[SSL_MAX_KEY_ARG_LENGTH];
 	int master_key_length;
 	unsigned char master_key[SSL_MAX_MASTER_KEY_LENGTH];
 	/* session_id - valid? */
@@ -434,18 +405,12 @@ struct ssl_session_st
 					 * needs to be used to load
 					 * the 'cipher' structure */
 
-	STACK_OF(SSL_CIPHER) *ciphers; /* shared ciphers? */
-
 	CRYPTO_EX_DATA ex_data; /* application specific data */
 
 	/* These are used to make removal of session-ids more
 	 * efficient and to implement a maximum cache size. */
 	struct ssl_session_st *prev,*next;
 	char *tlsext_hostname;
-	size_t tlsext_ecpointformatlist_length;
-	unsigned char *tlsext_ecpointformatlist; /* peer's list */
-	size_t tlsext_ellipticcurvelist_length;
-	uint16_t *tlsext_ellipticcurvelist; /* peer's list */
 	/* RFC4507 info */
 	uint8_t *tlsext_tick;	/* Session ticket */
 	size_t tlsext_ticklen;		/* Session ticket length */
@@ -467,6 +432,11 @@ struct ssl_session_st
 	 * resumption. */
 	unsigned char original_handshake_hash[EVP_MAX_MD_SIZE];
 	unsigned int original_handshake_hash_len;
+
+	/* extended_master_secret is true if the master secret in this session
+	 * was generated using EMS and thus isn't vulnerable to the Triple
+	 * Handshake attack. */
+	char extended_master_secret;
 	};
 
 #endif
@@ -538,18 +508,16 @@ struct ssl_session_st
  * the misconception that non-blocking SSL_write() behaves like
  * non-blocking write(): */
 #define SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER 0x00000002L
-/* Never bother the application with retries if the transport
- * is blocking: */
-#define SSL_MODE_AUTO_RETRY 0x00000004L
 /* Don't attempt to automatically build certificate chain */
 #define SSL_MODE_NO_AUTO_CHAIN 0x00000008L
 /* Save RAM by releasing read and write buffers when they're empty. (SSL3 and
  * TLS only.)  "Released" buffers are put onto a free-list in the context or
- * just freed (depending on the context's setting for freelist_max_len). Also
- * frees up RAM by releasing the list of client ciphersuites as soon as
- * possible (SSL3 and TLS only). This stops SSL_get_shared_ciphers from
- * working. */
+ * just freed (depending on the context's setting for freelist_max_len). */
 #define SSL_MODE_RELEASE_BUFFERS 0x00000010L
+
+/* The following flags do nothing and are included only to make it easier to
+ * compile code with BoringSSL. */
+#define SSL_MODE_AUTO_RETRY 0
 
 /* Send the current time in the Random fields of the ClientHello and
  * ServerHello records for compatibility with hypothetical implementations
@@ -563,9 +531,6 @@ struct ssl_session_st
  * enforcing certifcate chain algorithms. When this is set we enforce them.
  */
 #define SSL_CERT_FLAG_TLS_STRICT		0x00000001L
-
-/* Perform all sorts of protocol violations for testing purposes */
-#define SSL_CERT_FLAG_BROKEN_PROTOCOL		0x10000000
 
 /* Flags for building certificate chains */
 /* Treat any existing certificates as untrusted CAs */
@@ -1927,7 +1892,6 @@ OPENSSL_EXPORT int	SSL_get_fd(const SSL *s);
 OPENSSL_EXPORT int	SSL_get_rfd(const SSL *s);
 OPENSSL_EXPORT int	SSL_get_wfd(const SSL *s);
 OPENSSL_EXPORT const char  * SSL_get_cipher_list(const SSL *s,int n);
-OPENSSL_EXPORT char *	SSL_get_shared_ciphers(const SSL *s, char *buf, int len);
 OPENSSL_EXPORT int	SSL_get_read_ahead(const SSL * s);
 OPENSSL_EXPORT int	SSL_pending(const SSL *s);
 #ifndef OPENSSL_NO_SOCK
@@ -1994,18 +1958,52 @@ OPENSSL_EXPORT int	SSL_SESSION_print_fp(FILE *fp,const SSL_SESSION *ses);
 OPENSSL_EXPORT int	SSL_SESSION_print(BIO *fp,const SSL_SESSION *ses);
 #endif
 OPENSSL_EXPORT void	SSL_SESSION_free(SSL_SESSION *ses);
-OPENSSL_EXPORT int	i2d_SSL_SESSION(SSL_SESSION *in,unsigned char **pp);
 OPENSSL_EXPORT int	SSL_set_session(SSL *to, SSL_SESSION *session);
 OPENSSL_EXPORT int	SSL_CTX_add_session(SSL_CTX *s, SSL_SESSION *c);
 OPENSSL_EXPORT int	SSL_CTX_remove_session(SSL_CTX *,SSL_SESSION *c);
 OPENSSL_EXPORT int	SSL_CTX_set_generate_session_id(SSL_CTX *, GEN_SESSION_CB);
 OPENSSL_EXPORT int	SSL_set_generate_session_id(SSL *, GEN_SESSION_CB);
 OPENSSL_EXPORT int	SSL_has_matching_session_id(const SSL *ssl, const unsigned char *id, unsigned int id_len);
-OPENSSL_EXPORT SSL_SESSION *d2i_SSL_SESSION(SSL_SESSION **a,const unsigned char **pp, long length);
 
-#ifdef HEADER_X509_H
+/* SSL_SESSION_to_bytes serializes |in| into a newly allocated buffer
+ * and sets |*out_data| to that buffer and |*out_len| to its
+ * length. The caller takes ownership of the buffer and must call
+ * |OPENSSL_free| when done. It returns one on success and zero on
+ * error. */
+OPENSSL_EXPORT int SSL_SESSION_to_bytes(SSL_SESSION *in, uint8_t **out_data,
+                                        size_t *out_len);
+
+/* SSL_SESSION_to_bytes_for_ticket serializes |in|, but excludes the
+ * session ID which is not necessary in a session ticket. */
+OPENSSL_EXPORT int SSL_SESSION_to_bytes_for_ticket(SSL_SESSION *in,
+                                                   uint8_t **out_data,
+                                                   size_t *out_len);
+
+/* Deprecated: i2d_SSL_SESSION serializes |in| to the bytes pointed to
+ * by |*pp|. On success, it returns the number of bytes written and
+ * advances |*pp| by that many bytes. On failure, it returns -1. If
+ * |pp| is NULL, no bytes are written and only the length is
+ * returned.
+ *
+ * Use SSL_SESSION_to_bytes instead. */
+OPENSSL_EXPORT int i2d_SSL_SESSION(SSL_SESSION *in, uint8_t **pp);
+
+/* d2i_SSL_SESSION deserializes a serialized buffer contained in the
+ * |length| bytes pointed to by |*pp|. It returns the new SSL_SESSION
+ * and advances |*pp| by the number of bytes consumed on success and
+ * NULL on failure. If |a| is NULL, the caller takes ownership of the
+ * new session and must call |SSL_SESSION_free| when done.
+ *
+ * If |a| and |*a| are not NULL, the SSL_SESSION at |*a| is overridden
+ * with the deserialized session rather than allocating a new one. In
+ * addition, |a| is not NULL, but |*a| is, |*a| is set to the new
+ * SSL_SESSION.
+ *
+ * Passing a value other than NULL to |a| is deprecated. */
+OPENSSL_EXPORT SSL_SESSION *d2i_SSL_SESSION(SSL_SESSION **a, const uint8_t **pp,
+                                            long length);
+
 OPENSSL_EXPORT X509 *	SSL_get_peer_certificate(const SSL *s);
-#endif
 
 OPENSSL_EXPORT STACK_OF(X509) *SSL_get_peer_cert_chain(const SSL *s);
 
@@ -2477,6 +2475,12 @@ OPENSSL_EXPORT void ERR_load_SSL_strings(void);
 #define SSL_F_ssl3_cert_verify_hash 284
 #define SSL_F_ssl_ctx_log_rsa_client_key_exchange 285
 #define SSL_F_ssl_ctx_log_master_secret 286
+#define SSL_F_d2i_SSL_SESSION 287
+#define SSL_F_i2d_SSL_SESSION 288
+#define SSL_F_d2i_SSL_SESSION_get_octet_string 289
+#define SSL_F_d2i_SSL_SESSION_get_string 290
+#define SSL_F_ssl3_send_new_session_ticket 291
+#define SSL_F_SSL_SESSION_to_bytes_full 292
 #define SSL_R_UNABLE_TO_FIND_ECDH_PARAMETERS 100
 #define SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC 101
 #define SSL_R_INVALID_NULL_CMD_NAME 102
@@ -2790,6 +2794,7 @@ OPENSSL_EXPORT void ERR_load_SSL_strings(void);
 #define SSL_R_UNPROCESSED_HANDSHAKE_DATA 440
 #define SSL_R_HANDSHAKE_RECORD_BEFORE_CCS 441
 #define SSL_R_SESSION_MAY_NOT_BE_CREATED 442
+#define SSL_R_INVALID_SSL_SESSION 443
 #define SSL_R_SSLV3_ALERT_CLOSE_NOTIFY 1000
 #define SSL_R_SSLV3_ALERT_UNEXPECTED_MESSAGE 1010
 #define SSL_R_SSLV3_ALERT_BAD_RECORD_MAC 1020

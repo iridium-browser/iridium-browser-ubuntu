@@ -26,21 +26,15 @@
 #include "chromeos/network/network_handler.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/settings/cros_settings_provider.h"
-#include "chromeos/system/mock_statistics_provider.h"
+#include "chromeos/system/fake_statistics_provider.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/geolocation_provider.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
 #include "policy/proto/device_management_backend.pb.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
-using ::testing::DoAll;
-using ::testing::NotNull;
-using ::testing::Return;
-using ::testing::SetArgPointee;
-using ::testing::_;
 using base::Time;
 using base::TimeDelta;
 
@@ -108,14 +102,14 @@ class TestingDeviceStatusCollector : public policy::DeviceStatusCollector {
   }
 
  protected:
-  virtual void CheckIdleState() OVERRIDE {
+  virtual void CheckIdleState() override {
     // This should never be called in testing, as it results in a dbus call.
     ADD_FAILURE();
   }
 
   // Each time this is called, returns a time that is a fixed increment
   // later than the previous time.
-  virtual Time GetCurrentTime() OVERRIDE {
+  virtual Time GetCurrentTime() override {
     int poll_interval = policy::DeviceStatusCollector::kIdlePollIntervalSeconds;
     return baseline_time_ +
         TimeDelta::FromSeconds(poll_interval * baseline_offset_periods_++);
@@ -165,9 +159,6 @@ class DeviceStatusCollectorTest : public testing::Test {
 
     TestingDeviceStatusCollector::RegisterPrefs(prefs_.registry());
 
-    EXPECT_CALL(statistics_provider_, GetMachineStatistic(_, NotNull()))
-        .WillRepeatedly(Return(false));
-
     // Remove the real DeviceSettingsProvider and replace it with a stub.
     cros_settings_ = chromeos::CrosSettings::Get();
     device_settings_provider_ =
@@ -191,7 +182,7 @@ class DeviceStatusCollectorTest : public testing::Test {
     cros_settings_->AddSettingsProvider(device_settings_provider_);
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     // Disable network interface reporting since it requires additional setup.
     cros_settings_->SetBoolean(chromeos::kReportDeviceNetworkInterfaces, false);
   }
@@ -201,7 +192,7 @@ class DeviceStatusCollectorTest : public testing::Test {
         base::Bind(&MockPositionUpdateRequester);
     status_collector_.reset(
         new TestingDeviceStatusCollector(&prefs_,
-                                         &statistics_provider_,
+                                         &fake_statistics_provider_,
                                          &callback));
   }
 
@@ -265,7 +256,7 @@ class DeviceStatusCollectorTest : public testing::Test {
 
   ScopedStubEnterpriseInstallAttributes install_attributes_;
   TestingPrefServiceSimple prefs_;
-  chromeos::system::MockStatisticsProvider statistics_provider_;
+  chromeos::system::ScopedFakeStatisticsProvider fake_statistics_provider_;
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
   chromeos::ScopedTestCrosSettings test_cros_settings_;
   chromeos::CrosSettings* cros_settings_;
@@ -517,18 +508,13 @@ TEST_F(DeviceStatusCollectorTest, ActivityTimesKeptUntilSubmittedSuccessfully) {
 
 TEST_F(DeviceStatusCollectorTest, DevSwitchBootMode) {
   // Test that boot mode data is reported by default.
-  EXPECT_CALL(statistics_provider_,
-              GetMachineStatistic("devsw_boot", NotNull()))
-      .WillOnce(DoAll(SetArgPointee<1>("0"), Return(true)));
+  fake_statistics_provider_.SetMachineStatistic("devsw_boot", "0");
   GetStatus();
   EXPECT_EQ("Verified", status_.boot_mode());
 
   // Test that boot mode data is not reported if the pref turned off.
   cros_settings_->SetBoolean(chromeos::kReportDeviceBootMode, false);
 
-  EXPECT_CALL(statistics_provider_,
-              GetMachineStatistic("devsw_boot", NotNull()))
-      .WillRepeatedly(DoAll(SetArgPointee<1>("0"), Return(true)));
   GetStatus();
   EXPECT_FALSE(status_.has_boot_mode());
 
@@ -536,27 +522,19 @@ TEST_F(DeviceStatusCollectorTest, DevSwitchBootMode) {
   // statistics provider returns valid data.
   cros_settings_->SetBoolean(chromeos::kReportDeviceBootMode, true);
 
-  EXPECT_CALL(statistics_provider_,
-              GetMachineStatistic("devsw_boot", NotNull()))
-      .WillOnce(DoAll(SetArgPointee<1>("(error)"), Return(true)));
+  fake_statistics_provider_.SetMachineStatistic("devsw_boot", "(error)");
   GetStatus();
   EXPECT_FALSE(status_.has_boot_mode());
 
-  EXPECT_CALL(statistics_provider_,
-              GetMachineStatistic("devsw_boot", NotNull()))
-      .WillOnce(DoAll(SetArgPointee<1>(" "), Return(true)));
+  fake_statistics_provider_.SetMachineStatistic("devsw_boot", " ");
   GetStatus();
   EXPECT_FALSE(status_.has_boot_mode());
 
-  EXPECT_CALL(statistics_provider_,
-              GetMachineStatistic("devsw_boot", NotNull()))
-      .WillOnce(DoAll(SetArgPointee<1>("0"), Return(true)));
+  fake_statistics_provider_.SetMachineStatistic("devsw_boot", "0");
   GetStatus();
   EXPECT_EQ("Verified", status_.boot_mode());
 
-  EXPECT_CALL(statistics_provider_,
-              GetMachineStatistic("devsw_boot", NotNull()))
-      .WillOnce(DoAll(SetArgPointee<1>("1"), Return(true)));
+  fake_statistics_provider_.SetMachineStatistic("devsw_boot", "1");
   GetStatus();
   EXPECT_EQ("Dev", status_.boot_mode());
 }
@@ -708,7 +686,7 @@ static const FakeDeviceData kFakeDevices[] = {
 class DeviceStatusCollectorNetworkInterfacesTest
     : public DeviceStatusCollectorTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     chromeos::DBusThreadManager::Initialize();
     chromeos::NetworkHandler::Initialize();
     chromeos::ShillDeviceClient::TestInterface* test_device_client =
@@ -740,7 +718,7 @@ class DeviceStatusCollectorNetworkInterfacesTest
     base::RunLoop().RunUntilIdle();
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     chromeos::NetworkHandler::Shutdown();
     chromeos::DBusThreadManager::Shutdown();
   }

@@ -27,11 +27,12 @@ group("all_components") {
     "//components/component_updater",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
+    "//components/copresence_sockets",
     "//components/crash/app",
     "//components/crash/browser",
     "//components/crx_file",
-    "//components/data_reduction_proxy/browser",
-    "//components/data_reduction_proxy/common",
+    "//components/data_reduction_proxy/core/browser",
+    "//components/data_reduction_proxy/core/common",
     "//components/dom_distiller/core",
     "//components/domain_reliability",
     "//components/enhanced_bookmarks",
@@ -50,8 +51,8 @@ group("all_components") {
     "//components/keyed_service/content",
     "//components/language_usage_metrics",
     "//components/leveldb_proto",
+    "//components/login",
     "//components/metrics",
-    "//components/native_app_window",
     "//components/navigation_interception",
     "//components/navigation_metrics",
     "//components/network_time",
@@ -73,6 +74,7 @@ group("all_components") {
     "//components/precache/content",
     "//components/pref_registry",
     "//components/proximity_auth",
+    "//components/proximity_auth/cryptauth",
     "//components/query_parser",
     "//components/rappor",
     "//components/renderer_context_menu",
@@ -80,7 +82,7 @@ group("all_components") {
     "//components/search",
     "//components/search_engines",
     "//components/search_provider_logos",
-    "//components/sessions",
+    "//components/sessions:sessions_content",
     "//components/signin/core/browser",
     "//components/startup_metric_utils",
     "//components/strings",
@@ -113,12 +115,11 @@ group("all_components") {
   if (!is_chromeos) {
     deps -= [ "//components/pairing" ]
   }
-  if (!toolkit_views) {
-    deps -= [ "//components/native_app_window" ]
-  }
-
   if (is_ios) {
-    deps -= [ "//components/keyed_service/content" ]
+    deps -= [
+      "//components/keyed_service/content",
+      "//components/copresence_sockets",
+    ]
   }
 
   if (!enable_plugins) {
@@ -141,8 +142,8 @@ group("all_components") {
       "//components/cdm/browser",  # Blocked on content.
       "//components/cdm/common",  # Blocked on content.
       "//components/cdm/renderer",  # Blocked on content.
-      "//components/data_reduction_proxy/browser",  # Should work, needs checking.
-      "//components/data_reduction_proxy/common",  # Should work, needs checking.
+      "//components/data_reduction_proxy/core/browser",  # Should work, needs checking.
+      "//components/data_reduction_proxy/core/common",  # Should work, needs checking.
       "//components/dom_distiller/core",  # Blocked on content.
       "//components/domain_reliability",  # Blocked on content.
       "//components/favicon_base",  # Should work, needs checking.
@@ -172,7 +173,7 @@ group("all_components") {
       "//components/renderer_context_menu",  # Blocked on content.
       "//components/search_engines",  # Should work, needs checking.
       "//components/search_provider_logos",  # Should work, needs checking.
-      "//components/sessions",  # Blocked on content.
+      "//components/sessions:sessions_content",  # Blocked on content.
       "//components/signin/core/browser",  # Should work, needs checking.
       "//components/translate/content/browser",  # Blocked on content.
       "//components/translate/content/common",  # Blocked on content.
@@ -192,6 +193,14 @@ group("all_components") {
       "//components/copresence",
       "//components/storage_monitor",
     ]
+  }
+
+  if (!is_ios) {
+    deps += [ "//components/app_modal_dialogs" ]
+  }
+
+  if (toolkit_views) {
+    deps += [ "//components/constrained_window" ]
   }
 }
 
@@ -222,13 +231,16 @@ test("components_unittests") {
     "//components/content_settings/core/browser:unit_tests",
     "//components/content_settings/core/common:unit_tests",
     "//components/crx_file:unit_tests",
-    "//components/data_reduction_proxy/browser:unit_tests",
-    "//components/data_reduction_proxy/common:unit_tests",
+    "//components/data_reduction_proxy/core/browser:unit_tests",
+    "//components/data_reduction_proxy/core/common:unit_tests",
     "//components/dom_distiller/core:unit_tests",
     "//components/domain_reliability:unit_tests",
+    "//components/login:unit_tests",
+    "//components/metrics:unit_tests",
     "//components/omnibox:unit_tests",
     "//components/ownership:unit_tests",
     "//components/proximity_auth:unit_tests",
+    "//components/variations:unit_tests",
   ]
 
   # TODO(GYP) need this target.
@@ -236,6 +248,10 @@ test("components_unittests") {
 
   # Precache tests need these defines.
   #configs += [ "//components/precache/core:precache_config" ]
+
+  if (toolkit_views) {
+    deps += [ "//components/constrained_window:unit_tests" ]
+  }
 }
 
 }

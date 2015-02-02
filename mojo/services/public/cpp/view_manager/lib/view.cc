@@ -4,16 +4,10 @@
 
 #include "mojo/services/public/cpp/view_manager/view.h"
 
-#include "mojo/public/cpp/application/connect.h"
 #include "mojo/public/cpp/application/service_provider_impl.h"
-#include "mojo/public/interfaces/application/shell.mojom.h"
-#include "mojo/services/public/cpp/view_manager/lib/bitmap_uploader.h"
 #include "mojo/services/public/cpp/view_manager/lib/view_manager_client_impl.h"
 #include "mojo/services/public/cpp/view_manager/lib/view_private.h"
 #include "mojo/services/public/cpp/view_manager/view_observer.h"
-#include "mojo/services/public/interfaces/gpu/gpu.mojom.h"
-#include "mojo/services/public/interfaces/surfaces/surfaces_service.mojom.h"
-#include "ui/gfx/canvas.h"
 
 namespace mojo {
 
@@ -150,8 +144,8 @@ bool ReorderImpl(View::Children* children,
 class ScopedSetBoundsNotifier {
  public:
   ScopedSetBoundsNotifier(View* view,
-                          const gfx::Rect& old_bounds,
-                          const gfx::Rect& new_bounds)
+                          const Rect& old_bounds,
+                          const Rect& new_bounds)
       : view_(view),
         old_bounds_(old_bounds),
         new_bounds_(new_bounds) {
@@ -167,8 +161,8 @@ class ScopedSetBoundsNotifier {
 
  private:
   View* view_;
-  const gfx::Rect old_bounds_;
-  const gfx::Rect new_bounds_;
+  const Rect old_bounds_;
+  const Rect new_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(ScopedSetBoundsNotifier);
 };
@@ -211,7 +205,7 @@ void View::Destroy() {
   LocalDestroy();
 }
 
-void View::SetBounds(const gfx::Rect& bounds) {
+void View::SetBounds(const Rect& bounds) {
   if (!OwnsView(manager_, this))
     return;
 
@@ -221,8 +215,47 @@ void View::SetBounds(const gfx::Rect& bounds) {
 }
 
 void View::SetVisible(bool value) {
+  if (visible_ == value)
+    return;
+
   if (manager_)
     static_cast<ViewManagerClientImpl*>(manager_)->SetVisible(id_, value);
+  FOR_EACH_OBSERVER(ViewObserver, observers_, OnViewVisibilityChanging(this));
+  visible_ = value;
+  FOR_EACH_OBSERVER(ViewObserver, observers_, OnViewVisibilityChanged(this));
+}
+
+void View::SetProperty(const std::string& name,
+                       const std::vector<uint8_t>* value) {
+  std::vector<uint8_t> old_value;
+  std::vector<uint8_t>* old_value_ptr = nullptr;
+  auto it = properties_.find(name);
+  if (it != properties_.end()) {
+    old_value = it->second;
+    old_value_ptr = &old_value;
+
+    if (value && old_value == *value)
+      return;
+  } else if (!value) {
+    // This property isn't set in |properties_| and |value| is NULL, so there's
+    // no change.
+    return;
+  }
+
+  if (value) {
+    properties_[name] = *value;
+  } else if (it != properties_.end()) {
+    properties_.erase(it);
+  }
+
+  FOR_EACH_OBSERVER(ViewObserver, observers_,
+                    OnViewPropertyChanged(this, name, old_value_ptr, value));
+}
+
+bool View::IsDrawn() const {
+  if (!visible_)
+    return false;
+  return parent_ ? parent_->IsDrawn() : drawn_;
 }
 
 void View::AddObserver(ViewObserver* observer) {
@@ -256,10 +289,14 @@ void View::RemoveChild(View* child) {
 }
 
 void View::MoveToFront() {
+  if (!parent_ || parent_->children_.back() == this)
+    return;
   Reorder(parent_->children_.back(), ORDER_DIRECTION_ABOVE);
 }
 
 void View::MoveToBack() {
+  if (!parent_ || parent_->children_.front() == this)
+    return;
   Reorder(parent_->children_.front(), ORDER_DIRECTION_BELOW);
 }
 
@@ -302,24 +339,6 @@ void View::SetSurfaceId(SurfaceIdPtr id) {
   }
 }
 
-void View::SetContents(const SkBitmap& contents) {
-  if (manager_) {
-    if (!bitmap_uploader_)
-      CreateBitmapUploader();
-    bitmap_uploader_->SetSize(bounds_.size());
-    bitmap_uploader_->SetBitmap(contents);
-  }
-}
-
-void View::SetColor(SkColor color) {
-  if (manager_) {
-    if (!bitmap_uploader_)
-      CreateBitmapUploader();
-    bitmap_uploader_->SetSize(bounds_.size());
-    bitmap_uploader_->SetColor(color);
-  }
-}
-
 void View::SetFocus() {
   if (manager_)
     static_cast<ViewManagerClientImpl*>(manager_)->SetFocus(id_);
@@ -350,7 +369,10 @@ scoped_ptr<ServiceProvider>
 View::View()
     : manager_(NULL),
       id_(static_cast<Id>(-1)),
-      parent_(NULL) {}
+      parent_(NULL),
+      visible_(true),
+      drawn_(false) {
+}
 
 View::~View() {
   FOR_EACH_OBSERVER(ViewObserver, observers_, OnViewDestroying(this));
@@ -369,7 +391,10 @@ View::~View() {
 View::View(ViewManager* manager)
     : manager_(manager),
       id_(static_cast<ViewManagerClientImpl*>(manager_)->CreateView()),
-      parent_(NULL) {}
+      parent_(NULL),
+      visible_(true),
+      drawn_(false) {
+}
 
 void View::LocalDestroy() {
   delete this;
@@ -393,27 +418,29 @@ bool View::LocalReorder(View* relative, OrderDirection direction) {
   return ReorderImpl(&parent_->children_, this, relative, direction);
 }
 
-void View::LocalSetBounds(const gfx::Rect& old_bounds,
-                          const gfx::Rect& new_bounds) {
-  DCHECK(old_bounds == bounds_);
+void View::LocalSetBounds(const Rect& old_bounds,
+                          const Rect& new_bounds) {
+  DCHECK(old_bounds.x == bounds_.x);
+  DCHECK(old_bounds.y == bounds_.y);
+  DCHECK(old_bounds.width == bounds_.width);
+  DCHECK(old_bounds.height == bounds_.height);
   ScopedSetBoundsNotifier notifier(this, old_bounds, new_bounds);
   bounds_ = new_bounds;
 }
 
-void View::CreateBitmapUploader() {
-  ViewManagerClientImpl* vmci = static_cast<ViewManagerClientImpl*>(manager_);
-  SurfacesServicePtr surfaces_service;
-  InterfacePtr<ServiceProvider> surfaces_service_provider;
-  vmci->shell()->ConnectToApplication("mojo:mojo_surfaces_service",
-                                      Get(&surfaces_service_provider));
-  ConnectToService(surfaces_service_provider.get(), &surfaces_service);
-  GpuPtr gpu_service;
-  InterfacePtr<ServiceProvider> gpu_service_provider;
-  vmci->shell()->ConnectToApplication("mojo:mojo_native_viewport_service",
-                                      Get(&gpu_service_provider));
-  ConnectToService(gpu_service_provider.get(), &gpu_service);
-  bitmap_uploader_.reset(new BitmapUploader(
-      vmci, id_, surfaces_service.Pass(), gpu_service.Pass()));
+void View::LocalSetDrawn(bool value) {
+  if (drawn_ == value)
+    return;
+
+  // As IsDrawn() is derived from |visible_| and |drawn_|, only send drawn
+  // notification is the value of IsDrawn() is really changing.
+  if (IsDrawn() == value) {
+    drawn_ = value;
+    return;
+  }
+  FOR_EACH_OBSERVER(ViewObserver, observers_, OnViewDrawnChanging(this));
+  drawn_ = value;
+  FOR_EACH_OBSERVER(ViewObserver, observers_, OnViewDrawnChanged(this));
 }
 
 }  // namespace mojo

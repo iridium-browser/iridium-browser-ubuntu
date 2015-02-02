@@ -68,19 +68,18 @@ class DefaultBrowserInfoBarDelegate : public ConfirmInfoBarDelegate {
  private:
   DefaultBrowserInfoBarDelegate(PrefService* prefs,
                                 bool interactive_flow_required);
-  virtual ~DefaultBrowserInfoBarDelegate();
+  ~DefaultBrowserInfoBarDelegate() override;
 
   void AllowExpiry() { should_expire_ = true; }
 
   // ConfirmInfoBarDelegate:
-  virtual int GetIconID() const OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
-  virtual bool OKButtonTriggersUACPrompt() const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool ShouldExpireInternal(
-      const NavigationDetails& details) const OVERRIDE;
+  int GetIconID() const override;
+  base::string16 GetMessageText() const override;
+  base::string16 GetButtonLabel(InfoBarButton button) const override;
+  bool OKButtonTriggersUACPrompt() const override;
+  bool Accept() override;
+  bool Cancel() override;
+  bool ShouldExpireInternal(const NavigationDetails& details) const override;
 
   // The prefs to use.
   PrefService* prefs_;

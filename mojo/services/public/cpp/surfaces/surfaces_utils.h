@@ -5,22 +5,18 @@
 #ifndef MOJO_SERVICES_PUBLIC_CPP_SURFACES_SURFACES_UTILS_H_
 #define MOJO_SERVICES_PUBLIC_CPP_SURFACES_SURFACES_UTILS_H_
 
-#include "mojo/services/public/cpp/surfaces/mojo_surfaces_export.h"
 #include "mojo/services/public/interfaces/surfaces/quads.mojom.h"
 
-namespace gfx {
+namespace mojo {
 class Rect;
 class Size;
-}
 
-namespace mojo {
-
-MOJO_SURFACES_EXPORT SharedQuadStatePtr CreateDefaultSQS(const gfx::Size& size);
+SharedQuadStatePtr CreateDefaultSQS(const Size& size);
 
 // Constructs a pass with the given id, output_rect and damage_rect set to rect,
 // transform_to_root_target set to identity and has_transparent_background set
 // to false.
-MOJO_SURFACES_EXPORT PassPtr CreateDefaultPass(int id, const gfx::Rect& rect);
+PassPtr CreateDefaultPass(int id, const Rect& rect);
 
 }  // namespace mojo
 

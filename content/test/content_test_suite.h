@@ -17,10 +17,10 @@ namespace content {
 class ContentTestSuite : public ContentTestSuiteBase {
  public:
   ContentTestSuite(int argc, char** argv);
-  virtual ~ContentTestSuite();
+  ~ContentTestSuite() override;
 
  protected:
-  virtual void Initialize() OVERRIDE;
+  void Initialize() override;
 
  private:
 #if defined(OS_WIN)

@@ -9,19 +9,18 @@
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
 
 namespace athena {
@@ -37,12 +36,12 @@ void AthenaChromeAppDelegate::InitWebContents(
   FaviconTabHelper::CreateForWebContents(web_contents);
 
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   printing::PrintViewManager::CreateForWebContents(web_contents);
   printing::PrintPreviewMessageHandler::CreateForWebContents(web_contents);
 #else
   printing::PrintViewManagerBasic::CreateForWebContents(web_contents);
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
@@ -82,7 +81,7 @@ bool AthenaChromeAppDelegate::CheckMediaAccessPermission(
 void AthenaChromeAppDelegate::SetWebContentsBlocked(
     content::WebContents* web_contents,
     bool blocked) {
-  // RenderViewHost may be NULL during shutdown.
+  // RenderViewHost may be nullptr during shutdown.
   content::RenderViewHost* host = web_contents->GetRenderViewHost();
   if (host) {
     host->Send(new ChromeViewMsg_SetVisuallyDeemphasized(host->GetRoutingID(),

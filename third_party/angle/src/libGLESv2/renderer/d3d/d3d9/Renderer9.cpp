@@ -33,10 +33,12 @@
 #include "libGLESv2/FramebufferAttachment.h"
 #include "libGLESv2/Renderbuffer.h"
 #include "libGLESv2/ProgramBinary.h"
+#include "libGLESv2/State.h"
 #include "libGLESv2/angletypes.h"
 
 #include "libEGL/Display.h"
 
+#include "common/features.h"
 #include "common/utilities.h"
 
 #include "third_party/trace_event/trace_event.h"
@@ -45,14 +47,6 @@
 
 // Can also be enabled by defining FORCE_REF_RAST in the project's predefined macros
 #define REF_RAST 0
-
-// The "Debug This Pixel..." feature in PIX often fails when using the
-// D3D9Ex interfaces.  In order to get debug pixel to work on a Vista/Win 7
-// machine, define "ANGLE_ENABLE_D3D9EX=0" in your project file.
-#if !defined(ANGLE_ENABLE_D3D9EX)
-// Enables use of the IDirect3D9Ex interface, when available
-#define ANGLE_ENABLE_D3D9EX 1
-#endif // !defined(ANGLE_ENABLE_D3D9EX)
 
 #if !defined(ANGLE_COMPILE_OPTIMIZATION_LEVEL)
 #define ANGLE_COMPILE_OPTIMIZATION_LEVEL D3DCOMPILE_OPTIMIZATION_LEVEL3
@@ -205,7 +199,7 @@ EGLint Renderer9::initialize()
     // Use Direct3D9Ex if available. Among other things, this version is less
     // inclined to report a lost context, for example when the user switches
     // desktop. Direct3D9Ex is available in Windows Vista and later if suitable drivers are available.
-    if (ANGLE_ENABLE_D3D9EX && Direct3DCreate9ExPtr && SUCCEEDED(Direct3DCreate9ExPtr(D3D_SDK_VERSION, &mD3d9Ex)))
+    if (ANGLE_D3D9EX == ANGLE_ENABLED && Direct3DCreate9ExPtr && SUCCEEDED(Direct3DCreate9ExPtr(D3D_SDK_VERSION, &mD3d9Ex)))
     {
         TRACE_EVENT0("gpu", "D3d9Ex_QueryInterface");
         ASSERT(mD3d9Ex);
@@ -394,8 +388,11 @@ void Renderer9::initializeDevice()
 
     mSceneStarted = false;
 
-    ASSERT(!mBlit && !mVertexDataManager && !mIndexDataManager);
+    ASSERT(!mBlit);
     mBlit = new Blit9(this);
+    mBlit->initialize();
+
+    ASSERT(!mVertexDataManager && !mIndexDataManager);
     mVertexDataManager = new rx::VertexDataManager(this);
     mIndexDataManager = new rx::IndexDataManager(this);
 }
@@ -489,68 +486,92 @@ void Renderer9::endScene()
     }
 }
 
-void Renderer9::sync(bool block)
+gl::Error Renderer9::sync(bool block)
 {
-    HRESULT result;
-
-    IDirect3DQuery9* query = allocateEventQuery();
-    if (!query)
+    IDirect3DQuery9* query = NULL;
+    gl::Error error = allocateEventQuery(&query);
+    if (error.isError())
     {
-        return;
+        return error;
     }
 
-    result = query->Issue(D3DISSUE_END);
-    ASSERT(SUCCEEDED(result));
-
-    do
+    HRESULT result = query->Issue(D3DISSUE_END);
+    if (FAILED(result))
     {
+        ASSERT(result == D3DERR_OUTOFVIDEOMEMORY || result == E_OUTOFMEMORY);
+        return gl::Error(GL_OUT_OF_MEMORY, "Failed to issue event query, result: 0x%X.", result);
+    }
+
+    // Grab the query data once in blocking and non-blocking case
+    result = query->GetData(NULL, 0, D3DGETDATA_FLUSH);
+    if (FAILED(result))
+    {
+        if (d3d9::isDeviceLostError(result))
+        {
+            notifyDeviceLost();
+        }
+
+        freeEventQuery(query);
+        return gl::Error(GL_OUT_OF_MEMORY, "Failed to get event query data, result: 0x%X.", result);
+    }
+
+    // If blocking, loop until the query completes
+    while (block && result == S_FALSE)
+    {
+        // Keep polling, but allow other threads to do something useful first
+        Sleep(0);
+
         result = query->GetData(NULL, 0, D3DGETDATA_FLUSH);
 
-        if(block && result == S_FALSE)
+        // explicitly check for device loss
+        // some drivers seem to return S_FALSE even if the device is lost
+        // instead of D3DERR_DEVICELOST like they should
+        if (result == S_FALSE && testDeviceLost(false))
         {
-            // Keep polling, but allow other threads to do something useful first
-            Sleep(0);
-            // explicitly check for device loss
-            // some drivers seem to return S_FALSE even if the device is lost
-            // instead of D3DERR_DEVICELOST like they should
-            if (testDeviceLost(false))
-            {
-                result = D3DERR_DEVICELOST;
-            }
+            result = D3DERR_DEVICELOST;
         }
+
+        if (FAILED(result))
+        {
+            if (d3d9::isDeviceLostError(result))
+            {
+                notifyDeviceLost();
+            }
+
+            freeEventQuery(query);
+            return gl::Error(GL_OUT_OF_MEMORY, "Failed to get event query data, result: 0x%X.", result);
+        }
+
     }
-    while(block && result == S_FALSE);
 
     freeEventQuery(query);
 
-    if (d3d9::isDeviceLostError(result))
-    {
-        notifyDeviceLost();
-    }
+    return gl::Error(GL_NO_ERROR);
 }
 
-SwapChain *Renderer9::createSwapChain(HWND window, HANDLE shareHandle, GLenum backBufferFormat, GLenum depthBufferFormat)
+SwapChain *Renderer9::createSwapChain(rx::NativeWindow nativeWindow, HANDLE shareHandle, GLenum backBufferFormat, GLenum depthBufferFormat)
 {
-    return new rx::SwapChain9(this, window, shareHandle, backBufferFormat, depthBufferFormat);
+    return new rx::SwapChain9(this, nativeWindow, shareHandle, backBufferFormat, depthBufferFormat);
 }
 
-IDirect3DQuery9* Renderer9::allocateEventQuery()
+gl::Error Renderer9::allocateEventQuery(IDirect3DQuery9 **outQuery)
 {
-    IDirect3DQuery9 *query = NULL;
-
     if (mEventQueryPool.empty())
     {
-        HRESULT result = mDevice->CreateQuery(D3DQUERYTYPE_EVENT, &query);
-        UNUSED_ASSERTION_VARIABLE(result);
-        ASSERT(SUCCEEDED(result));
+        HRESULT result = mDevice->CreateQuery(D3DQUERYTYPE_EVENT, outQuery);
+        if (FAILED(result))
+        {
+            ASSERT(result == D3DERR_OUTOFVIDEOMEMORY || result == E_OUTOFMEMORY);
+            return gl::Error(GL_OUT_OF_MEMORY, "Failed to allocate event query, result: 0x%X.", result);
+        }
     }
     else
     {
-        query = mEventQueryPool.back();
+        *outQuery = mEventQueryPool.back();
         mEventQueryPool.pop_back();
     }
 
-    return query;
+    return gl::Error(GL_NO_ERROR);
 }
 
 void Renderer9::freeEventQuery(IDirect3DQuery9* query)
@@ -565,14 +586,14 @@ void Renderer9::freeEventQuery(IDirect3DQuery9* query)
     }
 }
 
-IDirect3DVertexShader9 *Renderer9::createVertexShader(const DWORD *function, size_t length)
+gl::Error Renderer9::createVertexShader(const DWORD *function, size_t length, IDirect3DVertexShader9 **outShader)
 {
-    return mVertexShaderCache.create(function, length);
+    return mVertexShaderCache.create(function, length, outShader);
 }
 
-IDirect3DPixelShader9 *Renderer9::createPixelShader(const DWORD *function, size_t length)
+gl::Error Renderer9::createPixelShader(const DWORD *function, size_t length, IDirect3DPixelShader9 **outShader)
 {
-    return mPixelShaderCache.create(function, length);
+    return mPixelShaderCache.create(function, length, outShader);
 }
 
 HRESULT Renderer9::createVertexBuffer(UINT Length, DWORD Usage, IDirect3DVertexBuffer9 **ppVertexBuffer)
@@ -612,9 +633,16 @@ QueryImpl *Renderer9::createQuery(GLenum type)
     return new Query9(this, type);
 }
 
-FenceImpl *Renderer9::createFence()
+FenceNVImpl *Renderer9::createFenceNV()
 {
-    return new Fence9(this);
+    return new FenceNV9(this);
+}
+
+FenceSyncImpl *Renderer9::createFenceSync()
+{
+    // Renderer9 doesn't support ES 3.0 and its sync objects.
+    UNREACHABLE();
+    return NULL;
 }
 
 TransformFeedbackImpl* Renderer9::createTransformFeedback()
@@ -628,21 +656,22 @@ bool Renderer9::supportsFastCopyBufferToTexture(GLenum internalFormat) const
     return false;
 }
 
-bool Renderer9::fastCopyBufferToTexture(const gl::PixelUnpackState &unpack, unsigned int offset, RenderTarget *destRenderTarget,
-                                        GLenum destinationFormat, GLenum sourcePixelsType, const gl::Box &destArea)
+gl::Error Renderer9::fastCopyBufferToTexture(const gl::PixelUnpackState &unpack, unsigned int offset, RenderTarget *destRenderTarget,
+                                             GLenum destinationFormat, GLenum sourcePixelsType, const gl::Box &destArea)
 {
     // Pixel buffer objects are not supported in D3D9, since D3D9 is ES2-only and PBOs are ES3.
     UNREACHABLE();
-    return false;
+    return gl::Error(GL_INVALID_OPERATION);
 }
 
-void Renderer9::generateSwizzle(gl::Texture *texture)
+gl::Error Renderer9::generateSwizzle(gl::Texture *texture)
 {
     // Swizzled textures are not available in ES2 or D3D9
     UNREACHABLE();
+    return gl::Error(GL_INVALID_OPERATION);
 }
 
-void Renderer9::setSamplerState(gl::SamplerType type, int index, const gl::SamplerState &samplerState)
+gl::Error Renderer9::setSamplerState(gl::SamplerType type, int index, gl::Texture *texture, const gl::SamplerState &samplerState)
 {
     std::vector<bool> &forceSetSamplers = (type == gl::SAMPLER_PIXEL) ? mForceSetPixelSamplerStates : mForceSetVertexSamplerStates;
     std::vector<gl::SamplerState> &appliedSamplers = (type == gl::SAMPLER_PIXEL) ? mCurPixelSamplerStates: mCurVertexSamplerStates;
@@ -652,6 +681,10 @@ void Renderer9::setSamplerState(gl::SamplerType type, int index, const gl::Sampl
         int d3dSamplerOffset = (type == gl::SAMPLER_PIXEL) ? 0 : D3DVERTEXTEXTURESAMPLER0;
         int d3dSampler = index + d3dSamplerOffset;
 
+        // Make sure to add the level offset for our tiny compressed texture workaround
+        TextureD3D *textureD3D = TextureD3D::makeTextureD3D(texture->getImplementation());
+        DWORD baseLevel = samplerState.baseLevel + textureD3D->getNativeTexture()->getTopLevel();
+
         mDevice->SetSamplerState(d3dSampler, D3DSAMP_ADDRESSU, gl_d3d9::ConvertTextureWrap(samplerState.wrapS));
         mDevice->SetSamplerState(d3dSampler, D3DSAMP_ADDRESSV, gl_d3d9::ConvertTextureWrap(samplerState.wrapT));
 
@@ -660,7 +693,7 @@ void Renderer9::setSamplerState(gl::SamplerType type, int index, const gl::Sampl
         gl_d3d9::ConvertMinFilter(samplerState.minFilter, &d3dMinFilter, &d3dMipFilter, samplerState.maxAnisotropy);
         mDevice->SetSamplerState(d3dSampler, D3DSAMP_MINFILTER, d3dMinFilter);
         mDevice->SetSamplerState(d3dSampler, D3DSAMP_MIPFILTER, d3dMipFilter);
-        mDevice->SetSamplerState(d3dSampler, D3DSAMP_MAXMIPLEVEL, samplerState.baseLevel);
+        mDevice->SetSamplerState(d3dSampler, D3DSAMP_MAXMIPLEVEL, baseLevel);
         if (getRendererExtensions().textureFilterAnisotropic)
         {
             mDevice->SetSamplerState(d3dSampler, D3DSAMP_MAXANISOTROPY, (DWORD)samplerState.maxAnisotropy);
@@ -669,9 +702,11 @@ void Renderer9::setSamplerState(gl::SamplerType type, int index, const gl::Sampl
 
     forceSetSamplers[index] = false;
     appliedSamplers[index] = samplerState;
+
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::setTexture(gl::SamplerType type, int index, gl::Texture *texture)
+gl::Error Renderer9::setTexture(gl::SamplerType type, int index, gl::Texture *texture)
 {
     int d3dSamplerOffset = (type == gl::SAMPLER_PIXEL) ? 0 : D3DVERTEXTEXTURESAMPLER0;
     int d3dSampler = index + d3dSamplerOffset;
@@ -689,7 +724,12 @@ void Renderer9::setTexture(gl::SamplerType type, int index, gl::Texture *texture
         if (texStorage)
         {
             TextureStorage9 *storage9 = TextureStorage9::makeTextureStorage9(texStorage);
-            d3dTexture = storage9->getBaseTexture();
+
+            gl::Error error = storage9->getBaseTexture(&d3dTexture);
+            if (error.isError())
+            {
+                return error;
+            }
         }
         // If we get NULL back from getBaseTexture here, something went wrong
         // in the texture class and we're unexpectedly missing the d3d texture
@@ -706,15 +746,17 @@ void Renderer9::setTexture(gl::SamplerType type, int index, gl::Texture *texture
     }
 
     appliedSerials[index] = serial;
+
+    return gl::Error(GL_NO_ERROR);
 }
 
-bool Renderer9::setUniformBuffers(const gl::Buffer* /*vertexUniformBuffers*/[], const gl::Buffer* /*fragmentUniformBuffers*/[])
+gl::Error Renderer9::setUniformBuffers(const gl::Buffer* /*vertexUniformBuffers*/[], const gl::Buffer* /*fragmentUniformBuffers*/[])
 {
     // No effect in ES2/D3D9
-    return true;
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::setRasterizerState(const gl::RasterizerState &rasterState)
+gl::Error Renderer9::setRasterizerState(const gl::RasterizerState &rasterState)
 {
     bool rasterStateChanged = mForceSetRasterState || memcmp(&rasterState, &mCurRasterState, sizeof(gl::RasterizerState)) != 0;
 
@@ -750,10 +792,12 @@ void Renderer9::setRasterizerState(const gl::RasterizerState &rasterState)
     }
 
     mForceSetRasterState = false;
+
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::setBlendState(gl::Framebuffer *framebuffer, const gl::BlendState &blendState, const gl::ColorF &blendColor,
-                              unsigned int sampleMask)
+gl::Error Renderer9::setBlendState(gl::Framebuffer *framebuffer, const gl::BlendState &blendState, const gl::ColorF &blendColor,
+                                   unsigned int sampleMask)
 {
     bool blendStateChanged = mForceSetBlendState || memcmp(&blendState, &mCurBlendState, sizeof(gl::BlendState)) != 0;
     bool blendColorChanged = mForceSetBlendState || memcmp(&blendColor, &mCurBlendColor, sizeof(gl::ColorF)) != 0;
@@ -854,10 +898,12 @@ void Renderer9::setBlendState(gl::Framebuffer *framebuffer, const gl::BlendState
     }
 
     mForceSetBlendState = false;
+
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::setDepthStencilState(const gl::DepthStencilState &depthStencilState, int stencilRef,
-                                     int stencilBackRef, bool frontFaceCCW)
+gl::Error Renderer9::setDepthStencilState(const gl::DepthStencilState &depthStencilState, int stencilRef,
+                                          int stencilBackRef, bool frontFaceCCW)
 {
     bool depthStencilStateChanged = mForceSetDepthStencilState ||
                                     memcmp(&depthStencilState, &mCurDepthStencilState, sizeof(gl::DepthStencilState)) != 0;
@@ -946,6 +992,8 @@ void Renderer9::setDepthStencilState(const gl::DepthStencilState &depthStencilSt
     }
 
     mForceSetDepthStencilState = false;
+
+    return gl::Error(GL_NO_ERROR);
 }
 
 void Renderer9::setScissorRectangle(const gl::Rectangle &scissor, bool enabled)
@@ -1139,7 +1187,7 @@ gl::FramebufferAttachment *Renderer9::getNullColorbuffer(gl::FramebufferAttachme
     return nullbuffer;
 }
 
-bool Renderer9::applyRenderTarget(gl::Framebuffer *framebuffer)
+gl::Error Renderer9::applyRenderTarget(gl::Framebuffer *framebuffer)
 {
     // if there is no color attachment we must synthesize a NULL colorattachment
     // to keep the D3D runtime happy.  This should only be possible if depth texturing.
@@ -1148,30 +1196,23 @@ bool Renderer9::applyRenderTarget(gl::Framebuffer *framebuffer)
     {
         attachment = getNullColorbuffer(framebuffer->getDepthbuffer());
     }
-    if (!attachment)
-    {
-        ERR("unable to locate renderbuffer for FBO.");
-        return false;
-    }
+    ASSERT(attachment);
 
     bool renderTargetChanged = false;
     unsigned int renderTargetSerial = GetAttachmentSerial(attachment);
     if (renderTargetSerial != mAppliedRenderTargetSerial)
     {
         // Apply the render target on the device
-        IDirect3DSurface9 *renderTargetSurface = NULL;
-
-        RenderTarget9 *renderTarget = d3d9::GetAttachmentRenderTarget(attachment);
-        if (renderTarget)
+        RenderTarget9 *renderTarget = NULL;
+        gl::Error error = d3d9::GetAttachmentRenderTarget(attachment, &renderTarget);
+        if (error.isError())
         {
-            renderTargetSurface = renderTarget->getSurface();
+            return error;
         }
+        ASSERT(renderTarget);
 
-        if (!renderTargetSurface)
-        {
-            ERR("render target pointer unexpectedly null.");
-            return false;   // Context must be lost
-        }
+        IDirect3DSurface9 *renderTargetSurface = renderTarget->getSurface();
+        ASSERT(renderTargetSurface);
 
         mDevice->SetRenderTarget(0, renderTargetSurface);
         SafeRelease(renderTargetSurface);
@@ -1203,19 +1244,16 @@ bool Renderer9::applyRenderTarget(gl::Framebuffer *framebuffer)
         // Apply the depth stencil on the device
         if (depthStencil)
         {
-            IDirect3DSurface9 *depthStencilSurface = NULL;
-            rx::RenderTarget9 *depthStencilRenderTarget = d3d9::GetAttachmentRenderTarget(depthStencil);
-
-            if (depthStencilRenderTarget)
+            RenderTarget9 *depthStencilRenderTarget = NULL;
+            gl::Error error = d3d9::GetAttachmentRenderTarget(depthStencil, &depthStencilRenderTarget);
+            if (error.isError())
             {
-                depthStencilSurface = depthStencilRenderTarget->getSurface();
+                return error;
             }
+            ASSERT(depthStencilRenderTarget);
 
-            if (!depthStencilSurface)
-            {
-                ERR("depth stencil pointer unexpectedly null.");
-                return false;   // Context must be lost
-            }
+            IDirect3DSurface9 *depthStencilSurface = depthStencilRenderTarget->getSurface();
+            ASSERT(depthStencilSurface);
 
             mDevice->SetDepthStencilSurface(depthStencilSurface);
             SafeRelease(depthStencilSurface);
@@ -1257,20 +1295,19 @@ bool Renderer9::applyRenderTarget(gl::Framebuffer *framebuffer)
         mRenderTargetDescInitialized = true;
     }
 
-    return true;
+    return gl::Error(GL_NO_ERROR);
 }
 
-gl::Error Renderer9::applyVertexBuffer(gl::ProgramBinary *programBinary, const gl::VertexAttribute vertexAttributes[], const gl::VertexAttribCurrentValueData currentValues[],
-                                       GLint first, GLsizei count, GLsizei instances)
+gl::Error Renderer9::applyVertexBuffer(const gl::State &state, GLint first, GLsizei count, GLsizei instances)
 {
     TranslatedAttribute attributes[gl::MAX_VERTEX_ATTRIBS];
-    gl::Error error = mVertexDataManager->prepareVertexData(vertexAttributes, currentValues, programBinary, first, count, attributes, instances);
+    gl::Error error = mVertexDataManager->prepareVertexData(state, first, count, attributes, instances);
     if (error.isError())
     {
         return error;
     }
 
-    return mVertexDeclarationCache.applyDeclaration(mDevice, attributes, programBinary, instances, &mRepeatDraw);
+    return mVertexDeclarationCache.applyDeclaration(mDevice, attributes, state.getCurrentProgramBinary(), instances, &mRepeatDraw);
 }
 
 // Applies the indices and element array bindings to the Direct3D 9 device
@@ -1296,12 +1333,12 @@ gl::Error Renderer9::applyIndexBuffer(const GLvoid *indices, gl::Buffer *element
     return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::applyTransformFeedbackBuffers(gl::Buffer *transformFeedbackBuffers[], GLintptr offsets[])
+void Renderer9::applyTransformFeedbackBuffers(const gl::State& state)
 {
     UNREACHABLE();
 }
 
-void Renderer9::drawArrays(GLenum mode, GLsizei count, GLsizei instances, bool transformFeedbackActive)
+gl::Error Renderer9::drawArrays(GLenum mode, GLsizei count, GLsizei instances, bool transformFeedbackActive)
 {
     ASSERT(!transformFeedbackActive);
 
@@ -1309,14 +1346,15 @@ void Renderer9::drawArrays(GLenum mode, GLsizei count, GLsizei instances, bool t
 
     if (mode == GL_LINE_LOOP)
     {
-        drawLineLoop(count, GL_NONE, NULL, 0, NULL);
+        return drawLineLoop(count, GL_NONE, NULL, 0, NULL);
     }
     else if (instances > 0)
     {
-        StaticIndexBufferInterface *countingIB = getCountingIB(count);
-        if (!countingIB)
+        StaticIndexBufferInterface *countingIB = NULL;
+        gl::Error error = getCountingIB(count, &countingIB);
+        if (error.isError())
         {
-            return;
+            return error;
         }
 
         if (mAppliedIBSerial != countingIB->getSerial())
@@ -1331,15 +1369,18 @@ void Renderer9::drawArrays(GLenum mode, GLsizei count, GLsizei instances, bool t
         {
             mDevice->DrawIndexedPrimitive(mPrimitiveType, 0, 0, count, 0, mPrimitiveCount);
         }
+
+        return gl::Error(GL_NO_ERROR);
     }
     else   // Regular case
     {
         mDevice->DrawPrimitive(mPrimitiveType, 0, mPrimitiveCount);
+        return gl::Error(GL_NO_ERROR);
     }
 }
 
-void Renderer9::drawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices,
-                             gl::Buffer *elementArrayBuffer, const TranslatedIndexData &indexInfo, GLsizei /*instances*/)
+gl::Error Renderer9::drawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices,
+                                  gl::Buffer *elementArrayBuffer, const TranslatedIndexData &indexInfo, GLsizei /*instances*/)
 {
     startScene();
 
@@ -1347,11 +1388,11 @@ void Renderer9::drawElements(GLenum mode, GLsizei count, GLenum type, const GLvo
 
     if (mode == GL_POINTS)
     {
-        drawIndexedPoints(count, type, indices, minIndex, elementArrayBuffer);
+        return drawIndexedPoints(count, type, indices, minIndex, elementArrayBuffer);
     }
     else if (mode == GL_LINE_LOOP)
     {
-        drawLineLoop(count, type, indices, minIndex, elementArrayBuffer);
+        return drawLineLoop(count, type, indices, minIndex, elementArrayBuffer);
     }
     else
     {
@@ -1360,18 +1401,24 @@ void Renderer9::drawElements(GLenum mode, GLsizei count, GLenum type, const GLvo
             GLsizei vertexCount = static_cast<int>(indexInfo.indexRange.length()) + 1;
             mDevice->DrawIndexedPrimitive(mPrimitiveType, -minIndex, minIndex, vertexCount, indexInfo.startIndex, mPrimitiveCount);
         }
+        return gl::Error(GL_NO_ERROR);
     }
 }
 
-void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, int minIndex, gl::Buffer *elementArrayBuffer)
+gl::Error Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, int minIndex, gl::Buffer *elementArrayBuffer)
 {
     // Get the raw indices for an indexed draw
     if (type != GL_NONE && elementArrayBuffer)
     {
-        gl::Buffer *indexBuffer = elementArrayBuffer;
-        BufferImpl *storage = indexBuffer->getImplementation();
+        BufferD3D *storage = BufferD3D::makeFromBuffer(elementArrayBuffer);
         intptr_t offset = reinterpret_cast<intptr_t>(indices);
-        indices = static_cast<const GLubyte*>(storage->getData()) + offset;
+        const uint8_t *bufferData = NULL;
+        gl::Error error = storage->getData(&bufferData);
+        if (error.isError())
+        {
+            return error;
+        }
+        indices = bufferData + offset;
     }
 
     unsigned int startIndex = 0;
@@ -1385,9 +1432,7 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
             if (error.isError())
             {
                 SafeDelete(mLineLoopIB);
-
-                ERR("Could not create a 32-bit looping index buffer for GL_LINE_LOOP.");
-                return gl::error(GL_OUT_OF_MEMORY);
+                return error;
             }
         }
 
@@ -1396,16 +1441,14 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
 
         if (static_cast<unsigned int>(count) + 1 > (std::numeric_limits<unsigned int>::max() / sizeof(unsigned int)))
         {
-            ERR("Could not create a 32-bit looping index buffer for GL_LINE_LOOP, too many indices required.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return gl::Error(GL_OUT_OF_MEMORY, "Failed to create a 32-bit looping index buffer for GL_LINE_LOOP, too many indices required.");
         }
 
         const unsigned int spaceNeeded = (static_cast<unsigned int>(count)+1) * sizeof(unsigned int);
         gl::Error error = mLineLoopIB->reserveBufferSpace(spaceNeeded, GL_UNSIGNED_INT);
         if (error.isError())
         {
-            ERR("Could not reserve enough space in looping index buffer for GL_LINE_LOOP.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return error;
         }
 
         void* mappedMemory = NULL;
@@ -1413,8 +1456,7 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
         error = mLineLoopIB->mapBuffer(spaceNeeded, &mappedMemory, &offset);
         if (error.isError())
         {
-            ERR("Could not map index buffer for GL_LINE_LOOP.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return error;
         }
 
         startIndex = static_cast<unsigned int>(offset) / 4;
@@ -1456,8 +1498,7 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
         error = mLineLoopIB->unmapBuffer();
         if (error.isError())
         {
-            ERR("Could not unmap index buffer for GL_LINE_LOOP.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return error;
         }
     }
     else
@@ -1469,9 +1510,7 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
             if (error.isError())
             {
                 SafeDelete(mLineLoopIB);
-
-                ERR("Could not create a 16-bit looping index buffer for GL_LINE_LOOP.");
-                return gl::error(GL_OUT_OF_MEMORY);
+                return error;
             }
         }
 
@@ -1480,16 +1519,14 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
 
         if (static_cast<unsigned int>(count) + 1 > (std::numeric_limits<unsigned short>::max() / sizeof(unsigned short)))
         {
-            ERR("Could not create a 16-bit looping index buffer for GL_LINE_LOOP, too many indices required.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return gl::Error(GL_OUT_OF_MEMORY, "Failed to create a 16-bit looping index buffer for GL_LINE_LOOP, too many indices required.");
         }
 
         const unsigned int spaceNeeded = (static_cast<unsigned int>(count) + 1) * sizeof(unsigned short);
         gl::Error error = mLineLoopIB->reserveBufferSpace(spaceNeeded, GL_UNSIGNED_SHORT);
         if (error.isError())
         {
-            ERR("Could not reserve enough space in looping index buffer for GL_LINE_LOOP.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return error;
         }
 
         void* mappedMemory = NULL;
@@ -1497,8 +1534,7 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
         error = mLineLoopIB->mapBuffer(spaceNeeded, &mappedMemory, &offset);
         if (error.isError())
         {
-            ERR("Could not map index buffer for GL_LINE_LOOP.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return error;
         }
 
         startIndex = static_cast<unsigned int>(offset) / 2;
@@ -1540,8 +1576,7 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
         error = mLineLoopIB->unmapBuffer();
         if (error.isError())
         {
-            ERR("Could not unmap index buffer for GL_LINE_LOOP.");
-            return gl::error(GL_OUT_OF_MEMORY);
+            return error;
         }
     }
 
@@ -1554,40 +1589,52 @@ void Renderer9::drawLineLoop(GLsizei count, GLenum type, const GLvoid *indices, 
     }
 
     mDevice->DrawIndexedPrimitive(D3DPT_LINESTRIP, -minIndex, minIndex, count, startIndex, count);
+
+    return gl::Error(GL_NO_ERROR);
 }
 
 template <typename T>
-static void drawPoints(IDirect3DDevice9* device, GLsizei count, const GLvoid *indices, int minIndex)
+static gl::Error drawPoints(IDirect3DDevice9* device, GLsizei count, const GLvoid *indices, int minIndex)
 {
     for (int i = 0; i < count; i++)
     {
         unsigned int indexValue = static_cast<unsigned int>(static_cast<const T*>(indices)[i]) - minIndex;
         device->DrawPrimitive(D3DPT_POINTLIST, indexValue, 1);
     }
+
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::drawIndexedPoints(GLsizei count, GLenum type, const GLvoid *indices, int minIndex, gl::Buffer *elementArrayBuffer)
+gl::Error Renderer9::drawIndexedPoints(GLsizei count, GLenum type, const GLvoid *indices, int minIndex, gl::Buffer *elementArrayBuffer)
 {
     // Drawing index point lists is unsupported in d3d9, fall back to a regular DrawPrimitive call
     // for each individual point. This call is not expected to happen often.
 
     if (elementArrayBuffer)
     {
-        BufferImpl *storage = elementArrayBuffer->getImplementation();
+        BufferD3D *storage = BufferD3D::makeFromBuffer(elementArrayBuffer);
         intptr_t offset = reinterpret_cast<intptr_t>(indices);
-        indices = static_cast<const GLubyte*>(storage->getData()) + offset;
+
+        const uint8_t *bufferData = NULL;
+        gl::Error error = storage->getData(&bufferData);
+        if (error.isError())
+        {
+            return error;
+        }
+
+        indices = bufferData + offset;
     }
 
     switch (type)
     {
-        case GL_UNSIGNED_BYTE:  drawPoints<GLubyte>(mDevice, count, indices, minIndex);  break;
-        case GL_UNSIGNED_SHORT: drawPoints<GLushort>(mDevice, count, indices, minIndex); break;
-        case GL_UNSIGNED_INT:   drawPoints<GLuint>(mDevice, count, indices, minIndex);   break;
-        default: UNREACHABLE();
+        case GL_UNSIGNED_BYTE:  return drawPoints<GLubyte>(mDevice, count, indices, minIndex);
+        case GL_UNSIGNED_SHORT: return drawPoints<GLushort>(mDevice, count, indices, minIndex);
+        case GL_UNSIGNED_INT:   return drawPoints<GLuint>(mDevice, count, indices, minIndex);
+        default: UNREACHABLE(); return gl::Error(GL_INVALID_OPERATION);
     }
 }
 
-StaticIndexBufferInterface *Renderer9::getCountingIB(size_t count)
+gl::Error Renderer9::getCountingIB(size_t count, StaticIndexBufferInterface **outIB)
 {
     // Update the counting index buffer if it is not large enough or has not been created yet.
     if (count <= 65536)   // 16-bit indices
@@ -1604,8 +1651,7 @@ StaticIndexBufferInterface *Renderer9::getCountingIB(size_t count)
             gl::Error error = mCountingIB->mapBuffer(spaceNeeded, &mappedMemory, NULL);
             if (error.isError())
             {
-                ERR("Failed to map counting buffer.");
-                return NULL;
+                return error;
             }
 
             unsigned short *data = reinterpret_cast<unsigned short*>(mappedMemory);
@@ -1617,12 +1663,9 @@ StaticIndexBufferInterface *Renderer9::getCountingIB(size_t count)
             error = mCountingIB->unmapBuffer();
             if (error.isError())
             {
-                ERR("Failed to unmap counting buffer.");
-                return NULL;
+                return error;
             }
         }
-
-        return mCountingIB;
     }
     else if (getRendererExtensions().elementIndexUint)
     {
@@ -1638,8 +1681,7 @@ StaticIndexBufferInterface *Renderer9::getCountingIB(size_t count)
             gl::Error error = mCountingIB->mapBuffer(spaceNeeded, &mappedMemory, NULL);
             if (error.isError())
             {
-                ERR("Failed to map counting buffer.");
-                return NULL;
+                return error;
             }
 
             unsigned int *data = reinterpret_cast<unsigned int*>(mappedMemory);
@@ -1651,28 +1693,40 @@ StaticIndexBufferInterface *Renderer9::getCountingIB(size_t count)
             error = mCountingIB->unmapBuffer();
             if (error.isError())
             {
-                ERR("Failed to unmap counting buffer.");
-                return NULL;
+                return error;
             }
         }
-
-        return mCountingIB;
     }
     else
     {
-        ERR("Could not create a counting index buffer for glDrawArraysInstanced.");
-        return gl::error<StaticIndexBufferInterface*>(GL_OUT_OF_MEMORY, NULL);
+        return gl::Error(GL_OUT_OF_MEMORY, "Could not create a counting index buffer for glDrawArraysInstanced.");
     }
+
+    *outIB = mCountingIB;
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::applyShaders(gl::ProgramBinary *programBinary, const gl::VertexFormat inputLayout[], const gl::Framebuffer *framebuffer,
-                             bool rasterizerDiscard, bool transformFeedbackActive)
+gl::Error Renderer9::applyShaders(gl::ProgramBinary *programBinary, const gl::VertexFormat inputLayout[], const gl::Framebuffer *framebuffer,
+                                  bool rasterizerDiscard, bool transformFeedbackActive)
 {
     ASSERT(!transformFeedbackActive);
     ASSERT(!rasterizerDiscard);
 
-    ShaderExecutable *vertexExe = programBinary->getVertexExecutableForInputLayout(inputLayout);
-    ShaderExecutable *pixelExe = programBinary->getPixelExecutableForFramebuffer(framebuffer);
+    ProgramD3D *programD3D = ProgramD3D::makeProgramD3D(programBinary->getImplementation());
+
+    ShaderExecutable *vertexExe = NULL;
+    gl::Error error = programD3D->getVertexExecutableForInputLayout(inputLayout, &vertexExe);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    ShaderExecutable *pixelExe = NULL;
+    error = programD3D->getPixelExecutableForFramebuffer(framebuffer, &pixelExe);
+    if (error.isError())
+    {
+        return error;
+    }
 
     IDirect3DVertexShader9 *vertexShader = (vertexExe ? ShaderExecutable9::makeShaderExecutable9(vertexExe)->getVertexShader() : NULL);
     IDirect3DPixelShader9 *pixelShader = (pixelExe ? ShaderExecutable9::makeShaderExecutable9(pixelExe)->getPixelShader() : NULL);
@@ -1697,16 +1751,16 @@ void Renderer9::applyShaders(gl::ProgramBinary *programBinary, const gl::VertexF
     unsigned int programSerial = programBinary->getSerial();
     if (programSerial != mAppliedProgramSerial)
     {
-        programBinary->dirtyAllUniforms();
+        programD3D->dirtyAllUniforms();
         mDxUniformsDirty = true;
         mAppliedProgramSerial = programSerial;
     }
+
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Renderer9::applyUniforms(const gl::ProgramBinary &programBinary)
+gl::Error Renderer9::applyUniforms(const ProgramImpl &program, const std::vector<gl::LinkedUniform*> &uniformArray)
 {
-    const std::vector<gl::LinkedUniform*> &uniformArray = programBinary.getUniforms();
-
     for (size_t uniformIndex = 0; uniformIndex < uniformArray.size(); uniformIndex++)
     {
         gl::LinkedUniform *targetUniform = uniformArray[uniformIndex];
@@ -1755,6 +1809,8 @@ void Renderer9::applyUniforms(const gl::ProgramBinary &programBinary)
         mDevice->SetPixelShaderConstantF(0, (float*)&mPixelConstants, sizeof(dx_PixelConstants) / sizeof(float[4]));
         mDxUniformsDirty = false;
     }
+
+    return gl::Error(GL_NO_ERROR);
 }
 
 void Renderer9::applyUniformnfv(gl::LinkedUniform *targetUniform, const GLfloat *v)
@@ -2224,7 +2280,7 @@ bool Renderer9::isRemovedDeviceResettable() const
 {
     bool success = false;
 
-#ifdef ANGLE_ENABLE_D3D9EX
+#if ANGLE_D3D9EX == ANGLE_ENABLED
     IDirect3D9Ex *d3d9Ex = NULL;
     typedef HRESULT (WINAPI *Direct3DCreate9ExFunc)(UINT, IDirect3D9Ex**);
     Direct3DCreate9ExFunc Direct3DCreate9ExPtr = reinterpret_cast<Direct3DCreate9ExFunc>(GetProcAddress(mD3d9Module, "Direct3DCreate9Ex"));
@@ -2335,82 +2391,6 @@ int Renderer9::getMaxSwapInterval() const
     return mMaxSwapInterval;
 }
 
-bool Renderer9::copyToRenderTarget2D(TextureStorage *dest, TextureStorage *source)
-{
-    bool result = false;
-
-    if (source && dest)
-    {
-        TextureStorage9_2D *source9 = TextureStorage9_2D::makeTextureStorage9_2D(source);
-        TextureStorage9_2D *dest9 = TextureStorage9_2D::makeTextureStorage9_2D(dest);
-
-        int levels = source9->getLevelCount();
-        for (int i = 0; i < levels; ++i)
-        {
-            IDirect3DSurface9 *srcSurf = source9->getSurfaceLevel(i, false);
-            IDirect3DSurface9 *dstSurf = dest9->getSurfaceLevel(i, false);
-
-            result = copyToRenderTarget(dstSurf, srcSurf, source9->isManaged());
-
-            SafeRelease(srcSurf);
-            SafeRelease(dstSurf);
-
-            if (!result)
-            {
-                return false;
-            }
-        }
-    }
-
-    return result;
-}
-
-bool Renderer9::copyToRenderTargetCube(TextureStorage *dest, TextureStorage *source)
-{
-    bool result = false;
-
-    if (source && dest)
-    {
-        TextureStorage9_Cube *source9 = TextureStorage9_Cube::makeTextureStorage9_Cube(source);
-        TextureStorage9_Cube *dest9 = TextureStorage9_Cube::makeTextureStorage9_Cube(dest);
-        int levels = source9->getLevelCount();
-        for (int f = 0; f < 6; f++)
-        {
-            for (int i = 0; i < levels; i++)
-            {
-                IDirect3DSurface9 *srcSurf = source9->getCubeMapSurface(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, i, false);
-                IDirect3DSurface9 *dstSurf = dest9->getCubeMapSurface(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, i, true);
-
-                result = copyToRenderTarget(dstSurf, srcSurf, source9->isManaged());
-
-                SafeRelease(srcSurf);
-                SafeRelease(dstSurf);
-
-                if (!result)
-                {
-                    return false;
-                }
-            }
-        }
-    }
-
-    return result;
-}
-
-bool Renderer9::copyToRenderTarget3D(TextureStorage *dest, TextureStorage *source)
-{
-    // 3D textures are not available in the D3D9 backend.
-    UNREACHABLE();
-    return false;
-}
-
-bool Renderer9::copyToRenderTarget2DArray(TextureStorage *dest, TextureStorage *source)
-{
-    // 2D array textures are not supported by the D3D9 backend.
-    UNREACHABLE();
-    return false;
-}
-
 D3DPOOL Renderer9::getBufferPool(DWORD usage) const
 {
     if (mD3d9Ex != NULL)
@@ -2428,8 +2408,8 @@ D3DPOOL Renderer9::getBufferPool(DWORD usage) const
     return D3DPOOL_DEFAULT;
 }
 
-bool Renderer9::copyImage2D(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
-                            GLint xoffset, GLint yoffset, TextureStorage *storage, GLint level)
+gl::Error Renderer9::copyImage2D(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
+                                 GLint xoffset, GLint yoffset, TextureStorage *storage, GLint level)
 {
     RECT rect;
     rect.left = sourceRect.x;
@@ -2440,8 +2420,8 @@ bool Renderer9::copyImage2D(gl::Framebuffer *framebuffer, const gl::Rectangle &s
     return mBlit->copy2D(framebuffer, rect, destFormat, xoffset, yoffset, storage, level);
 }
 
-bool Renderer9::copyImageCube(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
-                              GLint xoffset, GLint yoffset, TextureStorage *storage, GLenum target, GLint level)
+gl::Error Renderer9::copyImageCube(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
+                                   GLint xoffset, GLint yoffset, TextureStorage *storage, GLenum target, GLint level)
 {
     RECT rect;
     rect.left = sourceRect.x;
@@ -2452,24 +2432,24 @@ bool Renderer9::copyImageCube(gl::Framebuffer *framebuffer, const gl::Rectangle 
     return mBlit->copyCube(framebuffer, rect, destFormat, xoffset, yoffset, storage, target, level);
 }
 
-bool Renderer9::copyImage3D(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
-                            GLint xoffset, GLint yoffset, GLint zOffset, TextureStorage *storage, GLint level)
+gl::Error Renderer9::copyImage3D(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
+                                 GLint xoffset, GLint yoffset, GLint zOffset, TextureStorage *storage, GLint level)
 {
     // 3D textures are not available in the D3D9 backend.
     UNREACHABLE();
-    return false;
+    return gl::Error(GL_INVALID_OPERATION);
 }
 
-bool Renderer9::copyImage2DArray(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
-                                 GLint xoffset, GLint yoffset, GLint zOffset, TextureStorage *storage, GLint level)
+gl::Error Renderer9::copyImage2DArray(gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
+                                      GLint xoffset, GLint yoffset, GLint zOffset, TextureStorage *storage, GLint level)
 {
     // 2D array textures are not available in the D3D9 backend.
     UNREACHABLE();
-    return false;
+    return gl::Error(GL_INVALID_OPERATION);
 }
 
-bool Renderer9::blitRect(gl::Framebuffer *readFramebuffer, const gl::Rectangle &readRect, gl::Framebuffer *drawFramebuffer, const gl::Rectangle &drawRect,
-                         const gl::Rectangle *scissor, bool blitRenderTarget, bool blitDepth, bool blitStencil, GLenum filter)
+gl::Error Renderer9::blitRect(gl::Framebuffer *readFramebuffer, const gl::Rectangle &readRect, gl::Framebuffer *drawFramebuffer, const gl::Rectangle &drawRect,
+                              const gl::Rectangle *scissor, bool blitRenderTarget, bool blitDepth, bool blitStencil, GLenum filter)
 {
     ASSERT(filter == GL_NEAREST);
 
@@ -2478,35 +2458,33 @@ bool Renderer9::blitRect(gl::Framebuffer *readFramebuffer, const gl::Rectangle &
     if (blitRenderTarget)
     {
         gl::FramebufferAttachment *readBuffer = readFramebuffer->getColorbuffer(0);
-        gl::FramebufferAttachment *drawBuffer = drawFramebuffer->getColorbuffer(0);
+        ASSERT(readBuffer);
+
         RenderTarget9 *readRenderTarget = NULL;
+        gl::Error error = d3d9::GetAttachmentRenderTarget(readBuffer, &readRenderTarget);
+        if (error.isError())
+        {
+            return error;
+        }
+        ASSERT(readRenderTarget);
+
+        gl::FramebufferAttachment *drawBuffer = drawFramebuffer->getColorbuffer(0);
+        ASSERT(drawBuffer);
+
         RenderTarget9 *drawRenderTarget = NULL;
-        IDirect3DSurface9* readSurface = NULL;
-        IDirect3DSurface9* drawSurface = NULL;
+        error = d3d9::GetAttachmentRenderTarget(drawBuffer, &drawRenderTarget);
+        if (error.isError())
+        {
+            return error;
+        }
+        ASSERT(drawRenderTarget);
 
-        if (readBuffer)
-        {
-            readRenderTarget = d3d9::GetAttachmentRenderTarget(readBuffer);
-        }
-        if (drawBuffer)
-        {
-            drawRenderTarget = d3d9::GetAttachmentRenderTarget(drawBuffer);
-        }
+        // The getSurface calls do an AddRef so save them until after no errors are possible
+        IDirect3DSurface9* readSurface = readRenderTarget->getSurface();
+        ASSERT(readSurface);
 
-        if (readRenderTarget)
-        {
-            readSurface = readRenderTarget->getSurface();
-        }
-        if (drawRenderTarget)
-        {
-            drawSurface = drawRenderTarget->getSurface();
-        }
-
-        if (!readSurface || !drawSurface)
-        {
-            ERR("Failed to retrieve the render target.");
-            return gl::error(GL_OUT_OF_MEMORY, false);
-        }
+        IDirect3DSurface9* drawSurface = drawRenderTarget->getSurface();
+        ASSERT(drawSurface);
 
         gl::Extents srcSize(readRenderTarget->getWidth(), readRenderTarget->getHeight(), 1);
         gl::Extents dstSize(drawRenderTarget->getWidth(), drawRenderTarget->getHeight(), 1);
@@ -2599,43 +2577,40 @@ bool Renderer9::blitRect(gl::Framebuffer *readFramebuffer, const gl::Rectangle &
 
         if (FAILED(result))
         {
-            ERR("BlitFramebufferANGLE failed: StretchRect returned %x.", result);
-            return false;
+            return gl::Error(GL_OUT_OF_MEMORY, "Internal blit failed, StretchRect returned 0x%X.", result);
         }
     }
 
     if (blitDepth || blitStencil)
     {
         gl::FramebufferAttachment *readBuffer = readFramebuffer->getDepthOrStencilbuffer();
-        gl::FramebufferAttachment *drawBuffer = drawFramebuffer->getDepthOrStencilbuffer();
+        ASSERT(readBuffer);
+
         RenderTarget9 *readDepthStencil = NULL;
+        gl::Error error = d3d9::GetAttachmentRenderTarget(readBuffer, &readDepthStencil);
+        if (error.isError())
+        {
+            return error;
+        }
+        ASSERT(readDepthStencil);
+
+        gl::FramebufferAttachment *drawBuffer = drawFramebuffer->getDepthOrStencilbuffer();
+        ASSERT(drawBuffer);
+
         RenderTarget9 *drawDepthStencil = NULL;
-        IDirect3DSurface9* readSurface = NULL;
-        IDirect3DSurface9* drawSurface = NULL;
+        error = d3d9::GetAttachmentRenderTarget(drawBuffer, &drawDepthStencil);
+        if (error.isError())
+        {
+            return error;
+        }
+        ASSERT(drawDepthStencil);
 
-        if (readBuffer)
-        {
-            readDepthStencil = d3d9::GetAttachmentRenderTarget(readBuffer);
-        }
-        if (drawBuffer)
-        {
-            drawDepthStencil = d3d9::GetAttachmentRenderTarget(drawBuffer);
-        }
+        // The getSurface calls do an AddRef so save them until after no errors are possible
+        IDirect3DSurface9* readSurface = readDepthStencil->getSurface();
+        ASSERT(readDepthStencil);
 
-        if (readDepthStencil)
-        {
-            readSurface = readDepthStencil->getSurface();
-        }
-        if (drawDepthStencil)
-        {
-            drawSurface = drawDepthStencil->getSurface();
-        }
-
-        if (!readSurface || !drawSurface)
-        {
-            ERR("Failed to retrieve the render target.");
-            return gl::error(GL_OUT_OF_MEMORY, false);
-        }
+        IDirect3DSurface9* drawSurface = drawDepthStencil->getSurface();
+        ASSERT(drawDepthStencil);
 
         HRESULT result = mDevice->StretchRect(readSurface, NULL, drawSurface, NULL, D3DTEXF_NONE);
 
@@ -2644,12 +2619,11 @@ bool Renderer9::blitRect(gl::Framebuffer *readFramebuffer, const gl::Rectangle &
 
         if (FAILED(result))
         {
-            ERR("BlitFramebufferANGLE failed: StretchRect returned %x.", result);
-            return false;
+            return gl::Error(GL_OUT_OF_MEMORY, "Internal blit failed, StretchRect returned 0x%X.", result);
         }
     }
 
-    return true;
+    return gl::Error(GL_NO_ERROR);
 }
 
 gl::Error Renderer9::readPixels(gl::Framebuffer *framebuffer, GLint x, GLint y, GLsizei width, GLsizei height, GLenum format,
@@ -2657,25 +2631,19 @@ gl::Error Renderer9::readPixels(gl::Framebuffer *framebuffer, GLint x, GLint y, 
 {
     ASSERT(pack.pixelBuffer.get() == NULL);
 
-    RenderTarget9 *renderTarget = NULL;
-    IDirect3DSurface9 *surface = NULL;
     gl::FramebufferAttachment *colorbuffer = framebuffer->getColorbuffer(0);
+    ASSERT(colorbuffer);
 
-    if (colorbuffer)
+    RenderTarget9 *renderTarget = NULL;
+    gl::Error error = d3d9::GetAttachmentRenderTarget(colorbuffer, &renderTarget);
+    if (error.isError())
     {
-        renderTarget = d3d9::GetAttachmentRenderTarget(colorbuffer);
+        return error;
     }
+    ASSERT(renderTarget);
 
-    if (renderTarget)
-    {
-        surface = renderTarget->getSurface();
-    }
-
-    if (!surface)
-    {
-        // context must be lost
-        return gl::Error(GL_NO_ERROR);
-    }
+    IDirect3DSurface9 *surface = renderTarget->getSurface();
+    ASSERT(surface);
 
     D3DSURFACE_DESC desc;
     surface->GetDesc(&desc);
@@ -2869,64 +2837,69 @@ void Renderer9::releaseShaderCompiler()
     ShaderD3D::releaseCompiler();
 }
 
-ShaderExecutable *Renderer9::loadExecutable(const void *function, size_t length, rx::ShaderType type,
-                                            const std::vector<gl::LinkedVarying> &transformFeedbackVaryings,
-                                            bool separatedOutputBuffers)
+gl::Error Renderer9::loadExecutable(const void *function, size_t length, rx::ShaderType type,
+                                    const std::vector<gl::LinkedVarying> &transformFeedbackVaryings,
+                                    bool separatedOutputBuffers, ShaderExecutable **outExecutable)
 {
     // Transform feedback is not supported in ES2 or D3D9
     ASSERT(transformFeedbackVaryings.size() == 0);
-
-    ShaderExecutable9 *executable = NULL;
 
     switch (type)
     {
       case rx::SHADER_VERTEX:
         {
-            IDirect3DVertexShader9 *vshader = createVertexShader((DWORD*)function, length);
-            if (vshader)
+            IDirect3DVertexShader9 *vshader = NULL;
+            gl::Error error = createVertexShader((DWORD*)function, length, &vshader);
+            if (error.isError())
             {
-                executable = new ShaderExecutable9(function, length, vshader);
+                return error;
             }
+            *outExecutable = new ShaderExecutable9(function, length, vshader);
         }
         break;
       case rx::SHADER_PIXEL:
         {
-            IDirect3DPixelShader9 *pshader = createPixelShader((DWORD*)function, length);
-            if (pshader)
+            IDirect3DPixelShader9 *pshader = NULL;
+            gl::Error error = createPixelShader((DWORD*)function, length, &pshader);
+            if (error.isError())
             {
-                executable = new ShaderExecutable9(function, length, pshader);
+                return error;
             }
+            *outExecutable = new ShaderExecutable9(function, length, pshader);
         }
         break;
       default:
         UNREACHABLE();
-        break;
+        return gl::Error(GL_INVALID_OPERATION);
     }
 
-    return executable;
+    return gl::Error(GL_NO_ERROR);
 }
 
-ShaderExecutable *Renderer9::compileToExecutable(gl::InfoLog &infoLog, const char *shaderHLSL, rx::ShaderType type,
-                                                 const std::vector<gl::LinkedVarying> &transformFeedbackVaryings,
-                                                 bool separatedOutputBuffers, D3DWorkaroundType workaround)
+gl::Error Renderer9::compileToExecutable(gl::InfoLog &infoLog, const std::string &shaderHLSL, rx::ShaderType type,
+                                         const std::vector<gl::LinkedVarying> &transformFeedbackVaryings,
+                                         bool separatedOutputBuffers, D3DWorkaroundType workaround,
+                                         ShaderExecutable **outExectuable)
 {
     // Transform feedback is not supported in ES2 or D3D9
     ASSERT(transformFeedbackVaryings.size() == 0);
 
-    const char *profile = NULL;
-
+    const char *profileType = NULL;
     switch (type)
     {
       case rx::SHADER_VERTEX:
-        profile = getMajorShaderModel() >= 3 ? "vs_3_0" : "vs_2_0";
+        profileType = "vs";
         break;
       case rx::SHADER_PIXEL:
-        profile = getMajorShaderModel() >= 3 ? "ps_3_0" : "ps_2_0";
+        profileType = "ps";
         break;
       default:
         UNREACHABLE();
-        return NULL;
+        return gl::Error(GL_INVALID_OPERATION);
     }
+    unsigned int profileMajorVersion = (getMajorShaderModel() >= 3) ? 3 : 2;
+    unsigned int profileMinorVersion = 0;
+    std::string profile = FormatString("%s_%u_%u", profileType, profileMajorVersion, profileMinorVersion);
 
     UINT flags = ANGLE_COMPILE_OPTIMIZATION_LEVEL;
 
@@ -2947,41 +2920,46 @@ ShaderExecutable *Renderer9::compileToExecutable(gl::InfoLog &infoLog, const cha
 #endif
 
         flags |= D3DCOMPILE_DEBUG;
-
-        std::string sourcePath = getTempPath();
-        std::string sourceText = std::string("#line 2 \"") + sourcePath + std::string("\"\n\n") + std::string(shaderHLSL);
-        writeFile(sourcePath.c_str(), sourceText.c_str(), sourceText.size());
     }
 
     // Sometimes D3DCompile will fail with the default compilation flags for complicated shaders when it would otherwise pass with alternative options.
     // Try the default flags first and if compilation fails, try some alternatives.
-    const UINT extraFlags[] =
-    {
-        flags,
-        flags | D3DCOMPILE_AVOID_FLOW_CONTROL,
-        flags | D3DCOMPILE_PREFER_FLOW_CONTROL
-    };
+    std::vector<CompileConfig> configs;
+    configs.push_back(CompileConfig(flags,                                  "default"            ));
+    configs.push_back(CompileConfig(flags | D3DCOMPILE_AVOID_FLOW_CONTROL,  "avoid flow control" ));
+    configs.push_back(CompileConfig(flags | D3DCOMPILE_PREFER_FLOW_CONTROL, "prefer flow control"));
 
-    const static char *extraFlagNames[] =
+    ID3DBlob *binary = NULL;
+    std::string debugInfo;
+    gl::Error error = mCompiler.compileToBinary(infoLog, shaderHLSL, profile, configs, NULL, &binary, &debugInfo);
+    if (error.isError())
     {
-        "default",
-        "avoid flow control",
-        "prefer flow control"
-    };
-
-    int attempts = ArraySize(extraFlags);
-
-    ID3DBlob *binary = (ID3DBlob*)mCompiler.compileToBinary(infoLog, shaderHLSL, profile, extraFlags, extraFlagNames, attempts);
-    if (!binary)
-    {
-        return NULL;
+        return error;
     }
 
-    ShaderExecutable *executable = loadExecutable(binary->GetBufferPointer(), binary->GetBufferSize(), type,
-                                                  transformFeedbackVaryings, separatedOutputBuffers);
-    SafeRelease(binary);
+    // It's possible that binary is NULL if the compiler failed in all configurations.  Set the executable to NULL
+    // and return GL_NO_ERROR to signify that there was a link error but the internal state is still OK.
+    if (!binary)
+    {
+        *outExectuable = NULL;
+        return gl::Error(GL_NO_ERROR);
+    }
 
-    return executable;
+    error = loadExecutable(binary->GetBufferPointer(), binary->GetBufferSize(), type,
+                           transformFeedbackVaryings, separatedOutputBuffers, outExectuable);
+
+    SafeRelease(binary);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    if (!debugInfo.empty())
+    {
+        (*outExectuable)->appendDebugInfo(debugInfo);
+    }
+
+    return gl::Error(GL_NO_ERROR);
 }
 
 rx::UniformStorage *Renderer9::createUniformStorage(size_t storageSize)
@@ -2989,7 +2967,7 @@ rx::UniformStorage *Renderer9::createUniformStorage(size_t storageSize)
     return new UniformStorage(storageSize);
 }
 
-bool Renderer9::boxFilter(IDirect3DSurface9 *source, IDirect3DSurface9 *dest)
+gl::Error Renderer9::boxFilter(IDirect3DSurface9 *source, IDirect3DSurface9 *dest)
 {
     return mBlit->boxFilter(source, dest);
 }
@@ -3011,41 +2989,40 @@ D3DPOOL Renderer9::getTexturePool(DWORD usage) const
     return D3DPOOL_DEFAULT;
 }
 
-bool Renderer9::copyToRenderTarget(IDirect3DSurface9 *dest, IDirect3DSurface9 *source, bool fromManaged)
+gl::Error Renderer9::copyToRenderTarget(IDirect3DSurface9 *dest, IDirect3DSurface9 *source, bool fromManaged)
 {
-    if (source && dest)
+    ASSERT(source && dest);
+
+    HRESULT result = D3DERR_OUTOFVIDEOMEMORY;
+
+    if (fromManaged)
     {
-        HRESULT result = D3DERR_OUTOFVIDEOMEMORY;
+        D3DSURFACE_DESC desc;
+        source->GetDesc(&desc);
 
-        if (fromManaged)
+        IDirect3DSurface9 *surf = 0;
+        result = mDevice->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &surf, NULL);
+
+        if (SUCCEEDED(result))
         {
-            D3DSURFACE_DESC desc;
-            source->GetDesc(&desc);
-
-            IDirect3DSurface9 *surf = 0;
-            result = mDevice->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &surf, NULL);
-
-            if (SUCCEEDED(result))
-            {
-                Image9::copyLockableSurfaces(surf, source);
-                result = mDevice->UpdateSurface(surf, NULL, dest, NULL);
-                SafeRelease(surf);
-            }
-        }
-        else
-        {
-            endScene();
-            result = mDevice->StretchRect(source, NULL, dest, NULL, D3DTEXF_NONE);
-        }
-
-        if (FAILED(result))
-        {
-            ASSERT(result == D3DERR_OUTOFVIDEOMEMORY || result == E_OUTOFMEMORY);
-            return false;
+            Image9::copyLockableSurfaces(surf, source);
+            result = mDevice->UpdateSurface(surf, NULL, dest, NULL);
+            SafeRelease(surf);
         }
     }
+    else
+    {
+        endScene();
+        result = mDevice->StretchRect(source, NULL, dest, NULL, D3DTEXF_NONE);
+    }
 
-    return true;
+    if (FAILED(result))
+    {
+        ASSERT(result == D3DERR_OUTOFVIDEOMEMORY || result == E_OUTOFMEMORY);
+        return gl::Error(GL_OUT_OF_MEMORY, "Failed to blit internal texture, result: 0x%X.", result);
+    }
+
+    return gl::Error(GL_NO_ERROR);
 }
 
 Image *Renderer9::createImage()
@@ -3053,11 +3030,11 @@ Image *Renderer9::createImage()
     return new Image9();
 }
 
-void Renderer9::generateMipmap(Image *dest, Image *src)
+gl::Error Renderer9::generateMipmap(Image *dest, Image *src)
 {
     Image9 *src9 = Image9::makeImage9(src);
     Image9 *dst9 = Image9::makeImage9(dest);
-    Image9::generateMipmap(dst9, src9);
+    return Image9::generateMipmap(dst9, src9);
 }
 
 TextureStorage *Renderer9::createTextureStorage2D(SwapChain *swapChain)
@@ -3131,6 +3108,11 @@ GLenum Renderer9::getVertexComponentType(const gl::VertexFormat &vertexFormat) c
 void Renderer9::generateCaps(gl::Caps *outCaps, gl::TextureCapsMap *outTextureCaps, gl::Extensions *outExtensions) const
 {
     d3d9_gl::GenerateCaps(mD3d9, mDevice, mDeviceType, mAdapter, outCaps, outTextureCaps, outExtensions);
+}
+
+Workarounds Renderer9::generateWorkarounds() const
+{
+    return d3d9::GenerateWorkarounds();
 }
 
 }

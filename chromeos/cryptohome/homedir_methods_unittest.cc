@@ -49,8 +49,8 @@ class HomedirMethodsTest : public testing::Test {
   virtual ~HomedirMethodsTest();
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  virtual void SetUp() override;
+  virtual void TearDown() override;
 
   void RunProtobufMethodCallback(
       const chromeos::CryptohomeClient::ProtobufMethodCallback& callback);
@@ -88,7 +88,7 @@ void HomedirMethodsTest::SetUp() {
       new chromeos::MockCryptohomeClient);
   cryptohome_client_ = cryptohome_client.get();
   chromeos::DBusThreadManager::GetSetterForTesting()->SetCryptohomeClient(
-      cryptohome_client.PassAs<chromeos::CryptohomeClient>());
+      cryptohome_client.Pass());
   HomedirMethods::Initialize();
 }
 

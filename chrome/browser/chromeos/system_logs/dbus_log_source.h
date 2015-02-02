@@ -12,11 +12,11 @@ namespace system_logs {
 // Fetches memory usage details.
 class DBusLogSource : public SystemLogsSource {
  public:
-  DBusLogSource() {}
-  virtual ~DBusLogSource() {}
+  DBusLogSource();
+  virtual ~DBusLogSource();
 
   // SystemLogsSource override.
-  virtual void Fetch(const SysLogsSourceCallback& request) OVERRIDE;
+  virtual void Fetch(const SysLogsSourceCallback& request) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DBusLogSource);

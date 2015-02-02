@@ -59,7 +59,7 @@ class SYNC_EXPORT ModelTypeSyncWorkerImpl : public UpdateHandler,
                           scoped_ptr<Cryptographer> cryptographer,
                           NudgeHandler* nudge_handler,
                           scoped_ptr<ModelTypeSyncProxy> type_sync_proxy);
-  virtual ~ModelTypeSyncWorkerImpl();
+  ~ModelTypeSyncWorkerImpl() override;
 
   ModelType GetModelType() const;
 
@@ -67,25 +67,22 @@ class SYNC_EXPORT ModelTypeSyncWorkerImpl : public UpdateHandler,
   void UpdateCryptographer(scoped_ptr<Cryptographer> cryptographer);
 
   // UpdateHandler implementation.
-  virtual void GetDownloadProgress(
-      sync_pb::DataTypeProgressMarker* progress_marker) const OVERRIDE;
-  virtual void GetDataTypeContext(
-      sync_pb::DataTypeContext* context) const OVERRIDE;
-  virtual SyncerError ProcessGetUpdatesResponse(
+  void GetDownloadProgress(
+      sync_pb::DataTypeProgressMarker* progress_marker) const override;
+  void GetDataTypeContext(sync_pb::DataTypeContext* context) const override;
+  SyncerError ProcessGetUpdatesResponse(
       const sync_pb::DataTypeProgressMarker& progress_marker,
       const sync_pb::DataTypeContext& mutated_context,
       const SyncEntityList& applicable_updates,
-      sessions::StatusController* status) OVERRIDE;
-  virtual void ApplyUpdates(sessions::StatusController* status) OVERRIDE;
-  virtual void PassiveApplyUpdates(sessions::StatusController* status) OVERRIDE;
+      sessions::StatusController* status) override;
+  void ApplyUpdates(sessions::StatusController* status) override;
+  void PassiveApplyUpdates(sessions::StatusController* status) override;
 
   // ModelTypeSyncWorker implementation.
-  virtual void EnqueueForCommit(
-      const CommitRequestDataList& request_list) OVERRIDE;
+  void EnqueueForCommit(const CommitRequestDataList& request_list) override;
 
   // CommitContributor implementation.
-  virtual scoped_ptr<CommitContribution> GetContribution(
-      size_t max_entries) OVERRIDE;
+  scoped_ptr<CommitContribution> GetContribution(size_t max_entries) override;
 
   // Callback for when our contribution gets a response.
   void OnCommitResponse(const CommitResponseDataList& response_list);

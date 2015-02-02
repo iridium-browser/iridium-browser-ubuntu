@@ -35,12 +35,10 @@ class URLRequestSlowDownloadJob : public net::URLRequestJob {
   void CheckDoneStatus();
 
   // net::URLRequestJob methods
-  virtual void Start() OVERRIDE;
-  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE;
-  virtual bool ReadRawData(net::IOBuffer* buf,
-                           int buf_size,
-                           int *bytes_read) OVERRIDE;
+  void Start() override;
+  bool GetMimeType(std::string* mime_type) const override;
+  void GetResponseInfo(net::HttpResponseInfo* info) override;
+  bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read) override;
 
   static net::URLRequestJob* Factory(net::URLRequest* request,
                                      net::NetworkDelegate* network_delegate,
@@ -56,7 +54,7 @@ class URLRequestSlowDownloadJob : public net::URLRequestJob {
  private:
   URLRequestSlowDownloadJob(net::URLRequest* request,
                             net::NetworkDelegate* network_delegate);
-  virtual ~URLRequestSlowDownloadJob();
+  ~URLRequestSlowDownloadJob() override;
 
   // Enum indicating where we are in the read after a call to
   // FillBufferHelper.

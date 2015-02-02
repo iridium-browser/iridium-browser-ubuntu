@@ -22,32 +22,22 @@ class CancelledRequest : public PermissionBubbleRequest {
         message_fragment_(cancelled->GetMessageTextFragment()),
         user_gesture_(cancelled->HasUserGesture()),
         hostname_(cancelled->GetRequestingHostname()) {}
-  virtual ~CancelledRequest() {}
+  ~CancelledRequest() override {}
 
-  virtual int GetIconID() const OVERRIDE {
-    return icon_;
-  }
-  virtual base::string16 GetMessageText() const OVERRIDE {
-    return message_text_;
-  }
-  virtual base::string16 GetMessageTextFragment() const OVERRIDE {
+  int GetIconID() const override { return icon_; }
+  base::string16 GetMessageText() const override { return message_text_; }
+  base::string16 GetMessageTextFragment() const override {
     return message_fragment_;
   }
-  virtual bool HasUserGesture() const OVERRIDE {
-    return user_gesture_;
-  }
-  virtual GURL GetRequestingHostname() const OVERRIDE {
-    return hostname_;
-  }
+  bool HasUserGesture() const override { return user_gesture_; }
+  GURL GetRequestingHostname() const override { return hostname_; }
 
   // These are all no-ops since the placeholder is non-forwarding.
-  virtual void PermissionGranted() OVERRIDE {}
-  virtual void PermissionDenied() OVERRIDE {}
-  virtual void Cancelled() OVERRIDE {}
+  void PermissionGranted() override {}
+  void PermissionDenied() override {}
+  void Cancelled() override {}
 
-  virtual void RequestFinished() OVERRIDE {
-    delete this;
-  }
+  void RequestFinished() override { delete this; }
 
  private:
   int icon_;

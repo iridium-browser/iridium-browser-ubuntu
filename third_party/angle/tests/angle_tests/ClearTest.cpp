@@ -1,9 +1,17 @@
 #include "ANGLETest.h"
 
-class ClearTest : public ANGLETest
+// Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
+typedef ::testing::Types<TFT<Gles::Three, Rend::D3D11>, TFT<Gles::Two, Rend::D3D11>, TFT<Gles::Two, Rend::D3D9>> TestFixtureTypes;
+TYPED_TEST_CASE(ClearTest, TestFixtureTypes);
+
+typedef ::testing::Types<TFT<Gles::Three, Rend::D3D11>> TestFixtureTypesES3;
+TYPED_TEST_CASE(ClearTestES3, TestFixtureTypesES3);
+
+template<typename T>
+class ClearTestBase : public ANGLETest
 {
-protected:
-    ClearTest()
+  protected:
+    ClearTestBase() : ANGLETest(T::GetGlesMajorVersion(), T::GetRequestedRenderer())
     {
         setWindowWidth(128);
         setWindowHeight(128);
@@ -12,7 +20,6 @@ protected:
         setConfigBlueBits(8);
         setConfigAlphaBits(8);
         setConfigDepthBits(24);
-        setClientVersion(3);
     }
 
     virtual void SetUp()
@@ -63,7 +70,15 @@ protected:
     GLuint mFBO;
 };
 
-TEST_F(ClearTest, ClearIssue)
+template <typename T>
+class ClearTest : public ClearTestBase<T>
+{};
+
+template <typename T>
+class ClearTestES3 : public ClearTestBase<T>
+{};
+
+TYPED_TEST(ClearTest, ClearIssue)
 {
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
@@ -104,7 +119,7 @@ TEST_F(ClearTest, ClearIssue)
 // Requires ES3
 // This tests a bug where in a masked clear when calling "ClearBuffer", we would
 // mistakenly clear every channel (including the masked-out ones)
-TEST_F(ClearTest, MaskedClearBufferBug)
+TYPED_TEST(ClearTestES3, MaskedClearBufferBug)
 {
     unsigned char pixelData[] = { 255, 255, 255, 255 };
 
@@ -141,7 +156,7 @@ TEST_F(ClearTest, MaskedClearBufferBug)
     glDeleteTextures(2, textures);
 }
 
-TEST_F(ClearTest, BadFBOSerialBug)
+TYPED_TEST(ClearTestES3, BadFBOSerialBug)
 {
     // First make a simple framebuffer, and clear it to green
     glBindFramebuffer(GL_FRAMEBUFFER, mFBO);

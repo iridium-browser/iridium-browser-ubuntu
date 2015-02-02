@@ -20,24 +20,23 @@ class HidConnectionLinux : public HidConnection,
 
  private:
   friend class base::RefCountedThreadSafe<HidConnectionLinux>;
-  virtual ~HidConnectionLinux();
+  ~HidConnectionLinux() override;
 
   // HidConnection implementation.
-  virtual void PlatformClose() OVERRIDE;
-  virtual void PlatformRead(const ReadCallback& callback) OVERRIDE;
-  virtual void PlatformWrite(scoped_refptr<net::IOBuffer> buffer,
-                             size_t size,
-                             const WriteCallback& callback) OVERRIDE;
-  virtual void PlatformGetFeatureReport(uint8_t report_id,
-                                        const ReadCallback& callback) OVERRIDE;
-  virtual void PlatformSendFeatureReport(
-      scoped_refptr<net::IOBuffer> buffer,
-      size_t size,
-      const WriteCallback& callback) OVERRIDE;
+  void PlatformClose() override;
+  void PlatformRead(const ReadCallback& callback) override;
+  void PlatformWrite(scoped_refptr<net::IOBuffer> buffer,
+                     size_t size,
+                     const WriteCallback& callback) override;
+  void PlatformGetFeatureReport(uint8_t report_id,
+                                const ReadCallback& callback) override;
+  void PlatformSendFeatureReport(scoped_refptr<net::IOBuffer> buffer,
+                                 size_t size,
+                                 const WriteCallback& callback) override;
 
   // base::MessagePumpLibevent::Watcher implementation.
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
-  virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE;
+  void OnFileCanReadWithoutBlocking(int fd) override;
+  void OnFileCanWriteWithoutBlocking(int fd) override;
 
   void Disconnect();
 

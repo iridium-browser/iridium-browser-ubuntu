@@ -8,8 +8,8 @@
     return false;
   }
 
-  const {{class_name}}* MOJO_ALLOW_UNUSED object =
-      static_cast<const {{class_name}}*>(data);
+  const {{class_name}}* object = static_cast<const {{class_name}}*>(data);
+  MOJO_ALLOW_UNUSED_LOCAL(object);
 
 {%-   for packed_field in struct.packed.packed_fields %}
 {%-     set name = packed_field.field.name %}
@@ -28,11 +28,20 @@
     ReportValidationError(mojo::internal::VALIDATION_ERROR_ILLEGAL_POINTER);
     return false;
   }
-{%-       if kind|is_any_array_kind or kind|is_string_kind %}
+{%-       if kind|is_array_kind or kind|is_string_kind %}
   if (!{{wrapper_type}}::Data_::Validate<
           {{kind|get_array_validate_params|indent(10)}}>(
               mojo::internal::DecodePointerRaw(&object->{{name}}.offset),
               bounds_checker)) {
+{%-       elif kind|is_map_kind %}
+  if (!{{wrapper_type}}::Data_::Validate<
+          {{kind.value_kind|get_map_validate_params|indent(10)}}>(
+              mojo::internal::DecodePointerRaw(&object->{{name}}.offset),
+              bounds_checker)) {
+{%-       elif kind|is_struct_kind %}
+  if (!{{kind|get_name_for_kind}}::Data_::Validate(
+          mojo::internal::DecodePointerRaw(&object->{{name}}.offset),
+          bounds_checker)) {
 {%-       else %}
   if (!{{wrapper_type}}::Data_::Validate(
           mojo::internal::DecodePointerRaw(&object->{{name}}.offset),

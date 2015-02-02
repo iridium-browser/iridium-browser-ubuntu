@@ -10,8 +10,10 @@
         }
     ],
     "dependencies": [
+        "platform",
         "sdk",
         "ui"
     ],
-    "scripts": ["DevicesView.js"]
+    "scripts": [ "DevicesView.js" ],
+    "stylesheets": [ "devicesView.css" ]
 }

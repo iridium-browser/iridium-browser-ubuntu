@@ -20,10 +20,10 @@ class TestTransactionObserver :
   public TransactionObserver {
  public:
   TestTransactionObserver();
-  virtual ~TestTransactionObserver();
-  virtual void OnTransactionWrite(
+  ~TestTransactionObserver() override;
+  void OnTransactionWrite(
       const ImmutableWriteTransactionInfo& write_transaction_info,
-      ModelTypeSet models_with_changes) OVERRIDE;
+      ModelTypeSet models_with_changes) override;
 
   // Returns the number of transactions observed.
   //

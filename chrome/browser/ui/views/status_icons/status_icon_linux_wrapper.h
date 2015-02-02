@@ -16,21 +16,21 @@ class StatusIconLinuxWrapper : public StatusIcon,
                                public views::StatusIconLinux::Delegate,
                                public StatusIconMenuModel::Observer {
  public:
-  virtual ~StatusIconLinuxWrapper();
+  ~StatusIconLinuxWrapper() override;
 
   // StatusIcon overrides:
-  virtual void SetImage(const gfx::ImageSkia& image) OVERRIDE;
-  virtual void SetToolTip(const base::string16& tool_tip) OVERRIDE;
-  virtual void DisplayBalloon(const gfx::ImageSkia& icon,
-                              const base::string16& title,
-                              const base::string16& contents) OVERRIDE;
+  void SetImage(const gfx::ImageSkia& image) override;
+  void SetToolTip(const base::string16& tool_tip) override;
+  void DisplayBalloon(const gfx::ImageSkia& icon,
+                      const base::string16& title,
+                      const base::string16& contents) override;
 
   // StatusIconLinux::Delegate overrides:
-  virtual void OnClick() OVERRIDE;
-  virtual bool HasClickAction() OVERRIDE;
+  void OnClick() override;
+  bool HasClickAction() override;
 
   // StatusIconMenuModel::Observer overrides:
-  virtual void OnMenuStateChanged() OVERRIDE;
+  void OnMenuStateChanged() override;
 
   static StatusIconLinuxWrapper* CreateWrappedStatusIcon(
       const gfx::ImageSkia& image,
@@ -41,8 +41,7 @@ class StatusIconLinuxWrapper : public StatusIcon,
   // Invoked after a call to SetContextMenu() to let the platform-specific
   // subclass update the native context menu based on the new model. If NULL is
   // passed, subclass should destroy the native context menu.
-  virtual void UpdatePlatformContextMenu(
-      StatusIconMenuModel* model) OVERRIDE;
+  void UpdatePlatformContextMenu(StatusIconMenuModel* model) override;
 
  private:
   // A status icon wrapper should only be created by calling

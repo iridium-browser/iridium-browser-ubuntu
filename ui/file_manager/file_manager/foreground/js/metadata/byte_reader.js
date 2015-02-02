@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * @constructor
  * @param {ArrayBuffer} arrayBuffer An array of buffers to be read from.
@@ -305,7 +303,7 @@ ByteReader.prototype.validateRead = function(size, opt_end) {
   if (typeof opt_end == 'undefined')
     opt_end = this.view_.byteLength;
 
-  ByteReader.validateRead(this.view_, this.pos_, size, opt_end);
+  ByteReader.validateRead(this.pos_, size, opt_end);
 };
 
 /**
@@ -439,7 +437,7 @@ ByteReader.prototype.readSlice = function(size, opt_end,
 
   var arrayConstructor = opt_arrayConstructor || Uint8Array;
   var slice = new arrayConstructor(
-      this.view_.buffer, this.view_.byteOffset + this.pos, size);
+      this.view_.buffer, this.view_.byteOffset + this.pos_, size);
   this.pos_ += size;
 
   return slice;

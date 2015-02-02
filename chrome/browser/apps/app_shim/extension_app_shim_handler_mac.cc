@@ -28,6 +28,7 @@
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/common/constants.h"
 #include "ui/base/cocoa/focus_window_set.h"
 
 using extensions::AppWindow;
@@ -92,8 +93,7 @@ class EnableViaPrompt : public ExtensionEnableFlowDelegate {
         callback_(callback) {
   }
 
-  virtual ~EnableViaPrompt() {
-  }
+  ~EnableViaPrompt() override {}
 
   void Run() {
     flow_.reset(new ExtensionEnableFlow(profile_, extension_id_, this));
@@ -103,12 +103,12 @@ class EnableViaPrompt : public ExtensionEnableFlowDelegate {
 
  private:
   // ExtensionEnableFlowDelegate overrides.
-  virtual void ExtensionEnableFlowFinished() OVERRIDE {
+  void ExtensionEnableFlowFinished() override {
     callback_.Run();
     delete this;
   }
 
-  virtual void ExtensionEnableFlowAborted(bool user_initiated) OVERRIDE {
+  void ExtensionEnableFlowAborted(bool user_initiated) override {
     callback_.Run();
     delete this;
   }
@@ -186,7 +186,8 @@ void ExtensionAppShimHandler::Delegate::LaunchApp(
   CoreAppLauncherHandler::RecordAppLaunchType(
       extension_misc::APP_LAUNCH_CMD_LINE_APP, extension->GetType());
   if (files.empty()) {
-    apps::LaunchPlatformApp(profile, extension);
+    apps::LaunchPlatformApp(
+        profile, extension, extensions::SOURCE_COMMAND_LINE);
   } else {
     for (std::vector<base::FilePath>::const_iterator it = files.begin();
          it != files.end(); ++it) {

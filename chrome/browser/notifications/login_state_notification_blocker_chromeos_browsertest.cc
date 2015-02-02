@@ -30,12 +30,12 @@ class LoginStateNotificationBlockerChromeOSBrowserTest
         state_changed_count_(0) {}
   virtual ~LoginStateNotificationBlockerChromeOSBrowserTest() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     chromeos::LoginState::Get()->set_always_logged_in(false);
     chromeos::LoginManagerTest::SetUpOnMainThread();
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  virtual void TearDownOnMainThread() override {
     if (blocker_)
       blocker_->RemoveObserver(this);
     blocker_.reset();
@@ -51,7 +51,7 @@ class LoginStateNotificationBlockerChromeOSBrowserTest
 
   // message_center::NotificationBlocker::Observer ovverrides:
   virtual void OnBlockingStateChanged(
-      message_center::NotificationBlocker* blocker) OVERRIDE {
+      message_center::NotificationBlocker* blocker) override {
     state_changed_count_++;
   }
 
@@ -80,8 +80,9 @@ IN_PROC_BROWSER_TEST_F(LoginStateNotificationBlockerChromeOSBrowserTest,
   chromeos::StartupUtils::MarkOobeCompleted();
 }
 
+ // Disabled due to flakiness. See: http://crbug.com/421325.
 IN_PROC_BROWSER_TEST_F(LoginStateNotificationBlockerChromeOSBrowserTest,
-                       BaseTest) {
+                       DISABLED_BaseTest) {
   CreateBlocker();
   message_center::NotifierId notifier_id(
       message_center::NotifierId::APPLICATION, "test-notifier");

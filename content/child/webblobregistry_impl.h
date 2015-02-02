@@ -10,6 +10,10 @@
 #include "base/memory/ref_counted.h"
 #include "third_party/WebKit/public/platform/WebBlobRegistry.h"
 
+namespace blink {
+class WebThreadSafeData;
+}  // namespace blink
+
 namespace content {
 class ThreadSafeSender;
 
@@ -32,7 +36,7 @@ class WebBlobRegistryImpl : public blink::WebBlobRegistry {
   virtual void registerStreamURL(const blink::WebURL& url,
                                  const blink::WebURL& src_url);
   virtual void addDataToStream(const blink::WebURL& url,
-                               blink::WebThreadSafeData& data);
+                               const char* data, size_t length);
   virtual void finalizeStream(const blink::WebURL& url);
   virtual void abortStream(const blink::WebURL& url);
   virtual void unregisterStreamURL(const blink::WebURL& url);

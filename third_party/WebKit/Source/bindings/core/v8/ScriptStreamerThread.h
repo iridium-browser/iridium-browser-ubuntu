@@ -42,11 +42,6 @@ private:
         return !!m_thread;
     }
 
-    void markAsCompleted(TaskSynchronizer* taskSynchronizer)
-    {
-        taskSynchronizer->taskCompleted();
-    }
-
     blink::WebThread& platformThread();
 
     // At the moment, we only use one thread, so we can only stream one script
@@ -59,8 +54,8 @@ private:
 class ScriptStreamingTask : public WebThread::Task {
     WTF_MAKE_NONCOPYABLE(ScriptStreamingTask);
 public:
-    ScriptStreamingTask(v8::ScriptCompiler::ScriptStreamingTask*, ScriptStreamer*);
-    virtual void run() OVERRIDE;
+    ScriptStreamingTask(WTF::PassOwnPtr<v8::ScriptCompiler::ScriptStreamingTask>, ScriptStreamer*);
+    virtual void run() override;
 
 private:
     WTF::OwnPtr<v8::ScriptCompiler::ScriptStreamingTask> m_v8Task;

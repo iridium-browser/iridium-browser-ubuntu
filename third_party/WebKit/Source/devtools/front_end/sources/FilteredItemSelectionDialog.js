@@ -38,14 +38,10 @@ WebInspector.FilteredItemSelectionDialog = function(delegate)
 {
     WebInspector.DialogDelegate.call(this);
 
-    if (!WebInspector.FilteredItemSelectionDialog._stylesLoaded) {
-        WebInspector.View.createStyleElement("filteredItemSelectionDialog.css");
-        WebInspector.FilteredItemSelectionDialog._stylesLoaded = true;
-    }
-
-    this.element = document.createElement("div");
+    this.element = createElement("div");
     this.element.className = "filtered-item-list-dialog";
     this.element.addEventListener("keydown", this._onKeyDown.bind(this), false);
+    this.element.appendChild(WebInspector.View.createStyleElement("sources/filteredItemSelectionDialog.css"));
 
     this._promptElement = this.element.createChild("input", "monospace");
     this._promptElement.addEventListener("input", this._onInput.bind(this), false);
@@ -143,7 +139,7 @@ WebInspector.FilteredItemSelectionDialog.prototype = {
      */
     _createItemElement: function(index)
     {
-        var itemElement = document.createElement("div");
+        var itemElement = createElement("div");
         itemElement.className = "filtered-item-list-dialog-item " + (this._renderAsTwoRows ? "two-rows" : "one-row");
         itemElement._titleElement = itemElement.createChild("div", "filtered-item-list-dialog-title");
         itemElement._subtitleElement = itemElement.createChild("div", "filtered-item-list-dialog-subtitle");
@@ -363,7 +359,7 @@ WebInspector.FilteredItemSelectionDialog.prototype = {
         if (!this._rowHeight) {
             var delegateIndex = this._filteredItems[index];
             var element = this._createItemElement(delegateIndex);
-            this._rowHeight = element.measurePreferredSize(this._viewportControl.contentElement()).height;
+            this._rowHeight = WebInspector.measurePreferredSize(element, this._viewportControl.contentElement()).height;
         }
         return this._rowHeight;
     },

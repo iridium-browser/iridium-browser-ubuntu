@@ -11,16 +11,18 @@
 #include "android_webview/browser/jni_dependency_factory.h"
 #include "android_webview/browser/net/aw_url_request_context_getter.h"
 #include "android_webview/browser/net/init_native_callback.h"
+#include "base/base_paths_android.h"
 #include "base/bind.h"
+#include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/pref_service_factory.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_config_service.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_prefs.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_service.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/visitedlink/browser/visitedlink_master.h"
 #include "content/public/browser/browser_thread.h"
@@ -28,6 +30,7 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "net/cookies/cookie_store.h"
+#include "net/proxy/proxy_config_service_android.h"
 #include "net/proxy/proxy_service.h"
 
 using base::FilePath;
@@ -43,12 +46,33 @@ namespace {
 void HandleReadError(PersistentPrefStore::PrefReadError error) {
 }
 
+void DeleteDirRecursively(const base::FilePath& path) {
+  if (!base::DeleteFile(path, true)) {
+    // Deleting a non-existent file is considered successful, so this will
+    // trigger only in case of real errors.
+    LOG(WARNING) << "Failed to delete " << path.AsUTF8Unsafe();
+  }
+}
+
 AwBrowserContext* g_browser_context = NULL;
+
+net::ProxyConfigService* CreateProxyConfigService() {
+  net::ProxyConfigServiceAndroid* config_service =
+      static_cast<net::ProxyConfigServiceAndroid*>(
+          net::ProxyService::CreateSystemProxyConfigService(
+              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+              nullptr /* Ignored on Android */ ));
+  config_service->set_exclude_pac_url(true);
+  return config_service;
+}
 
 }  // namespace
 
 // Data reduction proxy is disabled by default.
 bool AwBrowserContext::data_reduction_proxy_enabled_ = false;
+
+// Delete the legacy cache dir (in the app data dir) in 10 seconds after init.
+int AwBrowserContext::legacy_cache_removal_delay_ms_ = 10000;
 
 AwBrowserContext::AwBrowserContext(
     const FilePath path,
@@ -102,6 +126,11 @@ void AwBrowserContext::SetDataReductionProxyEnabled(bool enabled) {
   proxy_settings->SetDataReductionProxyEnabled(data_reduction_proxy_enabled_);
 }
 
+// static
+void AwBrowserContext::SetLegacyCacheRemovalDelayForTest(int delay_ms) {
+  legacy_cache_removal_delay_ms_ = delay_ms;
+}
+
 void AwBrowserContext::PreMainMessageLoopRun() {
   cookie_store_ = CreateCookieStore(this);
   data_reduction_proxy_settings_.reset(
@@ -112,10 +141,7 @@ void AwBrowserContext::PreMainMessageLoopRun() {
       data_reduction_proxy_config_service(
           new DataReductionProxyConfigService(
               scoped_ptr<net::ProxyConfigService>(
-                  net::ProxyService::CreateSystemProxyConfigService(
-                      BrowserThread::GetMessageLoopProxyForThread(
-                          BrowserThread::IO),
-                          NULL /* Ignored on Android */)).Pass()));
+                  CreateProxyConfigService()).Pass()));
   if (data_reduction_proxy_settings_.get()) {
       data_reduction_proxy_configurator_.reset(
           new data_reduction_proxy::DataReductionProxyConfigTracker(
@@ -127,8 +153,24 @@ void AwBrowserContext::PreMainMessageLoopRun() {
         data_reduction_proxy_configurator_.get());
   }
 
+  FilePath cache_path;
+  const FilePath fallback_cache_dir =
+      GetPath().Append(FILE_PATH_LITERAL("Cache"));
+  if (PathService::Get(base::DIR_CACHE, &cache_path)) {
+    cache_path = cache_path.Append(
+        FILE_PATH_LITERAL("org.chromium.android_webview"));
+    // Delay the legacy dir removal to not impact startup performance.
+    BrowserThread::PostDelayedTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::Bind(&DeleteDirRecursively, fallback_cache_dir),
+        base::TimeDelta::FromMilliseconds(legacy_cache_removal_delay_ms_));
+  } else {
+    cache_path = fallback_cache_dir;
+    LOG(WARNING) << "Failed to get cache directory for Android WebView. "
+                 << "Using app data directory as a fallback.";
+  }
   url_request_context_getter_ =
-      new AwURLRequestContextGetter(GetPath(),
+      new AwURLRequestContextGetter(cache_path,
                                     cookie_store_.get(),
                                     data_reduction_proxy_config_service.Pass());
 
@@ -153,10 +195,10 @@ net::URLRequestContextGetter* AwBrowserContext::CreateRequestContext(
   // content::StoragePartitionImplMap::Create(). This is not fixable
   // until http://crbug.com/159193. Until then, assert that the context
   // has already been allocated and just handle setting the protocol_handlers.
-  DCHECK(url_request_context_getter_);
+  DCHECK(url_request_context_getter_.get());
   url_request_context_getter_->SetHandlersAndInterceptors(
       protocol_handlers, request_interceptors.Pass());
-  return url_request_context_getter_;
+  return url_request_context_getter_.get();
 }
 
 net::URLRequestContextGetter*
@@ -204,7 +246,6 @@ void AwBrowserContext::CreateUserPrefServiceIfNecessary() {
   pref_registry->RegisterDoublePref(
       autofill::prefs::kAutofillNegativeUploadRate, 0.0);
   data_reduction_proxy::RegisterSimpleProfilePrefs(pref_registry);
-  data_reduction_proxy::RegisterPrefs(pref_registry);
 
   base::PrefServiceFactory pref_service_factory;
   pref_service_factory.set_user_prefs(make_scoped_refptr(new AwPrefStore()));
@@ -217,6 +258,7 @@ void AwBrowserContext::CreateUserPrefServiceIfNecessary() {
     data_reduction_proxy_settings_->InitDataReductionProxySettings(
         user_pref_service_.get(),
         GetRequestContext());
+    data_reduction_proxy_settings_->MaybeActivateDataReductionProxy(true);
 
     SetDataReductionProxyEnabled(data_reduction_proxy_enabled_);
   }
@@ -287,7 +329,10 @@ content::PushMessagingService* AwBrowserContext::GetPushMessagingService() {
 }
 
 content::SSLHostStateDelegate* AwBrowserContext::GetSSLHostStateDelegate() {
-  return NULL;
+  if (!ssl_host_state_delegate_.get()) {
+    ssl_host_state_delegate_.reset(new AwSSLHostStateDelegate());
+  }
+  return ssl_host_state_delegate_.get();
 }
 
 void AwBrowserContext::RebuildTable(

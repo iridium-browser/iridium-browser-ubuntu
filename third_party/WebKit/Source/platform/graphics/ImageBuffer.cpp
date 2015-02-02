@@ -138,6 +138,11 @@ void ImageBuffer::notifySurfaceInvalid()
         m_client->notifySurfaceInvalid();
 }
 
+PassRefPtr<SkImage> ImageBuffer::newImageSnapshot() const
+{
+    return m_surface->newImageSnapshot();
+}
+
 static SkBitmap deepSkBitmapCopy(const SkBitmap& bitmap)
 {
     SkBitmap tmp;
@@ -244,7 +249,7 @@ bool ImageBuffer::copyRenderingResultsFromDrawingBuffer(DrawingBuffer* drawingBu
 
     m_surface->invalidateCachedBitmap();
     bool result = drawingBuffer->copyToPlatformTexture(context3D, tex, GL_RGBA,
-        GL_UNSIGNED_BYTE, 0, true, false, fromFrontBuffer);
+        GL_UNSIGNED_BYTE, 0, true, false, fromFrontBuffer ? DrawingBuffer::Front : DrawingBuffer::Back);
 
     if (result) {
         m_surface->didModifyBackingTexture();
@@ -261,7 +266,7 @@ void ImageBuffer::draw(GraphicsContext* context, const FloatRect& destRect, cons
     FloatRect srcRect = srcPtr ? *srcPtr : FloatRect(FloatPoint(), size());
     RefPtr<SkPicture> picture = m_surface->getPicture();
     if (picture) {
-        context->drawPicture(picture.release(), destRect, srcRect, op, blendMode);
+        context->drawPicture(picture.get(), destRect, srcRect, op, blendMode);
         return;
     }
 

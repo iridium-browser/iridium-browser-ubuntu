@@ -50,9 +50,9 @@ storage::FileSystemURL CreateNativeLocalFileSystemURL(
 class FileHandlersMimeUtilTest : public testing::Test {
  protected:
   FileHandlersMimeUtilTest() {}
-  virtual ~FileHandlersMimeUtilTest() {}
+  ~FileHandlersMimeUtilTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     file_system_context_ =
         content::CreateFileSystemContextForTesting(NULL, data_dir_.path());

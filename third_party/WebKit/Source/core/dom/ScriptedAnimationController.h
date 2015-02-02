@@ -31,6 +31,7 @@
 #include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
+#include "wtf/text/AtomicString.h"
 #include "wtf/text/StringImpl.h"
 
 namespace blink {
@@ -64,12 +65,13 @@ public:
     void suspend();
     void resume();
 
+    void dispatchEventsAndCallbacksForPrinting();
 private:
     explicit ScriptedAnimationController(Document*);
 
     void scheduleAnimationIfNeeded();
 
-    void dispatchEvents();
+    void dispatchEvents(const AtomicString& eventInterfaceFilter = AtomicString());
     void executeCallbacks(double monotonicTimeNow);
     void callMediaQueryListListeners();
 

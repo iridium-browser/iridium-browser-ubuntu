@@ -43,7 +43,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 
-#if defined(ENABLE_FULL_PRINTING) && !defined(OS_CHROMEOS)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OS_CHROMEOS)
 #define CLOUD_PRINT_CONNECTOR_UI_AVAILABLE
 #endif
 
@@ -392,12 +392,11 @@ void LocalDiscoveryUIHandler::SwitchToSetupWiFi(
 }
 
 void LocalDiscoveryUIHandler::ConfirmSecurityCode(
-    const std::string& confirmation_code,
     const ResultCallback& callback) {
   device_code_callback_ = callback;
   web_ui()->CallJavascriptFunction(
       "local_discovery.onRegistrationConfirmDeviceCode",
-      base::StringValue(confirmation_code));
+      base::StringValue("1234"));
 }
 
 void LocalDiscoveryUIHandler::RestoreWifi(const ResultCallback& callback) {

@@ -33,6 +33,7 @@
 #include "libEGL/Surface.h"
 
 #include <sstream>
+#include <iterator>
 
 namespace gl
 {
@@ -90,13 +91,13 @@ Context::Context(int clientVersion, const gl::Context *shareContext, rx::Rendere
     bindRenderbuffer(0);
 
     bindGenericUniformBuffer(0);
-    for (int i = 0; i < IMPLEMENTATION_MAX_COMBINED_SHADER_UNIFORM_BUFFERS; i++)
+    for (unsigned int i = 0; i < mCaps.maxCombinedUniformBlocks; i++)
     {
         bindIndexedUniformBuffer(0, i, 0, -1);
     }
 
     bindGenericTransformFeedbackBuffer(0);
-    for (int i = 0; i < IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS; i++)
+    for (unsigned int i = 0; i < mCaps.maxTransformFeedbackSeparateAttributes; i++)
     {
         bindIndexedTransformFeedbackBuffer(0, i, 0, -1);
     }
@@ -118,8 +119,6 @@ Context::Context(int clientVersion, const gl::Context *shareContext, rx::Rendere
     mResetStatus = GL_NO_ERROR;
     mResetStrategy = (notifyResets ? GL_LOSE_CONTEXT_ON_RESET_EXT : GL_NO_RESET_NOTIFICATION_EXT);
     mRobustAccess = robustAccess;
-
-    mState.setContext(this);
 }
 
 Context::~Context()
@@ -241,14 +240,9 @@ GLuint Context::createRenderbuffer()
     return mResourceManager->createRenderbuffer();
 }
 
-GLsync Context::createFenceSync(GLenum condition)
+GLsync Context::createFenceSync()
 {
     GLuint handle = mResourceManager->createFenceSync();
-
-    gl::FenceSync *fenceSync = mResourceManager->getFenceSync(handle);
-    ASSERT(fenceSync);
-
-    fenceSync->set(condition);
 
     return reinterpret_cast<GLsync>(handle);
 }
@@ -293,7 +287,7 @@ GLuint Context::createFenceNV()
 {
     GLuint handle = mFenceNVHandleAllocator.allocate();
 
-    mFenceNVMap[handle] = new FenceNV(mRenderer);
+    mFenceNVMap[handle] = new FenceNV(mRenderer->createFenceNV());
 
     return handle;
 }
@@ -354,7 +348,7 @@ void Context::deleteFenceSync(GLsync fenceSync)
     // wait commands finish. However, since the name becomes invalid, we cannot query the fence,
     // and since our API is currently designed for being called from a single thread, we can delete
     // the fence immediately.
-    mResourceManager->deleteFenceSync(reinterpret_cast<GLuint>(fenceSync));
+    mResourceManager->deleteFenceSync(reinterpret_cast<uintptr_t>(fenceSync));
 }
 
 void Context::deleteVertexArray(GLuint vertexArray)
@@ -460,7 +454,7 @@ Renderbuffer *Context::getRenderbuffer(GLuint handle)
 
 FenceSync *Context::getFenceSync(GLsync handle) const
 {
-    return mResourceManager->getFenceSync(reinterpret_cast<GLuint>(handle));
+    return mResourceManager->getFenceSync(reinterpret_cast<uintptr_t>(handle));
 }
 
 VertexArray *Context::getVertexArray(GLuint handle) const
@@ -639,33 +633,44 @@ void Context::useProgram(GLuint program)
     }
 }
 
-void Context::linkProgram(GLuint program)
+Error Context::linkProgram(GLuint program)
 {
     Program *programObject = mResourceManager->getProgram(program);
 
-    bool linked = programObject->link(getCaps());
+    Error error = programObject->link(getCaps());
+    if (error.isError())
+    {
+        return error;
+    }
 
     // if the current program was relinked successfully we
     // need to install the new executables
-    if (linked && program == mState.getCurrentProgramId())
+    if (programObject->isLinked() && program == mState.getCurrentProgramId())
     {
         mState.setCurrentProgramBinary(programObject->getProgramBinary());
     }
+
+    return Error(GL_NO_ERROR);
 }
 
-void Context::setProgramBinary(GLuint program, GLenum binaryFormat, const void *binary, GLint length)
+Error Context::setProgramBinary(GLuint program, GLenum binaryFormat, const void *binary, GLint length)
 {
     Program *programObject = mResourceManager->getProgram(program);
 
-    bool loaded = programObject->setProgramBinary(binaryFormat, binary, length);
+    Error error = programObject->setProgramBinary(binaryFormat, binary, length);
+    if (error.isError())
+    {
+        return error;
+    }
 
     // if the current program was reloaded successfully we
     // need to install the new executables
-    if (loaded && program == mState.getCurrentProgramId())
+    if (programObject->isLinked() && program == mState.getCurrentProgramId())
     {
         mState.setCurrentProgramBinary(programObject->getProgramBinary());
     }
 
+    return Error(GL_NO_ERROR);
 }
 
 void Context::bindTransformFeedback(GLuint transformFeedback)
@@ -1310,12 +1315,16 @@ bool Context::getIndexedQueryParameterInfo(GLenum target, GLenum *type, unsigned
 
 // Applies the render target surface, depth stencil surface, viewport rectangle and
 // scissor rectangle to the renderer
-void Context::applyRenderTarget(GLenum drawMode, bool ignoreViewport)
+Error Context::applyRenderTarget(GLenum drawMode, bool ignoreViewport)
 {
     Framebuffer *framebufferObject = mState.getDrawFramebuffer();
     ASSERT(framebufferObject && framebufferObject->completeness() == GL_FRAMEBUFFER_COMPLETE);
 
-    mRenderer->applyRenderTarget(framebufferObject);
+    gl::Error error = mRenderer->applyRenderTarget(framebufferObject);
+    if (error.isError())
+    {
+        return error;
+    }
 
     float nearZ, farZ;
     mState.getDepthRange(&nearZ, &farZ);
@@ -1323,10 +1332,12 @@ void Context::applyRenderTarget(GLenum drawMode, bool ignoreViewport)
                            ignoreViewport);
 
     mRenderer->setScissorRectangle(mState.getScissor(), mState.isScissorTestEnabled());
+
+    return gl::Error(GL_NO_ERROR);
 }
 
 // Applies the fixed-function state (culling, depth test, alpha blending, stenciling, etc) to the Direct3D 9 device
-void Context::applyState(GLenum drawMode)
+Error Context::applyState(GLenum drawMode)
 {
     Framebuffer *framebufferObject = mState.getDrawFramebuffer();
     int samples = framebufferObject->getSamples();
@@ -1335,7 +1346,11 @@ void Context::applyState(GLenum drawMode)
     rasterizer.pointDrawMode = (drawMode == GL_POINTS);
     rasterizer.multiSample = (samples != 0);
 
-    mRenderer->setRasterizerState(rasterizer);
+    Error error = mRenderer->setRasterizerState(rasterizer);
+    if (error.isError())
+    {
+        return error;
+    }
 
     unsigned int mask = 0;
     if (mState.isSampleCoverageEnabled())
@@ -1345,7 +1360,6 @@ void Context::applyState(GLenum drawMode)
         mState.getSampleCoverageParams(&coverageValue, &coverageInvert);
         if (coverageValue != 0)
         {
-
             float threshold = 0.5f;
 
             for (int i = 0; i < samples; ++i)
@@ -1369,28 +1383,40 @@ void Context::applyState(GLenum drawMode)
     {
         mask = 0xFFFFFFFF;
     }
-    mRenderer->setBlendState(framebufferObject, mState.getBlendState(), mState.getBlendColor(), mask);
+    error = mRenderer->setBlendState(framebufferObject, mState.getBlendState(), mState.getBlendColor(), mask);
+    if (error.isError())
+    {
+        return error;
+    }
 
-    mRenderer->setDepthStencilState(mState.getDepthStencilState(), mState.getStencilRef(), mState.getStencilBackRef(),
-                                    rasterizer.frontFace == GL_CCW);
+    error = mRenderer->setDepthStencilState(mState.getDepthStencilState(), mState.getStencilRef(), mState.getStencilBackRef(),
+                                            rasterizer.frontFace == GL_CCW);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    return Error(GL_NO_ERROR);
 }
 
 // Applies the shaders and shader constants to the Direct3D 9 device
-void Context::applyShaders(ProgramBinary *programBinary, bool transformFeedbackActive)
+Error Context::applyShaders(ProgramBinary *programBinary, bool transformFeedbackActive)
 {
-    const VertexAttribute *vertexAttributes = mState.getVertexArray()->getVertexAttributes();
-
     VertexFormat inputLayout[MAX_VERTEX_ATTRIBS];
-    VertexFormat::GetInputLayout(inputLayout, programBinary, vertexAttributes, mState.getVertexAttribCurrentValues());
+    VertexFormat::GetInputLayout(inputLayout, programBinary, mState);
 
     const Framebuffer *fbo = mState.getDrawFramebuffer();
 
-    mRenderer->applyShaders(programBinary, inputLayout, fbo, mState.getRasterizerState().rasterizerDiscard, transformFeedbackActive);
+    Error error = mRenderer->applyShaders(programBinary, inputLayout, fbo, mState.getRasterizerState().rasterizerDiscard, transformFeedbackActive);
+    if (error.isError())
+    {
+        return error;
+    }
 
-    programBinary->applyUniforms();
+    return programBinary->applyUniforms();
 }
 
-void Context::generateSwizzles(ProgramBinary *programBinary, SamplerType type)
+Error Context::generateSwizzles(ProgramBinary *programBinary, SamplerType type)
 {
     size_t samplerRange = programBinary->getUsedSamplerRange(type);
 
@@ -1403,23 +1429,40 @@ void Context::generateSwizzles(ProgramBinary *programBinary, SamplerType type)
             Texture* texture = getSamplerTexture(textureUnit, textureType);
             if (texture->getSamplerState().swizzleRequired())
             {
-                mRenderer->generateSwizzle(texture);
+                Error error = mRenderer->generateSwizzle(texture);
+                if (error.isError())
+                {
+                    return error;
+                }
             }
         }
     }
+
+    return Error(GL_NO_ERROR);
 }
 
-void Context::generateSwizzles(ProgramBinary *programBinary)
+Error Context::generateSwizzles(ProgramBinary *programBinary)
 {
-    generateSwizzles(programBinary, SAMPLER_VERTEX);
-    generateSwizzles(programBinary, SAMPLER_PIXEL);
+    Error error = generateSwizzles(programBinary, SAMPLER_VERTEX);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    error = generateSwizzles(programBinary, SAMPLER_PIXEL);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    return Error(GL_NO_ERROR);
 }
 
 // For each Direct3D sampler of either the pixel or vertex stage,
 // looks up the corresponding OpenGL texture image unit and texture type,
 // and sets the texture and its addressing/filtering state (or NULL when inactive).
-void Context::applyTextures(ProgramBinary *programBinary, SamplerType shaderType,
-                            const FramebufferTextureSerialArray &framebufferSerials, size_t framebufferSerialCount)
+Error Context::applyTextures(ProgramBinary *programBinary, SamplerType shaderType,
+                             const FramebufferTextureSerialArray &framebufferSerials, size_t framebufferSerialCount)
 {
     size_t samplerRange = programBinary->getUsedSamplerRange(shaderType);
     for (size_t samplerIndex = 0; samplerIndex < samplerRange; samplerIndex++)
@@ -1428,9 +1471,8 @@ void Context::applyTextures(ProgramBinary *programBinary, SamplerType shaderType
         GLint textureUnit = programBinary->getSamplerMapping(shaderType, samplerIndex, getCaps());
         if (textureUnit != -1)
         {
-            SamplerState sampler;
-            Texture* texture = getSamplerTexture(textureUnit, textureType);
-            texture->getSamplerStateWithNativeOffset(&sampler);
+            Texture *texture = getSamplerTexture(textureUnit, textureType);
+            SamplerState sampler = texture->getSamplerState();
 
             Sampler *samplerObject = mState.getSampler(textureUnit);
             if (samplerObject)
@@ -1442,20 +1484,37 @@ void Context::applyTextures(ProgramBinary *programBinary, SamplerType shaderType
             if (texture->isSamplerComplete(sampler, mTextureCaps, mExtensions, mClientVersion) &&
                 !std::binary_search(framebufferSerials.begin(), framebufferSerials.begin() + framebufferSerialCount, texture->getTextureSerial()))
             {
-                mRenderer->setSamplerState(shaderType, samplerIndex, sampler);
-                mRenderer->setTexture(shaderType, samplerIndex, texture);
+                Error error = mRenderer->setSamplerState(shaderType, samplerIndex, texture, sampler);
+                if (error.isError())
+                {
+                    return error;
+                }
+
+                error = mRenderer->setTexture(shaderType, samplerIndex, texture);
+                if (error.isError())
+                {
+                    return error;
+                }
             }
             else
             {
                 // Texture is not sampler complete or it is in use by the framebuffer.  Bind the incomplete texture.
                 Texture *incompleteTexture = getIncompleteTexture(textureType);
-                mRenderer->setTexture(shaderType, samplerIndex, incompleteTexture);
+                gl::Error error = mRenderer->setTexture(shaderType, samplerIndex, incompleteTexture);
+                if (error.isError())
+                {
+                    return error;
+                }
             }
         }
         else
         {
             // No texture bound to this slot even though it is used by the shader, bind a NULL texture
-            mRenderer->setTexture(shaderType, samplerIndex, NULL);
+            Error error = mRenderer->setTexture(shaderType, samplerIndex, NULL);
+            if (error.isError())
+            {
+                return error;
+            }
         }
     }
 
@@ -1464,20 +1523,37 @@ void Context::applyTextures(ProgramBinary *programBinary, SamplerType shaderType
                                                         : mCaps.maxVertexTextureImageUnits;
     for (size_t samplerIndex = samplerRange; samplerIndex < samplerCount; samplerIndex++)
     {
-        mRenderer->setTexture(shaderType, samplerIndex, NULL);
+        Error error = mRenderer->setTexture(shaderType, samplerIndex, NULL);
+        if (error.isError())
+        {
+            return error;
+        }
     }
+
+    return Error(GL_NO_ERROR);
 }
 
-void Context::applyTextures(ProgramBinary *programBinary)
+Error Context::applyTextures(ProgramBinary *programBinary)
 {
     FramebufferTextureSerialArray framebufferSerials;
     size_t framebufferSerialCount = getBoundFramebufferTextureSerials(&framebufferSerials);
 
-    applyTextures(programBinary, SAMPLER_VERTEX, framebufferSerials, framebufferSerialCount);
-    applyTextures(programBinary, SAMPLER_PIXEL, framebufferSerials, framebufferSerialCount);
+    Error error = applyTextures(programBinary, SAMPLER_VERTEX, framebufferSerials, framebufferSerialCount);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    error = applyTextures(programBinary, SAMPLER_PIXEL, framebufferSerials, framebufferSerialCount);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    return Error(GL_NO_ERROR);
 }
 
-bool Context::applyUniformBuffers()
+Error Context::applyUniformBuffers()
 {
     Program *programObject = getProgram(mState.getCurrentProgramId());
     ProgramBinary *programBinary = programObject->getProgramBinary();
@@ -1491,7 +1567,7 @@ bool Context::applyUniformBuffers()
         if (mState.getIndexedUniformBuffer(blockBinding)->id() == 0)
         {
             // undefined behaviour
-            return false;
+            return gl::Error(GL_INVALID_OPERATION, "It is undefined behaviour to have a used but unbound uniform buffer.");
         }
         else
         {
@@ -1509,14 +1585,7 @@ bool Context::applyTransformFeedbackBuffers()
     TransformFeedback *curTransformFeedback = mState.getCurrentTransformFeedback();
     if (curTransformFeedback && curTransformFeedback->isStarted() && !curTransformFeedback->isPaused())
     {
-        Buffer *transformFeedbackBuffers[IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS];
-        GLintptr transformFeedbackOffsets[IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS];
-        for (size_t i = 0; i < IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS; i++)
-        {
-            transformFeedbackBuffers[i] = mState.getIndexedTransformFeedbackBuffer(i);
-            transformFeedbackOffsets[i] = mState.getIndexedTransformFeedbackBufferOffset(i);
-        }
-        mRenderer->applyTransformFeedbackBuffers(transformFeedbackBuffers, transformFeedbackOffsets);
+        mRenderer->applyTransformFeedbackBuffers(mState);
         return true;
     }
     else
@@ -1527,7 +1596,7 @@ bool Context::applyTransformFeedbackBuffers()
 
 void Context::markTransformFeedbackUsage()
 {
-    for (size_t i = 0; i < IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS; i++)
+    for (size_t i = 0; i < mCaps.maxTransformFeedbackSeparateAttributes; i++)
     {
         Buffer *buffer = mState.getIndexedTransformFeedbackBuffer(i);
         if (buffer)
@@ -1546,7 +1615,11 @@ Error Context::clear(GLbitfield mask)
 
     ClearParameters clearParams = mState.getClearParameters(mask);
 
-    applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    Error error = applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    if (error.isError())
+    {
+        return error;
+    }
 
     return mRenderer->clear(clearParams, mState.getDrawFramebuffer());
 }
@@ -1577,7 +1650,11 @@ Error Context::clearBufferfv(GLenum buffer, int drawbuffer, const float *values)
         clearParams.depthClearValue = values[0];
     }
 
-    applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    Error error = applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    if (error.isError())
+    {
+        return error;
+    }
 
     return mRenderer->clear(clearParams, mState.getDrawFramebuffer());
 }
@@ -1598,7 +1675,11 @@ Error Context::clearBufferuiv(GLenum buffer, int drawbuffer, const unsigned int 
     clearParams.colorUIClearValue = ColorUI(values[0], values[1], values[2], values[3]);
     clearParams.colorClearType = GL_UNSIGNED_INT;
 
-    applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    Error error = applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    if (error.isError())
+    {
+        return error;
+    }
 
     return mRenderer->clear(clearParams, mState.getDrawFramebuffer());
 }
@@ -1629,7 +1710,11 @@ Error Context::clearBufferiv(GLenum buffer, int drawbuffer, const int *values)
         clearParams.stencilClearValue = values[1];
     }
 
-    applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    Error error = applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    if (error.isError())
+    {
+        return error;
+    }
 
     return mRenderer->clear(clearParams, mState.getDrawFramebuffer());
 }
@@ -1648,7 +1733,11 @@ Error Context::clearBufferfi(GLenum buffer, int drawbuffer, float depth, int ste
     clearParams.clearStencil = true;
     clearParams.stencilClearValue = stencil;
 
-    applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    Error error = applyRenderTarget(GL_TRIANGLES, true);   // Clips the clear to the scissor rectangle but not the viewport
+    if (error.isError())
+    {
+        return error;
+    }
 
     return mRenderer->clear(clearParams, mState.getDrawFramebuffer());
 }
@@ -1666,86 +1755,125 @@ Error Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height,
                                  reinterpret_cast<uint8_t*>(pixels));
 }
 
-void Context::drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instances)
+Error Context::drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instances)
 {
     ASSERT(mState.getCurrentProgramId() != 0);
 
     ProgramBinary *programBinary = mState.getCurrentProgramBinary();
     programBinary->updateSamplerMapping();
 
-    generateSwizzles(programBinary);
+    Error error = generateSwizzles(programBinary);
+    if (error.isError())
+    {
+        return error;
+    }
 
     if (!mRenderer->applyPrimitiveType(mode, count))
     {
-        return;
+        return Error(GL_NO_ERROR);
     }
 
-    applyRenderTarget(mode, false);
-    applyState(mode);
-
-    Error error = mRenderer->applyVertexBuffer(programBinary, mState.getVertexArray()->getVertexAttributes(), mState.getVertexAttribCurrentValues(), first, count, instances);
+    error = applyRenderTarget(mode, false);
     if (error.isError())
     {
-        return gl::error(error.getCode());
+        return error;
+    }
+
+    error = applyState(mode);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    error = mRenderer->applyVertexBuffer(mState, first, count, instances);
+    if (error.isError())
+    {
+        return error;
     }
 
     bool transformFeedbackActive = applyTransformFeedbackBuffers();
 
-    applyShaders(programBinary, transformFeedbackActive);
-
-    applyTextures(programBinary);
-
-    if (!applyUniformBuffers())
+    error = applyShaders(programBinary, transformFeedbackActive);
+    if (error.isError())
     {
-        return;
+        return error;
+    }
+
+    error = applyTextures(programBinary);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    error = applyUniformBuffers();
+    if (error.isError())
+    {
+        return error;
     }
 
     if (!skipDraw(mode))
     {
-        mRenderer->drawArrays(mode, count, instances, transformFeedbackActive);
+        error = mRenderer->drawArrays(mode, count, instances, transformFeedbackActive);
+        if (error.isError())
+        {
+            return error;
+        }
 
         if (transformFeedbackActive)
         {
             markTransformFeedbackUsage();
         }
     }
+
+    return gl::Error(GL_NO_ERROR);
 }
 
-void Context::drawElements(GLenum mode, GLsizei count, GLenum type,
-                           const GLvoid *indices, GLsizei instances,
-                           const rx::RangeUI &indexRange)
+Error Context::drawElements(GLenum mode, GLsizei count, GLenum type,
+                            const GLvoid *indices, GLsizei instances,
+                            const rx::RangeUI &indexRange)
 {
     ASSERT(mState.getCurrentProgramId() != 0);
 
     ProgramBinary *programBinary = mState.getCurrentProgramBinary();
     programBinary->updateSamplerMapping();
 
-    generateSwizzles(programBinary);
+    Error error = generateSwizzles(programBinary);
+    if (error.isError())
+    {
+        return error;
+    }
 
     if (!mRenderer->applyPrimitiveType(mode, count))
     {
-        return;
+        return Error(GL_NO_ERROR);
     }
 
-    applyRenderTarget(mode, false);
-    applyState(mode);
+    error = applyRenderTarget(mode, false);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    error = applyState(mode);
+    if (error.isError())
+    {
+        return error;
+    }
 
     VertexArray *vao = mState.getVertexArray();
     rx::TranslatedIndexData indexInfo;
     indexInfo.indexRange = indexRange;
-    Error error = mRenderer->applyIndexBuffer(indices, vao->getElementArrayBuffer(), count, mode, type, &indexInfo);
+    error = mRenderer->applyIndexBuffer(indices, vao->getElementArrayBuffer(), count, mode, type, &indexInfo);
     if (error.isError())
     {
-        return gl::error(error.getCode());
+        return error;
     }
 
     GLsizei vertexCount = indexInfo.indexRange.length() + 1;
-    error = mRenderer->applyVertexBuffer(programBinary, vao->getVertexAttributes(),
-                                         mState.getVertexAttribCurrentValues(),
-                                         indexInfo.indexRange.start, vertexCount, instances);
+    error = mRenderer->applyVertexBuffer(mState, indexInfo.indexRange.start, vertexCount, instances);
     if (error.isError())
     {
-        return gl::error(error.getCode());
+        return error;
     }
 
     bool transformFeedbackActive = applyTransformFeedbackBuffers();
@@ -1753,25 +1881,40 @@ void Context::drawElements(GLenum mode, GLsizei count, GLenum type,
     // layer.
     ASSERT(!transformFeedbackActive);
 
-    applyShaders(programBinary, transformFeedbackActive);
-
-    applyTextures(programBinary);
-
-    if (!applyUniformBuffers())
+    error = applyShaders(programBinary, transformFeedbackActive);
+    if (error.isError())
     {
-        return;
+        return error;
+    }
+
+    error = applyTextures(programBinary);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    error = applyUniformBuffers();
+    if (error.isError())
+    {
+        return error;
     }
 
     if (!skipDraw(mode))
     {
-        mRenderer->drawElements(mode, count, type, indices, vao->getElementArrayBuffer(), indexInfo, instances);
+        error = mRenderer->drawElements(mode, count, type, indices, vao->getElementArrayBuffer(), indexInfo, instances);
+        if (error.isError())
+        {
+            return error;
+        }
     }
+
+    return Error(GL_NO_ERROR);
 }
 
 // Implements glFlush when block is false, glFinish when block is true
-void Context::sync(bool block)
+Error Context::sync(bool block)
 {
-    mRenderer->sync(block);
+    return mRenderer->sync(block);
 }
 
 void Context::recordError(const Error &error)
@@ -1967,12 +2110,12 @@ Texture *Context::getIncompleteTexture(GLenum type)
             {
               TextureCubeMap *incompleteCube = new TextureCubeMap(mRenderer->createTexture(GL_TEXTURE_CUBE_MAP), Texture::INCOMPLETE_TEXTURE_ID);
 
-              incompleteCube->setImagePosX(0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
-              incompleteCube->setImageNegX(0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
-              incompleteCube->setImagePosY(0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
-              incompleteCube->setImageNegY(0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
-              incompleteCube->setImagePosZ(0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
-              incompleteCube->setImageNegZ(0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+              incompleteCube->setImage(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+              incompleteCube->setImage(GL_TEXTURE_CUBE_MAP_NEGATIVE_X, 0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+              incompleteCube->setImage(GL_TEXTURE_CUBE_MAP_POSITIVE_Y, 0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+              incompleteCube->setImage(GL_TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+              incompleteCube->setImage(GL_TEXTURE_CUBE_MAP_POSITIVE_Z, 0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
+              incompleteCube->setImage(GL_TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, 1, 1, GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, incompleteUnpackState, color);
 
               t = incompleteCube;
             }
@@ -2189,8 +2332,8 @@ size_t Context::getBoundFramebufferTextureSerials(FramebufferTextureSerialArray 
     return serialCount;
 }
 
-void Context::blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
-                              GLbitfield mask, GLenum filter)
+Error Context::blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+                               GLbitfield mask, GLenum filter)
 {
     Framebuffer *readFramebuffer = mState.getReadFramebuffer();
     Framebuffer *drawFramebuffer = mState.getDrawFramebuffer();
@@ -2215,10 +2358,16 @@ void Context::blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1
     Rectangle dstRect(dstX0, dstY0, dstX1 - dstX0, dstY1 - dstY0);
     if (blitRenderTarget || blitDepth || blitStencil)
     {
-        const Rectangle *scissor = mState.isScissorTestEnabled() ? &mState.getScissor() : NULL;
-        mRenderer->blitRect(readFramebuffer, srcRect, drawFramebuffer, dstRect, scissor,
-                            blitRenderTarget, blitDepth, blitStencil, filter);
+        const gl::Rectangle *scissor = mState.isScissorTestEnabled() ? &mState.getScissor() : NULL;
+        gl::Error error = mRenderer->blitRect(readFramebuffer, srcRect, drawFramebuffer, dstRect, scissor,
+                                              blitRenderTarget, blitDepth, blitStencil, filter);
+        if (error.isError())
+        {
+            return error;
+        }
     }
+
+    return gl::Error(GL_NO_ERROR);
 }
 
 void Context::releaseShaderCompiler()
@@ -2261,26 +2410,25 @@ void Context::initCaps(GLuint clientVersion)
         TextureCaps formatCaps = i->second;
 
         const InternalFormat &formatInfo = GetInternalFormatInfo(format);
-        if (formatCaps.texturable && formatInfo.textureSupport(clientVersion, mExtensions))
+
+        // Update the format caps based on the client version and extensions
+        formatCaps.texturable = formatInfo.textureSupport(clientVersion, mExtensions);
+        formatCaps.renderable = formatInfo.renderSupport(clientVersion, mExtensions);
+        formatCaps.filterable = formatInfo.filterSupport(clientVersion, mExtensions);
+
+        // OpenGL ES does not support multisampling with integer formats
+        if (!formatInfo.renderSupport || formatInfo.componentType == GL_INT || formatInfo.componentType == GL_UNSIGNED_INT)
         {
-            // Update the format caps based on the client version and extensions
-            formatCaps.renderable = formatInfo.renderSupport(clientVersion, mExtensions);
-            formatCaps.filterable = formatInfo.filterSupport(clientVersion, mExtensions);
-
-            // OpenGL ES does not support multisampling with integer formats
-            if (formatInfo.componentType == GL_INT || formatInfo.componentType == GL_UNSIGNED_INT)
-            {
-                formatCaps.sampleCounts.clear();
-            }
-            maxSamples = std::max(maxSamples, formatCaps.getMaxSamples());
-
-            if (formatInfo.compressed)
-            {
-                mCaps.compressedTextureFormats.push_back(format);
-            }
-
-            mTextureCaps.insert(format, formatCaps);
+            formatCaps.sampleCounts.clear();
         }
+        maxSamples = std::max(maxSamples, formatCaps.getMaxSamples());
+
+        if (formatCaps.texturable && formatInfo.compressed)
+        {
+            mCaps.compressedTextureFormats.push_back(format);
+        }
+
+        mTextureCaps.insert(format, formatCaps);
     }
 
     mExtensions.maxSamples = maxSamples;

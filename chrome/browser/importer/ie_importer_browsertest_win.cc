@@ -19,7 +19,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -232,10 +231,10 @@ class TestObserver : public ProfileWriter,
   }
 
   // importer::ImporterProgressObserver:
-  virtual void ImportStarted() OVERRIDE {}
-  virtual void ImportItemStarted(importer::ImportItem item) OVERRIDE {}
-  virtual void ImportItemEnded(importer::ImportItem item) OVERRIDE {}
-  virtual void ImportEnded() OVERRIDE {
+  virtual void ImportStarted() override {}
+  virtual void ImportItemStarted(importer::ImportItem item) override {}
+  virtual void ImportItemEnded(importer::ImportItem item) override {}
+  virtual void ImportEnded() override {
     base::MessageLoop::current()->Quit();
     if (importer_items_ & importer::FAVORITES) {
       EXPECT_EQ(arraysize(kIEBookmarks), bookmark_count_);
@@ -286,7 +285,7 @@ class TestObserver : public ProfileWriter,
 
   virtual void AddBookmarks(
       const std::vector<ImportedBookmarkEntry>& bookmarks,
-      const base::string16& top_level_folder_name) OVERRIDE {
+      const base::string16& top_level_folder_name) override {
     ASSERT_LE(bookmark_count_ + bookmarks.size(), arraysize(kIEBookmarks));
     // Importer should import the IE Favorites folder the same as the list,
     // in the same order.
@@ -307,7 +306,7 @@ class TestObserver : public ProfileWriter,
   }
 
   virtual void AddFavicons(
-      const std::vector<ImportedFaviconUsage>& usage) OVERRIDE {
+      const std::vector<ImportedFaviconUsage>& usage) override {
     // Importer should group the favicon information for each favicon URL.
     for (size_t i = 0; i < arraysize(kIEFaviconGroup); ++i) {
       GURL favicon_url(kIEFaviconGroup[i].favicon_url);
@@ -368,10 +367,10 @@ class MalformedFavoritesRegistryTestObserver
   }
 
   // importer::ImporterProgressObserver:
-  virtual void ImportStarted() OVERRIDE {}
-  virtual void ImportItemStarted(importer::ImportItem item) OVERRIDE {}
-  virtual void ImportItemEnded(importer::ImportItem item) OVERRIDE {}
-  virtual void ImportEnded() OVERRIDE {
+  virtual void ImportStarted() override {}
+  virtual void ImportItemStarted(importer::ImportItem item) override {}
+  virtual void ImportItemEnded(importer::ImportItem item) override {}
+  virtual void ImportEnded() override {
     base::MessageLoop::current()->Quit();
     EXPECT_EQ(arraysize(kIESortedBookmarks), bookmark_count_);
   }
@@ -386,7 +385,7 @@ class MalformedFavoritesRegistryTestObserver
                           int default_keyword_index) {}
   virtual void AddBookmarks(
       const std::vector<ImportedBookmarkEntry>& bookmarks,
-      const base::string16& top_level_folder_name) OVERRIDE {
+      const base::string16& top_level_folder_name) override {
     ASSERT_LE(bookmark_count_ + bookmarks.size(),
               arraysize(kIESortedBookmarks));
     for (size_t i = 0; i < bookmarks.size(); ++i) {
@@ -409,7 +408,7 @@ class MalformedFavoritesRegistryTestObserver
 // import (via ExternalProcessImporterHost) which launches a utility process.
 class IEImporterBrowserTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     // This will launch the browser test and thus needs to happen last.

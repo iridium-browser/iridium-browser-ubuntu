@@ -12,7 +12,6 @@
 #include "base/time/clock.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_usages_state.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +21,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
@@ -50,12 +50,12 @@ namespace {
 class IFrameLoader : public content::NotificationObserver {
  public:
   IFrameLoader(Browser* browser, int iframe_id, const GURL& url);
-  virtual ~IFrameLoader();
+  ~IFrameLoader() override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   const GURL& iframe_url() const { return iframe_url_; }
 
@@ -129,12 +129,12 @@ class GeolocationNotificationObserver : public content::NotificationObserver {
   // until the infobar has been displayed; otherwise it will block until the
   // navigation is completed.
   explicit GeolocationNotificationObserver(bool wait_for_infobar);
-  virtual ~GeolocationNotificationObserver();
+  ~GeolocationNotificationObserver() override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   void AddWatchAndWaitForNotification(
       content::RenderFrameHost* render_frame_host);
@@ -242,11 +242,11 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   };
 
   GeolocationBrowserTest();
-  virtual ~GeolocationBrowserTest();
+  ~GeolocationBrowserTest() override;
 
   // InProcessBrowserTest:
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
+  void SetUpOnMainThread() override;
+  void TearDownInProcessBrowserTestFixture() override;
 
   Browser* current_browser() { return current_browser_; }
   void set_html_for_tests(const std::string& html_for_tests) {

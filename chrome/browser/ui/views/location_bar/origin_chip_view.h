@@ -41,7 +41,7 @@ class OriginChipView : public views::LabelButton,
   OriginChipView(LocationBarView* location_bar_view,
                  Profile* profile,
                  const gfx::FontList& font_list);
-  virtual ~OriginChipView();
+  ~OriginChipView() override;
 
   SkColor pressed_text_color() const { return pressed_text_color_; }
   SkColor pressed_background_color() const {
@@ -68,8 +68,8 @@ class OriginChipView : public views::LabelButton,
   int WidthFromStartOfLabels() const;
 
   // views::LabelButton:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void Layout() override;
 
  private:
   // Returns the X coordinate the first label should be placed at.
@@ -79,20 +79,19 @@ class OriginChipView : public views::LabelButton,
   void SetBorderImages(const int images[3][9]);
 
   // views::LabelButton:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void OnPaintBorder(gfx::Canvas* canvas) OVERRIDE;
-  virtual void StateChanged() OVERRIDE;
+  void AnimationProgressed(const gfx::Animation* animation) override;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void OnPaintBorder(gfx::Canvas* canvas) override;
+  void StateChanged() override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // SafeBrowsingUIManager::Observer:
-  virtual void OnSafeBrowsingHit(
-      const SafeBrowsingUIManager::UnsafeResource& resource) OVERRIDE;
-  virtual void OnSafeBrowsingMatch(
-      const SafeBrowsingUIManager::UnsafeResource& resource) OVERRIDE;
+  void OnSafeBrowsingHit(
+      const SafeBrowsingUIManager::UnsafeResource& resource) override;
+  void OnSafeBrowsingMatch(
+      const SafeBrowsingUIManager::UnsafeResource& resource) override;
 
   LocationBarView* location_bar_view_;
   Profile* profile_;

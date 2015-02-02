@@ -41,8 +41,8 @@ class DefaultChannelIDStore::GetChannelIDTask
  public:
   GetChannelIDTask(const std::string& server_identifier,
                    const GetChannelIDCallback& callback);
-  virtual ~GetChannelIDTask();
-  virtual void Run(DefaultChannelIDStore* store) OVERRIDE;
+  ~GetChannelIDTask() override;
+  void Run(DefaultChannelIDStore* store) override;
 
  private:
   std::string server_identifier_;
@@ -83,8 +83,8 @@ class DefaultChannelIDStore::SetChannelIDTask
                    base::Time expiration_time,
                    const std::string& private_key,
                    const std::string& cert);
-  virtual ~SetChannelIDTask();
-  virtual void Run(DefaultChannelIDStore* store) OVERRIDE;
+  ~SetChannelIDTask() override;
+  void Run(DefaultChannelIDStore* store) override;
 
  private:
   std::string server_identifier_;
@@ -123,8 +123,8 @@ class DefaultChannelIDStore::DeleteChannelIDTask
  public:
   DeleteChannelIDTask(const std::string& server_identifier,
                       const base::Closure& callback);
-  virtual ~DeleteChannelIDTask();
-  virtual void Run(DefaultChannelIDStore* store) OVERRIDE;
+  ~DeleteChannelIDTask() override;
+  void Run(DefaultChannelIDStore* store) override;
 
  private:
   std::string server_identifier_;
@@ -158,8 +158,8 @@ class DefaultChannelIDStore::DeleteAllCreatedBetweenTask
   DeleteAllCreatedBetweenTask(base::Time delete_begin,
                               base::Time delete_end,
                               const base::Closure& callback);
-  virtual ~DeleteAllCreatedBetweenTask();
-  virtual void Run(DefaultChannelIDStore* store) OVERRIDE;
+  ~DeleteAllCreatedBetweenTask() override;
+  void Run(DefaultChannelIDStore* store) override;
 
  private:
   base::Time delete_begin_;
@@ -194,8 +194,8 @@ class DefaultChannelIDStore::GetAllChannelIDsTask
     : public DefaultChannelIDStore::Task {
  public:
   explicit GetAllChannelIDsTask(const GetChannelIDListCallback& callback);
-  virtual ~GetAllChannelIDsTask();
-  virtual void Run(DefaultChannelIDStore* store) OVERRIDE;
+  ~GetAllChannelIDsTask() override;
+  void Run(DefaultChannelIDStore* store) override;
 
  private:
   std::string server_identifier_;

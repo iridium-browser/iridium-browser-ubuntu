@@ -39,8 +39,8 @@ DEF_GPUTEST(FloatingPointTextureTest, reporter, factory) {
         int glCtxTypeCnt = 1;
         glCtxTypeCnt = GrContextFactory::kGLContextTypeCnt;
         for (int glCtxType = 0; glCtxType < glCtxTypeCnt; ++glCtxType) {
-            GrTextureDesc desc;
-            desc.fFlags = kRenderTarget_GrTextureFlagBit;
+            GrSurfaceDesc desc;
+            desc.fFlags = kRenderTarget_GrSurfaceFlag;
             desc.fWidth = DEV_W;
             desc.fHeight = DEV_H;
             desc.fConfig = kRGBA_float_GrPixelConfig;
@@ -68,9 +68,8 @@ DEF_GPUTEST(FloatingPointTextureTest, reporter, factory) {
             }
 
             // write square
-            context->writeTexturePixels(fpTexture, 0, 0, DEV_W, DEV_H, desc.fConfig,
-                    controlPixelData, 0);
-            context->readTexturePixels(fpTexture, 0, 0, DEV_W, DEV_H, desc.fConfig, readBuffer, 0);
+            fpTexture->writePixels(0, 0, DEV_W, DEV_H, desc.fConfig, controlPixelData, 0);
+            fpTexture->readPixels(0, 0, DEV_W, DEV_H, desc.fConfig, readBuffer, 0);
             for (int j = 0; j < FP_CONTROL_ARRAY_SIZE; ++j) {
                 REPORTER_ASSERT(reporter, readBuffer[j] == controlPixelData[j]);
             }

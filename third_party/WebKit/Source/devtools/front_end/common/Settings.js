@@ -42,6 +42,7 @@ WebInspector.Settings = function()
     this.eventListenersFilter = this.createSetting("eventListenersFilter", "all");
     this.lastViewedScriptFile = this.createSetting("lastViewedScriptFile", "application");
     this.monitoringXHREnabled = this.createSetting("monitoringXHREnabled", false);
+    this.hideNetworkMessages = this.createSetting("hideNetworkMessages", false);
     this.preserveConsoleLog = this.createSetting("preserveConsoleLog", false);
     this.consoleTimestampsEnabled = this.createSetting("consoleTimestampsEnabled", false);
     this.resourcesLargeRows = this.createSetting("resourcesLargeRows", true);
@@ -88,6 +89,8 @@ WebInspector.Settings = function()
     this.enableAsyncStackTraces = this.createSetting("enableAsyncStackTraces", false);
     this.showMediaQueryInspector = this.createSetting("showMediaQueryInspector", false);
     this.disableOverridesWarning = this.createSetting("disableOverridesWarning", false);
+    this.testPath = this.createSetting("testPath", "");
+    this.frameViewerHideChromeWindow = this.createSetting("frameViewerHideChromeWindow", false);
 
     // Rendering options
     this.showPaintRects = this.createSetting("showPaintRects", false);

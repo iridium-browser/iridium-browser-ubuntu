@@ -34,12 +34,12 @@ class VIEWS_EXPORT TouchSelectionControllerImpl
   explicit TouchSelectionControllerImpl(
       ui::TouchEditable* client_view);
 
-  virtual ~TouchSelectionControllerImpl();
+  ~TouchSelectionControllerImpl() override;
 
   // TextSelectionController.
-  virtual void SelectionChanged() OVERRIDE;
-  virtual bool IsHandleDragInProgress() OVERRIDE;
-  virtual void HideHandles(bool quick) OVERRIDE;
+  void SelectionChanged() override;
+  bool IsHandleDragInProgress() override;
+  void HideHandles(bool quick) override;
 
  private:
   friend class TouchSelectionControllerImplTest;
@@ -65,26 +65,26 @@ class VIEWS_EXPORT TouchSelectionControllerImpl
   bool ShouldShowHandleFor(const gfx::Rect& rect) const;
 
   // Overridden from TouchEditingMenuController.
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
-  virtual void OpenContextMenu() OVERRIDE;
-  virtual void OnMenuClosed(TouchEditingMenuView* menu) OVERRIDE;
+  bool IsCommandIdEnabled(int command_id) const override;
+  void ExecuteCommand(int command_id, int event_flags) override;
+  void OpenContextMenu() override;
+  void OnMenuClosed(TouchEditingMenuView* menu) override;
 
   // Overriden from aura::WindowObserver.
-  virtual void OnAncestorWindowTransformed(aura::Window* source,
-                                           aura::Window* window) OVERRIDE;
+  void OnAncestorWindowTransformed(aura::Window* source,
+                                   aura::Window* window) override;
 
   // Overridden from WidgetObserver. We will observe the widget backing the
   // |client_view_| so that when its moved/resized, we can update the selection
   // handles appropriately.
-  virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
-  virtual void OnWidgetBoundsChanged(Widget* widget,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
+  void OnWidgetClosing(Widget* widget) override;
+  void OnWidgetBoundsChanged(Widget* widget,
+                             const gfx::Rect& new_bounds) override;
 
   // Overriden from ui::EventHandler.
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnScrollEvent(ui::ScrollEvent* event) OVERRIDE;
+  void OnKeyEvent(ui::KeyEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnScrollEvent(ui::ScrollEvent* event) override;
 
   // Time to show context menu.
   void ContextMenuTimerFired();

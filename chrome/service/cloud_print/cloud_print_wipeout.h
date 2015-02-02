@@ -25,20 +25,20 @@ class CloudPrintWipeout : public CloudPrintURLFetcherDelegate {
   };
 
   CloudPrintWipeout(Client* client, const GURL& cloud_print_server_url);
-  virtual ~CloudPrintWipeout();
+  ~CloudPrintWipeout() override;
 
   void UnregisterPrinters(const std::string& auth_token,
                           const std::list<std::string>& printer_ids);
 
   // CloudPrintURLFetcher::Delegate implementation.
-  virtual CloudPrintURLFetcher::ResponseAction HandleJSONData(
+  CloudPrintURLFetcher::ResponseAction HandleJSONData(
       const net::URLFetcher* source,
       const GURL& url,
       base::DictionaryValue* json_data,
-      bool succeeded) OVERRIDE;
-  virtual void OnRequestGiveUp() OVERRIDE;
-  virtual CloudPrintURLFetcher::ResponseAction OnRequestAuthError() OVERRIDE;
-  virtual std::string GetAuthHeader() OVERRIDE;
+      bool succeeded) override;
+  void OnRequestGiveUp() override;
+  CloudPrintURLFetcher::ResponseAction OnRequestAuthError() override;
+  std::string GetAuthHeader() override;
 
  private:
   void UnregisterNextPrinter();

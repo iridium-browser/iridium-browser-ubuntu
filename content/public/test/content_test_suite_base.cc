@@ -29,6 +29,7 @@
 #include "base/android/jni_android.h"
 #include "content/browser/android/browser_jni_registrar.h"
 #include "content/common/android/common_jni_registrar.h"
+#include "content/public/browser/android/compositor.h"
 #include "media/base/android/media_jni_registrar.h"
 #include "net/android/net_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
@@ -37,13 +38,17 @@
 #include "ui/shell_dialogs/android/shell_dialogs_jni_registrar.h"
 #endif
 
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+#include "gin/public/isolate_holder.h"
+#endif
+
 namespace content {
 
 class ContentTestSuiteBaseListener : public testing::EmptyTestEventListener {
  public:
   ContentTestSuiteBaseListener() {
   }
-  virtual void OnTestEnd(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestEnd(const testing::TestInfo& test_info) override {
     BrowserThreadImpl::FlushThreadPoolHelperForTesting();
   }
  private:
@@ -62,6 +67,10 @@ void ContentTestSuiteBase::Initialize() {
   // by tests.
   base::StatisticsRecorder::Initialize();
 
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+  gin::IsolateHolder::LoadV8Snapshot();
+#endif
+
 #if defined(OS_ANDROID)
   // Register JNI bindings for android.
   JNIEnv* env = base::android::AttachCurrentThread();
@@ -72,6 +81,8 @@ void ContentTestSuiteBase::Initialize() {
   net::android::RegisterJni(env);
   ui::android::RegisterJni(env);
   ui::shell_dialogs::RegisterJni(env);
+
+  content::Compositor::Initialize();
 #endif
 
   testing::UnitTest::GetInstance()->listeners().Append(

@@ -27,17 +27,16 @@ class AutofillOptionsHandler : public OptionsPageUIHandler,
                                public autofill::PersonalDataManagerObserver {
  public:
   AutofillOptionsHandler();
-  virtual ~AutofillOptionsHandler();
+  ~AutofillOptionsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
+  void RegisterMessages() override;
 
   // PersonalDataManagerObserver implementation.
-  virtual void OnPersonalDataChanged() OVERRIDE;
+  void OnPersonalDataChanged() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AutofillOptionsHandlerTest, AddressToDictionary);

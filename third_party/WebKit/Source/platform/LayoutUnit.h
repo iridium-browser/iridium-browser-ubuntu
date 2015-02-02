@@ -74,14 +74,14 @@ public:
     static LayoutUnit fromFloatCeil(float value)
     {
         LayoutUnit v;
-        v.m_value = clampToInteger(ceilf(value * kFixedPointDenominator));
+        v.m_value = clampTo<int>(ceilf(value * kFixedPointDenominator));
         return v;
     }
 
     static LayoutUnit fromFloatFloor(float value)
     {
         LayoutUnit v;
-        v.m_value = clampToInteger(floorf(value * kFixedPointDenominator));
+        v.m_value = clampTo<int>(floorf(value * kFixedPointDenominator));
         return v;
     }
 
@@ -131,11 +131,7 @@ public:
         returnValue.setRawValue(::abs(m_value));
         return returnValue;
     }
-#if OS(MACOSX)
-    int wtf_ceil() const
-#else
     int ceil() const
-#endif
     {
         if (UNLIKELY(m_value >= INT_MAX - kFixedPointDenominator + 1))
             return intMaxForLayoutUnit;
@@ -619,6 +615,11 @@ inline LayoutUnit operator-(const LayoutUnit& a, unsigned b)
 inline float operator-(const LayoutUnit& a, float b)
 {
     return a.toFloat() - b;
+}
+
+inline double operator-(const LayoutUnit& a, double b)
+{
+    return a.toDouble() - b;
 }
 
 inline LayoutUnit operator-(const int a, const LayoutUnit& b)

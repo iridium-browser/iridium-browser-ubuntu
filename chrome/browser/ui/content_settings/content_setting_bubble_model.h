@@ -79,6 +79,7 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
     ~BubbleContent();
 
     std::string title;
+    base::string16 plugin_names;
     PopupItems popup_items;
     RadioGroup radio_group;
     bool radio_group_enabled;
@@ -99,16 +100,16 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
       Profile* profile,
       ContentSettingsType content_type);
 
-  virtual ~ContentSettingBubbleModel();
+  ~ContentSettingBubbleModel() override;
 
   ContentSettingsType content_type() const { return content_type_; }
 
   const BubbleContent& bubble_content() const { return bubble_content_; }
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   virtual void OnRadioClicked(int radio_index) {}
   virtual void OnPopupClicked(int index) {}
@@ -132,6 +133,9 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   Profile* profile() const { return profile_; }
 
   void set_title(const std::string& title) { bubble_content_.title = title; }
+  void set_plugin_names(const base::string16& plugin_names) {
+    bubble_content_.plugin_names = plugin_names;
+  }
   void add_popup(const PopupItem& popup) {
     bubble_content_.popup_items.push_back(popup);
   }
@@ -189,7 +193,7 @@ class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
                                   content::WebContents* web_contents,
                                   Profile* profile,
                                   ContentSettingsType content_type);
-  virtual ~ContentSettingTitleAndLinkModel() {}
+  ~ContentSettingTitleAndLinkModel() override {}
   Delegate* delegate() const { return delegate_; }
 
  private:
@@ -198,8 +202,8 @@ class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
   void SetLearnMoreLink();
 
   // content::ContentSettingBubbleModel:
-  virtual void OnManageLinkClicked() OVERRIDE;
-  virtual void OnLearnMoreLinkClicked() OVERRIDE;
+  void OnManageLinkClicked() override;
+  void OnLearnMoreLinkClicked() override;
   Delegate* delegate_;
 };
 
@@ -211,8 +215,8 @@ class ContentSettingRPHBubbleModel : public ContentSettingTitleAndLinkModel {
                                ProtocolHandlerRegistry* registry,
                                ContentSettingsType content_type);
 
-  virtual void OnRadioClicked(int radio_index) OVERRIDE;
-  virtual void OnDoneClicked() OVERRIDE;
+  void OnRadioClicked(int radio_index) override;
+  void OnDoneClicked() override;
 
  private:
   // These states must match the order of appearance of the radio buttons

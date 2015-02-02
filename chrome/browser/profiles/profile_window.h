@@ -30,11 +30,15 @@ enum UserManagerProfileSelected {
   USER_MANAGER_SELECT_PROFILE_NO_ACTION,
   USER_MANAGER_SELECT_PROFILE_TASK_MANAGER,
   USER_MANAGER_SELECT_PROFILE_ABOUT_CHROME,
+  USER_MANAGER_SELECT_PROFILE_CHROME_SETTINGS,
+  USER_MANAGER_SELECT_PROFILE_CHROME_MEMORY,
 };
 
 extern const char kUserManagerDisplayTutorial[];
 extern const char kUserManagerSelectProfileTaskManager[];
 extern const char kUserManagerSelectProfileAboutChrome[];
+extern const char kUserManagerSelectProfileChromeSettings[];
+extern const char kUserManagerSelectProfileChromeMemory[];
 
 // Activates a window for |profile| on the desktop specified by
 // |desktop_type|. If no such window yet exists, or if |always_create| is
@@ -76,6 +80,9 @@ void CloseGuestProfileWindows();
 
 // Closes all the browser windows for |profile| and opens the user manager.
 void LockProfile(Profile* profile);
+
+// Returns whether lock is available to this profile.
+bool IsLockAvailable(Profile* profile);
 
 // Creates or reuses the guest profile needed by the user manager. Based on
 // the value of |tutorial_mode|, the user manager can show a specific

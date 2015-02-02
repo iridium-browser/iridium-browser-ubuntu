@@ -22,7 +22,7 @@ class Delegate : public mojo::ApplicationDelegate,
  public:
   Delegate() {}
 
-  virtual void Initialize(mojo::ApplicationImpl* app) OVERRIDE {
+  void Initialize(mojo::ApplicationImpl* app) override {
     base::FilePath base_path;
     CHECK(PathService::Get(base::DIR_TEMP, &base_path));
     base_path = base_path.Append(FILE_PATH_LITERAL("network_service"));
@@ -30,17 +30,16 @@ class Delegate : public mojo::ApplicationDelegate,
   }
 
   // mojo::ApplicationDelegate implementation.
-  virtual bool ConfigureIncomingConnection(
-      mojo::ApplicationConnection* connection) OVERRIDE {
+  bool ConfigureIncomingConnection(
+      mojo::ApplicationConnection* connection) override {
     DCHECK(context_);
     connection->AddService(this);
     return true;
   }
 
   // mojo::InterfaceFactory<mojo::NetworkService> implementation.
-  virtual void Create(
-      mojo::ApplicationConnection* connection,
-      mojo::InterfaceRequest<mojo::NetworkService> request) OVERRIDE {
+  void Create(mojo::ApplicationConnection* connection,
+              mojo::InterfaceRequest<mojo::NetworkService> request) override {
     mojo::BindToRequest(
         new mojo::NetworkServiceImpl(connection, context_.get()), &request);
   }

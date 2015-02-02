@@ -19,7 +19,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/upload_list.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
@@ -40,7 +39,6 @@ namespace {
 content::WebUIDataSource* CreateWebRtcLogsUIHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIWebRtcLogsHost);
-  source->SetUseJsonJSFormatV2();
 
   source->AddLocalizedString("webrtcLogsTitle", IDS_WEBRTC_LOGS_TITLE);
   source->AddLocalizedString("webrtcLogCountFormat",
@@ -79,13 +77,13 @@ class WebRtcLogsDOMHandler : public WebUIMessageHandler,
                              public UploadList::Delegate {
  public:
   explicit WebRtcLogsDOMHandler(Profile* profile);
-  virtual ~WebRtcLogsDOMHandler();
+  ~WebRtcLogsDOMHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // UploadList::Delegate implemenation.
-  virtual void OnUploadListAvailable() OVERRIDE;
+  void OnUploadListAvailable() override;
 
  private:
   // Asynchronously fetches the list of upload WebRTC logs. Called from JS.

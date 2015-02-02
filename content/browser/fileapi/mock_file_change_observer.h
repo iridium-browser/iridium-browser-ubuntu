@@ -17,19 +17,19 @@ namespace storage {
 class MockFileChangeObserver : public FileChangeObserver {
  public:
   MockFileChangeObserver();
-  virtual ~MockFileChangeObserver();
+  ~MockFileChangeObserver() override;
 
   // Creates a ChangeObserverList which only contains given |observer|.
   static ChangeObserverList CreateList(MockFileChangeObserver* observer);
 
   // FileChangeObserver overrides.
-  virtual void OnCreateFile(const FileSystemURL& url) OVERRIDE;
-  virtual void OnCreateFileFrom(const FileSystemURL& url,
-                                const FileSystemURL& src) OVERRIDE;
-  virtual void OnRemoveFile(const FileSystemURL& url) OVERRIDE;
-  virtual void OnModifyFile(const FileSystemURL& url) OVERRIDE;
-  virtual void OnCreateDirectory(const FileSystemURL& url) OVERRIDE;
-  virtual void OnRemoveDirectory(const FileSystemURL& url) OVERRIDE;
+  void OnCreateFile(const FileSystemURL& url) override;
+  void OnCreateFileFrom(const FileSystemURL& url,
+                        const FileSystemURL& src) override;
+  void OnRemoveFile(const FileSystemURL& url) override;
+  void OnModifyFile(const FileSystemURL& url) override;
+  void OnCreateDirectory(const FileSystemURL& url) override;
+  void OnRemoveDirectory(const FileSystemURL& url) override;
 
   void ResetCount() {
     create_file_count_ = 0;

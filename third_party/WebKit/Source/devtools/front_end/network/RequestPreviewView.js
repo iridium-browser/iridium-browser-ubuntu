@@ -81,7 +81,10 @@ WebInspector.RequestPreviewView.prototype = {
      */
     _jsonView: function()
     {
-        var parsedJSON = WebInspector.RequestJSONView.parseJSON(this.request.content || "");
+        var request = this.request;
+        var content = request.content;
+        content = request.contentEncoded ? window.atob(content || "") : (content || "");
+        var parsedJSON = WebInspector.RequestJSONView.parseJSON(content);
         return parsedJSON ? new WebInspector.RequestJSONView(this.request, parsedJSON) : null;
     },
 
@@ -119,7 +122,7 @@ WebInspector.RequestPreviewView.prototype = {
                 return htmlErrorPreview;
         }
 
-        if (this.request.type === WebInspector.resourceTypes.XHR) {
+        if (this.request.resourceType() === WebInspector.resourceTypes.XHR) {
             var jsonView = this._jsonView();
             if (jsonView)
                 return jsonView;
@@ -131,7 +134,7 @@ WebInspector.RequestPreviewView.prototype = {
         if (this._responseView.sourceView)
             return this._responseView.sourceView;
 
-        if (this.request.type === WebInspector.resourceTypes.Other)
+        if (this.request.resourceType() === WebInspector.resourceTypes.Other)
             return this._createEmptyView();
 
         return WebInspector.RequestView.nonSourceViewForRequest(this.request);

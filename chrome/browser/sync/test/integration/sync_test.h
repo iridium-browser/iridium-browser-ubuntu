@@ -37,7 +37,6 @@ class FakeServerInvalidationService;
 
 namespace net {
 class FakeURLFetcherFactory;
-class ProxyConfig;
 class ScopedDefaultHostResolverProc;
 class URLFetcherImplFactory;
 class URLRequestContextGetter;
@@ -95,35 +94,20 @@ class SyncTest : public InProcessBrowserTest {
                             // LOCAL_PYTHON_SERVER.
   };
 
-  // NOTE: IMPORTANT the enum here should match with
-  // the enum defined on the chromiumsync.py test server impl.
-  enum SyncErrorFrequency {
-    // Uninitialized state.
-    ERROR_FREQUENCY_NONE,
-
-    // Server sends the error on all requests.
-    ERROR_FREQUENCY_ALWAYS,
-
-    // Server sends the error on two thirds of the request.
-    // Note this is not random. The server would send the
-    // error on the first 2 requests of every 3 requests.
-    ERROR_FREQUENCY_TWO_THIRDS
-  };
-
   // A SyncTest must be associated with a particular test type.
   explicit SyncTest(TestType test_type);
 
-  virtual ~SyncTest();
+  ~SyncTest() override;
 
   // Validates command line parameters and creates a local python test server if
   // specified.
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   // Brings down local python test server if one was created.
-  virtual void TearDown() OVERRIDE;
+  void TearDown() override;
 
   // Sets up command line flags required for sync tests.
-  virtual void SetUpCommandLine(base::CommandLine* cl) OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* cl) override;
 
   // Used to get the number of sync clients used by a test.
   int num_clients() WARN_UNUSED_RESULT { return num_clients_; }
@@ -169,12 +153,6 @@ class SyncTest : public InProcessBrowserTest {
 
   // Initializes sync clients and profiles if required and syncs each of them.
   virtual bool SetupSync() WARN_UNUSED_RESULT;
-
-  // Enable outgoing network connections for the given profile.
-  virtual void EnableNetwork(Profile* profile);
-
-  // Disable outgoing network connections for the given profile.
-  virtual void DisableNetwork(Profile* profile);
 
   // Sets whether or not the sync clients in this test should respond to
   // notifications of their own commits.  Real sync clients do not do this, but
@@ -228,19 +206,9 @@ class SyncTest : public InProcessBrowserTest {
   // only if ServerSupportsErrorTriggering() returned true.
   void TriggerMigrationDoneError(syncer::ModelTypeSet model_types);
 
-  // Triggers a transient error on the server. Note the server will stay in
-  // this state until shut down.
-  void TriggerTransientError();
-
   // Triggers an XMPP auth error on the server.  Note the server will
   // stay in this state until shut down.
   void TriggerXmppAuthError();
-
-  // Triggers a sync error on the server.
-  //   error: The error the server is expected to return.
-  //   frequency: Frequency with which the error is returned.
-  void TriggerSyncError(const syncer::SyncProtocolError& error,
-                        SyncErrorFrequency frequency);
 
   // Triggers the creation the Synced Bookmarks folder on the server.
   void TriggerCreateSyncedBookmarks();
@@ -259,15 +227,15 @@ class SyncTest : public InProcessBrowserTest {
 
   // BrowserTestBase override. Destroys all the sync clients and sync
   // profiles created by a test.
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void TearDownOnMainThread() override;
 
   // InProcessBrowserTest override. Changes behavior of the default host
   // resolver to avoid DNS lookup errors.
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
+  void SetUpInProcessBrowserTestFixture() override;
 
   // InProcessBrowserTest override. Resets the host resolver its default
   // behavior.
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
+  void TearDownInProcessBrowserTestFixture() override;
 
   // Creates Profile, Browser and ProfileSyncServiceHarness instances for
   // |index|. Used by SetupClients().
@@ -328,11 +296,6 @@ class SyncTest : public InProcessBrowserTest {
 
   // Helper method used to check if the test server is up and running.
   bool IsTestServerRunning();
-
-  // Used to disable and enable network connectivity by providing and
-  // clearing an invalid proxy configuration.
-  void SetProxyConfig(net::URLRequestContextGetter* context,
-                      const net::ProxyConfig& proxy_config);
 
   void SetupNetwork(net::URLRequestContextGetter* context);
 

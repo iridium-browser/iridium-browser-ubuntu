@@ -9,10 +9,10 @@
 
 #include "base/basictypes.h"
 #include "base/strings/string16.h"
-#include "chrome/common/instant_restricted_id_cache.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/ntp_logging_events.h"
 #include "chrome/common/omnibox_focus_state.h"
+#include "chrome/renderer/instant_restricted_id_cache.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
 #include "ui/base/window_open_disposition.h"
@@ -26,7 +26,7 @@ class SearchBox : public content::RenderViewObserver,
                   public content::RenderViewObserverTracker<SearchBox> {
  public:
   explicit SearchBox(content::RenderView* render_view);
-  virtual ~SearchBox();
+  ~SearchBox() override;
 
   // Sends ChromeViewHostMsg_LogEvent to the browser.
   void LogEvent(NTPLoggingEventType event);
@@ -86,6 +86,7 @@ class SearchBox : public content::RenderViewObserver,
   void Paste(const base::string16& text);
 
   const ThemeBackgroundInfo& GetThemeBackgroundInfo();
+  const EmbeddedSearchRequestParams& GetEmbeddedSearchRequestParams();
 
   // Sends ChromeViewHostMsg_SetVoiceSearchSupported to the browser.
   void SetVoiceSearchSupported(bool supported);
@@ -114,7 +115,7 @@ class SearchBox : public content::RenderViewObserver,
 
  private:
   // Overridden from content::RenderViewObserver:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   void OnSetPageSequenceNumber(int page_seq_no);
   void OnChromeIdentityCheckResult(const base::string16& identity,
@@ -129,7 +130,8 @@ class SearchBox : public content::RenderViewObserver,
   void OnSetDisplayInstantResults(bool display_instant_results);
   void OnSetInputInProgress(bool input_in_progress);
   void OnSetSuggestionToPrefetch(const InstantSuggestion& suggestion);
-  void OnSubmit(const base::string16& query);
+  void OnSubmit(const base::string16& query,
+                const EmbeddedSearchRequestParams& params);
   void OnThemeChanged(const ThemeBackgroundInfo& theme_info);
   void OnToggleVoiceSearch();
 
@@ -151,6 +153,7 @@ class SearchBox : public content::RenderViewObserver,
   InstantRestrictedIDCache<InstantMostVisitedItem> most_visited_items_cache_;
   ThemeBackgroundInfo theme_info_;
   base::string16 query_;
+  EmbeddedSearchRequestParams embedded_search_request_params_;
   int start_margin_;
   InstantSuggestion suggestion_;
 

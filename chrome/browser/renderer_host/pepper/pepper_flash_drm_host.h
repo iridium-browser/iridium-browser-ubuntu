@@ -28,12 +28,12 @@ class PepperFlashDRMHost : public ppapi::host::ResourceHost {
   PepperFlashDRMHost(content::BrowserPpapiHost* host,
                      PP_Instance instance,
                      PP_Resource resource);
-  virtual ~PepperFlashDRMHost();
+  ~PepperFlashDRMHost() override;
 
   // ResourceHost override.
-  virtual int32_t OnResourceMessageReceived(
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
  private:
   // IPC message handler.

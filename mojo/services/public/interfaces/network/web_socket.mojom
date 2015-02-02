@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import "mojo/services/public/interfaces/network/network_error.mojom"
+module mojo;
 
-module mojo {
+import "mojo/services/public/interfaces/network/network_error.mojom";
 
 interface WebSocket {
   enum MessageType {
@@ -19,7 +19,7 @@ interface WebSocket {
   // to send over the WebSocket should be written to the producer end of the
   // |send_stream|.
   Connect(string url,
-          string[] protocols,
+          array<string> protocols,
           string origin,
           handle<data_pipe_consumer> send_stream,
           WebSocketClient client);
@@ -58,5 +58,3 @@ interface WebSocketClient {
   // didFinishOpeningHandshake
   // didStartClosingHandshake
 };
-
-}

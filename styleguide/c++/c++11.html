@@ -56,6 +56,14 @@ few months later, when we have more experience with the language.</p>
 </tr>
 
 <tr>
+<td>Aliases</td>
+<td><code>using <i>new_alias</i> = <i>typename</i></code></td>
+<td>Allow parameterized typedefs</td>
+<td><a href="http://en.cppreference.com/w/cpp/language/type_alias">Type alias (using syntax)</a></td>
+<td>Use instead of typedef, unless the header needs to be compatible with C. <a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/8dOAMzgR4ao">Discussion thread</a></td>
+</tr>
+
+<tr>
 <td>Angle Bracket Parsing in Templates</td>
 <td><code>&gt;&gt;</code> for <code>&gt; &gt;</code> and <br />
 <code>&lt;::</code> for <code>&lt; ::</code></td>
@@ -76,11 +84,82 @@ Style Guide on <code>auto</code></a>. <a href="https://groups.google.com/a/chrom
 </tr>
 
 <tr>
+<td>Declared Type Accessor</td>
+<td><code>decltype(<i>expression</i>)</code></td>
+<td>Provides a means to determine the type of an expression at compile-time,
+useful most often in templates.</td>
+<td><a href="http://en.cppreference.com/w/cpp/language/decltype">
+decltype specifier</a></td>
+<td>Usage should be rare. <a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/_zoNvZd_dSo">Discussion thread</a></td>
+</tr>
+
+<tr>
+<td>Default Function Creation</td>
+<td><code><i>Function</i>(<i>arguments</i>) = default;</code></td>
+<td>Instructs the compiler to generate a default version
+of the indicated function</td>
+<td><a href="http://stackoverflow.com/questions/823935/whats-the-point-in-defaulting-functions-in-c11">
+What's the point in defaulting functions in C++11?</a></td>
+<td>Doesn't work for move constructors and move assignment operators in MSVC2013.
+<a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/qgU4mh_MpGA">Discussion thread</a></td>
+</tr>
+
+<tr>
+<td>Delegated Constructors</td>
+<td><code>Class() : Class(0) {}</code><br />
+<code>Class(<i>type</i> <i>var</i>) : Class(<i>var</i>, 0)</code></td>
+<td>Allow overloaded constructors to use common initialization code</td>
+<td><a href="https://www.ibm.com/developerworks/community/blogs/5894415f-be62-4bc0-81c5-3956e82276f3/entry/introduction_to_the_c_11_feature_delegating_constructors?lang=en">
+Introduction to the C++11 feature: delegating constructors</a></td>
+<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/0zVA8Ctx3Xo">Discussion thread</a></td>
+</tr>
+
+<tr>
+<td>Enumerated Type Classes and Enum Bases</td>
+<td><code>enum class <i>classname</i></code><br>
+    <code>enum class <i>classname</i> : <i>base-type</i></code><br>
+    <code>enum <i>enumname</i> : <i>base-type</i></code></td>
+<td>Provide enums as full classes, with no implicit
+conversion to booleans or integers. Provide an explicit underlying type for
+enum classes and regular enums.</td>
+<td><a href="http://www.stroustrup.com/C++11FAQ.html#enum">enum-class</a></td>
+<td>Enum classes are still enums and follow enum naming rules
+(which means SHOUTY_CASE in the <a href="http://www.chromium.org/developers/coding-style#Naming">current style guide</a>).
+<a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/Q5WmkAImanc">Discussion thread</a></td>
+</tr>
+
+<tr>
 <td>Final Specifier</td>
 <td><code>final</code></td>
 <td> Indicates that a class or function is final and cannot be overridden</td>
 <td><a href="http://en.cppreference.com/w/cpp/language/final">final Language Reference</a></td>
 <td>Recommended for new code. Existing uses of the <code>FINAL</code> macro will be <a href="https://crbug.com/417463">replaced throughout the codebase</a>. <a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/VTNZzizN0zo">Discussion thread</a></td>
+</tr>
+
+<tr>
+<td>Function Suppression</td>
+<td><code><i>Function</i>(<i>arguments</i>) = delete;</code></td>
+<td>Suppresses the implementation of a function, especially a
+synthetic function such as a copy constructor</td>
+<td>TODO: documentation link</td>
+<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/i1o7-RNRnMs">Discussion thread</a></td>
+</tr>
+
+<tr>
+<td>Lambda Expressions</td>
+<td><code>[<i>captures</i>](<i>params</i>) -&gt; <i>ret</i> { <i>body</i> }</code></td>
+<td>Anonymous functions</td>
+<td><a href="http://en.cppreference.com/w/cpp/language/lambda">Lambda functions</a></td>
+<td>Do not bind or store lambdas; use <code>base::Bind</code> and
+<code>base::Callback</code> instead, because they offer protection against a
+large class of object lifetime mistakes. Don't use default captures
+(<code>[=]</code>, <code>[&amp;]</code> &ndash; <a
+  href="https://google-styleguide.googlecode.com/svn/trunk/cppguide.html#Lambda_expressions">Google Style Guide</a>).
+Lambdas are typically useful as a parameter to methods or
+functions that will use them immediately, such as those in
+<code>&lt;algorithm&gt;</code>. <a
+  href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/D9UnnxBnciQ">Discussion
+  thread</a></td>
 </tr>
 
 <tr>
@@ -165,7 +244,7 @@ Are Variadic macros nonstandard?</a></td>
 
 <h3 id="blacklist_banned">C++11 Banned Features</h3>
 
-<p>This section will list C++11 features that are not allowed in the Chromium
+<p>This section lists C++11 features that are not allowed in the Chromium
 codebase.
 </p>
 
@@ -185,9 +264,19 @@ codebase.
 <td><code>constexpr</code></td>
 <td>Compile-time constant expressions</td>
 <td>TODO: documentation link</td>
-<td>Doesn't work in MSVS2013. Reevalute once it does.<a
-href="https://google-styleguide.googlecode.com/svn/trunk/cppguide.html#constexpr">Google
+<td>Doesn't work in MSVS2013. Reevalute once it does. <a
+href="https://google-styleguide.googlecode.com/svn/trunk/cppguide.html#Use_of_constexpr">Google
 Style Guide on <code>constexpr</code></a></td>
+</tr>
+
+<tr>
+<td>Explicit Conversion Operators</td>
+<td><code>explicit operator <i>type</i>() {
+<br />&nbsp;&nbsp;// code<br /> }</code></td>
+<td>Allows conversion operators that cannot be implicitly invoked</td>
+<td><a href="http://en.cppreference.com/w/cpp/language/explicit">
+explicit specifier</a></td>
+<td><a href="https://connect.microsoft.com/VisualStudio/feedback/details/811334/bug-in-vs-2013-support-for-explicit-conversion-operators">Doesn't work in MSVS2013</a>. Reevaluate once it does. <a href="https://groups.google.com/a/chromium.org/d/msg/chromium-dev/zGF1SrQ-1HQ/BAiC12vwPeEJ">Discussion thread</a></td>
 </tr>
 
 <tr>
@@ -201,11 +290,49 @@ The __func__ Predeclared Identifier is Coming to C++</a></td>
 </tr>
 
 <tr>
+<td>Inherited Constructors</td>
+<td><code>class Derived : Base {
+<br />&nbsp;&nbsp;using Base::Base;
+<br />};</code></td>
+<td>Allow derived classes to inherit constructors from base classes</td>
+<td><a href="http://en.cppreference.com/w/cpp/language/using_declaration">Using-declaration</a></td>
+<td>Doesn't work in MSVS2013. Reevaluate once it does. <a
+href="https://groups.google.com/a/chromium.org/d/msg/chromium-dev/BULzgIKZ-Ao/PLO7_GoVNvYJ">Discussion thread</a></td>
+</tr>
+
+<tr>
+<td><code>long long</code> Type</td>
+<td><code>long long <i>var</i>= <i>value</i>;</code></td>
+<td>An integer of at least 64 bits</td>
+<td><a href="http://en.cppreference.com/w/cpp/language/types">
+Fundamental types</a></td>
+<td>Use an stdint.h type if you need a 64bit number. <a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/RxugZ-pIDxk">Discussion thread</a></td>
+</tr>
+
+<tr>
+<td>Raw String Literals</td>
+<td><code>string <i>var</i>=R&quot;(<i>raw_string</i>)&quot;;</code></td>
+<td>Allows a string to be encoded without any escape
+sequences, easing parsing in regex expressions, for example</td>
+<td>TODO: documentation link</td>
+<td>Causes incorrect line numbers in MSVS2014 and gcc. Reevaluate once that works. <a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/2kWQHbbuMHI">Discussion thread</a></td>
+</tr>
+
+<tr>
 <td>Rvalue References (and Move Semantics)</td>
 <td><code>T(T&amp;&amp; t)</code> and <code>T&amp; operator=(T&amp;&amp; t)</code></td>
 <td>Reference that only binds to a temporary object</td>
 <td>TODO: documentation link</td>
 <td>To be revisited in the future.  Allowed in exceptional cases where approved by the OWNERS of src/styleguide/c++/.</td>
+</tr>
+
+<tr>
+<td>(Uniform) Initialization Syntax</td>
+<td><code><i>type</i> <i>name</i> { [<i>value</i> ..., <i>value</i>]};</code></td>
+<td>Allows any object of primitive, aggregate or class
+type to be initialized using brace syntax</td>
+<td>TODO: documentation link</td>
+<td>Dangerous without library support, see thread. Reevaulate once we have C++11 library support. <a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/GF96FshwHLw">Discussion thread</a></td>
 </tr>
 
 <tr>
@@ -254,14 +381,6 @@ work in all our compilers yet.</p>
 </tr>
 
 <tr>
-<td>Aliases</td>
-<td><code>using <i>new_alias</i> = <i>typename</i></code></td>
-<td>Allow parameterized typedefs</td>
-<td><a href="http://en.cppreference.com/w/cpp/language/type_alias">Type alias (using syntax)</a></td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/8dOAMzgR4ao">Discussion thread</a></td>
-</tr>
-
-<tr>
 <td>Alignment Features</td>
 <td>
 <code>alignas</code> specifier,
@@ -284,26 +403,6 @@ C++11 generalized attributes</a></td>
 </tr>
 
 <tr>
-<td>Declared Type Accessor</td>
-<td><code>decltype(<i>expression</i>)</code></td>
-<td>Provides a means to determine the type of an expression at compile-time,
-useful most often in templates.</td>
-<td><a href="http://en.cppreference.com/w/cpp/language/decltype">
-decltype specifier</a></td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/_zoNvZd_dSo">Discussion thread</a></td>
-</tr>
-
-<tr>
-<td>Default Function Creation</td>
-<td><code><i>Function</i>(<i>arguments</i>) = default;</code></td>
-<td>Instructs the compiler to generate a default version
-of the indicated function</td>
-<td><a href="http://stackoverflow.com/questions/823935/whats-the-point-in-defaulting-functions-in-c11">
-What's the point in defaulting functions in C++11?</a></td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/qgU4mh_MpGA">Discussion thread</a></td>
-</tr>
-
-<tr>
 <td>Default Function Template Arguments</td>
 <td><code>template &lt;typename T = <i>type</i>&gt; <br />
 &nbsp;&nbsp;<i>type</i> <i>Function</i>(T <i>var</i>) {}</code></td>
@@ -311,26 +410,6 @@ What's the point in defaulting functions in C++11?</a></td>
 <td><a href="http://stackoverflow.com/questions/2447458/default-template-arguments-for-function-templates">
 Default Template Arguments for Function Templates</a></td>
 <td></td>
-</tr>
-
-<tr>
-<td>Delegated Constructors</td>
-<td><code>Class() : Class(0) {}</code><br />
-<code>Class(<i>type</i> <i>var</i>) : Class(<i>var</i>, 0)</code></td>
-<td>Allow overloaded constructors to use common initialization code</td>
-<td><a href="https://www.ibm.com/developerworks/community/blogs/5894415f-be62-4bc0-81c5-3956e82276f3/entry/introduction_to_the_c_11_feature_delegating_constructors?lang=en">
-Introduction to the C++11 feature: delegating constructors</a></td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/0zVA8Ctx3Xo">Discussion thread</a></td>
-</tr>
-
-<tr>
-<td>Enumerated Type Classes</td>
-<td><code>enum class <i>classname</i></code></td>
-<td>Provide enums as full classes, with no implicit
-conversion to booleans or integers</td>
-<td><a href="http://stackoverflow.com/questions/6936030/do-we-really-need-enum-class-in-c11">
-enum-class</a></td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/Q5WmkAImanc">Discussion thread</a></td>
 </tr>
 
 <tr>
@@ -346,56 +425,11 @@ std::exception</a></td>
 </tr>
 
 <tr>
-<td>Explicit Conversion Operators</td>
-<td><code>explicit operator <i>type</i>() {
-<br />&nbsp;&nbsp;// code<br /> }</code></td>
-<td>Allows conversion operators that cannot be implicitly invoked</td>
-<td><a href="http://en.cppreference.com/w/cpp/language/explicit">
-explicit specifier</a></td>
-<td></td>
-</tr>
-
-<tr>
-<td>Function Suppression</td>
-<td><code><i>Function</i>(<i>arguments</i>) = delete;</code></td>
-<td>Suppresses the implementation of a function, especially a
-synthetic function such as a copy constructor</td>
-<td>TODO: documentation link</td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/i1o7-RNRnMs">Discussion thread</a></td>
-</tr>
-
-<tr>
-<td>(Uniform) Initialization Syntax</td>
-<td><code><i>type</i> <i>name</i> { [<i>value</i> ..., <i>value</i>]};</code></td>
-<td>Allows any object of primitive, aggregate or class
-type to be initialized using brace syntax</td>
-<td>TODO: documentation link</td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/GF96FshwHLw">Discussion thread</a></td>
-</tr>
-
-<tr>
 <td>Inline Namespaces</td>
 <td><code>inline</code></td>
 <td>Allows better versioning of namespaces</td>
 <td><a href="http://en.cppreference.com/w/cpp/language/namespace">Namespaces</a></td>
 <td>Unclear how it will work with components</td>
-</tr>
-
-<tr>
-<td>Lambda Expressions</td>
-<td><code>[<i>captures</i>](<i>params</i>) -&gt; <i>ret</i> { <i>body</i> }</code></td>
-<td>Anonymous functions</td>
-<td><a href="http://en.cppreference.com/w/cpp/language/lambda">Lambda functions</a></td>
-<td>No default captures (<a href="https://google-styleguide.googlecode.com/svn/trunk/cppguide.html#Lambda_expressions">Google Style Guide</a>). <a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/D9UnnxBnciQ">Discussion thread</a></td>
-</tr>
-
-<tr>
-<td><code>long long</code> Type</td>
-<td><code>long long <i>var</i>= <i>value</i>;</code></td>
-<td>An integer of at least 64 bits</td>
-<td><a href="http://en.cppreference.com/w/cpp/language/types">
-Fundamental types</a></td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/RxugZ-pIDxk">Discussion thread</a></td>
 </tr>
 
 <tr>
@@ -410,15 +444,6 @@ class C {<br />
 <td><a href="http://en.cppreference.com/w/cpp/language/data_members">
 Non-static data members</a></td>
 <td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/zqB-DySA4V0">Discussion thread</a></td>
-</tr>
-
-<tr>
-<td>Raw String Literals</td>
-<td><code>string <i>var</i>=R&quot;(<i>raw_string</i>)&quot;;</code></td>
-<td>Allows a string to be encoded without any escape
-sequences, easing parsing in regex expressions, for example</td>
-<td>TODO: documentation link</td>
-<td><a href="https://groups.google.com/a/chromium.org/forum/#!topic/chromium-dev/2kWQHbbuMHI">Discussion thread</a></td>
 </tr>
 
 <tr>

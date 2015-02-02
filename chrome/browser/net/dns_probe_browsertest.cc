@@ -21,10 +21,10 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/net/net_error_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/error_page/common/net_error_info.h"
 #include "components/google/core/browser/google_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -78,11 +78,9 @@ class DelayingDnsProbeService : public DnsProbeService {
  public:
   DelayingDnsProbeService() {}
 
-  virtual ~DelayingDnsProbeService() {
-    EXPECT_TRUE(delayed_probes_.empty());
-  }
+  ~DelayingDnsProbeService() override { EXPECT_TRUE(delayed_probes_.empty()); }
 
-  virtual void ProbeDns(const ProbeCallback& callback) OVERRIDE {
+  void ProbeDns(const ProbeCallback& callback) override {
     delayed_probes_.push_back(callback);
   }
 
@@ -143,7 +141,7 @@ class DelayableURLRequestFailedJob : public URLRequestFailedJob,
         start_delayed_(false),
         destruction_callback_(destruction_callback) {}
 
-  virtual void Start() OVERRIDE {
+  void Start() override {
     if (should_delay_) {
       DCHECK(!start_delayed_);
       start_delayed_ = true;
@@ -152,7 +150,7 @@ class DelayableURLRequestFailedJob : public URLRequestFailedJob,
     URLRequestFailedJob::Start();
   }
 
-  virtual void Resume() OVERRIDE {
+  void Resume() override {
     DCHECK(should_delay_);
     should_delay_ = false;
     if (start_delayed_) {
@@ -162,7 +160,7 @@ class DelayableURLRequestFailedJob : public URLRequestFailedJob,
   }
 
  private:
-  virtual ~DelayableURLRequestFailedJob() {
+  ~DelayableURLRequestFailedJob() override {
     if (should_delay_)
       destruction_callback_.Run(this);
   }
@@ -191,7 +189,7 @@ class DelayableURLRequestMockHTTPJob : public URLRequestMockHTTPJob,
         start_delayed_(false),
         destruction_callback_(destruction_callback) {}
 
-  virtual void Start() OVERRIDE {
+  void Start() override {
     if (should_delay_) {
       DCHECK(!start_delayed_);
       start_delayed_ = true;
@@ -200,7 +198,7 @@ class DelayableURLRequestMockHTTPJob : public URLRequestMockHTTPJob,
     URLRequestMockHTTPJob::Start();
   }
 
-  virtual void Resume() OVERRIDE {
+  void Resume() override {
     DCHECK(should_delay_);
     should_delay_ = false;
     if (start_delayed_) {
@@ -210,7 +208,7 @@ class DelayableURLRequestMockHTTPJob : public URLRequestMockHTTPJob,
   }
 
  private:
-  virtual ~DelayableURLRequestMockHTTPJob() {
+  ~DelayableURLRequestMockHTTPJob() override {
     if (should_delay_)
       destruction_callback_.Run(this);
   }
@@ -235,14 +233,14 @@ class BreakableCorrectionInterceptor : public URLRequestInterceptor {
                        base::Unretained(this))) {
   }
 
-  virtual ~BreakableCorrectionInterceptor() {
+  ~BreakableCorrectionInterceptor() override {
     // All delayed requests should have been resumed or cancelled by this point.
     EXPECT_TRUE(delayed_requests_.empty());
   }
 
-  virtual URLRequestJob* MaybeInterceptRequest(
+  URLRequestJob* MaybeInterceptRequest(
       URLRequest* request,
-      NetworkDelegate* network_delegate) const OVERRIDE {
+      NetworkDelegate* network_delegate) const override {
     if (net_error_ != net::OK) {
       DelayableURLRequestFailedJob* job =
           new DelayableURLRequestFailedJob(
@@ -431,10 +429,10 @@ void DnsProbeBrowserTestIOThreadHelper::StartDelayedProbes(
 class DnsProbeBrowserTest : public InProcessBrowserTest {
  public:
   DnsProbeBrowserTest();
-  virtual ~DnsProbeBrowserTest();
+  ~DnsProbeBrowserTest() override;
 
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
 
  protected:
   // Sets the browser object that other methods apply to, and that has the

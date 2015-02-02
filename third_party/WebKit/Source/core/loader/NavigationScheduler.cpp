@@ -46,7 +46,6 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/FrameLoaderStateMachine.h"
-#include "core/page/BackForwardClient.h"
 #include "core/page/Page.h"
 #include "platform/SharedBuffer.h"
 #include "platform/UserGestureIndicator.h"
@@ -97,21 +96,20 @@ private:
 
 class ScheduledURLNavigation : public ScheduledNavigation {
 protected:
-    ScheduledURLNavigation(double delay, Document* originDocument, const String& url, const Referrer& referrer, bool lockBackForwardList, bool isLocationChange)
+    ScheduledURLNavigation(double delay, Document* originDocument, const String& url, bool lockBackForwardList, bool isLocationChange)
         : ScheduledNavigation(delay, lockBackForwardList, isLocationChange)
         , m_originDocument(originDocument)
         , m_url(url)
-        , m_referrer(referrer)
         , m_shouldCheckMainWorldContentSecurityPolicy(CheckContentSecurityPolicy)
     {
         if (ContentSecurityPolicy::shouldBypassMainWorld(originDocument))
             m_shouldCheckMainWorldContentSecurityPolicy = DoNotCheckContentSecurityPolicy;
     }
 
-    virtual void fire(LocalFrame* frame) OVERRIDE
+    virtual void fire(LocalFrame* frame) override
     {
         OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
-        FrameLoadRequest request(m_originDocument.get(), ResourceRequest(KURL(ParsedURLString, m_url), m_referrer), "_self", m_shouldCheckMainWorldContentSecurityPolicy);
+        FrameLoadRequest request(m_originDocument.get(), m_url, "_self", m_shouldCheckMainWorldContentSecurityPolicy);
         request.setLockBackForwardList(lockBackForwardList());
         request.setClientRedirect(ClientRedirect);
         frame->loader().load(request);
@@ -119,29 +117,27 @@ protected:
 
     Document* originDocument() const { return m_originDocument.get(); }
     String url() const { return m_url; }
-    const Referrer& referrer() const { return m_referrer; }
 
 private:
     RefPtrWillBePersistent<Document> m_originDocument;
     String m_url;
-    Referrer m_referrer;
     ContentSecurityPolicyCheck m_shouldCheckMainWorldContentSecurityPolicy;
 };
 
-class ScheduledRedirect FINAL : public ScheduledURLNavigation {
+class ScheduledRedirect final : public ScheduledURLNavigation {
 public:
     ScheduledRedirect(double delay, Document* originDocument, const String& url, bool lockBackForwardList)
-        : ScheduledURLNavigation(delay, originDocument, url, Referrer(), lockBackForwardList, false)
+        : ScheduledURLNavigation(delay, originDocument, url, lockBackForwardList, false)
     {
         clearUserGesture();
     }
 
-    virtual bool shouldStartTimer(LocalFrame* frame) OVERRIDE { return frame->loader().allAncestorsAreComplete(); }
+    virtual bool shouldStartTimer(LocalFrame* frame) override { return frame->loader().allAncestorsAreComplete(); }
 
-    virtual void fire(LocalFrame* frame) OVERRIDE
+    virtual void fire(LocalFrame* frame) override
     {
         OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
-        FrameLoadRequest request(originDocument(), ResourceRequest(KURL(ParsedURLString, url()), referrer()), "_self");
+        FrameLoadRequest request(originDocument(), url(), "_self");
         request.setLockBackForwardList(lockBackForwardList());
         if (equalIgnoringFragmentIdentifier(frame->document()->url(), request.resourceRequest().url()))
             request.resourceRequest().setCachePolicy(ReloadIgnoringCacheData);
@@ -150,65 +146,45 @@ public:
     }
 };
 
-class ScheduledLocationChange FINAL : public ScheduledURLNavigation {
+class ScheduledLocationChange final : public ScheduledURLNavigation {
 public:
-    ScheduledLocationChange(Document* originDocument, const String& url, const Referrer& referrer, bool lockBackForwardList)
-        : ScheduledURLNavigation(0.0, originDocument, url, referrer, lockBackForwardList, true) { }
+    ScheduledLocationChange(Document* originDocument, const String& url, bool lockBackForwardList)
+        : ScheduledURLNavigation(0.0, originDocument, url, lockBackForwardList, !protocolIsJavaScript(url)) { }
 };
 
-class ScheduledReload FINAL : public ScheduledNavigation {
+class ScheduledReload final : public ScheduledNavigation {
 public:
     ScheduledReload()
         : ScheduledNavigation(0.0, true, true)
     {
     }
 
-    virtual void fire(LocalFrame* frame) OVERRIDE
+    virtual void fire(LocalFrame* frame) override
     {
         OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
-        frame->loader().reload(NormalReload, KURL(), nullAtom, ClientRedirect);
+        frame->loader().reload(NormalReload, KURL(), ClientRedirect);
     }
 };
 
-class ScheduledPageBlock FINAL : public ScheduledURLNavigation {
+class ScheduledPageBlock final : public ScheduledURLNavigation {
 public:
-    ScheduledPageBlock(Document* originDocument, const String& url, const Referrer& referrer)
-        : ScheduledURLNavigation(0.0, originDocument, url, referrer, true, true)
+    ScheduledPageBlock(Document* originDocument, const String& url)
+        : ScheduledURLNavigation(0.0, originDocument, url, true, true)
     {
     }
 
-    virtual void fire(LocalFrame* frame) OVERRIDE
+    virtual void fire(LocalFrame* frame) override
     {
         OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
         SubstituteData substituteData(SharedBuffer::create(), "text/plain", "UTF-8", KURL(), ForceSynchronousLoad);
-        FrameLoadRequest request(originDocument(), ResourceRequest(KURL(ParsedURLString, url()), referrer(), ReloadIgnoringCacheData), substituteData);
+        FrameLoadRequest request(originDocument(), url(), substituteData);
         request.setLockBackForwardList(true);
         request.setClientRedirect(ClientRedirect);
         frame->loader().load(request);
     }
 };
 
-class ScheduledHistoryNavigation FINAL : public ScheduledNavigation {
-public:
-    explicit ScheduledHistoryNavigation(int historySteps)
-        : ScheduledNavigation(0, false, true)
-        , m_historySteps(historySteps)
-    {
-    }
-
-    virtual void fire(LocalFrame* frame) OVERRIDE
-    {
-        OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
-        // go(i!=0) from a frame navigates into the history of the frame only,
-        // in both IE and NS (but not in Mozilla). We can't easily do that.
-        frame->page()->deprecatedLocalMainFrame()->loader().client()->navigateBackForward(m_historySteps);
-    }
-
-private:
-    int m_historySteps;
-};
-
-class ScheduledFormSubmission FINAL : public ScheduledNavigation {
+class ScheduledFormSubmission final : public ScheduledNavigation {
 public:
     ScheduledFormSubmission(PassRefPtrWillBeRawPtr<FormSubmission> submission, bool lockBackForwardList)
         : ScheduledNavigation(0, lockBackForwardList, true)
@@ -217,7 +193,7 @@ public:
         ASSERT(m_submission->state());
     }
 
-    virtual void fire(LocalFrame* frame) OVERRIDE
+    virtual void fire(LocalFrame* frame) override
     {
         OwnPtr<UserGestureIndicator> gestureIndicator = createUserGestureIndicator();
         FrameLoadRequest frameRequest(m_submission->state()->sourceDocument());
@@ -293,7 +269,7 @@ bool NavigationScheduler::mustLockBackForwardList(LocalFrame* targetFrame)
     return parentFrame && parentFrame->isLocalFrame() && !toLocalFrame(parentFrame)->loader().allAncestorsAreComplete();
 }
 
-void NavigationScheduler::scheduleLocationChange(Document* originDocument, const String& url, const Referrer& referrer, bool lockBackForwardList)
+void NavigationScheduler::scheduleLocationChange(Document* originDocument, const String& url, bool lockBackForwardList)
 {
     if (!shouldScheduleNavigation(url))
         return;
@@ -309,7 +285,7 @@ void NavigationScheduler::scheduleLocationChange(Document* originDocument, const
     if (originDocument->securityOrigin()->canAccess(m_frame->document()->securityOrigin())) {
         KURL parsedURL(ParsedURLString, url);
         if (parsedURL.hasFragmentIdentifier() && equalIgnoringFragmentIdentifier(m_frame->document()->url(), parsedURL)) {
-            FrameLoadRequest request(originDocument, ResourceRequest(m_frame->document()->completeURL(url), referrer), "_self");
+            FrameLoadRequest request(originDocument, m_frame->document()->completeURL(url), "_self");
             request.setLockBackForwardList(lockBackForwardList);
             if (lockBackForwardList)
                 request.setClientRedirect(ClientRedirect);
@@ -318,14 +294,14 @@ void NavigationScheduler::scheduleLocationChange(Document* originDocument, const
         }
     }
 
-    schedule(adoptPtr(new ScheduledLocationChange(originDocument, url, referrer, lockBackForwardList)));
+    schedule(adoptPtr(new ScheduledLocationChange(originDocument, url, lockBackForwardList)));
 }
 
-void NavigationScheduler::schedulePageBlock(Document* originDocument, const Referrer& referrer)
+void NavigationScheduler::schedulePageBlock(Document* originDocument)
 {
     ASSERT(m_frame->page());
     const KURL& url = m_frame->document()->url();
-    schedule(adoptPtr(new ScheduledPageBlock(originDocument, url, referrer)));
+    schedule(adoptPtr(new ScheduledPageBlock(originDocument, url)));
 }
 
 void NavigationScheduler::scheduleFormSubmission(PassRefPtrWillBeRawPtr<FormSubmission> submission)
@@ -341,26 +317,6 @@ void NavigationScheduler::scheduleReload()
     if (m_frame->document()->url().isEmpty())
         return;
     schedule(adoptPtr(new ScheduledReload));
-}
-
-void NavigationScheduler::scheduleHistoryNavigation(int steps)
-{
-    if (!shouldScheduleNavigation())
-        return;
-
-    // Invalid history navigations (such as history.forward() during a new load) have the side effect of cancelling any scheduled
-    // redirects. We also avoid the possibility of cancelling the current load by avoiding the scheduled redirection altogether.
-    BackForwardClient& backForward = m_frame->page()->backForward();
-    if (steps > backForward.forwardListCount() || -steps > backForward.backListCount()) {
-        cancel();
-        return;
-    }
-
-    // In all other cases, schedule the history traversal to occur asynchronously.
-    if (steps)
-        schedule(adoptPtr(new ScheduledHistoryNavigation(steps)));
-    else
-        schedule(adoptPtr(new ScheduledReload));
 }
 
 void NavigationScheduler::timerFired(Timer<NavigationScheduler>*)

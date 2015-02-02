@@ -67,6 +67,15 @@ SkFontStyle::SkFontStyle(int weight, int width, Slant slant) {
     fUnion.fR.fSlant = SkPin32(slant, kUpright_Slant, kItalic_Slant);
 }
 
+SkFontStyle::SkFontStyle(unsigned oldStyle) {
+    fUnion.fU32 = 0;
+    fUnion.fR.fWeight = (oldStyle & SkTypeface::kBold) ? SkFontStyle::kBold_Weight
+                                                       : SkFontStyle::kNormal_Weight;
+    fUnion.fR.fWidth = SkFontStyle::kNormal_Width;
+    fUnion.fR.fSlant = (oldStyle & SkTypeface::kItalic) ? SkFontStyle::kItalic_Slant
+                                                        : SkFontStyle::kUpright_Slant;
+}
+
 #include "SkFontMgr.h"
 
 class SkEmptyFontStyleSet : public SkFontStyleSet {
@@ -214,12 +223,14 @@ SkTypeface* SkFontMgr::legacyCreateTypeface(const char familyName[],
     return this->onLegacyCreateTypeface(familyName, styleBits);
 }
 
-SkFontMgr* SkFontMgr::CreateDefault() {
+// As a template argument this must have external linkage.
+SkFontMgr* sk_fontmgr_create_default() {
     SkFontMgr* fm = SkFontMgr::Factory();
     return fm ? fm : SkNEW(SkEmptyFontMgr);
 }
 
+SK_DECLARE_STATIC_LAZY_PTR(SkFontMgr, singleton, sk_fontmgr_create_default);
+
 SkFontMgr* SkFontMgr::RefDefault() {
-    SK_DECLARE_STATIC_LAZY_PTR(SkFontMgr, singleton, CreateDefault);
     return SkRef(singleton.get());
 }

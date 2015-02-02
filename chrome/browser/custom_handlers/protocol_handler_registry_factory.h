@@ -29,20 +29,20 @@ class ProtocolHandlerRegistryFactory
 
  protected:
   // BrowserContextKeyedServiceFactory implementation.
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 
  private:
   friend struct DefaultSingletonTraits<ProtocolHandlerRegistryFactory>;
 
   ProtocolHandlerRegistryFactory();
-  virtual ~ProtocolHandlerRegistryFactory();
+  ~ProtocolHandlerRegistryFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation.
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(ProtocolHandlerRegistryFactory);
 };

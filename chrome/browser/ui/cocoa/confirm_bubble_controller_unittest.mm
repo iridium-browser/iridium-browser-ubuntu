@@ -25,16 +25,16 @@ class TestConfirmBubbleModel : public ConfirmBubbleModel {
                          bool* cancel_clicked,
                          bool* link_clicked);
   TestConfirmBubbleModel();
-  virtual ~TestConfirmBubbleModel() OVERRIDE;
-  virtual base::string16 GetTitle() const OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual gfx::Image* GetIcon() const OVERRIDE;
-  virtual int GetButtons() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(BubbleButton button) const OVERRIDE;
-  virtual void Accept() OVERRIDE;
-  virtual void Cancel() OVERRIDE;
-  virtual base::string16 GetLinkText() const OVERRIDE;
-  virtual void LinkClicked() OVERRIDE;
+  ~TestConfirmBubbleModel() override;
+  base::string16 GetTitle() const override;
+  base::string16 GetMessageText() const override;
+  gfx::Image* GetIcon() const override;
+  int GetButtons() const override;
+  base::string16 GetButtonLabel(BubbleButton button) const override;
+  void Accept() override;
+  void Cancel() override;
+  base::string16 GetLinkText() const override;
+  void LinkClicked() override;
 
  private:
   bool* model_deleted_;

@@ -30,19 +30,18 @@ class HandlerOptionsHandler : public OptionsPageUIHandler,
                               public content::NotificationObserver {
  public:
   HandlerOptionsHandler();
-  virtual ~HandlerOptionsHandler();
+  ~HandlerOptionsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
+  void RegisterMessages() override;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
   // Called when the user toggles whether custom handlers are enabled.

@@ -27,12 +27,12 @@ class CloudPrintProxyServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<CloudPrintProxyServiceFactory>;
 
   CloudPrintProxyServiceFactory();
-  virtual ~CloudPrintProxyServiceFactory();
+  ~CloudPrintProxyServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 };
 
 #endif  // CHROME_BROWSER_PRINTING_CLOUD_PRINT_CLOUD_PRINT_PROXY_SERVICE_FACTORY_H_

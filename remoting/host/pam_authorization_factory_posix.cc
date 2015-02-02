@@ -20,17 +20,17 @@ namespace {
 class PamAuthorizer : public protocol::Authenticator {
  public:
   PamAuthorizer(scoped_ptr<protocol::Authenticator> underlying);
-  virtual ~PamAuthorizer();
+  ~PamAuthorizer() override;
 
   // protocol::Authenticator interface.
-  virtual State state() const OVERRIDE;
-  virtual bool started() const OVERRIDE;
-  virtual RejectionReason rejection_reason() const OVERRIDE;
-  virtual void ProcessMessage(const buzz::XmlElement* message,
-                              const base::Closure& resume_callback) OVERRIDE;
-  virtual scoped_ptr<buzz::XmlElement> GetNextMessage() OVERRIDE;
-  virtual scoped_ptr<protocol::ChannelAuthenticator>
-      CreateChannelAuthenticator() const OVERRIDE;
+  State state() const override;
+  bool started() const override;
+  RejectionReason rejection_reason() const override;
+  void ProcessMessage(const buzz::XmlElement* message,
+                      const base::Closure& resume_callback) override;
+  scoped_ptr<buzz::XmlElement> GetNextMessage() override;
+  scoped_ptr<protocol::ChannelAuthenticator> CreateChannelAuthenticator()
+      const override;
 
  private:
   void MaybeCheckLocalLogin();
@@ -171,8 +171,7 @@ PamAuthorizationFactory::CreateAuthenticator(
     const buzz::XmlElement* first_message) {
   scoped_ptr<protocol::Authenticator> authenticator(
       underlying_->CreateAuthenticator(local_jid, remote_jid, first_message));
-  return scoped_ptr<protocol::Authenticator>(
-      new PamAuthorizer(authenticator.Pass()));
+  return make_scoped_ptr(new PamAuthorizer(authenticator.Pass()));
 }
 
 

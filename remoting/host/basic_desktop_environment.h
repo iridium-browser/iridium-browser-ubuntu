@@ -27,19 +27,18 @@ class GnubbyAuthHandler;
 // the local console.
 class BasicDesktopEnvironment : public DesktopEnvironment {
  public:
-  virtual ~BasicDesktopEnvironment();
+  ~BasicDesktopEnvironment() override;
 
   // DesktopEnvironment implementation.
-  virtual scoped_ptr<AudioCapturer> CreateAudioCapturer() OVERRIDE;
-  virtual scoped_ptr<InputInjector> CreateInputInjector() OVERRIDE;
-  virtual scoped_ptr<ScreenControls> CreateScreenControls() OVERRIDE;
-  virtual scoped_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() OVERRIDE;
-  virtual scoped_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor()
-      OVERRIDE;
-  virtual std::string GetCapabilities() const OVERRIDE;
-  virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
-  virtual scoped_ptr<GnubbyAuthHandler> CreateGnubbyAuthHandler(
-      protocol::ClientStub* client_stub) OVERRIDE;
+  scoped_ptr<AudioCapturer> CreateAudioCapturer() override;
+  scoped_ptr<InputInjector> CreateInputInjector() override;
+  scoped_ptr<ScreenControls> CreateScreenControls() override;
+  scoped_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() override;
+  scoped_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor() override;
+  std::string GetCapabilities() const override;
+  void SetCapabilities(const std::string& capabilities) override;
+  scoped_ptr<GnubbyAuthHandler> CreateGnubbyAuthHandler(
+      protocol::ClientStub* client_stub) override;
 
  protected:
   friend class BasicDesktopEnvironmentFactory;
@@ -93,10 +92,10 @@ class BasicDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
-  virtual ~BasicDesktopEnvironmentFactory();
+  ~BasicDesktopEnvironmentFactory() override;
 
   // DesktopEnvironmentFactory implementation.
-  virtual bool SupportsAudioCapture() const OVERRIDE;
+  bool SupportsAudioCapture() const override;
 
  protected:
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner() const {

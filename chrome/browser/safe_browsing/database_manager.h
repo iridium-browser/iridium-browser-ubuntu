@@ -205,7 +205,7 @@ class SafeBrowsingDatabaseManager
   void StopOnIOThread(bool shutdown);
 
  protected:
-  virtual ~SafeBrowsingDatabaseManager();
+  ~SafeBrowsingDatabaseManager() override;
 
   // protected for tests.
   void NotifyDatabaseUpdateFinished(bool update_succeeded);
@@ -216,7 +216,8 @@ class SafeBrowsingDatabaseManager
   friend class SafeBrowsingServiceTest;
   friend class SafeBrowsingServiceTestHelper;
   friend class SafeBrowsingDatabaseManagerTest;
-  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingDatabaseManagerTest, GetUrlThreatType);
+  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingDatabaseManagerTest,
+                           GetUrlSeverestThreatType);
 
   typedef std::set<SafeBrowsingCheck*> CurrentChecks;
   typedef std::vector<SafeBrowsingCheck*> GetHashRequestors;
@@ -237,16 +238,16 @@ class SafeBrowsingDatabaseManager
     base::TimeTicks start;  // When check was queued.
   };
 
-  // Return the threat type from the first result in |full_hashes| which matches
+  // Return the threat type of the severest entry in |full_hashes| which matches
   // |hash|, or SAFE if none match.
-  static SBThreatType GetHashThreatType(
+  static SBThreatType GetHashSeverestThreatType(
       const SBFullHash& hash,
       const std::vector<SBFullHashResult>& full_hashes);
 
   // Given a URL, compare all the possible host + path full hashes to the set of
-  // provided full hashes.  Returns the threat type of the matching result from
-  // |full_hashes|, or SAFE if none match.
-  static SBThreatType GetUrlThreatType(
+  // provided full hashes.  Returns the threat type of the severest matching
+  // result from |full_hashes|, or SAFE if none match.
+  static SBThreatType GetUrlSeverestThreatType(
       const GURL& url,
       const std::vector<SBFullHashResult>& full_hashes,
       size_t* index);
@@ -341,15 +342,15 @@ class SafeBrowsingDatabaseManager
                               const base::Closure& task);
 
   // SafeBrowsingProtocolManageDelegate override
-  virtual void ResetDatabase() OVERRIDE;
-  virtual void UpdateStarted() OVERRIDE;
-  virtual void UpdateFinished(bool success) OVERRIDE;
-  virtual void GetChunks(GetChunksCallback callback) OVERRIDE;
-  virtual void AddChunks(const std::string& list,
-                         scoped_ptr<ScopedVector<SBChunkData> > chunks,
-                         AddChunksCallback callback) OVERRIDE;
-  virtual void DeleteChunks(
-      scoped_ptr<std::vector<SBChunkDelete> > chunk_deletes) OVERRIDE;
+  void ResetDatabase() override;
+  void UpdateStarted() override;
+  void UpdateFinished(bool success) override;
+  void GetChunks(GetChunksCallback callback) override;
+  void AddChunks(const std::string& list,
+                 scoped_ptr<ScopedVector<SBChunkData>> chunks,
+                 AddChunksCallback callback) override;
+  void DeleteChunks(
+      scoped_ptr<std::vector<SBChunkDelete>> chunk_deletes) override;
 
   scoped_refptr<SafeBrowsingService> sb_service_;
 
@@ -388,6 +389,9 @@ class SafeBrowsingDatabaseManager
 
   // Indicate if the csd malware IP blacklist should be enabled.
   bool enable_ip_blacklist_;
+
+  // Indicate if the unwanted software blacklist should be enabled.
+  bool enable_unwanted_software_blacklist_;
 
   // The SafeBrowsing thread that runs database operations.
   //

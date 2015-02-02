@@ -13,6 +13,7 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
@@ -38,7 +39,8 @@ class Browser;
 
 // This bubble view is displayed when the user clicks on the avatar button.
 // It displays a list of profiles and allows users to switch between profiles.
-class ProfileChooserView : public views::BubbleDelegateView,
+class ProfileChooserView : public content::WebContentsDelegate,
+                           public views::BubbleDelegateView,
                            public views::ButtonListener,
                            public views::LinkListener,
                            public views::StyledLabelListener,
@@ -83,34 +85,36 @@ class ProfileChooserView : public views::BubbleDelegateView,
                      profiles::BubbleViewMode view_mode,
                      profiles::TutorialMode tutorial_mode,
                      signin::GAIAServiceType service_type);
-  virtual ~ProfileChooserView();
+  ~ProfileChooserView() override;
 
   // views::BubbleDelegateView:
-  virtual void Init() OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+  void Init() override;
+  void WindowClosing() override;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+
+  // content::WebContentsDelegate:
+  bool HandleContextMenu(const content::ContextMenuParams& params) override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::LinkListener:
-  virtual void LinkClicked(views::Link* sender, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* sender, int event_flags) override;
 
   // views::StyledLabelListener:
-  virtual void StyledLabelLinkClicked(
-      const gfx::Range& range, int event_flags) OVERRIDE;
+  void StyledLabelLinkClicked(const gfx::Range& range,
+                              int event_flags) override;
 
   // views::TextfieldController:
-  virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const ui::KeyEvent& key_event) OVERRIDE;
+  bool HandleKeyEvent(views::Textfield* sender,
+                      const ui::KeyEvent& key_event) override;
 
   // AvatarMenuObserver:
-  virtual void OnAvatarMenuChanged(AvatarMenu* avatar_menu) OVERRIDE;
+  void OnAvatarMenuChanged(AvatarMenu* avatar_menu) override;
 
   // OAuth2TokenService::Observer overrides.
-  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE;
-  virtual void OnRefreshTokenRevoked(const std::string& account_id) OVERRIDE;
+  void OnRefreshTokenAvailable(const std::string& account_id) override;
+  void OnRefreshTokenRevoked(const std::string& account_id) override;
 
   static ProfileChooserView* profile_bubble_;
   static bool close_on_deactivate_for_testing_;

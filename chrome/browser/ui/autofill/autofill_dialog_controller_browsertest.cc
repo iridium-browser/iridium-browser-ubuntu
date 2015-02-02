@@ -95,7 +95,7 @@ class MockAutofillMetrics : public AutofillMetrics {
 
   virtual void LogDialogUiDuration(
       const base::TimeDelta& duration,
-      DialogDismissalAction dismissal_action) const OVERRIDE {
+      DialogDismissalAction dismissal_action) const override {
     // Ignore constness for testing.
     MockAutofillMetrics* mutable_this = const_cast<MockAutofillMetrics*>(this);
     mutable_this->dialog_dismissal_action_ = dismissal_action;
@@ -141,11 +141,15 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   virtual ~TestAutofillDialogController() {}
 
-  virtual GURL SignInUrl() const OVERRIDE {
+  GURL FakeSignInUrl() const {
     return GURL(chrome::kChromeUIVersionURL);
   }
 
-  virtual void ViewClosed() OVERRIDE {
+  virtual void ShowSignIn(const GURL& url) override {
+    AutofillDialogControllerImpl::ShowSignIn(FakeSignInUrl());
+  }
+
+  virtual void ViewClosed() override {
     message_loop_runner_->Quit();
     AutofillDialogControllerImpl::ViewClosed();
   }
@@ -153,7 +157,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
   virtual base::string16 InputValidityMessage(
       DialogSection section,
       ServerFieldType type,
-      const base::string16& value) OVERRIDE {
+      const base::string16& value) override {
     if (!use_validation_)
       return base::string16();
     return AutofillDialogControllerImpl::InputValidityMessage(
@@ -162,7 +166,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   virtual ValidityMessages InputsAreValid(
       DialogSection section,
-      const FieldValueMap& inputs) OVERRIDE {
+      const FieldValueMap& inputs) override {
     if (!use_validation_)
       return ValidityMessages();
     return AutofillDialogControllerImpl::InputsAreValid(section, inputs);
@@ -170,7 +174,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   // Saving to Chrome is tested in AutofillDialogControllerImpl unit tests.
   // TODO(estade): test that the view defaults to saving to Chrome.
-  virtual bool ShouldOfferToSaveInChrome() const OVERRIDE {
+  virtual bool ShouldOfferToSaveInChrome() const override {
     return true;
   }
 
@@ -184,7 +188,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   MOCK_METHOD0(LoadRiskFingerprintData, void());
 
-  virtual std::vector<DialogNotification> CurrentNotifications() OVERRIDE {
+  virtual std::vector<DialogNotification> CurrentNotifications() override {
     return notifications_;
   }
 
@@ -226,27 +230,27 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
   }
 
  protected:
-  virtual PersonalDataManager* GetManager() const OVERRIDE {
+  virtual PersonalDataManager* GetManager() const override {
     return &const_cast<TestAutofillDialogController*>(this)->test_manager_;
   }
 
-  virtual AddressValidator* GetValidator() OVERRIDE {
+  virtual AddressValidator* GetValidator() override {
     return &mock_validator_;
   }
 
-  virtual wallet::WalletClient* GetWalletClient() OVERRIDE {
+  virtual wallet::WalletClient* GetWalletClient() override {
     return &mock_wallet_client_;
   }
 
   virtual bool IsSignInContinueUrl(const GURL& url, size_t* user_index) const
-      OVERRIDE {
+      override {
     *user_index = sign_in_user_index_;
     return url == wallet::GetSignInContinueUrl();
   }
 
  private:
   // To specify our own metric logger.
-  virtual const AutofillMetrics& GetMetricLogger() const OVERRIDE {
+  virtual const AutofillMetrics& GetMetricLogger() const override {
     return metric_logger_;
   }
 
@@ -284,12 +288,12 @@ class NavEntryCommittedObserver : public content::WindowedNotificationObserver {
                                    source),
       url_(url) {}
 
-  virtual ~NavEntryCommittedObserver() {}
+  ~NavEntryCommittedObserver() override {}
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     content::LoadCommittedDetails* load_details =
         content::Details<content::LoadCommittedDetails>(details).ptr();
     if (load_details->entry->GetVirtualURL() != url_)
@@ -311,11 +315,11 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
   AutofillDialogControllerTest() : controller_(NULL) {}
   virtual ~AutofillDialogControllerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(::switches::kReduceSecurityForTesting);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     autofill::test::DisableSystemServices(browser()->profile()->GetPrefs());
     InitializeController();
   }
@@ -1174,7 +1178,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, SimulateSuccessfulSignIn) {
       wallet::GetTestWalletItemsWithRequiredAction(wallet::GAIA_AUTH));
 
   NavEntryCommittedObserver sign_in_page_observer(
-      controller()->SignInUrl(),
+      controller()->FakeSignInUrl(),
       content::NotificationService::AllSources());
 
   // Simulate a user clicking "Sign In" (which loads dialog's web contents).
@@ -1191,7 +1195,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, SimulateSuccessfulSignIn) {
       wallet::GetSignInContinueUrl(),
       content::NotificationService::AllSources());
 
-  EXPECT_EQ(sign_in_contents->GetURL(), controller()->SignInUrl());
+  EXPECT_EQ(sign_in_contents->GetURL(), controller()->FakeSignInUrl());
 
   AccountChooserModel* account_chooser_model =
       controller()->AccountChooserModelForTesting();
@@ -1250,7 +1254,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AddAccount) {
       account_chooser_model->GetItemCount() - 1);
 
   NavEntryCommittedObserver sign_in_page_observer(
-      controller()->SignInUrl(),
+      controller()->FakeSignInUrl(),
       content::NotificationService::AllSources());
 
   // Simulate a user clicking "add account".
@@ -1268,7 +1272,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AddAccount) {
       wallet::GetSignInContinueUrl(),
       content::NotificationService::AllSources());
 
-  EXPECT_EQ(sign_in_contents->GetURL(), controller()->SignInUrl());
+  EXPECT_EQ(sign_in_contents->GetURL(), controller()->FakeSignInUrl());
 
   EXPECT_FALSE(account_chooser_model->WalletIsSelected());
 
@@ -1407,7 +1411,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
       wallet::GetTestWalletItemsWithRequiredAction(wallet::GAIA_AUTH));
 
   NavEntryCommittedObserver sign_in_page_observer(
-      controller()->SignInUrl(),
+      controller()->FakeSignInUrl(),
       content::NotificationService::AllSources());
 
   controller()->SignInLinkClicked();
@@ -1499,9 +1503,9 @@ class AutofillDialogControllerSecurityTest :
     public AutofillDialogControllerTest {
  public:
   AutofillDialogControllerSecurityTest() {}
-  virtual ~AutofillDialogControllerSecurityTest() {}
+  ~AutofillDialogControllerSecurityTest() override {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     CHECK(!command_line->HasSwitch(::switches::kReduceSecurityForTesting));
   }
 
@@ -1764,6 +1768,21 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
       "<input type='number' step='0.01'"
       "   autocomplete='transaction-amount' value='24'>"
       "<input autocomplete='transaction-currency' value='USD'>"
+      "<input autocomplete='cc-csc'>");
+  AutofillDialogControllerImpl* controller = SetUpHtmlAndInvoke(html);
+  ASSERT_TRUE(controller);
+
+  EXPECT_EQ(ASCIIToUTF16("24"), controller->transaction_amount_);
+  EXPECT_EQ(ASCIIToUTF16("USD"), controller->transaction_currency_);
+}
+
+// Same as above, plus readonly attribute.
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
+                       TransactionAmountReadonly) {
+  std::string html(
+      "<input type='number' step='0.01'"
+      "   autocomplete='transaction-amount' value='24' readonly>"
+      "<input autocomplete='transaction-currency' value='USD' readonly>"
       "<input autocomplete='cc-csc'>");
   AutofillDialogControllerImpl* controller = SetUpHtmlAndInvoke(html);
   ASSERT_TRUE(controller);

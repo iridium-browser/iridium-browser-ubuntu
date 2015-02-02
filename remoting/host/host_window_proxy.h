@@ -24,12 +24,11 @@ class HostWindowProxy : public HostWindow {
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       scoped_ptr<HostWindow> host_window);
-  virtual ~HostWindowProxy();
+  ~HostWindowProxy() override;
 
   // HostWindow overrides.
-  virtual void Start(
-      const base::WeakPtr<ClientSessionControl>& client_session_control)
-      OVERRIDE;
+  void Start(const base::WeakPtr<ClientSessionControl>& client_session_control)
+      override;
 
  private:
   // All thread switching logic is implemented in the ref-counted |Core| class.

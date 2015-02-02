@@ -36,7 +36,7 @@
 WebInspector.CanvasProfileView = function(profile)
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("canvasProfiler.css");
+    this.registerRequiredCSS("profiler/canvasProfiler.css");
     this.element.classList.add("canvas-profile-view");
 
     this._profile = profile;
@@ -484,7 +484,7 @@ WebInspector.CanvasProfileView.prototype = {
      */
     _createCallNode: function(index, call)
     {
-        var callViewElement = document.createElement("div");
+        var callViewElement = createElement("div");
 
         var data = {};
         data[0] = index + 1;
@@ -653,7 +653,7 @@ WebInspector.CanvasProfileType = function()
 
     this._canvasAgentEnabled = false;
 
-    this._decorationElement = document.createElement("div");
+    this._decorationElement = createElement("div");
     this._decorationElement.className = "profile-canvas-decoration";
     this._updateDecorationElement();
 }
@@ -726,22 +726,22 @@ WebInspector.CanvasProfileType.prototype = {
     _runSingleFrameCapturing: function()
     {
         var frameId = this._selectedFrameId();
-        WebInspector.profilingLock().acquire();
+        WebInspector.targetManager.suspendAllTargets();
         CanvasAgent.captureFrame(frameId, this._didStartCapturingFrame.bind(this, frameId));
-        WebInspector.profilingLock().release();
+        WebInspector.targetManager.resumeAllTargets();
     },
 
     _startFrameCapturing: function()
     {
         var frameId = this._selectedFrameId();
-        WebInspector.profilingLock().acquire();
+        WebInspector.targetManager.suspendAllTargets();
         CanvasAgent.startCapturing(frameId, this._didStartCapturingFrame.bind(this, frameId));
     },
 
     _stopFrameCapturing: function()
     {
         if (!this._lastProfileHeader) {
-            WebInspector.profilingLock().release();
+            WebInspector.targetManager.resumeAllTargets();
             return;
         }
         var profileHeader = this._lastProfileHeader;
@@ -752,7 +752,7 @@ WebInspector.CanvasProfileType.prototype = {
             profileHeader._updateCapturingStatus();
         }
         CanvasAgent.stopCapturing(traceLogId, didStopCapturing);
-        WebInspector.profilingLock().release();
+        WebInspector.targetManager.resumeAllTargets();
     },
 
     /**
@@ -890,7 +890,7 @@ WebInspector.CanvasProfileType.prototype = {
     _addFrame: function(frame)
     {
         var frameId = frame.id;
-        var option = document.createElement("option");
+        var option = createElement("option");
         option.text = frame.displayName();
         option.title = frame.url;
         option.value = frameId;
@@ -1148,7 +1148,7 @@ WebInspector.CanvasProfileDataGridHelper = {
     {
         if (callArgument.enumName)
             return WebInspector.CanvasProfileDataGridHelper.createEnumValueElement(callArgument.enumName, +callArgument.description);
-        var element = document.createElement("span");
+        var element = createElement("span");
         element.className = "canvas-call-argument";
         var description = callArgument.description;
         if (callArgument.type === "string") {
@@ -1184,7 +1184,7 @@ WebInspector.CanvasProfileDataGridHelper = {
      */
     createEnumValueElement: function(enumName, enumValue)
     {
-        var element = document.createElement("span");
+        var element = createElement("span");
         element.className = "canvas-call-argument canvas-formatted-number";
         element.textContent = enumName;
         element.__evalResult = WebInspector.runtimeModel.createRemoteObjectFromPrimitiveValue(enumValue);

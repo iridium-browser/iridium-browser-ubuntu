@@ -31,7 +31,6 @@
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderLayerReflectionInfo.h"
-#include "core/rendering/RenderPart.h"
 #include "core/rendering/compositing/CompositedLayerMapping.h"
 #include "core/rendering/compositing/RenderLayerCompositor.h"
 #include "platform/TraceEvent.h"
@@ -97,12 +96,6 @@ void GraphicsLayerUpdater::updateRecursive(RenderLayer& layer, UpdateType update
         if (updateType == ForceUpdate || mapping->needsGraphicsLayerUpdate()) {
             const RenderLayer* compositingContainer = context.compositingContainer(layer);
             ASSERT(compositingContainer == layer.enclosingLayerWithCompositedLayerMapping(ExcludeSelf));
-
-            if (mapping->updateRequiresOwnBackingStoreForAncestorReasons(compositingContainer)) {
-                TRACE_LAYER_INVALIDATION(&layer, InspectorLayerInvalidationTrackingEvent::AncestorRequiresNewLayer);
-                layersNeedingPaintInvalidation.append(&layer);
-                updateType = ForceUpdate;
-            }
 
             if (mapping->updateGraphicsLayerConfiguration())
                 m_needsRebuildTree = true;

@@ -12,11 +12,11 @@
 class TestSchemeClassifier : public AutocompleteSchemeClassifier {
  public:
   TestSchemeClassifier();
-  virtual ~TestSchemeClassifier();
+  ~TestSchemeClassifier() override;
 
   // Overridden from AutocompleteInputSchemeChecker:
-  virtual metrics::OmniboxInputType::Type GetInputTypeForScheme(
-      const std::string& scheme) const OVERRIDE;
+  metrics::OmniboxInputType::Type GetInputTypeForScheme(
+      const std::string& scheme) const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestSchemeClassifier);

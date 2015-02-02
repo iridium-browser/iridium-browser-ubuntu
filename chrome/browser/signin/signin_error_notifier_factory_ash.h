@@ -27,11 +27,11 @@ class SigninErrorNotifierFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<SigninErrorNotifierFactory>;
 
   SigninErrorNotifierFactory();
-  virtual ~SigninErrorNotifierFactory();
+  ~SigninErrorNotifierFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(SigninErrorNotifierFactory);
 };

@@ -84,12 +84,15 @@ DO_FOR_TYPE(NONTRIV_CLASS_DOUBLE_DOUBLE)
 
 DO_FOR_TYPE(MEMBER_PTRS)
 /*
- * C++ method pointers are represented differently on x86 and ARM.
- * PNaCl is changing to use the ARM representation, so the following
- * test will not pass on x86.
+ * NOTE: C++ method pointers are represented differently on x86 and ARM.
+ * PNaCl has changed to use the ARM representation, but only for le32.
+ * So, this should still work for native nacl-clang, but beware
+ * if testing le32 against anything else.
  * See https://code.google.com/p/nativeclient/issues/detail?id=3450
  */
-/* DO_FOR_TYPE(MEMBER_FUN_PTRS) */
+DO_FOR_TYPE(MEMBER_FUN_PTRS)
+DO_FOR_TYPE(I32_MEMBER_FUN_PTR)
+DO_FOR_TYPE(I32_MEMBER_FUN_PTR_I32)
 
 /*
  * Vector arguments currently have different name mangling (gcc < 4.5 bug).
@@ -109,7 +112,12 @@ DO_FOR_TYPE(MEMBER_PTRS)
 extern "C" {
 #endif
 
+/*
+ * TODO(mcgrathr): __m128 is not really supported by arm-nacl-gcc yet.
+ */
+#if !defined(__arm__)
 DO_FOR_TYPE(__m128)
+#endif
 
 #if !defined(NOT_DECLARING_DEFINING) && defined(__cplusplus)
 }

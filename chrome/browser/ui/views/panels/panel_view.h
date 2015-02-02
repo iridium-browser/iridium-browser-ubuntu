@@ -37,54 +37,53 @@ class PanelView : public NativePanel,
   static const int kResizeInsideBoundsSize = 5;
 
   PanelView(Panel* panel, const gfx::Rect& bounds, bool always_on_top);
-  virtual ~PanelView();
+  ~PanelView() override;
 
   // Overridden from NativePanel:
-  virtual void ShowPanel() OVERRIDE;
-  virtual void ShowPanelInactive() OVERRIDE;
-  virtual gfx::Rect GetPanelBounds() const OVERRIDE;
-  virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SetPanelBoundsInstantly(const gfx::Rect& bounds) OVERRIDE;
-  virtual void ClosePanel() OVERRIDE;
-  virtual void ActivatePanel() OVERRIDE;
-  virtual void DeactivatePanel() OVERRIDE;
-  virtual bool IsPanelActive() const OVERRIDE;
-  virtual void PreventActivationByOS(bool prevent_activation) OVERRIDE;
-  virtual gfx::NativeWindow GetNativePanelWindow() OVERRIDE;
-  virtual void UpdatePanelTitleBar() OVERRIDE;
-  virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
-  virtual void PanelWebContentsFocused(content::WebContents* contents) OVERRIDE;
-  virtual void PanelCut() OVERRIDE;
-  virtual void PanelCopy() OVERRIDE;
-  virtual void PanelPaste() OVERRIDE;
-  virtual void DrawAttention(bool draw_attention) OVERRIDE;
-  virtual bool IsDrawingAttention() const OVERRIDE;
-  virtual void HandlePanelKeyboardEvent(
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void FullScreenModeChanged(bool is_full_screen) OVERRIDE;
-  virtual bool IsPanelAlwaysOnTop() const OVERRIDE;
-  virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
-  virtual void UpdatePanelMinimizeRestoreButtonVisibility() OVERRIDE;
-  virtual void SetWindowCornerStyle(panel::CornerStyle corner_style) OVERRIDE;
-  virtual void PanelExpansionStateChanging(
-      Panel::ExpansionState old_state,
-      Panel::ExpansionState new_state) OVERRIDE;
-  virtual void AttachWebContents(content::WebContents* contents) OVERRIDE;
-  virtual void DetachWebContents(content::WebContents* contents) OVERRIDE;
-  virtual gfx::Size WindowSizeFromContentSize(
-      const gfx::Size& content_size) const OVERRIDE;
-  virtual gfx::Size ContentSizeFromWindowSize(
-      const gfx::Size& window_size) const OVERRIDE;
-  virtual int TitleOnlyHeight() const OVERRIDE;
-  virtual void MinimizePanelBySystem() OVERRIDE;
-  virtual bool IsPanelMinimizedBySystem() const OVERRIDE;
-  virtual bool IsPanelShownOnActiveDesktop() const OVERRIDE;
-  virtual void ShowShadow(bool show) OVERRIDE;
-  virtual NativePanelTesting* CreateNativePanelTesting() OVERRIDE;
+  void ShowPanel() override;
+  void ShowPanelInactive() override;
+  gfx::Rect GetPanelBounds() const override;
+  void SetPanelBounds(const gfx::Rect& bounds) override;
+  void SetPanelBoundsInstantly(const gfx::Rect& bounds) override;
+  void ClosePanel() override;
+  void ActivatePanel() override;
+  void DeactivatePanel() override;
+  bool IsPanelActive() const override;
+  void PreventActivationByOS(bool prevent_activation) override;
+  gfx::NativeWindow GetNativePanelWindow() override;
+  void UpdatePanelTitleBar() override;
+  void UpdatePanelLoadingAnimations(bool should_animate) override;
+  void PanelWebContentsFocused(content::WebContents* contents) override;
+  void PanelCut() override;
+  void PanelCopy() override;
+  void PanelPaste() override;
+  void DrawAttention(bool draw_attention) override;
+  bool IsDrawingAttention() const override;
+  void HandlePanelKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) override;
+  void FullScreenModeChanged(bool is_full_screen) override;
+  bool IsPanelAlwaysOnTop() const override;
+  void SetPanelAlwaysOnTop(bool on_top) override;
+  void UpdatePanelMinimizeRestoreButtonVisibility() override;
+  void SetWindowCornerStyle(panel::CornerStyle corner_style) override;
+  void PanelExpansionStateChanging(Panel::ExpansionState old_state,
+                                   Panel::ExpansionState new_state) override;
+  void AttachWebContents(content::WebContents* contents) override;
+  void DetachWebContents(content::WebContents* contents) override;
+  gfx::Size WindowSizeFromContentSize(
+      const gfx::Size& content_size) const override;
+  gfx::Size ContentSizeFromWindowSize(
+      const gfx::Size& window_size) const override;
+  int TitleOnlyHeight() const override;
+  void MinimizePanelBySystem() override;
+  bool IsPanelMinimizedBySystem() const override;
+  bool IsPanelShownOnActiveDesktop() const override;
+  void ShowShadow(bool show) override;
+  NativePanelTesting* CreateNativePanelTesting() override;
 
   // Overridden from views::View:
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual gfx::Size GetMaximumSize() const OVERRIDE;
+  gfx::Size GetMinimumSize() const override;
+  gfx::Size GetMaximumSize() const override;
 
   // Return true if the mouse event is handled.
   // |mouse_location| is in screen coordinate system.
@@ -114,35 +113,34 @@ class PanelView : public NativePanel,
   };
 
   // Overridden from views::WidgetDelegate:
-  virtual void OnDisplayChanged() OVERRIDE;
-  virtual void OnWorkAreaChanged() OVERRIDE;
-  virtual bool WillProcessWorkAreaChange() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) OVERRIDE;
-  virtual bool CanResize() const OVERRIDE;
-  virtual bool CanMaximize() const OVERRIDE;
-  virtual bool CanMinimize() const OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
-  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual void OnWindowBeginUserBoundsChange() OVERRIDE;
-  virtual void OnWindowEndUserBoundsChange() OVERRIDE;
+  void OnDisplayChanged() override;
+  void OnWorkAreaChanged() override;
+  bool WillProcessWorkAreaChange() const override;
+  views::View* GetContentsView() override;
+  views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) override;
+  bool CanResize() const override;
+  bool CanMaximize() const override;
+  bool CanMinimize() const override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
+  base::string16 GetWindowTitle() const override;
+  gfx::ImageSkia GetWindowAppIcon() override;
+  gfx::ImageSkia GetWindowIcon() override;
+  void WindowClosing() override;
+  void DeleteDelegate() override;
+  void OnWindowBeginUserBoundsChange() override;
+  void OnWindowEndUserBoundsChange() override;
 
   // Overridden from views::View:
-  virtual void Layout() OVERRIDE;
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+  void Layout() override;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetActivationChanged(views::Widget* widget,
-                                         bool active) OVERRIDE;
-  virtual void OnWidgetBoundsChanged(views::Widget* widget,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
+  void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
+  void OnWidgetBoundsChanged(views::Widget* widget,
+                             const gfx::Rect& new_bounds) override;
 
   // Overridden from ui::HWNDMessageFilter:
 #if defined(OS_WIN)
@@ -150,12 +148,12 @@ class PanelView : public NativePanel,
                              UINT message,
                              WPARAM w_param,
                              LPARAM l_param,
-                             LRESULT* l_result) OVERRIDE;
+                             LRESULT* l_result) override;
 #endif
 
   // Overridden from AnimationDelegate:
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void AnimationProgressed(const gfx::Animation* animation) override;
 
   void UpdateLoadingAnimations(bool should_animate);
   void UpdateWindowTitle();

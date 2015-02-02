@@ -17,11 +17,11 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/login/auth/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chromeos/login/auth/login_performer.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/notification_observer.h"
@@ -80,33 +80,28 @@ class ExistingUserController : public LoginDisplay::Delegate,
   void StopPublicSessionAutoLoginTimer();
 
   // LoginDisplay::Delegate: implementation
-  virtual void CancelPasswordChangedFlow() OVERRIDE;
-  virtual void CreateAccount() OVERRIDE;
-  virtual void CompleteLogin(const UserContext& user_context) OVERRIDE;
-  virtual base::string16 GetConnectedNetworkName() OVERRIDE;
-  virtual bool IsSigninInProgress() const OVERRIDE;
+  virtual void CancelPasswordChangedFlow() override;
+  virtual void CreateAccount() override;
+  virtual void CompleteLogin(const UserContext& user_context) override;
+  virtual base::string16 GetConnectedNetworkName() override;
+  virtual bool IsSigninInProgress() const override;
   virtual void Login(const UserContext& user_context,
-                     const SigninSpecifics& specifics) OVERRIDE;
-  virtual void MigrateUserData(const std::string& old_password) OVERRIDE;
-  virtual void OnSigninScreenReady() OVERRIDE;
-  virtual void OnStartEnterpriseEnrollment() OVERRIDE;
-  virtual void OnStartKioskEnableScreen() OVERRIDE;
-  virtual void OnStartKioskAutolaunchScreen() OVERRIDE;
-  virtual void ResetPublicSessionAutoLoginTimer() OVERRIDE;
-  virtual void ResyncUserData() OVERRIDE;
-  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
-  virtual void ShowWrongHWIDScreen() OVERRIDE;
-  virtual void Signout() OVERRIDE;
-
-  void LoginAsRetailModeUser();
-  void LoginAsGuest();
-  void LoginAsPublicSession(const UserContext& user_context);
-  void LoginAsKioskApp(const std::string& app_id, bool diagnostic_mode);
+                     const SigninSpecifics& specifics) override;
+  virtual void MigrateUserData(const std::string& old_password) override;
+  virtual void OnSigninScreenReady() override;
+  virtual void OnStartEnterpriseEnrollment() override;
+  virtual void OnStartKioskEnableScreen() override;
+  virtual void OnStartKioskAutolaunchScreen() override;
+  virtual void ResetPublicSessionAutoLoginTimer() override;
+  virtual void ResyncUserData() override;
+  virtual void SetDisplayEmail(const std::string& email) override;
+  virtual void ShowWrongHWIDScreen() override;
+  virtual void Signout() override;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details) override;
 
   // Set a delegate that we will pass AuthStatusConsumer events to.
   // Used for testing.
@@ -139,6 +134,11 @@ class ExistingUserController : public LoginDisplay::Delegate,
   friend class ExistingUserControllerPublicSessionTest;
   friend class MockLoginPerformerDelegate;
 
+  void LoginAsRetailModeUser();
+  void LoginAsGuest();
+  void LoginAsPublicSession(const UserContext& user_context);
+  void LoginAsKioskApp(const std::string& app_id, bool diagnostic_mode);
+
   // Retrieve public session auto-login policy and update the timer.
   void ConfigurePublicSessionAutoLogin();
 
@@ -146,29 +146,24 @@ class ExistingUserController : public LoginDisplay::Delegate,
   void OnPublicSessionAutoLoginTimerFire();
 
   // LoginPerformer::Delegate implementation:
-  virtual void OnAuthFailure(const AuthFailure& error) OVERRIDE;
-  virtual void OnAuthSuccess(const UserContext& user_context) OVERRIDE;
-  virtual void OnOffTheRecordAuthSuccess() OVERRIDE;
-  virtual void OnPasswordChangeDetected() OVERRIDE;
-  virtual void WhiteListCheckFailed(const std::string& email) OVERRIDE;
-  virtual void PolicyLoadFailed() OVERRIDE;
+  virtual void OnAuthFailure(const AuthFailure& error) override;
+  virtual void OnAuthSuccess(const UserContext& user_context) override;
+  virtual void OnOffTheRecordAuthSuccess() override;
+  virtual void OnPasswordChangeDetected() override;
+  virtual void WhiteListCheckFailed(const std::string& email) override;
+  virtual void PolicyLoadFailed() override;
   virtual void OnOnlineChecked(
-      const std::string& username, bool success) OVERRIDE;
+      const std::string& username, bool success) override;
 
   // LoginUtils::Delegate implementation:
-  virtual void OnProfilePrepared(Profile* profile) OVERRIDE;
+  virtual void OnProfilePrepared(Profile* profile,
+                                 bool browser_launched) override;
 
   // Called when device settings change.
   void DeviceSettingsChanged();
 
-  // Starts WizardController with the specified screen.
-  void ActivateWizard(const std::string& screen_name);
-
   // Returns corresponding native window.
   gfx::NativeWindow GetNativeWindow() const;
-
-  // Adds first-time login URLs.
-  void InitializeStartUrls() const;
 
   // Show error message. |error_id| error message ID in resources.
   // If |details| string is not empty, it specify additional error text
@@ -234,6 +229,14 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Starts the actual login process for a public session. Invoked when all
   // preconditions have been verified.
   void LoginAsPublicSessionInternal(const UserContext& user_context);
+
+  // Performs sets of actions right prior to login has been started.
+  void PerformPreLoginActions(const UserContext& user_context);
+
+  // Performs set of actions when login has been completed or has been
+  // cancelled. If |start_public_session_timer| is true than public session
+  // auto-login timer is started.
+  void PerformLoginFinishedActions(bool start_public_session_timer);
 
   // Public session auto-login timer.
   scoped_ptr<base::OneShotTimer<ExistingUserController> > auto_login_timer_;

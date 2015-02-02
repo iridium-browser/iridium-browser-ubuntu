@@ -14,13 +14,13 @@
 #include "base/prefs/testing_pref_service.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
-#include "chrome/browser/prefs/interceptable_pref_filter.h"
-#include "chrome/browser/prefs/pref_hash_store.h"
-#include "chrome/browser/prefs/pref_hash_store_impl.h"
-#include "chrome/browser/prefs/pref_hash_store_transaction.h"
 #include "chrome/browser/prefs/profile_pref_store_manager.h"
 #include "chrome/browser/prefs/tracked/dictionary_hash_store_contents.h"
 #include "chrome/browser/prefs/tracked/hash_store_contents.h"
+#include "chrome/browser/prefs/tracked/interceptable_pref_filter.h"
+#include "chrome/browser/prefs/tracked/pref_hash_store.h"
+#include "chrome/browser/prefs/tracked/pref_hash_store_impl.h"
+#include "chrome/browser/prefs/tracked/pref_hash_store_transaction.h"
 #include "chrome/browser/prefs/tracked/pref_service_hash_store_contents.h"
 #include "chrome/browser/prefs/tracked/tracked_preferences_migration.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -46,20 +46,18 @@ const char kPreviouslyProtectedPrefValue[] = "previously_protected_value";
 class SimpleInterceptablePrefFilter : public InterceptablePrefFilter {
  public:
   // PrefFilter remaining implementation.
-  virtual void FilterUpdate(const std::string& path) OVERRIDE {
-    ADD_FAILURE();
-  }
-  virtual void FilterSerializeData(
-      base::DictionaryValue* pref_store_contents) OVERRIDE {
+  void FilterUpdate(const std::string& path) override { ADD_FAILURE(); }
+  void FilterSerializeData(
+      base::DictionaryValue* pref_store_contents) override {
     ADD_FAILURE();
   }
 
  private:
   // InterceptablePrefFilter implementation.
-  virtual void FinalizeFilterOnLoad(
+  void FinalizeFilterOnLoad(
       const PostFilterOnLoadCallback& post_filter_on_load_callback,
       scoped_ptr<base::DictionaryValue> pref_store_contents,
-      bool prefs_altered) OVERRIDE {
+      bool prefs_altered) override {
     post_filter_on_load_callback.Run(pref_store_contents.Pass(), prefs_altered);
   }
 };
@@ -86,7 +84,7 @@ class TrackedPreferencesMigrationTest : public testing::Test {
         unprotected_store_migration_complete_(false),
         protected_store_migration_complete_(false) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ProfilePrefStoreManager::RegisterPrefs(local_state_.registry());
     Reset();
   }

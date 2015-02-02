@@ -9,8 +9,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/app_list/app_list_service.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "extensions/common/extension.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -38,7 +38,7 @@ class ExtensionUninstallDialogViews
       Profile* profile,
       aura::Window* parent,
       extensions::ExtensionUninstallDialog::Delegate* delegate);
-  virtual ~ExtensionUninstallDialogViews();
+  ~ExtensionUninstallDialogViews() override;
 
   // Called when the ExtensionUninstallDialogDelegate has been destroyed to make
   // sure we invalidate pointers.
@@ -49,7 +49,7 @@ class ExtensionUninstallDialogViews
   void ExtensionUninstallCanceled();
 
  private:
-  virtual void Show() OVERRIDE;
+  void Show() override;
 
   ExtensionUninstallDialogDelegateView* view_;
 
@@ -70,7 +70,7 @@ class ExtensionUninstallDialogDelegateView : public views::DialogDelegateView {
       const extensions::Extension* extension,
       const extensions::Extension* triggering_extension,
       gfx::ImageSkia* image);
-  virtual ~ExtensionUninstallDialogDelegateView();
+  ~ExtensionUninstallDialogDelegateView() override;
 
   // Called when the ExtensionUninstallDialog has been destroyed to make sure
   // we invalidate pointers.
@@ -78,26 +78,23 @@ class ExtensionUninstallDialogDelegateView : public views::DialogDelegateView {
 
  private:
   // views::DialogDelegate:
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual int GetDefaultDialogButton() const OVERRIDE {
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  int GetDefaultDialogButton() const override {
     // Default to accept when triggered via chrome://extensions page.
     return triggered_by_extension_ ?
         ui::DIALOG_BUTTON_CANCEL : ui::DIALOG_BUTTON_OK;
   }
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
+  bool Accept() override;
+  bool Cancel() override;
 
   // views::WidgetDelegate:
-  virtual ui::ModalType GetModalType() const OVERRIDE {
-    return ui::MODAL_TYPE_WINDOW;
-  }
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
+  ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_WINDOW; }
+  base::string16 GetWindowTitle() const override;
 
   // views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
 
-  virtual void Layout() OVERRIDE;
+  void Layout() override;
 
   ExtensionUninstallDialogViews* dialog_;
 

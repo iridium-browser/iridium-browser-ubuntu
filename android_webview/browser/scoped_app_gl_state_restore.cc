@@ -273,7 +273,7 @@ ScopedAppGLStateRestoreImpl::ScopedAppGLStateRestoreImpl(
     glBindVertexArrayOES(0);
   }
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(vertex_attrib_); ++i) {
+  for (size_t i = 0; i < arraysize(vertex_attrib_); ++i) {
     glGetVertexAttribiv(
         i, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &vertex_attrib_[i].enabled);
     glGetVertexAttribiv(
@@ -294,6 +294,9 @@ ScopedAppGLStateRestoreImpl::ScopedAppGLStateRestoreImpl(
     glGetVertexAttribfv(
         i, GL_CURRENT_VERTEX_ATTRIB, vertex_attrib_[i].current_vertex_attrib);
   }
+
+  // Android 5.0.0 specific qualcomm workaround. See crbug.com/434570.
+  glBindRenderbufferEXT(GL_RENDERBUFFER, 0);
   DCHECK(ClearGLErrors(false, NULL));
 }
 
@@ -309,7 +312,7 @@ ScopedAppGLStateRestoreImpl::~ScopedAppGLStateRestoreImpl() {
   if (g_supports_oes_vertex_array_object)
     glBindVertexArrayOES(0);
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(vertex_attrib_); ++i) {
+  for (size_t i = 0; i < arraysize(vertex_attrib_); ++i) {
     glBindBuffer(GL_ARRAY_BUFFER,
                  vertex_attrib_[i].vertex_attrib_array_buffer_binding);
     glVertexAttribPointer(i,

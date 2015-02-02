@@ -233,9 +233,7 @@ class MouseDownTask : public WebMethodTask<EventSender> {
         button_number_(button_number),
         modifiers_(modifiers) {}
 
-  virtual void RunIfValid() OVERRIDE {
-    object_->MouseDown(button_number_, modifiers_);
-  }
+  void RunIfValid() override { object_->MouseDown(button_number_, modifiers_); }
 
  private:
   int button_number_;
@@ -249,9 +247,7 @@ class MouseUpTask : public WebMethodTask<EventSender> {
         button_number_(button_number),
         modifiers_(modifiers) {}
 
-  virtual void RunIfValid() OVERRIDE {
-    object_->MouseUp(button_number_, modifiers_);
-  }
+  void RunIfValid() override { object_->MouseUp(button_number_, modifiers_); }
 
  private:
   int button_number_;
@@ -269,7 +265,7 @@ class KeyDownTask : public WebMethodTask<EventSender> {
         modifiers_(modifiers),
         location_(location) {}
 
-  virtual void RunIfValid() OVERRIDE {
+  void RunIfValid() override {
     object_->KeyDown(code_str_, modifiers_, location_);
   }
 
@@ -344,11 +340,11 @@ class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
 
  private:
   explicit EventSenderBindings(base::WeakPtr<EventSender> sender);
-  virtual ~EventSenderBindings();
+  ~EventSenderBindings() override;
 
   // gin::Wrappable:
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   // Bound methods:
   void EnableDOMUIEventLogging();
@@ -361,6 +357,7 @@ class EventSenderBindings : public gin::Wrappable<EventSenderBindings> {
   void ZoomPageOut();
   void SetPageZoomFactor(double factor);
   void SetPageScaleFactor(gin::Arguments* args);
+  void SetPageScaleFactorLimits(gin::Arguments* args);
   void ClearTouchPoints();
   void ReleaseTouchPoint(unsigned index);
   void UpdateTouchPoint(unsigned index, double x, double y);
@@ -487,6 +484,8 @@ EventSenderBindings::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("zoomPageOut", &EventSenderBindings::ZoomPageOut)
       .SetMethod("setPageZoomFactor", &EventSenderBindings::SetPageZoomFactor)
       .SetMethod("setPageScaleFactor", &EventSenderBindings::SetPageScaleFactor)
+      .SetMethod("setPageScaleFactorLimits",
+                 &EventSenderBindings::SetPageScaleFactorLimits)
       .SetMethod("clearTouchPoints", &EventSenderBindings::ClearTouchPoints)
       .SetMethod("releaseTouchPoint", &EventSenderBindings::ReleaseTouchPoint)
       .SetMethod("updateTouchPoint", &EventSenderBindings::UpdateTouchPoint)
@@ -642,6 +641,20 @@ void EventSenderBindings::SetPageScaleFactor(gin::Arguments* args) {
   args->GetNext(&y);
   sender_->SetPageScaleFactor(scale_factor,
                               static_cast<int>(x), static_cast<int>(y));
+}
+
+void EventSenderBindings::SetPageScaleFactorLimits(gin::Arguments* args) {
+  if (!sender_)
+    return;
+  float min_scale_factor;
+  float max_scale_factor;
+  if (args->PeekNext().IsEmpty())
+    return;
+  args->GetNext(&min_scale_factor);
+  if (args->PeekNext().IsEmpty())
+    return;
+  args->GetNext(&max_scale_factor);
+  sender_->SetPageScaleFactorLimits(min_scale_factor, max_scale_factor);
 }
 
 void EventSenderBindings::ClearTouchPoints() {
@@ -1365,7 +1378,11 @@ void EventSender::KeyDown(const std::string& code_str,
   if (generate_char) {
     WebKeyboardEvent event_char = event_up;
     event_char.type = WebInputEvent::Char;
-    event_char.keyIdentifier[0] = '\0';
+    // keyIdentifier is an empty string, unless the Enter key was pressed.
+    // This behavior is not standard (keyIdentifier itself is not even a
+    // standard any more), but it matches the actual behavior in Blink.
+    if (code != ui::VKEY_RETURN)
+      event_char.keyIdentifier[0] = '\0';
     view_->handleInputEvent(event_char);
   }
 
@@ -1463,8 +1480,11 @@ void EventSender::SetPageZoomFactor(double zoom_factor) {
 }
 
 void EventSender::SetPageScaleFactor(float scale_factor, int x, int y) {
-  view_->setPageScaleFactorLimits(scale_factor, scale_factor);
   view_->setPageScaleFactor(scale_factor, WebPoint(x, y));
+}
+
+void EventSender::SetPageScaleFactorLimits(float min_scale, float max_scale) {
+  view_->setPageScaleFactorLimits(min_scale, max_scale);
 }
 
 void EventSender::ClearTouchPoints() {

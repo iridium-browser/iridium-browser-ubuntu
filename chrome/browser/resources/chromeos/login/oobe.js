@@ -7,6 +7,12 @@
  * This is the main code for the OOBE WebUI implementation.
  */
 
+/**
+ * Setting WAIT_FOR_POLYMER to 'true' will delay screens' registration until
+ * Polymer is loaded.
+ */
+/* @const */ var WAIT_FOR_POLYMER = true;
+
 <include src="login_common.js">
 <include src="oobe_screen_eula.js">
 <include src="oobe_screen_network.js">
@@ -88,6 +94,7 @@ cr.define('cr.ui.Oobe', function() {
       login.FatalErrorScreen.register();
       login.ControllerPairingScreen.register();
       login.HostPairingScreen.register();
+      login.DeviceDisabledScreen.register();
 
       cr.ui.Bubble.decorate($('bubble'));
       login.HeaderBar.decorate($('login-header-bar'));

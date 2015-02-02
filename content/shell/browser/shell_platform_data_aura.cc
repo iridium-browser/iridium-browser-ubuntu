@@ -29,29 +29,25 @@ class FillLayout : public aura::LayoutManager {
       : root_(root) {
   }
 
-  virtual ~FillLayout() {}
+  ~FillLayout() override {}
 
  private:
   // aura::LayoutManager:
-  virtual void OnWindowResized() OVERRIDE {
-  }
+  void OnWindowResized() override {}
 
-  virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE {
+  void OnWindowAddedToLayout(aura::Window* child) override {
     child->SetBounds(root_->bounds());
   }
 
-  virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE {
-  }
+  void OnWillRemoveWindowFromLayout(aura::Window* child) override {}
 
-  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE {
-  }
+  void OnWindowRemovedFromLayout(aura::Window* child) override {}
 
-  virtual void OnChildWindowVisibilityChanged(aura::Window* child,
-                                              bool visible) OVERRIDE {
-  }
+  void OnChildWindowVisibilityChanged(aura::Window* child,
+                                      bool visible) override {}
 
-  virtual void SetChildBounds(aura::Window* child,
-                              const gfx::Rect& requested_bounds) OVERRIDE {
+  void SetChildBounds(aura::Window* child,
+                      const gfx::Rect& requested_bounds) override {
     SetChildBoundsDirect(child, requested_bounds);
   }
 
@@ -73,7 +69,7 @@ class MinimalInputEventFilter : public ui::internal::InputMethodDelegate,
                                  input_method_.get());
   }
 
-  virtual ~MinimalInputEventFilter() {
+  ~MinimalInputEventFilter() override {
     host_->window()->RemovePreTargetHandler(this);
     host_->window()->SetProperty(aura::client::kRootWindowInputMethodKey,
                                  static_cast<ui::InputMethod*>(NULL));
@@ -81,7 +77,7 @@ class MinimalInputEventFilter : public ui::internal::InputMethodDelegate,
 
  private:
   // ui::EventHandler:
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE {
+  void OnKeyEvent(ui::KeyEvent* event) override {
     // See the comment in InputMethodEventFilter::OnKeyEvent() for details.
     if (event->IsTranslated()) {
       event->SetTranslated(false);
@@ -92,7 +88,7 @@ class MinimalInputEventFilter : public ui::internal::InputMethodDelegate,
   }
 
   // ui::internal::InputMethodDelegate:
-  virtual bool DispatchKeyEventPostIME(const ui::KeyEvent& event) OVERRIDE {
+  bool DispatchKeyEventPostIME(const ui::KeyEvent& event) override {
     // See the comment in InputMethodEventFilter::DispatchKeyEventPostIME() for
     // details.
     ui::KeyEvent aura_event(event);

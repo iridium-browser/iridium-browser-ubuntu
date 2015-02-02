@@ -45,7 +45,7 @@ std::string GetExpectedDownloadDirectory() {
 class DownloadDirPolicyHandlerTest
     : public policy::ConfigurationPolicyPrefStoreTest {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     recommended_store_ = new policy::ConfigurationPolicyPrefStore(
         policy_service_.get(),
         &handler_list_,
@@ -55,8 +55,8 @@ class DownloadDirPolicyHandlerTest
             new DownloadDirPolicyHandler));
   }
 
-  virtual void PopulatePolicyHandlerParameters(
-      policy::PolicyHandlerParameters* parameters) OVERRIDE {
+  void PopulatePolicyHandlerParameters(
+      policy::PolicyHandlerParameters* parameters) override {
     parameters->user_id_hash = kUserIDHash;
   }
 

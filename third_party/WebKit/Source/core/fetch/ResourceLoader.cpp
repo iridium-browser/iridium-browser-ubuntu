@@ -102,8 +102,8 @@ void ResourceLoader::releaseResources()
 {
     ASSERT(m_state != Terminated);
     ASSERT(m_notifiedLoadComplete);
-    m_requestCountTracker.clear();
-    m_host->didLoadResource(m_resource);
+    ASSERT(!m_requestCountTracker);
+    m_host->didLoadResource();
     if (m_state == Terminated)
         return;
     m_resource->clearLoader();
@@ -148,6 +148,11 @@ void ResourceLoader::start()
     ASSERT(!m_loader);
     ASSERT(!m_request.isNull());
     ASSERT(m_deferredRequest.isNull());
+
+    if (responseNeedsAccessControlCheck() && m_host->isControlledByServiceWorker()) {
+        m_fallbackRequestForServiceWorker = adoptPtr(new ResourceRequest(m_request));
+        m_fallbackRequestForServiceWorker->setSkipServiceWorker(true);
+    }
 
     m_host->willStartLoadingResource(m_resource, m_request);
 
@@ -219,7 +224,7 @@ void ResourceLoader::didDownloadData(blink::WebURLLoader*, int length, int encod
     m_resource->didDownloadData(length);
 }
 
-void ResourceLoader::didFinishLoadingOnePart(double finishTime, int64 encodedDataLength)
+void ResourceLoader::didFinishLoadingOnePart(double finishTime, int64_t encodedDataLength)
 {
     // If load has been cancelled after finishing (which could happen with a
     // JavaScript that changes the window location), do nothing.
@@ -228,7 +233,7 @@ void ResourceLoader::didFinishLoadingOnePart(double finishTime, int64 encodedDat
 
     if (m_notifiedLoadComplete)
         return;
-    m_notifiedLoadComplete = true;
+    didComplete();
     m_host->didFinishLoading(m_resource, finishTime, encodedDataLength);
 }
 
@@ -281,7 +286,7 @@ void ResourceLoader::cancel(const ResourceError& error)
     }
 
     if (!m_notifiedLoadComplete) {
-        m_notifiedLoadComplete = true;
+        didComplete();
         m_host->didFailLoading(m_resource, nonNullError);
     }
 
@@ -291,34 +296,34 @@ void ResourceLoader::cancel(const ResourceError& error)
         releaseResources();
 }
 
-void ResourceLoader::willSendRequest(blink::WebURLLoader*, blink::WebURLRequest& passedRequest, const blink::WebURLResponse& passedRedirectResponse)
+void ResourceLoader::willSendRequest(blink::WebURLLoader*, blink::WebURLRequest& passedNewRequest, const blink::WebURLResponse& passedRedirectResponse)
 {
     ASSERT(m_state != Terminated);
     RefPtrWillBeRawPtr<ResourceLoader> protect(this);
 
-    ResourceRequest& request(applyOptions(passedRequest.toMutableResourceRequest()));
+    ResourceRequest& newRequest(applyOptions(passedNewRequest.toMutableResourceRequest()));
 
-    ASSERT(!request.isNull());
+    ASSERT(!newRequest.isNull());
     const ResourceResponse& redirectResponse(passedRedirectResponse.toResourceResponse());
     ASSERT(!redirectResponse.isNull());
-    if (!m_host->canAccessRedirect(m_resource, request, redirectResponse, m_options)) {
+    if (!m_host->canAccessRedirect(m_resource, newRequest, redirectResponse, m_options)) {
         cancel();
         return;
     }
     ASSERT(m_state != Terminated);
 
-    applyOptions(request); // canAccessRedirect() can modify m_options so we should re-apply it.
+    applyOptions(newRequest); // canAccessRedirect() can modify m_options so we should re-apply it.
     m_host->redirectReceived(m_resource, redirectResponse);
     ASSERT(m_state != Terminated);
-    m_resource->willSendRequest(request, redirectResponse);
-    if (request.isNull() || m_state == Terminated)
+    m_resource->willFollowRedirect(newRequest, redirectResponse);
+    if (newRequest.isNull() || m_state == Terminated)
         return;
 
-    m_host->willSendRequest(m_resource->identifier(), request, redirectResponse, m_options.initiatorInfo);
+    m_host->willSendRequest(m_resource->identifier(), newRequest, redirectResponse, m_options.initiatorInfo);
     ASSERT(m_state != Terminated);
-    ASSERT(!request.isNull());
-    m_resource->updateRequest(request);
-    m_request = request;
+    ASSERT(!newRequest.isNull());
+    m_resource->updateRequest(newRequest);
+    m_request = newRequest;
 }
 
 void ResourceLoader::didReceiveCachedMetadata(blink::WebURLLoader*, const char* data, int length)
@@ -341,10 +346,12 @@ bool ResourceLoader::responseNeedsAccessControlCheck() const
     return m_options.corsEnabled == IsCORSEnabled;
 }
 
-void ResourceLoader::didReceiveResponse(blink::WebURLLoader*, const blink::WebURLResponse& response)
+void ResourceLoader::didReceiveResponse(blink::WebURLLoader*, const blink::WebURLResponse& response, WebDataConsumerHandle* rawHandle)
 {
     ASSERT(!response.isNull());
     ASSERT(m_state == Initialized);
+    // |rawHandle|'s ownership is transferred to the callee.
+    OwnPtr<WebDataConsumerHandle> handle = adoptPtr(rawHandle);
 
     bool isMultipartPayload = response.isMultipartPayload();
     bool isValidStateTransition = (m_connectionState == ConnectionStateStarted || m_connectionState == ConnectionStateReceivedResponse);
@@ -355,25 +362,40 @@ void ResourceLoader::didReceiveResponse(blink::WebURLLoader*, const blink::WebUR
     const ResourceResponse& resourceResponse = response.toResourceResponse();
 
     if (responseNeedsAccessControlCheck()) {
-        // If the response successfully validated a cached resource, perform
-        // the access control with respect to it. Need to do this right here
-        // before the resource switches clients over to that validated resource.
-        Resource* resource = m_resource;
-        if (resource->isCacheValidator() && resourceResponse.httpStatusCode() == 304)
-            resource = m_resource->resourceToRevalidate();
-        else
-            m_resource->setResponse(resourceResponse);
-        if (!m_host->canAccessResource(resource, m_options.securityOrigin.get(), response.url())) {
-            m_host->didReceiveResponse(m_resource, resourceResponse);
-            cancel();
-            return;
+        if (response.wasFetchedViaServiceWorker()) {
+            if (response.wasFallbackRequiredByServiceWorker()) {
+                ASSERT(m_fallbackRequestForServiceWorker);
+                m_loader->cancel();
+                m_loader.clear();
+                m_connectionState = ConnectionStateStarted;
+                m_request = *m_fallbackRequestForServiceWorker;
+                m_loader = adoptPtr(blink::Platform::current()->createURLLoader());
+                ASSERT(m_loader);
+                blink::WrappedResourceRequest wrappedRequest(m_request);
+                m_loader->loadAsynchronously(wrappedRequest, this);
+                return;
+            }
+        } else {
+            // If the response successfully validated a cached resource, perform
+            // the access control with respect to it. Need to do this right here
+            // before the resource switches clients over to that validated resource.
+            Resource* resource = m_resource;
+            if (resource->isCacheValidator() && resourceResponse.httpStatusCode() == 304)
+                resource = m_resource->resourceToRevalidate();
+            else
+                m_resource->setResponse(resourceResponse);
+            if (!m_host->canAccessResource(resource, m_options.securityOrigin.get(), response.url())) {
+                m_host->didReceiveResponse(m_resource, resourceResponse);
+                cancel();
+                return;
+            }
         }
     }
 
     // Reference the object in this method since the additional processing can do
     // anything including removing the last reference to this object.
     RefPtrWillBeRawPtr<ResourceLoader> protect(this);
-    m_resource->responseReceived(resourceResponse);
+    m_resource->responseReceived(resourceResponse, handle.release());
     if (m_state == Terminated)
         return;
 
@@ -403,13 +425,18 @@ void ResourceLoader::didReceiveResponse(blink::WebURLLoader*, const blink::WebUR
     m_state = Finishing;
 
     if (!m_notifiedLoadComplete) {
-        m_notifiedLoadComplete = true;
+        didComplete();
         m_host->didFailLoading(m_resource, ResourceError::cancelledError(m_request.url()));
     }
 
     ASSERT(m_state != Terminated);
     m_resource->error(Resource::LoadError);
     cancel();
+}
+
+void ResourceLoader::didReceiveResponse(blink::WebURLLoader* loader, const blink::WebURLResponse& response)
+{
+    didReceiveResponse(loader, response, nullptr);
 }
 
 void ResourceLoader::didReceiveData(blink::WebURLLoader*, const char* data, int length, int encodedDataLength)
@@ -434,10 +461,11 @@ void ResourceLoader::didReceiveData(blink::WebURLLoader*, const char* data, int 
     m_host->didReceiveData(m_resource, data, length, encodedDataLength);
     if (m_state == Terminated)
         return;
+    RELEASE_ASSERT(length >= 0);
     m_resource->appendData(data, length);
 }
 
-void ResourceLoader::didFinishLoading(blink::WebURLLoader*, double finishTime, int64 encodedDataLength)
+void ResourceLoader::didFinishLoading(blink::WebURLLoader*, double finishTime, int64_t encodedDataLength)
 {
     RELEASE_ASSERT(m_connectionState == ConnectionStateReceivedResponse || m_connectionState == ConnectionStateReceivingData);
     m_connectionState = ConnectionStateFinishedLoading;
@@ -449,10 +477,11 @@ void ResourceLoader::didFinishLoading(blink::WebURLLoader*, double finishTime, i
     RefPtrWillBeRawPtr<ResourceLoader> protect(this);
     ResourcePtr<Resource> protectResource(m_resource);
     m_state = Finishing;
+    m_resource->setLoadFinishTime(finishTime);
     didFinishLoadingOnePart(finishTime, encodedDataLength);
     if (m_state == Terminated)
         return;
-    m_resource->finish(finishTime);
+    m_resource->finish();
 
     // If the load has been cancelled by a delegate in response to didFinishLoad(), do not release
     // the resources a second time, they have been released by cancel.
@@ -474,7 +503,7 @@ void ResourceLoader::didFail(blink::WebURLLoader*, const blink::WebURLError& err
     m_resource->setResourceError(error);
 
     if (!m_notifiedLoadComplete) {
-        m_notifiedLoadComplete = true;
+        didComplete();
         m_host->didFailLoading(m_resource, error);
     }
     if (m_state == Terminated)
@@ -522,10 +551,16 @@ void ResourceLoader::requestSynchronously()
     if (m_state == Terminated)
         return;
     RefPtr<ResourceLoadInfo> resourceLoadInfo = responseOut.toResourceResponse().resourceLoadInfo();
-    int64 encodedDataLength = resourceLoadInfo ? resourceLoadInfo->encodedDataLength : blink::WebURLLoaderClient::kUnknownEncodedDataLength;
+    int64_t encodedDataLength = resourceLoadInfo ? resourceLoadInfo->encodedDataLength : blink::WebURLLoaderClient::kUnknownEncodedDataLength;
     m_host->didReceiveData(m_resource, dataOut.data(), dataOut.size(), encodedDataLength);
     m_resource->setResourceBuffer(dataOut);
     didFinishLoading(0, monotonicallyIncreasingTime(), encodedDataLength);
+}
+
+void ResourceLoader::didComplete()
+{
+    m_notifiedLoadComplete = true;
+    m_requestCountTracker.clear();
 }
 
 ResourceRequest& ResourceLoader::applyOptions(ResourceRequest& request) const

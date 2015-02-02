@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="pl">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="pl">
 <translation id="777702478322588152">Prefektura</translation>
 <translation id="3713769522066937702">Format kodu pocztowego nie został rozpoznany. Prawidłowy kod powinien wyglądać na przykład tak: <ph name="EXAMPLE"/>. Nie znasz swojego kodu? Sprawdzisz go <ph name="BEGIN_LINK"/>tutaj<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Ulica i nr</translation>

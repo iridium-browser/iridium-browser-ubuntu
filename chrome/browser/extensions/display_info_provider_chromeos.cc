@@ -25,8 +25,6 @@ using core_api::system_display::Insets;
 
 namespace {
 
-// TODO(hshi): determine the DPI of the screen.
-const float kDpi96 = 96.0;
 // Maximum allowed bounds origin absolute value.
 const int kMaxBoundsOrigin = 200 * 1000;
 
@@ -367,6 +365,9 @@ void DisplayInfoProviderChromeOS::UpdateDisplayUnitInfoForPlatform(
     unit->mirroring_source_id =
         base::Int64ToString(display_manager->mirrored_display_id());
   }
+
+  // TODO(hshi): determine the DPI of the screen.
+  const float kDpi96 = 96.0;
 
   const float dpi = display.device_scale_factor() * kDpi96;
   unit->dpi_x = dpi;

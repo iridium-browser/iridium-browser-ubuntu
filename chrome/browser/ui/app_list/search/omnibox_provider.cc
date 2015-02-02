@@ -9,13 +9,14 @@
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
-#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
+#include "chrome/browser/ui/app_list/search/search_util.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "grit/theme_resources.h"
+#include "ui/app_list/search_result.h"
 #include "ui/base/resource/resource_bundle.h"
 
 namespace app_list {
@@ -65,12 +66,14 @@ void ACMatchClassificationsToTags(
   }
 }
 
-class OmniboxResult : public ChromeSearchResult {
+class OmniboxResult : public SearchResult {
  public:
   OmniboxResult(Profile* profile,
+                AppListControllerDelegate* list_controller,
                 AutocompleteController* autocomplete_controller,
                 const AutocompleteMatch& match)
       : profile_(profile),
+        list_controller_(list_controller),
         autocomplete_controller_(autocomplete_controller),
         match_(match) {
     if (match_.search_terms_args) {
@@ -88,26 +91,20 @@ class OmniboxResult : public ChromeSearchResult {
     UpdateIcon();
     UpdateTitleAndDetails();
   }
-  virtual ~OmniboxResult() {}
+  ~OmniboxResult() override {}
 
-  // ChromeSearchResult overides:
-  virtual void Open(int event_flags) OVERRIDE {
-    chrome::NavigateParams params(profile_,
-                                  match_.destination_url,
-                                  match_.transition);
-    params.disposition = ui::DispositionFromEventFlags(event_flags);
-    chrome::Navigate(&params);
+  // SearchResult overrides:
+  void Open(int event_flags) override {
+    RecordHistogram(OMNIBOX_SEARCH_RESULT);
+    list_controller_->OpenURL(profile_,
+                              match_.destination_url,
+                              match_.transition,
+                              ui::DispositionFromEventFlags(event_flags));
   }
 
-  virtual void InvokeAction(int action_index, int event_flags) OVERRIDE {}
-
-  virtual scoped_ptr<ChromeSearchResult> Duplicate() OVERRIDE {
-    return scoped_ptr<ChromeSearchResult>(
-        new OmniboxResult(profile_, autocomplete_controller_, match_)).Pass();
-  }
-
-  virtual ChromeSearchResultType GetType() OVERRIDE {
-    return OMNIBOX_SEARCH_RESULT;
+  scoped_ptr<SearchResult> Duplicate() override {
+    return scoped_ptr<SearchResult>(new OmniboxResult(
+        profile_, list_controller_, autocomplete_controller_, match_));
   }
 
  private:
@@ -139,6 +136,7 @@ class OmniboxResult : public ChromeSearchResult {
   }
 
   Profile* profile_;
+  AppListControllerDelegate* list_controller_;
   AutocompleteController* autocomplete_controller_;
   AutocompleteMatch match_;
 
@@ -147,8 +145,10 @@ class OmniboxResult : public ChromeSearchResult {
 
 }  // namespace
 
-OmniboxProvider::OmniboxProvider(Profile* profile)
+OmniboxProvider::OmniboxProvider(Profile* profile,
+                                 AppListControllerDelegate* list_controller)
     : profile_(profile),
+      list_controller_(list_controller),
       controller_(new AutocompleteController(
           profile,
           TemplateURLServiceFactory::GetForProfile(profile),
@@ -161,7 +161,7 @@ OmniboxProvider::~OmniboxProvider() {}
 
 void OmniboxProvider::Start(const base::string16& query) {
   controller_->Start(AutocompleteInput(
-      query, base::string16::npos, base::string16(), GURL(),
+      query, base::string16::npos, std::string(), GURL(),
       metrics::OmniboxEventProto::INVALID_SPEC, false, false, true, true,
       ChromeAutocompleteSchemeClassifier(profile_)));
 }
@@ -179,7 +179,7 @@ void OmniboxProvider::PopulateFromACResult(const AutocompleteResult& result) {
       continue;
 
     Add(scoped_ptr<SearchResult>(
-        new OmniboxResult(profile_, controller_.get(), *it)));
+        new OmniboxResult(profile_, list_controller_, controller_.get(), *it)));
   }
 }
 

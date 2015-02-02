@@ -16,12 +16,13 @@
 #include "base/strings/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_checker.h"
+#include "base/strings/string_split.h"
 #include "components/leveldb_proto/leveldb_database.h"
 #include "components/leveldb_proto/proto_database.h"
 
 namespace leveldb_proto {
 
-typedef std::vector<std::pair<std::string, std::string> > KeyValueVector;
+typedef base::StringPairs KeyValueVector;
 typedef std::vector<std::string> KeyVector;
 
 // When the ProtoDatabaseImpl instance is deleted, in-progress asynchronous
@@ -40,13 +41,13 @@ class ProtoDatabaseImpl : public ProtoDatabase<T> {
   // TODO(cjhopman): Perhaps Init() shouldn't be exposed to users and not just
   //     part of the constructor
   virtual void Init(const base::FilePath& database_dir,
-                    typename ProtoDatabase<T>::InitCallback callback) OVERRIDE;
+                    typename ProtoDatabase<T>::InitCallback callback) override;
   virtual void UpdateEntries(
       scoped_ptr<typename ProtoDatabase<T>::KeyEntryVector> entries_to_save,
       scoped_ptr<KeyVector> keys_to_remove,
-      typename ProtoDatabase<T>::UpdateCallback callback) OVERRIDE;
+      typename ProtoDatabase<T>::UpdateCallback callback) override;
   virtual void LoadEntries(
-      typename ProtoDatabase<T>::LoadCallback callback) OVERRIDE;
+      typename ProtoDatabase<T>::LoadCallback callback) override;
 
   // Allow callers to provide their own Database implementation.
   void InitWithDatabase(scoped_ptr<LevelDB> database,

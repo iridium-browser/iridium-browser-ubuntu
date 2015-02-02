@@ -184,7 +184,7 @@ const int FILES_AND_DIRECTORIES =
 // to be a PlatformTest
 class FileUtilTest : public PlatformTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     PlatformTest::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   }
@@ -1379,24 +1379,34 @@ TEST_F(FileUtilTest, CopyDirectoryWithTrailingSeparators) {
 }
 
 // Sets the source file to read-only.
-void SetReadOnly(const FilePath& path) {
+void SetReadOnly(const FilePath& path, bool read_only) {
 #if defined(OS_WIN)
-  // On Windows, it involves setting a bit.
+  // On Windows, it involves setting/removing the 'readonly' bit.
   DWORD attrs = GetFileAttributes(path.value().c_str());
   ASSERT_NE(INVALID_FILE_ATTRIBUTES, attrs);
   ASSERT_TRUE(SetFileAttributes(
-      path.value().c_str(), attrs | FILE_ATTRIBUTE_READONLY));
-  attrs = GetFileAttributes(path.value().c_str());
+      path.value().c_str(),
+      read_only ? (attrs | FILE_ATTRIBUTE_READONLY) :
+          (attrs & ~FILE_ATTRIBUTE_READONLY)));
   // Files in the temporary directory should not be indexed ever. If this
   // assumption change, fix this unit test accordingly.
   // FILE_ATTRIBUTE_NOT_CONTENT_INDEXED doesn't exist on XP.
-  DWORD expected = FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_READONLY;
+  DWORD expected = read_only ?
+      ((attrs & (FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_DIRECTORY)) |
+          FILE_ATTRIBUTE_READONLY) :
+      (attrs & (FILE_ATTRIBUTE_ARCHIVE | FILE_ATTRIBUTE_DIRECTORY));
+  // TODO(ripp@yandex-team.ru): this seems out of place here. If we really think
+  // it is important to verify that temp files are not indexed there should be
+  // a dedicated test for that (create a file, inspect the attributes)
   if (win::GetVersion() >= win::VERSION_VISTA)
     expected |= FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+  attrs = GetFileAttributes(path.value().c_str());
   ASSERT_EQ(expected, attrs);
 #else
-  // On all other platforms, it involves removing the write bit.
-  EXPECT_TRUE(SetPosixFilePermissions(path, S_IRUSR));
+  // On all other platforms, it involves removing/setting the write bit.
+  mode_t mode = read_only ? S_IRUSR : (S_IRUSR | S_IWUSR);
+  EXPECT_TRUE(SetPosixFilePermissions(
+      path, DirectoryExists(path) ? (mode | S_IXUSR) : mode));
 #endif
 }
 
@@ -1413,23 +1423,34 @@ bool IsReadOnly(const FilePath& path) {
 }
 
 TEST_F(FileUtilTest, CopyDirectoryACL) {
-  // Create a directory.
+  // Create source directories.
   FilePath src = temp_dir_.path().Append(FILE_PATH_LITERAL("src"));
-  CreateDirectory(src);
-  ASSERT_TRUE(PathExists(src));
+  FilePath src_subdir = src.Append(FILE_PATH_LITERAL("subdir"));
+  CreateDirectory(src_subdir);
+  ASSERT_TRUE(PathExists(src_subdir));
 
   // Create a file under the directory.
   FilePath src_file = src.Append(FILE_PATH_LITERAL("src.txt"));
   CreateTextFile(src_file, L"Gooooooooooooooooooooogle");
-  SetReadOnly(src_file);
+  SetReadOnly(src_file, true);
   ASSERT_TRUE(IsReadOnly(src_file));
+
+  // Make directory read-only.
+  SetReadOnly(src_subdir, true);
+  ASSERT_TRUE(IsReadOnly(src_subdir));
 
   // Copy the directory recursively.
   FilePath dst = temp_dir_.path().Append(FILE_PATH_LITERAL("dst"));
   FilePath dst_file = dst.Append(FILE_PATH_LITERAL("src.txt"));
   EXPECT_TRUE(CopyDirectory(src, dst, true));
 
+  FilePath dst_subdir = dst.Append(FILE_PATH_LITERAL("subdir"));
+  ASSERT_FALSE(IsReadOnly(dst_subdir));
   ASSERT_FALSE(IsReadOnly(dst_file));
+
+  // Give write permissions to allow deletion.
+  SetReadOnly(src_subdir, false);
+  ASSERT_FALSE(IsReadOnly(src_subdir));
 }
 
 TEST_F(FileUtilTest, CopyFile) {
@@ -1480,7 +1501,7 @@ TEST_F(FileUtilTest, CopyFileACL) {
 
   // Set the source file to read-only.
   ASSERT_FALSE(IsReadOnly(src));
-  SetReadOnly(src);
+  SetReadOnly(src, true);
   ASSERT_TRUE(IsReadOnly(src));
 
   // Copy the file.
@@ -1977,11 +1998,10 @@ TEST_F(FileUtilTest, AppendToFile) {
   FilePath foobar(data_dir.Append(FILE_PATH_LITERAL("foobar.txt")));
 
   std::string data("hello");
-  EXPECT_EQ(-1, AppendToFile(foobar, data.c_str(), data.length()));
+  EXPECT_FALSE(AppendToFile(foobar, data.c_str(), data.size()));
   EXPECT_EQ(static_cast<int>(data.length()),
             WriteFile(foobar, data.c_str(), data.length()));
-  EXPECT_EQ(static_cast<int>(data.length()),
-            AppendToFile(foobar, data.c_str(), data.length()));
+  EXPECT_TRUE(AppendToFile(foobar, data.c_str(), data.size()));
 
   const std::wstring read_content = ReadTextFile(foobar);
   EXPECT_EQ(L"hellohello", read_content);
@@ -2151,7 +2171,7 @@ TEST_F(FileUtilTest, IsDirectoryEmpty) {
 // with a common SetUp() method.
 class VerifyPathControlledByUserTest : public FileUtilTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     FileUtilTest::SetUp();
 
     // Create a basic structure used by each test.

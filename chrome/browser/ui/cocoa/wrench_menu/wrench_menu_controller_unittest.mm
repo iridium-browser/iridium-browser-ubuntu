@@ -7,7 +7,6 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/sync/glue/local_device_info_provider_mock.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sessions/sessions_sync_manager.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
@@ -21,6 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/sync_driver/local_device_info_provider_mock.h"
 #include "grit/theme_resources.h"
 #include "sync/api/fake_sync_change_processor.h"
 #include "sync/api/sync_error_factory_mock.h"
@@ -50,17 +50,17 @@ class MockWrenchMenuModel : public WrenchMenuModel {
 
 class DummyRouter : public browser_sync::LocalSessionEventRouter {
  public:
-  virtual ~DummyRouter() {}
-  virtual void StartRoutingTo(
-      browser_sync::LocalSessionEventHandler* handler) OVERRIDE {}
-  virtual void Stop() OVERRIDE {}
+  ~DummyRouter() override {}
+  void StartRoutingTo(
+      browser_sync::LocalSessionEventHandler* handler) override {}
+  void Stop() override {}
 };
 
 class WrenchMenuControllerTest
     : public CocoaProfileTest {
  public:
   WrenchMenuControllerTest()
-      : local_device_(new browser_sync::LocalDeviceInfoProviderMock(
+      : local_device_(new sync_driver::LocalDeviceInfoProviderMock(
             "WrenchMenuControllerTest",
             "Test Machine",
             "Chromium 10k",
@@ -71,7 +71,7 @@ class WrenchMenuControllerTest
 
   virtual ~WrenchMenuControllerTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser());
 
@@ -100,7 +100,7 @@ class WrenchMenuControllerTest
     return manager_.get();
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     fake_model_.reset();
     controller_.reset();
     manager_.reset();
@@ -117,7 +117,7 @@ class WrenchMenuControllerTest
 
  private:
   scoped_ptr<browser_sync::SessionsSyncManager> manager_;
-  scoped_ptr<browser_sync::LocalDeviceInfoProviderMock> local_device_;
+  scoped_ptr<sync_driver::LocalDeviceInfoProviderMock> local_device_;
 };
 
 TEST_F(WrenchMenuControllerTest, Initialized) {

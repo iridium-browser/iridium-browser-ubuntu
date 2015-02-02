@@ -13,8 +13,7 @@
 
 #include "GrBackendProcessorFactory.h"
 #include "GrCoordTransform.h"
-#include "GrProcessor.h"
-#include "GrGeometryProcessor.h"
+#include "GrFragmentProcessor.h"
 #include "GrProgramElementRef.h"
 #include "SkMatrix.h"
 #include "SkShader.h"
@@ -24,14 +23,14 @@
 // is immutable, and only owns pending execution refs. This requries removing the common base
 // class from GrDrawState and GrOptDrawState called GrRODrawState and converting to GrOptDrawState
 // when draws are enqueued in the GrInOrderDrawBuffer.
-class GrProcessorStage {
+class GrFragmentStage {
 public:
-    explicit GrProcessorStage(const GrProcessor* proc)
+    explicit GrFragmentStage(const GrFragmentProcessor* proc)
     : fProc(SkRef(proc)) {
         fCoordChangeMatrixSet = false;
     }
 
-    GrProcessorStage(const GrProcessorStage& other) {
+    GrFragmentStage(const GrFragmentStage& other) {
         fCoordChangeMatrixSet = other.fCoordChangeMatrixSet;
         if (other.fCoordChangeMatrixSet) {
             fCoordChangeMatrix = other.fCoordChangeMatrix;
@@ -39,7 +38,7 @@ public:
         fProc.initAndRef(other.fProc);
     }
     
-    static bool AreCompatible(const GrProcessorStage& a, const GrProcessorStage& b,
+    static bool AreCompatible(const GrFragmentStage& a, const GrFragmentStage& b,
                               bool usingExplicitLocalCoords) {
         SkASSERT(a.fProc.get());
         SkASSERT(b.fProc.get());
@@ -88,7 +87,7 @@ public:
         SkMatrix fCoordChangeMatrix;
         SkDEBUGCODE(mutable uint32_t fEffectUniqueID;)
 
-        friend class GrProcessorStage;
+        friend class GrFragmentStage;
     };
 
     /**
@@ -147,32 +146,14 @@ public:
         }
     }
 
-    const GrProcessor* getProcessor() const { return fProc.get(); }
+    const GrFragmentProcessor* getProcessor() const { return fProc.get(); }
 
     void convertToPendingExec() { fProc.convertToPendingExec(); }
 
-private:
-    bool                                   fCoordChangeMatrixSet;
-    SkMatrix                               fCoordChangeMatrix;
-    GrProgramElementRef<const GrProcessor> fProc;
-};
-
-class GrFragmentStage : public GrProcessorStage {
-public:
-    GrFragmentStage(const GrFragmentProcessor* fp) : GrProcessorStage(fp) {}
-
-    const GrFragmentProcessor* getFragmentProcessor() const {
-        return static_cast<const GrFragmentProcessor*>(this->getProcessor());
-    }
-};
-
-class GrGeometryStage : public GrProcessorStage {
-public:
-    GrGeometryStage(const GrGeometryProcessor* gp) : GrProcessorStage(gp) {}
-
-    const GrGeometryProcessor* getGeometryProcessor() const {
-        return static_cast<const GrGeometryProcessor*>(this->getProcessor());
-    }
+protected:
+    bool                                           fCoordChangeMatrixSet;
+    SkMatrix                                       fCoordChangeMatrix;
+    GrProgramElementRef<const GrFragmentProcessor> fProc;
 };
 
 #endif

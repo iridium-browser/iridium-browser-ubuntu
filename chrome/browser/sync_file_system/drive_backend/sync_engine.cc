@@ -89,11 +89,11 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
     sequence_checker_.DetachFromSequence();
   }
 
-  virtual ~WorkerObserver() {
+  ~WorkerObserver() override {
     DCHECK(sequence_checker_.CalledOnValidSequencedThread());
   }
 
-  virtual void OnPendingFileListUpdated(int item_count) OVERRIDE {
+  void OnPendingFileListUpdated(int item_count) override {
     if (ui_task_runner_->RunsTasksOnCurrentThread()) {
       if (sync_engine_)
         sync_engine_->OnPendingFileListUpdated(item_count);
@@ -108,14 +108,15 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
                    item_count));
   }
 
-  virtual void OnFileStatusChanged(const storage::FileSystemURL& url,
-                                   SyncFileStatus file_status,
-                                   SyncAction sync_action,
-                                   SyncDirection direction) OVERRIDE {
+  void OnFileStatusChanged(const storage::FileSystemURL& url,
+                           SyncFileType file_type,
+                           SyncFileStatus file_status,
+                           SyncAction sync_action,
+                           SyncDirection direction) override {
     if (ui_task_runner_->RunsTasksOnCurrentThread()) {
       if (sync_engine_)
         sync_engine_->OnFileStatusChanged(
-            url, file_status, sync_action, direction);
+            url, file_type, file_status, sync_action, direction);
       return;
     }
 
@@ -124,11 +125,11 @@ class SyncEngine::WorkerObserver : public SyncWorkerInterface::Observer {
         FROM_HERE,
         base::Bind(&SyncEngine::OnFileStatusChanged,
                    sync_engine_,
-                   url, file_status, sync_action, direction));
+                   url, file_type, file_status, sync_action, direction));
   }
 
-  virtual void UpdateServiceState(RemoteServiceState state,
-                                  const std::string& description) OVERRIDE {
+  void UpdateServiceState(RemoteServiceState state,
+                          const std::string& description) override {
     if (ui_task_runner_->RunsTasksOnCurrentThread()) {
       if (sync_engine_)
         sync_engine_->UpdateServiceState(state, description);
@@ -227,7 +228,7 @@ scoped_ptr<SyncEngine> SyncEngine::CreateForBrowserContext(
                      token_service,
                      request_context.get(),
                      make_scoped_ptr(new DriveServiceFactory()),
-                     NULL /* env_override */));
+                     nullptr /* env_override */));
 
   sync_engine->Initialize();
   return sync_engine.Pass();
@@ -284,8 +285,7 @@ void SyncEngine::Initialize() {
   scoped_ptr<drive::DriveUploaderInterface> drive_uploader(
       new drive::DriveUploader(drive_service.get(), drive_task_runner_.get()));
 
-  InitializeInternal(drive_service.Pass(), drive_uploader.Pass(),
-                     scoped_ptr<SyncWorkerInterface>());
+  InitializeInternal(drive_service.Pass(), drive_uploader.Pass(), nullptr);
 }
 
 void SyncEngine::InitializeForTesting(
@@ -758,7 +758,7 @@ SyncEngine::SyncEngine(
       token_service_(token_service),
       request_context_(request_context),
       drive_service_factory_(drive_service_factory.Pass()),
-      remote_change_processor_(NULL),
+      remote_change_processor_(nullptr),
       service_state_(REMOTE_SERVICE_TEMPORARY_UNAVAILABLE),
       has_refresh_token_(false),
       network_available_(false),
@@ -781,13 +781,14 @@ void SyncEngine::OnPendingFileListUpdated(int item_count) {
 }
 
 void SyncEngine::OnFileStatusChanged(const storage::FileSystemURL& url,
+                                     SyncFileType file_type,
                                      SyncFileStatus file_status,
                                      SyncAction sync_action,
                                      SyncDirection direction) {
   FOR_EACH_OBSERVER(FileStatusObserver,
                     file_status_observers_,
                     OnFileStatusChanged(
-                        url, file_status, sync_action, direction));
+                        url, file_type, file_status, sync_action, direction));
 }
 
 void SyncEngine::UpdateServiceState(RemoteServiceState state,

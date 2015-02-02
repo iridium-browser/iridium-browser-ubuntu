@@ -14,11 +14,13 @@
 #include "GrGLIndexBuffer.h"
 #include "GrGLPathRendering.h"
 #include "GrGLProgram.h"
+#include "GrGLRenderTarget.h"
 #include "GrGLStencilBuffer.h"
 #include "GrGLTexture.h"
 #include "GrGLVertexArray.h"
 #include "GrGLVertexBuffer.h"
 #include "GrGpu.h"
+#include "GrOptDrawState.h"
 #include "SkTypes.h"
 
 #ifdef SK_DEVELOPER
@@ -68,7 +70,7 @@ public:
                                     size_t rowBytes) const SK_OVERRIDE;
     virtual bool fullReadPixelsIsFasterThanPartial() const SK_OVERRIDE;
 
-    virtual void initCopySurfaceDstDesc(const GrSurface* src, GrTextureDesc* desc) SK_OVERRIDE;
+    virtual void initCopySurfaceDstDesc(const GrSurface* src, GrSurfaceDesc* desc) SK_OVERRIDE;
 
     // These functions should be used to bind GL objects. They track the GL state and skip redundant
     // bindings. Making the equivalent glBind calls directly will confuse the state tracking.
@@ -94,25 +96,32 @@ public:
         fHWGeometryState.notifyIndexBufferDelete(id);
     }
 
-protected:
-    virtual bool onCopySurface(GrSurface* dst,
-                               GrSurface* src,
-                               const SkIRect& srcRect,
-                               const SkIPoint& dstPoint) SK_OVERRIDE;
+    // DrawTarget overrides
+    virtual bool copySurface(GrSurface* dst,
+                             GrSurface* src,
+                             const SkIRect& srcRect,
+                             const SkIPoint& dstPoint) SK_OVERRIDE;
 
-    virtual bool onCanCopySurface(GrSurface* dst,
-                                  GrSurface* src,
-                                  const SkIRect& srcRect,
-                                  const SkIPoint& dstPoint) SK_OVERRIDE;
+    virtual bool canCopySurface(GrSurface* dst,
+                                GrSurface* src,
+                                const SkIRect& srcRect,
+                                const SkIPoint& dstPoint) SK_OVERRIDE;
+
+protected:
+    virtual void buildProgramDesc(const GrOptDrawState&,
+                                  const GrProgramDesc::DescInfo&,
+                                  GrGpu::DrawType,
+                                  const GrDeviceCoordTexture* dstCopy,
+                                  GrProgramDesc*) SK_OVERRIDE;
 
 private:
     // GrGpu overrides
     virtual void onResetContext(uint32_t resetBits) SK_OVERRIDE;
 
-    virtual GrTexture* onCreateTexture(const GrTextureDesc& desc,
+    virtual GrTexture* onCreateTexture(const GrSurfaceDesc& desc,
                                        const void* srcData,
                                        size_t rowBytes) SK_OVERRIDE;
-    virtual GrTexture* onCreateCompressedTexture(const GrTextureDesc& desc,
+    virtual GrTexture* onCreateCompressedTexture(const GrSurfaceDesc& desc,
                                                  const void* srcData) SK_OVERRIDE;
     virtual GrVertexBuffer* onCreateVertexBuffer(size_t size, bool dynamic) SK_OVERRIDE;
     virtual GrIndexBuffer* onCreateIndexBuffer(size_t size, bool dynamic) SK_OVERRIDE;
@@ -125,8 +134,12 @@ private:
         GrStencilBuffer* sb,
         GrRenderTarget* rt) SK_OVERRIDE;
 
-    virtual void onClear(GrRenderTarget*, const SkIRect* rect, GrColor color,
-                         bool canIgnoreRect) SK_OVERRIDE;
+    virtual void onGpuClear(GrRenderTarget*, const SkIRect* rect, GrColor color,
+                            bool canIgnoreRect) SK_OVERRIDE;
+
+    virtual void onClearStencilClip(GrRenderTarget*,
+                                    const SkIRect& rect,
+                                    bool insideClip) SK_OVERRIDE;
 
     virtual bool onReadPixels(GrRenderTarget* target,
                               int left, int top,
@@ -146,9 +159,9 @@ private:
 
 
     virtual void clearStencil(GrRenderTarget*) SK_OVERRIDE;
-    virtual void clearStencilClip(GrRenderTarget*, const SkIRect& rect,
-                                  bool insideClip) SK_OVERRIDE;
-    virtual bool flushGraphicsState(DrawType, const GrDeviceCoordTexture* dstCopy) SK_OVERRIDE;
+    virtual bool flushGraphicsState(DrawType,
+                                    const GrClipMaskManager::ScissorState&,
+                                    const GrDeviceCoordTexture* dstCopy) SK_OVERRIDE;
 
     // GrDrawTarget overrides
     virtual void didAddGpuTraceMarker() SK_OVERRIDE;
@@ -179,10 +192,7 @@ private:
         ~ProgramCache();
 
         void abandon();
-        GrGLProgram* getProgram(const GrGLProgramDesc& desc,
-                                const GrGeometryStage* geometryProcessor,
-                                const GrFragmentStage* colorStages[],
-                                const GrFragmentStage* coverageStages[]);
+        GrGLProgram* getProgram(const GrOptDrawState&, DrawType);
 
     private:
         enum {
@@ -198,7 +208,7 @@ private:
 
         // binary search for entry matching desc. returns index into fEntries that matches desc or ~
         // of the index of where it should be inserted.
-        int search(const GrGLProgramDesc& desc) const;
+        int search(const GrProgramDesc& desc) const;
 
         // sorted array of all the entries
         Entry*                      fEntries[kMaxEntries];
@@ -221,7 +231,12 @@ private:
 
     // flushes the scissor. see the note on flushBoundTextureAndParams about
     // flushing the scissor after that function is called.
-    void flushScissor(const GrGLIRect& rtViewport, GrSurfaceOrigin rtOrigin);
+    void flushScissor(const GrClipMaskManager::ScissorState&,
+                      const GrGLIRect& rtViewport,
+                      GrSurfaceOrigin rtOrigin);
+
+    // disables the scissor
+    void disableScissor();
 
     void initFSAASupport();
 
@@ -236,7 +251,7 @@ private:
     // NULL means whole target. Can be an empty rect.
     void flushRenderTarget(GrGLRenderTarget*, const SkIRect* bounds);
 
-    void flushStencil(DrawType);
+    void flushStencil(const GrStencilSettings&, DrawType);
     void flushAAState(const GrOptDrawState&, DrawType);
 
     bool configToGLFormats(GrPixelConfig config,
@@ -245,7 +260,7 @@ private:
                            GrGLenum* externalFormat,
                            GrGLenum* externalType);
     // helper for onCreateTexture and writeTexturePixels
-    bool uploadTexData(const GrGLTexture::Desc& desc,
+    bool uploadTexData(const GrSurfaceDesc& desc,
                        bool isNewTexture,
                        int left, int top, int width, int height,
                        GrPixelConfig dataConfig,
@@ -258,15 +273,13 @@ private:
     // whenever a new texture needs to be created. Otherwise, we assume that
     // the texture is already in GPU memory and that it's going to be updated
     // with new data.
-    bool uploadCompressedTexData(const GrGLTexture::Desc& desc,
+    bool uploadCompressedTexData(const GrSurfaceDesc& desc,
                                  const void* data,
                                  bool isNewTexture = true,
                                  int left = 0, int top = 0,
                                  int width = -1, int height = -1);
 
-    bool createRenderTargetObjects(int width, int height,
-                                   GrGLuint texID,
-                                   GrGLRenderTarget::Desc* desc);
+    bool createRenderTargetObjects(const GrSurfaceDesc&, GrGLuint texID, GrGLRenderTarget::IDDesc*);
 
     GrGLuint bindSurfaceAsFBO(GrSurface* surface, GrGLenum fboTarget, GrGLIRect* viewport);
 
@@ -281,8 +294,6 @@ private:
     ///@{
     int                         fHWActiveTextureUnitIdx;
     GrGLuint                    fHWProgramID;
-
-    GrGLProgram::SharedGLState  fSharedGLProgramState;
 
     enum TriState {
         kNo_TriState,
@@ -431,7 +442,7 @@ private:
     TriState                    fHWStencilTestEnabled;
 
 
-    GrDrawState::DrawFace       fHWDrawFace;
+    GrOptDrawState::DrawFace    fHWDrawFace;
     TriState                    fHWWriteToColor;
     TriState                    fHWDitherEnabled;
     uint32_t                    fHWBoundRenderTargetUniqueID;

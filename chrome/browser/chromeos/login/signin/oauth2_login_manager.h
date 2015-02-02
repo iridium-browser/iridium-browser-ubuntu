@@ -78,7 +78,7 @@ class OAuth2LoginManager : public KeyedService,
   };
 
   explicit OAuth2LoginManager(Profile* user_profile);
-  virtual ~OAuth2LoginManager();
+  ~OAuth2LoginManager() override;
 
   void AddObserver(OAuth2LoginManager::Observer* observer);
   void RemoveObserver(OAuth2LoginManager::Observer* observer);
@@ -145,28 +145,29 @@ class OAuth2LoginManager : public KeyedService,
   };
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // gaia::GaiaOAuthClient::Delegate overrides.
-  virtual void OnRefreshTokenResponse(const std::string& access_token,
-                                      int expires_in_seconds) OVERRIDE;
-  virtual void OnGetUserEmailResponse(const std::string& user_email) OVERRIDE;
-  virtual void OnOAuthError() OVERRIDE;
-  virtual void OnNetworkError(int response_code) OVERRIDE;
+  void OnRefreshTokenResponse(const std::string& access_token,
+                                      int expires_in_seconds) override;
+  void OnGetUserInfoResponse(
+      scoped_ptr<base::DictionaryValue> user_info) override;
+  void OnOAuthError() override;
+  void OnNetworkError(int response_code) override;
 
   // OAuth2LoginVerifier::Delegate overrides.
-  virtual void OnSessionMergeSuccess() OVERRIDE;
-  virtual void OnSessionMergeFailure(bool connection_error) OVERRIDE;
-  virtual void OnListAccountsSuccess(const std::string& data) OVERRIDE;
-  virtual void OnListAccountsFailure(bool connection_error) OVERRIDE;
+  void OnSessionMergeSuccess() override;
+  void OnSessionMergeFailure(bool connection_error) override;
+  void OnListAccountsSuccess(const std::string& data) override;
+  void OnListAccountsFailure(bool connection_error) override;
 
   // OAuth2TokenFetcher::Delegate overrides.
-  virtual void OnOAuth2TokensAvailable(
-      const GaiaAuthConsumer::ClientOAuthResult& oauth2_tokens) OVERRIDE;
-  virtual void OnOAuth2TokensFetchFailed() OVERRIDE;
+  void OnOAuth2TokensAvailable(
+      const GaiaAuthConsumer::ClientOAuthResult& oauth2_tokens) override;
+  void OnOAuth2TokensFetchFailed() override;
 
   // OAuth2TokenService::Observer implementation:
-  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE;
+  void OnRefreshTokenAvailable(const std::string& account_id) override;
 
   // Signals delegate that authentication is completed, kicks off token fetching
   // process.
@@ -180,12 +181,15 @@ class OAuth2LoginManager : public KeyedService,
 
   // Records |refresh_token_| to token service. The associated account id is
   // assumed to be the primary account id of the user profile. If the primary
-  // account id is not present, GetAccountIdOfRefreshToken will be called to
-  // retrieve the associated account id.
+  // account id is not present, GetAccountInfoOfRefreshToken will be called to
+  // retrieve the associated account info.
   void StoreOAuth2Token();
 
-  // Get the account id corresponding to the specified refresh token.
-  void GetAccountIdOfRefreshToken(const std::string& refresh_token);
+  // Get the account info corresponding to the specified refresh token.
+  void GetAccountInfoOfRefreshToken(const std::string& refresh_token);
+
+  // Update the token service and inform listeners of a new refresh token.
+  void UpdateCredentials(const std::string& account_id);
 
   // Attempts to fetch OAuth2 tokens by using pre-authenticated cookie jar from
   // provided |auth_profile|.
@@ -230,7 +234,7 @@ class OAuth2LoginManager : public KeyedService,
 
   scoped_ptr<OAuth2TokenFetcher> oauth2_token_fetcher_;
   scoped_ptr<OAuth2LoginVerifier> login_verifier_;
-  scoped_ptr<gaia::GaiaOAuthClient> account_id_fetcher_;
+  scoped_ptr<gaia::GaiaOAuthClient> account_info_fetcher_;
 
   // OAuth2 refresh token.
   std::string refresh_token_;

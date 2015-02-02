@@ -9,7 +9,7 @@
 #include "base/process/process_handle.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_listener.h"
-#include "mojo/embedder/scoped_platform_handle.h"
+#include "mojo/edk/embedder/scoped_platform_handle.h"
 
 namespace IPC {
 
@@ -41,7 +41,7 @@ class IPC_MOJO_EXPORT MojoBootstrap : public Listener {
                                           Delegate* delegate);
 
   MojoBootstrap();
-  virtual ~MojoBootstrap();
+  ~MojoBootstrap() override;
 
   // Start the handshake over the underlying platform channel.
   bool Connect();
@@ -51,14 +51,16 @@ class IPC_MOJO_EXPORT MojoBootstrap : public Listener {
 
 #if defined(OS_POSIX) && !defined(OS_NACL)
   int GetClientFileDescriptor() const;
-  int TakeClientFileDescriptor();
+  base::ScopedFD TakeClientFileDescriptor();
 #endif  // defined(OS_POSIX) && !defined(OS_NACL)
 
  protected:
-  enum State { STATE_INITIALIZED, STATE_WAITING_ACK, STATE_READY };
+  enum State { STATE_INITIALIZED, STATE_WAITING_ACK, STATE_READY, STATE_ERROR };
 
   Delegate* delegate() const { return delegate_; }
   bool Send(Message* message);
+  void Fail();
+  bool HasFailed() const;
 
   State state() const { return state_; }
   void set_state(State state) { state_ = state; }
@@ -67,8 +69,8 @@ class IPC_MOJO_EXPORT MojoBootstrap : public Listener {
   void Init(scoped_ptr<Channel> channel, Delegate* delegate);
 
   // Listener implementations
-  virtual void OnBadMessageReceived(const Message& message) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
+  void OnBadMessageReceived(const Message& message) override;
+  void OnChannelError() override;
 
   scoped_ptr<Channel> channel_;
   Delegate* delegate_;

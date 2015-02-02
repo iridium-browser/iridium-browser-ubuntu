@@ -45,6 +45,7 @@
 #include "bindings/core/v8/V8HTMLCollection.h"
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8Node.h"
+#include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/MessagePort.h"
 #include "core/frame/DOMTimer.h"
@@ -53,6 +54,7 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLCollection.h"
 #include "core/html/HTMLDocument.h"
@@ -62,7 +64,6 @@
 #include "core/storage/Storage.h"
 #include "platform/PlatformScreen.h"
 #include "platform/graphics/media/MediaPlayer.h"
-#include "wtf/ArrayBuffer.h"
 #include "wtf/Assertions.h"
 #include "wtf/OwnPtr.h"
 
@@ -138,12 +139,10 @@ static void windowSetTimeoutImpl(const v8::FunctionCallbackInfo<v8::Value>& info
     else
         timerId = DOMWindowTimers::setInterval(*impl, action.release(), timeout);
 
-    // Try to do the idle notification before the timeout expires to get better
-    // use of any idle time. Aim for the middle of the interval for simplicity.
-    if (timeout >= 0) {
-        double maximumFireInterval = static_cast<double>(timeout) / 1000 / 2;
-        V8GCForContextDispose::instanceTemplate().notifyIdleSooner(maximumFireInterval);
-    }
+    // FIXME: Crude hack that attempts to pass idle time to V8. This should be
+    // done using the scheduler instead.
+    if (timeout >= 0)
+        V8GCForContextDispose::instance().notifyIdle();
 
     v8SetReturnValue(info, timerId);
 }
@@ -247,6 +246,9 @@ void V8Window::postMessageMethodCustom(const v8::FunctionCallbackInfo<v8::Value>
     LocalDOMWindow* window = V8Window::toImpl(info.Holder());
     LocalDOMWindow* source = callingDOMWindow(info.GetIsolate());
 
+    ASSERT(window);
+    UseCounter::countIfNotPrivateScript(info.GetIsolate(), window->document(), UseCounter::WindowPostMessage);
+
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "postMessage", "Window", info.Holder(), info.GetIsolate());
 
     // If called directly by WebCore we don't have a calling context.
@@ -268,10 +270,11 @@ void V8Window::postMessageMethodCustom(const v8::FunctionCallbackInfo<v8::Value>
     if (info.Length() > 2) {
         int transferablesArgIndex = 2;
         if (isLegacyTargetOriginDesignation(info[2])) {
+            UseCounter::countIfNotPrivateScript(info.GetIsolate(), window->document(), UseCounter::WindowPostMessageWithLegacyTargetOriginArgument);
             targetOriginArgIndex = 2;
             transferablesArgIndex = 1;
         }
-        if (!SerializedScriptValue::extractTransferables(info[transferablesArgIndex], transferablesArgIndex, portArray, arrayBufferArray, exceptionState, info.GetIsolate())) {
+        if (!SerializedScriptValue::extractTransferables(info.GetIsolate(), info[transferablesArgIndex], transferablesArgIndex, portArray, arrayBufferArray, exceptionState)) {
             exceptionState.throwIfNeeded();
             return;
         }
@@ -334,7 +337,7 @@ v8::Handle<v8::Value> DialogHandler::returnValue() const
 {
     if (!m_scriptStateForDialogFrame)
         return v8Undefined();
-    ASSERT(!m_scriptStateForDialogFrame->contextIsValid());
+    ASSERT(m_scriptStateForDialogFrame->contextIsValid());
 
     v8::Isolate* isolate = m_scriptStateForDialogFrame->isolate();
     v8::EscapableHandleScope handleScope(isolate);

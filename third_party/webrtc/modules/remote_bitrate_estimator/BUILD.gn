@@ -8,6 +8,22 @@
 
 source_set("remote_bitrate_estimator") {
   sources = [
+    "include/bwe_defines.h",
+    "include/remote_bitrate_estimator.h",
+    "rate_statistics.cc",
+    "rate_statistics.h",
+  ]
+
+  configs += [ "../../:common_inherited_config"]
+
+  deps = [
+    ":rbe_components",
+    "../../system_wrappers",
+  ]
+}
+
+source_set("rbe_components") {
+  sources = [
     "overuse_detector.cc",
     "overuse_detector.h",
     "remote_bitrate_estimator_single_stream.cc",
@@ -15,7 +31,8 @@ source_set("remote_bitrate_estimator") {
     "remote_rate_control.h",
   ]
 
-  configs += [ "../../:common_inherited_config"]
+  configs += [ "../..:common_config" ]
+  public_configs = [ "../..:common_inherited_config" ]
 
   if (is_clang) {
     # Suppress warnings from Chrome's Clang plugins.

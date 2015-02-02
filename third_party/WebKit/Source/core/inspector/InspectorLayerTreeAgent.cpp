@@ -34,15 +34,17 @@
 #include "core/inspector/InspectorLayerTreeAgent.h"
 
 #include "core/dom/Document.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectorNodeIds.h"
 #include "core/inspector/InspectorState.h"
 #include "core/inspector/InstrumentingAgents.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/page/Page.h"
+#include "core/rendering/RenderPart.h"
 #include "core/rendering/RenderView.h"
-#include "core/rendering/RenderWidget.h"
 #include "core/rendering/compositing/CompositedLayerMapping.h"
 #include "core/rendering/compositing/RenderLayerCompositor.h"
 #include "platform/geometry/IntRect.h"
@@ -221,7 +223,7 @@ PassRefPtr<TypeBuilder::Array<TypeBuilder::LayerTree::Layer> > InspectorLayerTre
     LayerIdToNodeIdMap layerIdToNodeIdMap;
     RefPtr<TypeBuilder::Array<TypeBuilder::LayerTree::Layer> > layers = TypeBuilder::Array<TypeBuilder::LayerTree::Layer>::create();
     buildLayerIdToNodeIdMap(compositor->rootRenderLayer(), layerIdToNodeIdMap);
-    gatherGraphicsLayers(compositor->rootGraphicsLayer(), layerIdToNodeIdMap, layers);
+    gatherGraphicsLayers(rootGraphicsLayer(), layerIdToNodeIdMap, layers);
     return layers.release();
 }
 
@@ -237,7 +239,7 @@ void InspectorLayerTreeAgent::buildLayerIdToNodeIdMap(RenderLayer* root, LayerId
         buildLayerIdToNodeIdMap(child, layerIdToNodeIdMap);
     if (!root->renderer()->isRenderIFrame())
         return;
-    FrameView* childFrameView = toFrameView(toRenderWidget(root->renderer())->widget());
+    FrameView* childFrameView = toFrameView(toRenderPart(root->renderer())->widget());
     if (RenderView* childRenderView = childFrameView->renderView()) {
         if (RenderLayerCompositor* childCompositor = childRenderView->compositor())
             buildLayerIdToNodeIdMap(childCompositor->rootRenderLayer(), layerIdToNodeIdMap);
@@ -266,6 +268,14 @@ RenderLayerCompositor* InspectorLayerTreeAgent::renderLayerCompositor()
     RenderView* renderView = m_page->deprecatedLocalMainFrame()->contentRenderer();
     RenderLayerCompositor* compositor = renderView ? renderView->compositor() : 0;
     return compositor;
+}
+
+GraphicsLayer* InspectorLayerTreeAgent::rootGraphicsLayer()
+{
+    if (m_page->settings().pinchVirtualViewportEnabled())
+        return m_page->frameHost().pinchViewport().rootGraphicsLayer();
+
+    return renderLayerCompositor()->rootGraphicsLayer();
 }
 
 static GraphicsLayer* findLayerById(GraphicsLayer* root, int layerId)
@@ -297,7 +307,7 @@ GraphicsLayer* InspectorLayerTreeAgent::layerById(ErrorString* errorString, cons
         return 0;
     }
 
-    GraphicsLayer* result = findLayerById(compositor->rootGraphicsLayer(), id);
+    GraphicsLayer* result = findLayerById(rootGraphicsLayer(), id);
     if (!result)
         *errorString = "No layer matching given id found";
     return result;

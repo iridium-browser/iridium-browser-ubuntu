@@ -147,14 +147,17 @@ static void appendServerMapMousePosition(StringBuilder& url, Event* event)
 
 void HTMLAnchorElement::defaultEventHandler(Event* event)
 {
-    if (isLink()) {
-        if (focused() && isEnterKeyKeydownEvent(event) && isLiveLink()) {
+    if (isLiveLink()) {
+        ASSERT(event->target());
+        Node* target = event->target()->toNode();
+        ASSERT(target);
+        if ((focused() || target->focused()) && isEnterKeyKeypressEvent(event)) {
             event->setDefaultHandled();
             dispatchSimulatedClick(event);
             return;
         }
 
-        if (isLinkClick(event) && isLiveLink()) {
+        if (isLinkClick(event)) {
             handleClick(event);
             return;
         }
@@ -195,8 +198,6 @@ void HTMLAnchorElement::parseAttribute(const QualifiedName& name, const AtomicSt
         if (wasLink || isLink()) {
             pseudoStateChanged(CSSSelector::PseudoLink);
             pseudoStateChanged(CSSSelector::PseudoVisited);
-            if (wasLink != isLink())
-                pseudoStateChanged(CSSSelector::PseudoEnabled);
         }
         if (wasLink && !isLink() && treeScope().adjustedFocusedElement() == this) {
             // We might want to call blur(), but it's dangerous to dispatch
@@ -345,12 +346,6 @@ void HTMLAnchorElement::handleClick(Event* event)
     ResourceRequest request(completedURL);
     if (hasAttribute(downloadAttr)) {
         request.setRequestContext(blink::WebURLRequest::RequestContextDownload);
-        if (!hasRel(RelationNoReferrer)) {
-            String referrer = SecurityPolicy::generateReferrerHeader(document().referrerPolicy(), completedURL, document().outgoingReferrer());
-            if (!referrer.isEmpty())
-                request.setHTTPReferrer(Referrer(referrer, document().referrerPolicy()));
-        }
-
         bool isSameOrigin = completedURL.protocolIsData() || document().securityOrigin()->canRequest(completedURL);
         const AtomicString& suggestedName = (isSameOrigin ? fastGetAttribute(downloadAttr) : nullAtom);
 
@@ -365,9 +360,9 @@ void HTMLAnchorElement::handleClick(Event* event)
     }
 }
 
-bool isEnterKeyKeydownEvent(Event* event)
+bool isEnterKeyKeypressEvent(Event* event)
 {
-    return event->type() == EventTypeNames::keydown && event->isKeyboardEvent() && toKeyboardEvent(event)->keyIdentifier() == "Enter";
+    return event->type() == EventTypeNames::keypress && event->isKeyboardEvent() && toKeyboardEvent(event)->keyIdentifier() == "Enter";
 }
 
 bool isLinkClick(Event* event)

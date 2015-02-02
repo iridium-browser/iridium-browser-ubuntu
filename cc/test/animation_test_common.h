@@ -24,11 +24,11 @@ class FakeFloatAnimationCurve : public FloatAnimationCurve {
  public:
   FakeFloatAnimationCurve();
   explicit FakeFloatAnimationCurve(double duration);
-  virtual ~FakeFloatAnimationCurve();
+  ~FakeFloatAnimationCurve() override;
 
-  virtual double Duration() const OVERRIDE;
-  virtual float GetValue(double now) const OVERRIDE;
-  virtual scoped_ptr<AnimationCurve> Clone() const OVERRIDE;
+  double Duration() const override;
+  float GetValue(double now) const override;
+  scoped_ptr<AnimationCurve> Clone() const override;
 
  private:
   double duration_;
@@ -37,18 +37,18 @@ class FakeFloatAnimationCurve : public FloatAnimationCurve {
 class FakeTransformTransition : public TransformAnimationCurve {
  public:
   explicit FakeTransformTransition(double duration);
-  virtual ~FakeTransformTransition();
+  ~FakeTransformTransition() override;
 
-  virtual double Duration() const OVERRIDE;
-  virtual gfx::Transform GetValue(double time) const OVERRIDE;
-  virtual bool AnimatedBoundsForBox(const gfx::BoxF& box,
-                                    gfx::BoxF* bounds) const OVERRIDE;
-  virtual bool AffectsScale() const OVERRIDE;
-  virtual bool IsTranslation() const OVERRIDE;
-  virtual bool MaximumTargetScale(bool forward_direction,
-                                  float* max_scale) const OVERRIDE;
+  double Duration() const override;
+  gfx::Transform GetValue(double time) const override;
+  bool AnimatedBoundsForBox(const gfx::BoxF& box,
+                            gfx::BoxF* bounds) const override;
+  bool AffectsScale() const override;
+  bool IsTranslation() const override;
+  bool MaximumTargetScale(bool forward_direction,
+                          float* max_scale) const override;
 
-  virtual scoped_ptr<AnimationCurve> Clone() const OVERRIDE;
+  scoped_ptr<AnimationCurve> Clone() const override;
 
  private:
   double duration_;
@@ -57,12 +57,12 @@ class FakeTransformTransition : public TransformAnimationCurve {
 class FakeFloatTransition : public FloatAnimationCurve {
  public:
   FakeFloatTransition(double duration, float from, float to);
-  virtual ~FakeFloatTransition();
+  ~FakeFloatTransition() override;
 
-  virtual double Duration() const OVERRIDE;
-  virtual float GetValue(double time) const OVERRIDE;
+  double Duration() const override;
+  float GetValue(double time) const override;
 
-  virtual scoped_ptr<AnimationCurve> Clone() const OVERRIDE;
+  scoped_ptr<AnimationCurve> Clone() const override;
 
  private:
   double duration_;
@@ -73,21 +73,20 @@ class FakeFloatTransition : public FloatAnimationCurve {
 class FakeLayerAnimationValueObserver : public LayerAnimationValueObserver {
  public:
   FakeLayerAnimationValueObserver();
-  virtual ~FakeLayerAnimationValueObserver();
+  ~FakeLayerAnimationValueObserver() override;
 
   // LayerAnimationValueObserver implementation
-  virtual void OnFilterAnimated(const FilterOperations& filters) OVERRIDE;
-  virtual void OnOpacityAnimated(float opacity) OVERRIDE;
-  virtual void OnTransformAnimated(const gfx::Transform& transform) OVERRIDE;
-  virtual void OnScrollOffsetAnimated(
-      const gfx::Vector2dF& scroll_offset) OVERRIDE;
-  virtual void OnAnimationWaitingForDeletion() OVERRIDE;
-  virtual bool IsActive() const OVERRIDE;
+  void OnFilterAnimated(const FilterOperations& filters) override;
+  void OnOpacityAnimated(float opacity) override;
+  void OnTransformAnimated(const gfx::Transform& transform) override;
+  void OnScrollOffsetAnimated(const gfx::ScrollOffset& scroll_offset) override;
+  void OnAnimationWaitingForDeletion() override;
+  bool IsActive() const override;
 
   const FilterOperations& filters() const { return filters_; }
   float opacity() const  { return opacity_; }
   const gfx::Transform& transform() const { return transform_; }
-  gfx::Vector2dF scroll_offset() { return scroll_offset_; }
+  gfx::ScrollOffset scroll_offset() { return scroll_offset_; }
 
   bool animation_waiting_for_deletion() {
     return animation_waiting_for_deletion_;
@@ -97,26 +96,26 @@ class FakeLayerAnimationValueObserver : public LayerAnimationValueObserver {
   FilterOperations filters_;
   float opacity_;
   gfx::Transform transform_;
-  gfx::Vector2dF scroll_offset_;
+  gfx::ScrollOffset scroll_offset_;
   bool animation_waiting_for_deletion_;
 };
 
 class FakeInactiveLayerAnimationValueObserver
     : public FakeLayerAnimationValueObserver {
  public:
-  virtual bool IsActive() const OVERRIDE;
+  bool IsActive() const override;
 };
 
 class FakeLayerAnimationValueProvider : public LayerAnimationValueProvider {
  public:
-  virtual gfx::Vector2dF ScrollOffsetForAnimation() const OVERRIDE;
+  gfx::ScrollOffset ScrollOffsetForAnimation() const override;
 
-  void set_scroll_offset(const gfx::Vector2dF& scroll_offset) {
+  void set_scroll_offset(const gfx::ScrollOffset& scroll_offset) {
     scroll_offset_ = scroll_offset;
   }
 
  private:
-  gfx::Vector2dF scroll_offset_;
+  gfx::ScrollOffset scroll_offset_;
 };
 
 int AddOpacityTransitionToController(LayerAnimationController* controller,

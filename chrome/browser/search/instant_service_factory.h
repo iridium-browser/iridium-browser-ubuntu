@@ -25,13 +25,13 @@ class InstantServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<InstantServiceFactory>;
 
   InstantServiceFactory();
-  virtual ~InstantServiceFactory();
+  ~InstantServiceFactory() override;
 
   // Overridden from BrowserContextKeyedServiceFactory:
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(InstantServiceFactory);
 };

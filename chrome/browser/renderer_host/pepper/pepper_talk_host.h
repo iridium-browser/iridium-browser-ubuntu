@@ -27,13 +27,13 @@ class PepperTalkHost : public ppapi::host::ResourceHost {
   PepperTalkHost(content::BrowserPpapiHost* host,
                  PP_Instance instance,
                  PP_Resource resource);
-  virtual ~PepperTalkHost();
+  ~PepperTalkHost() override;
 
  private:
   // ResourceHost override.
-  virtual int32_t OnResourceMessageReceived(
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
   int32_t OnRequestPermission(ppapi::host::HostMessageContext* context,
                               PP_TalkPermission permission);

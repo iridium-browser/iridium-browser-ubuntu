@@ -43,9 +43,17 @@ void MergeSessionHelper::ExternalCcResultFetcher::Start() {
   CleanupTransientState();
   results_.clear();
   gaia_auth_fetcher_.reset(
-      new GaiaAuthFetcher(this, GaiaConstants::kChromeSource,
+      new GaiaAuthFetcher(this, helper_->source_,
                           helper_->request_context()));
   gaia_auth_fetcher_->StartGetCheckConnectionInfo();
+
+  // Some fetches may timeout.  Start a timer to decide when the result fetcher
+  // has waited long enough.
+  // TODO(rogerta): I have no idea how long to wait before timing out.
+  // Gaia folks say this should take no more than 2 second even in mobile.
+  // This will need to be tweaked.
+  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(5),
+               this, &MergeSessionHelper::ExternalCcResultFetcher::Timeout);
 }
 
 bool MergeSessionHelper::ExternalCcResultFetcher::IsRunning() {
@@ -61,8 +69,18 @@ MergeSessionHelper::ExternalCcResultFetcher::OnGetCheckConnectionInfoSuccess(
     const std::string& data) {
   scoped_ptr<base::Value> value(base::JSONReader::Read(data));
   const base::ListValue* list;
-  if (!value || !value->GetAsList(&list))
+  if (!value || !value->GetAsList(&list)) {
+    CleanupTransientState();
+    FireGetCheckConnectionInfoCompleted(false);
     return;
+  }
+
+  // If there is nothing to check, terminate immediately.
+  if (list->GetSize() == 0) {
+    CleanupTransientState();
+    FireGetCheckConnectionInfoCompleted(true);
+    return;
+  }
 
   // Start a fetcher for each connection URL that needs to be checked.
   for (size_t i = 0; i < list->GetSize(); ++i) {
@@ -79,14 +97,13 @@ MergeSessionHelper::ExternalCcResultFetcher::OnGetCheckConnectionInfoSuccess(
       }
     }
   }
+}
 
-  // Some fetches may timeout.  Start a timer to decide when the result fetcher
-  // has waited long enough.
-  // TODO(rogerta): I have no idea how long to wait before timing out.
-  // Gaia folks say this should take no more than 2 second even in mobile.
-  // This will need to be tweaked.
-  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(5),
-               this, &MergeSessionHelper::ExternalCcResultFetcher::Timeout);
+void
+MergeSessionHelper::ExternalCcResultFetcher::OnGetCheckConnectionInfoError(
+    const GoogleServiceAuthError& error) {
+  CleanupTransientState();
+  FireGetCheckConnectionInfoCompleted(false);
 }
 
 net::URLFetcher* MergeSessionHelper::ExternalCcResultFetcher::CreateFetcher(
@@ -130,17 +147,19 @@ void MergeSessionHelper::ExternalCcResultFetcher::OnURLFetchComplete(
     // If all expected responses have been received, cancel the timer and
     // report the result.
     if (fetchers_.empty()) {
-      timer_.Stop();
       CleanupTransientState();
+      FireGetCheckConnectionInfoCompleted(true);
     }
   }
 }
 
 void MergeSessionHelper::ExternalCcResultFetcher::Timeout() {
   CleanupTransientState();
+  FireGetCheckConnectionInfoCompleted(false);
 }
 
 void MergeSessionHelper::ExternalCcResultFetcher::CleanupTransientState() {
+  timer_.Stop();
   gaia_auth_fetcher_.reset();
 
   for (URLToTokenAndFetcher::const_iterator it = fetchers_.begin();
@@ -150,13 +169,21 @@ void MergeSessionHelper::ExternalCcResultFetcher::CleanupTransientState() {
   fetchers_.clear();
 }
 
+void MergeSessionHelper::ExternalCcResultFetcher::
+    FireGetCheckConnectionInfoCompleted(bool succeeded) {
+  FOR_EACH_OBSERVER(Observer, helper_->observer_list_,
+                    GetCheckConnectionInfoCompleted(succeeded));
+}
+
 MergeSessionHelper::MergeSessionHelper(
     OAuth2TokenService* token_service,
+    const std::string& source,
     net::URLRequestContextGetter* request_context,
     Observer* observer)
     : token_service_(token_service),
       request_context_(request_context),
-      result_fetcher_(this) {
+      result_fetcher_(this),
+      source_(source) {
   if (observer)
     AddObserver(observer);
 }
@@ -262,7 +289,8 @@ bool MergeSessionHelper::StillFetchingExternalCcResult() {
 void MergeSessionHelper::StartLogOutUrlFetch() {
   DCHECK(accounts_.front().empty());
   VLOG(1) << "MergeSessionHelper::StartLogOutUrlFetch";
-  GURL logout_url(GaiaUrls::GetInstance()->service_logout_url());
+  GURL logout_url(GaiaUrls::GetInstance()->service_logout_url().Resolve(
+          base::StringPrintf("?source=%s", source_.c_str())));
   net::URLFetcher* fetcher =
       net::URLFetcher::Create(logout_url, net::URLFetcher::GET, this);
   fetcher->SetRequestContext(request_context_);
@@ -273,7 +301,7 @@ void MergeSessionHelper::OnUbertokenSuccess(const std::string& uber_token) {
   VLOG(1) << "MergeSessionHelper::OnUbertokenSuccess"
           << " account=" << accounts_.front();
   gaia_auth_fetcher_.reset(new GaiaAuthFetcher(this,
-                                               GaiaConstants::kChromeSource,
+                                               source_,
                                                request_context_));
 
   // It's possible that not all external checks have completed.
@@ -314,6 +342,7 @@ void MergeSessionHelper::StartFetching() {
           << accounts_.front();
   uber_token_fetcher_.reset(new UbertokenFetcher(token_service_,
                                                  this,
+                                                 source_,
                                                  request_context_));
   uber_token_fetcher_->StartFetchingToken(accounts_.front());
 }

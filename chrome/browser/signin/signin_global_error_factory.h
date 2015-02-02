@@ -27,11 +27,11 @@ class SigninGlobalErrorFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<SigninGlobalErrorFactory>;
 
   SigninGlobalErrorFactory();
-  virtual ~SigninGlobalErrorFactory();
+  ~SigninGlobalErrorFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(SigninGlobalErrorFactory);
 };

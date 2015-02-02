@@ -34,6 +34,7 @@
 
 #include "platform/PopupMenuStyle.h"
 #include "platform/geometry/FloatQuad.h"
+#include "platform/heap/Handle.h"
 #include "web/PopupListBox.h"
 
 namespace blink {
@@ -47,20 +48,20 @@ struct WebPopupMenuInfo;
 // This class wraps a PopupListBox. It positions the popup, paints the border
 // around it, and forwards input events.
 // FIXME(skobes): This class can probably be combined with PopupListBox.
-class PopupContainer FINAL : public Widget {
+class PopupContainer final : public Widget {
 public:
-    static PassRefPtr<PopupContainer> create(PopupMenuClient*, bool deviceSupportsTouch);
+    static PassRefPtrWillBeRawPtr<PopupContainer> create(PopupMenuClient*, bool deviceSupportsTouch);
 
     // Whether a key event should be sent to this popup.
     bool isInterestedInEventForKey(int keyCode);
 
     // Widget
-    virtual void paint(GraphicsContext*, const IntRect&) OVERRIDE;
-    virtual void hide() OVERRIDE;
-    virtual HostWindow* hostWindow() const OVERRIDE;
-    virtual void invalidateRect(const IntRect&) OVERRIDE;
-    virtual IntPoint convertChildToSelf(const Widget* child, const IntPoint&) const OVERRIDE;
-    virtual IntPoint convertSelfToChild(const Widget* child, const IntPoint&) const OVERRIDE;
+    virtual void paint(GraphicsContext*, const IntRect&) override;
+    virtual void hide() override;
+    virtual HostWindow* hostWindow() const override;
+    virtual void invalidateRect(const IntRect&) override;
+    virtual IntPoint convertChildToSelf(const Widget* child, const IntPoint&) const override;
+    virtual IntPoint convertSelfToChild(const Widget* child, const IntPoint&) const override;
 
     // PopupContainer methods
 
@@ -124,6 +125,8 @@ public:
 
     void updateFromElement() { m_listBox->updateFromElement(); }
 
+    virtual void trace(Visitor*) override;
+
 private:
     friend class WTF::RefCounted<PopupContainer>;
 
@@ -144,8 +147,8 @@ private:
     // Returns the ChromeClient of the page this popup is associated with.
     ChromeClient& chromeClient();
 
-    RefPtr<PopupListBox> m_listBox;
-    RefPtr<FrameView> m_frameView;
+    RefPtrWillBeMember<PopupListBox> m_listBox;
+    RefPtrWillBeMember<FrameView> m_frameView;
 
     // m_controlPosition contains the transformed position of the
     // <select>/<input> associated with this popup. m_controlSize is the size

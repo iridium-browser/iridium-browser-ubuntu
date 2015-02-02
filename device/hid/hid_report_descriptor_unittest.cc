@@ -286,9 +286,9 @@ const uint8_t kLogitechUnifyingReceiver[] = {
 class HidReportDescriptorTest : public testing::Test {
 
  protected:
-  virtual void SetUp() OVERRIDE { descriptor_ = NULL; }
+  void SetUp() override { descriptor_ = NULL; }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (descriptor_) {
       delete descriptor_;
     }
@@ -298,18 +298,18 @@ class HidReportDescriptorTest : public testing::Test {
   void ValidateDetails(
       const std::vector<HidCollectionInfo>& expected_collections,
       const bool expected_has_report_id,
-      const uint16_t expected_max_input_report_size,
-      const uint16_t expected_max_output_report_size,
-      const uint16_t expected_max_feature_report_size,
+      const size_t expected_max_input_report_size,
+      const size_t expected_max_output_report_size,
+      const size_t expected_max_feature_report_size,
       const uint8_t* bytes,
       size_t size) {
     descriptor_ = new HidReportDescriptor(bytes, size);
 
     std::vector<HidCollectionInfo> actual_collections;
     bool actual_has_report_id;
-    uint16_t actual_max_input_report_size;
-    uint16_t actual_max_output_report_size;
-    uint16_t actual_max_feature_report_size;
+    size_t actual_max_input_report_size;
+    size_t actual_max_output_report_size;
+    size_t actual_max_feature_report_size;
     descriptor_->GetDetails(&actual_collections,
                             &actual_has_report_id,
                             &actual_max_input_report_size,
@@ -356,7 +356,7 @@ TEST_F(HidReportDescriptorTest, ValidateDetails_Digitizer) {
   digitizer.report_ids.insert(3);
   HidCollectionInfo expected[] = {digitizer};
   ValidateDetails(std::vector<HidCollectionInfo>(
-                      expected, expected + ARRAYSIZE_UNSAFE(expected)),
+                      expected, expected + arraysize(expected)),
                   true,
                   6,
                   0,
@@ -370,7 +370,7 @@ TEST_F(HidReportDescriptorTest, ValidateDetails_Keyboard) {
   keyboard.usage = HidUsageAndPage(0x06, HidUsageAndPage::kPageGenericDesktop);
   HidCollectionInfo expected[] = {keyboard};
   ValidateDetails(std::vector<HidCollectionInfo>(
-                      expected, expected + ARRAYSIZE_UNSAFE(expected)),
+                      expected, expected + arraysize(expected)),
                   false,
                   8,
                   1,
@@ -389,7 +389,7 @@ TEST_F(HidReportDescriptorTest, ValidateDetails_Monitor) {
   monitor.report_ids.insert(5);
   HidCollectionInfo expected[] = {monitor};
   ValidateDetails(std::vector<HidCollectionInfo>(
-                      expected, expected + ARRAYSIZE_UNSAFE(expected)),
+                      expected, expected + arraysize(expected)),
                   true,
                   0,
                   0,
@@ -403,7 +403,7 @@ TEST_F(HidReportDescriptorTest, ValidateDetails_Mouse) {
   mouse.usage = HidUsageAndPage(0x02, HidUsageAndPage::kPageGenericDesktop);
   HidCollectionInfo expected[] = {mouse};
   ValidateDetails(std::vector<HidCollectionInfo>(
-                      expected, expected + ARRAYSIZE_UNSAFE(expected)),
+                      expected, expected + arraysize(expected)),
                   false,
                   3,
                   0,
@@ -426,7 +426,7 @@ TEST_F(HidReportDescriptorTest, ValidateDetails_LogitechUnifyingReceiver) {
 
   HidCollectionInfo expected[] = {hidpp_short, hidpp_long, hidpp_dj};
   ValidateDetails(std::vector<HidCollectionInfo>(
-                      expected, expected + ARRAYSIZE_UNSAFE(expected)),
+                      expected, expected + arraysize(expected)),
                   true,
                   31,
                   31,

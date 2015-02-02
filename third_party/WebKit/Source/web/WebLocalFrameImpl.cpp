@@ -201,10 +201,12 @@
 #include "web/NotificationPermissionClientImpl.h"
 #include "web/PageOverlay.h"
 #include "web/SharedWorkerRepositoryClientImpl.h"
+#include "web/SuspendableScriptExecutor.h"
 #include "web/TextFinder.h"
 #include "web/WebDataSourceImpl.h"
 #include "web/WebDevToolsAgentPrivate.h"
 #include "web/WebPluginContainerImpl.h"
+#include "web/WebRemoteFrameImpl.h"
 #include "web/WebViewImpl.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/HashMap.h"
@@ -277,6 +279,13 @@ static void frameContentAsPlainText(size_t maxChars, LocalFrame* frame, StringBu
     }
 }
 
+static Vector<ScriptSourceCode> createSourcesVector(const WebScriptSource* sourcesIn, unsigned numSources)
+{
+    Vector<ScriptSourceCode> sources;
+    sources.append(sourcesIn, numSources);
+    return sources;
+}
+
 WebPluginContainerImpl* WebLocalFrameImpl::pluginContainerFromFrame(LocalFrame* frame)
 {
     if (!frame)
@@ -323,18 +332,26 @@ public:
 
     float spoolSinglePage(GraphicsContext& graphicsContext, int pageNumber)
     {
-        // FIXME: Why is it ok to proceed without all the null checks that
-        // spoolAllPagesWithBoundaries does?
+        dispatchEventsForPrintingOnAllFrames();
+        if (!frame()->document() || !frame()->document()->renderView())
+            return 0;
+
         frame()->view()->updateLayoutAndStyleForPainting();
+        if (!frame()->document() || !frame()->document()->renderView())
+            return 0;
+
         return spoolPage(graphicsContext, pageNumber);
     }
 
     void spoolAllPagesWithBoundaries(GraphicsContext& graphicsContext, const FloatSize& pageSizeInPixels)
     {
-        if (!frame()->document() || !frame()->view() || !frame()->document()->renderView())
+        dispatchEventsForPrintingOnAllFrames();
+        if (!frame()->document() || !frame()->document()->renderView())
             return;
 
         frame()->view()->updateLayoutAndStyleForPainting();
+        if (!frame()->document() || !frame()->document()->renderView())
+            return;
 
         float pageHeight;
         computePageRects(FloatRect(FloatPoint(0, 0), pageSizeInPixels), 0, 0, 1, pageHeight);
@@ -344,8 +361,7 @@ public:
         int totalHeight = numPages * (pageSizeInPixels.height() + 1) - 1;
 
         // Fill the whole background by white.
-        graphicsContext.setFillColor(Color::white);
-        graphicsContext.fillRect(FloatRect(0, 0, pageWidth, totalHeight));
+        graphicsContext.fillRect(FloatRect(0, 0, pageWidth, totalHeight), Color::white);
 
         int currentHeight = 0;
         for (size_t pageIndex = 0; pageIndex < numPages; pageIndex++) {
@@ -398,6 +414,18 @@ protected:
     }
 
 private:
+    void dispatchEventsForPrintingOnAllFrames()
+    {
+        WillBeHeapVector<RefPtrWillBeMember<Document>> documents;
+        for (Frame* currentFrame = frame(); currentFrame; currentFrame = currentFrame->tree().traverseNext(frame())) {
+            if (currentFrame->isLocalFrame())
+                documents.append(toLocalFrame(currentFrame)->document());
+        }
+
+        for (auto& doc : documents)
+            doc->dispatchEventsForPrinting();
+    }
+
     // Set when printing.
     float m_printedPageWidth;
 };
@@ -405,7 +433,7 @@ private:
 // Simple class to override some of PrintContext behavior. This is used when
 // the frame hosts a plugin that supports custom printing. In this case, we
 // want to delegate all printing related calls to the plugin.
-class ChromePluginPrintContext FINAL : public ChromePrintContext {
+class ChromePluginPrintContext final : public ChromePrintContext {
 public:
     ChromePluginPrintContext(LocalFrame* frame, WebPluginContainerImpl* plugin, const WebPrintParams& printParams)
         : ChromePrintContext(frame), m_plugin(plugin), m_printParams(printParams)
@@ -414,28 +442,28 @@ public:
 
     virtual ~ChromePluginPrintContext() { }
 
-    virtual void begin(float width, float height) OVERRIDE
+    virtual void begin(float width, float height) override
     {
     }
 
-    virtual void end() OVERRIDE
+    virtual void end() override
     {
         m_plugin->printEnd();
     }
 
-    virtual float getPageShrink(int pageNumber) const OVERRIDE
+    virtual float getPageShrink(int pageNumber) const override
     {
         // We don't shrink the page (maybe we should ask the widget ??)
         return 1.0;
     }
 
-    virtual void computePageRects(const FloatRect& printRect, float headerHeight, float footerHeight, float userScaleFactor, float& outPageHeight) OVERRIDE
+    virtual void computePageRects(const FloatRect& printRect, float headerHeight, float footerHeight, float userScaleFactor, float& outPageHeight) override
     {
         m_printParams.printContentArea = IntRect(printRect);
         m_pageRects.fill(IntRect(printRect), m_plugin->printBegin(m_printParams));
     }
 
-    virtual void computePageRectsWithPageSize(const FloatSize& pageSizeInPixels, bool allowHorizontalTiling) OVERRIDE
+    virtual void computePageRectsWithPageSize(const FloatSize& pageSizeInPixels, bool allowHorizontalTiling) override
     {
         ASSERT_NOT_REACHED();
     }
@@ -444,7 +472,7 @@ protected:
     // Spools the printed page, a subrect of frame(). Skip the scale step.
     // NativeTheme doesn't play well with scaling. Scaling is done browser side
     // instead. Returns the scale to be applied.
-    virtual float spoolPage(GraphicsContext& context, int pageNumber) OVERRIDE
+    virtual float spoolPage(GraphicsContext& context, int pageNumber) override
     {
         m_plugin->printPage(pageNumber, &context);
         return 1.0;
@@ -540,13 +568,6 @@ WebVector<WebIconURL> WebLocalFrameImpl::iconURLs(int iconTypesMask) const
     if (frame()->loader().state() == FrameStateComplete)
         return frame()->document()->iconURLs(iconTypesMask);
     return WebVector<WebIconURL>();
-}
-
-void WebLocalFrameImpl::setIsRemote(bool isRemote)
-{
-    m_isRemote = isRemote;
-    if (isRemote)
-        client()->initializeChildFrame(frame()->view()->frameRect(), frame()->view()->visibleContentScaleFactor());
 }
 
 void WebLocalFrameImpl::setRemoteWebLayer(WebLayer* webLayer)
@@ -662,7 +683,7 @@ WebPerformance WebLocalFrameImpl::performance() const
 {
     if (!frame())
         return WebPerformance();
-    return WebPerformance(&frame()->domWindow()->performance());
+    return WebPerformance(frame()->domWindow()->performance());
 }
 
 bool WebLocalFrameImpl::dispatchBeforeUnloadEvent()
@@ -712,12 +733,7 @@ void WebLocalFrameImpl::executeScriptInIsolatedWorld(int worldID, const WebScrip
     RELEASE_ASSERT(worldID > 0);
     RELEASE_ASSERT(worldID < EmbedderWorldIdLimit);
 
-    Vector<ScriptSourceCode> sources;
-    for (unsigned i = 0; i < numSources; ++i) {
-        TextPosition position(OrdinalNumber::fromOneBasedInt(sourcesIn[i].startLine), OrdinalNumber::first());
-        sources.append(ScriptSourceCode(sourcesIn[i].code, sourcesIn[i].url, position));
-    }
-
+    Vector<ScriptSourceCode> sources = createSourcesVector(sourcesIn, numSources);
     v8::HandleScope handleScope(toIsolate(frame()));
     frame()->script().executeScriptInIsolatedWorld(worldID, sources, extensionGroup, 0);
 }
@@ -789,18 +805,20 @@ v8::Handle<v8::Value> WebLocalFrameImpl::executeScriptAndReturnValue(const WebSc
     return frame()->script().executeScriptInMainWorldAndReturnValue(ScriptSourceCode(source.code, source.url, position));
 }
 
+void WebLocalFrameImpl::requestExecuteScriptAndReturnValue(const WebScriptSource& source, bool userGesture, WebScriptExecutionCallback* callback)
+{
+    ASSERT(frame());
+
+    SuspendableScriptExecutor::createAndRun(frame(), 0, createSourcesVector(&source, 1), 0, userGesture, callback);
+}
+
 void WebLocalFrameImpl::executeScriptInIsolatedWorld(int worldID, const WebScriptSource* sourcesIn, unsigned numSources, int extensionGroup, WebVector<v8::Local<v8::Value> >* results)
 {
     ASSERT(frame());
     RELEASE_ASSERT(worldID > 0);
     RELEASE_ASSERT(worldID < EmbedderWorldIdLimit);
 
-    Vector<ScriptSourceCode> sources;
-
-    for (unsigned i = 0; i < numSources; ++i) {
-        TextPosition position(OrdinalNumber::fromOneBasedInt(sourcesIn[i].startLine), OrdinalNumber::first());
-        sources.append(ScriptSourceCode(sourcesIn[i].code, sourcesIn[i].url, position));
-    }
+    Vector<ScriptSourceCode> sources = createSourcesVector(sourcesIn, numSources);
 
     if (results) {
         Vector<v8::Local<v8::Value> > scriptResults;
@@ -813,6 +831,15 @@ void WebLocalFrameImpl::executeScriptInIsolatedWorld(int worldID, const WebScrip
         v8::HandleScope handleScope(toIsolate(frame()));
         frame()->script().executeScriptInIsolatedWorld(worldID, sources, extensionGroup, 0);
     }
+}
+
+void WebLocalFrameImpl::requestExecuteScriptInIsolatedWorld(int worldID, const WebScriptSource* sourcesIn, unsigned numSources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
+{
+    ASSERT(frame());
+    RELEASE_ASSERT(worldID > 0);
+    RELEASE_ASSERT(worldID < EmbedderWorldIdLimit);
+
+    SuspendableScriptExecutor::createAndRun(frame(), worldID, createSourcesVector(sourcesIn, numSources), extensionGroup, userGesture, callback);
 }
 
 v8::Handle<v8::Value> WebLocalFrameImpl::callFunctionEvenIfScriptDisabled(v8::Handle<v8::Function> function, v8::Handle<v8::Value> receiver, int argc, v8::Handle<v8::Value> argv[])
@@ -855,9 +882,10 @@ void WebLocalFrameImpl::loadRequest(const WebURLRequest& request)
 void WebLocalFrameImpl::loadHistoryItem(const WebHistoryItem& item, WebHistoryLoadType loadType, WebURLRequest::CachePolicy cachePolicy)
 {
     ASSERT(frame());
-    RefPtr<HistoryItem> historyItem = PassRefPtr<HistoryItem>(item);
+    RefPtrWillBeRawPtr<HistoryItem> historyItem = PassRefPtrWillBeRawPtr<HistoryItem>(item);
     ASSERT(historyItem);
-    frame()->loader().loadHistoryItem(historyItem.get(), static_cast<HistoryLoadType>(loadType), static_cast<ResourceRequestCachePolicy>(cachePolicy));
+    frame()->loader().loadHistoryItem(historyItem.get(), FrameLoadTypeBackForward,
+        static_cast<HistoryLoadType>(loadType), static_cast<ResourceRequestCachePolicy>(cachePolicy));
 }
 
 void WebLocalFrameImpl::loadData(const WebData& data, const WebString& mimeType, const WebString& textEncoding, const WebURL& baseURL, const WebURL& unreachableURL, bool replace)
@@ -930,10 +958,7 @@ bool WebLocalFrameImpl::isViewSourceModeEnabled() const
 void WebLocalFrameImpl::setReferrerForRequest(WebURLRequest& request, const WebURL& referrerURL)
 {
     String referrer = referrerURL.isEmpty() ? frame()->document()->outgoingReferrer() : String(referrerURL.spec().utf16());
-    referrer = SecurityPolicy::generateReferrerHeader(frame()->document()->referrerPolicy(), request.url(), referrer);
-    if (referrer.isEmpty())
-        return;
-    request.setHTTPReferrer(referrer, static_cast<WebReferrerPolicy>(frame()->document()->referrerPolicy()));
+    request.toMutableResourceRequest().setHTTPReferrer(SecurityPolicy::generateReferrer(frame()->document()->referrerPolicy(), request.url(), referrer));
 }
 
 void WebLocalFrameImpl::dispatchWillSendRequest(WebURLRequest& request)
@@ -1141,11 +1166,7 @@ WebString WebLocalFrameImpl::selectionAsMarkup() const
 
 void WebLocalFrameImpl::selectWordAroundPosition(LocalFrame* frame, VisiblePosition position)
 {
-    VisibleSelection selection(position);
-    selection.expandUsingGranularity(WordGranularity);
-
-    TextGranularity granularity = selection.isRange() ? WordGranularity : CharacterGranularity;
-    frame->selection().setSelection(selection, granularity);
+    frame->selection().selectWordAroundPosition(position);
 }
 
 bool WebLocalFrameImpl::selectWordAroundCaret()
@@ -1153,8 +1174,7 @@ bool WebLocalFrameImpl::selectWordAroundCaret()
     FrameSelection& selection = frame()->selection();
     if (selection.isNone() || selection.isRange())
         return false;
-    selectWordAroundPosition(frame(), selection.selection().visibleStart());
-    return true;
+    return frame()->selection().selectWordAroundPosition(selection.selection().visibleStart());
 }
 
 void WebLocalFrameImpl::selectRange(const WebPoint& base, const WebPoint& extent)
@@ -1166,6 +1186,22 @@ void WebLocalFrameImpl::selectRange(const WebRange& webRange)
 {
     if (RefPtrWillBeRawPtr<Range> range = static_cast<PassRefPtrWillBeRawPtr<Range> >(webRange))
         frame()->selection().setSelectedRange(range.get(), VP_DEFAULT_AFFINITY, FrameSelection::NonDirectional, NotUserTriggered);
+}
+
+void WebLocalFrameImpl::moveRangeSelectionExtent(const WebPoint& point)
+{
+    VisibleSelection currentSelection = frame()->selection().selection();
+
+    VisiblePosition basePosition = currentSelection.isBaseFirst() ?
+        currentSelection.visibleStart() : currentSelection.visibleEnd();
+    VisiblePosition extentPosition = visiblePositionForWindowPoint(point);
+
+    // Prevent the selection from collapsing.
+    if (comparePositions(basePosition, extentPosition) == 0)
+        return;
+
+    VisibleSelection newSelection = VisibleSelection(basePosition, extentPosition);
+    frame()->selection().setSelection(newSelection, CharacterGranularity);
 }
 
 void WebLocalFrameImpl::moveRangeSelection(const WebPoint& base, const WebPoint& extent)
@@ -1529,19 +1565,22 @@ WebLocalFrameImpl::~WebLocalFrameImpl()
     Platform::current()->decrementStatsCounter(webFrameActiveCount);
     frameCount--;
 
+#if !ENABLE(OILPAN)
     cancelPendingScopingEffort();
-}
-
-void WebLocalFrameImpl::trace(Visitor* visitor)
-{
-#if ENABLE(OILPAN)
-    visitor->trace(m_frame);
-    visitor->trace(m_printContext);
-    visitor->trace(m_geolocationClientProxy);
-
-    WebFrame::traceChildren(visitor, this);
 #endif
 }
+
+#if ENABLE(OILPAN)
+void WebLocalFrameImpl::trace(Visitor* visitor)
+{
+    visitor->trace(m_frame);
+    visitor->trace(m_textFinder);
+    visitor->trace(m_printContext);
+    visitor->trace(m_geolocationClientProxy);
+    visitor->registerWeakMembers<WebFrame, &WebFrame::clearWeakFrames>(this);
+    WebFrame::traceFrames(visitor, this);
+}
+#endif
 
 void WebLocalFrameImpl::setCoreFrame(PassRefPtrWillBeRawPtr<LocalFrame> frame)
 {
@@ -1597,14 +1636,14 @@ PassRefPtrWillBeRawPtr<LocalFrame> WebLocalFrameImpl::createChildFrame(const Fra
 
     // If we're moving in the back/forward list, we might want to replace the content
     // of this child frame with whatever was there at that point.
-    RefPtr<HistoryItem> childItem;
+    RefPtrWillBeRawPtr<HistoryItem> childItem = nullptr;
     if (isBackForwardLoadType(frame()->loader().loadType()) && !frame()->document()->loadEventFinished())
-        childItem = PassRefPtr<HistoryItem>(webframeChild->client()->historyItemForNewChildFrame(webframeChild));
+        childItem = PassRefPtrWillBeRawPtr<HistoryItem>(webframeChild->client()->historyItemForNewChildFrame(webframeChild));
 
     if (childItem)
-        child->loader().loadHistoryItem(childItem.get());
+        child->loader().loadHistoryItem(childItem.get(), FrameLoadTypeInitialHistoryLoad);
     else
-        child->loader().load(FrameLoadRequest(0, request.resourceRequest(), "_self"));
+        child->loader().load(FrameLoadRequest(request.originDocument(), request.resourceRequest(), "_self"));
 
     // Note a synchronous navigation (about:blank) would have already processed
     // onload, so it is possible for the child frame to have already been
@@ -1634,7 +1673,7 @@ void WebLocalFrameImpl::createFrameView()
     if (isLocalRoot)
         webView->suppressInvalidations(true);
 
-    frame()->createView(webView->size(), webView->baseBackgroundColor(), webView->isTransparent());
+    frame()->createView(webView->mainFrameSize(), webView->baseBackgroundColor(), webView->isTransparent());
     if (webView->shouldAutoResize() && isLocalRoot)
         frame()->view()->enableAutoSizeMode(webView->minAutoSize(), webView->maxAutoSize());
 
@@ -1809,6 +1848,20 @@ void WebLocalFrameImpl::loadJavaScriptURL(const KURL& url)
         frame()->loader().replaceDocumentWhileExecutingJavaScriptURL(scriptResult, ownerDocument.get());
 }
 
+void WebLocalFrameImpl::initializeToReplaceRemoteFrame(WebRemoteFrame* oldWebFrame)
+{
+    Frame* oldFrame = toCoreFrame(oldWebFrame);
+    OwnPtr<FrameOwner> tempOwner = adoptPtr(new PlaceholderFrameOwner());
+    m_frame = LocalFrame::create(&m_frameLoaderClientImpl, oldFrame->host(), tempOwner.get());
+    m_frame->setOwner(oldFrame->owner());
+    m_frame->tree().setName(oldFrame->tree().name());
+    setParent(oldWebFrame->parent());
+    // We must call init() after m_frame is assigned because it is referenced
+    // during init(). Note that this may dispatch JS events; the frame may be
+    // detached after init() returns.
+    m_frame->init();
+}
+
 void WebLocalFrameImpl::sendPings(const WebNode& linkNode, const WebURL& destinationURL)
 {
     ASSERT(frame());
@@ -1858,9 +1911,9 @@ void WebLocalFrameImpl::sendOrientationChangeEvent()
     if (ScreenOrientationController::from(*frame()))
         ScreenOrientationController::from(*frame())->notifyOrientationChanged();
 
-    // Legacy window.orientation API.
+    // Legacy window.orientation API
     if (RuntimeEnabledFeatures::orientationEventEnabled() && frame()->domWindow())
-        frame()->domWindow()->dispatchEvent(Event::create(EventTypeNames::orientationchange));
+        frame()->domWindow()->sendOrientationChangeEvent();
 }
 
 v8::Handle<v8::Value> WebLocalFrameImpl::executeScriptAndReturnValueForTests(const WebScriptSource& source)

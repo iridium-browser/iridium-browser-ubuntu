@@ -18,7 +18,7 @@ class AppListServiceViews : public AppListServiceImpl,
  public:
   explicit AppListServiceViews(
       scoped_ptr<AppListControllerDelegate> controller_delegate);
-  virtual ~AppListServiceViews();
+  ~AppListServiceViews() override;
 
   // Set |can_dismiss| to prevent the app list dismissing when losing focus. For
   // example, while showing a window-modal dialog.
@@ -31,20 +31,20 @@ class AppListServiceViews : public AppListServiceImpl,
   virtual void OnViewBeingDestroyed();
 
   // AppListService overrides:
-  virtual void Init(Profile* initial_profile) OVERRIDE;
-  virtual void CreateForProfile(Profile* requested_profile) OVERRIDE;
-  virtual void ShowForProfile(Profile* requested_profile) OVERRIDE;
-  virtual void DismissAppList() OVERRIDE;
-  virtual bool IsAppListVisible() const OVERRIDE;
-  virtual gfx::NativeWindow GetAppListWindow() OVERRIDE;
-  virtual Profile* GetCurrentAppListProfile() OVERRIDE;
-  virtual AppListControllerDelegate* GetControllerDelegate() OVERRIDE;
+  void Init(Profile* initial_profile) override;
+  void ShowForProfile(Profile* requested_profile) override;
+  void DismissAppList() override;
+  bool IsAppListVisible() const override;
+  gfx::NativeWindow GetAppListWindow() override;
+  Profile* GetCurrentAppListProfile() override;
+  AppListControllerDelegate* GetControllerDelegate() override;
 
   // AppListServiceImpl overrides:
-  virtual void DestroyAppList() OVERRIDE;
+  void CreateForProfile(Profile* requested_profile) override;
+  void DestroyAppList() override;
 
   // AppListShowerDelegate overrides:
-  virtual AppListViewDelegate* GetViewDelegateForCreate() OVERRIDE;
+  AppListViewDelegate* GetViewDelegateForCreate() override;
 
  private:
   // Responsible for creating the app list and responding to profile changes.

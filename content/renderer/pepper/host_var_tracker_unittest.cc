@@ -9,6 +9,7 @@
 #include "content/renderer/pepper/mock_resource.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
 #include "content/renderer/pepper/pepper_try_catch.h"
+#include "content/renderer/pepper/v8_var_converter.h"
 #include "content/renderer/pepper/v8object_var.h"
 #include "content/test/ppapi_unittest.h"
 #include "gin/handle.h"
@@ -35,7 +36,7 @@ class MyObject : public gin::Wrappable<MyObject> {
 
  private:
   MyObject() { ++g_v8objects_alive; }
-  virtual ~MyObject() { --g_v8objects_alive; }
+  ~MyObject() override { --g_v8objects_alive; }
 
   DISALLOW_COPY_AND_ASSIGN(MyObject);
 };
@@ -44,14 +45,15 @@ gin::WrapperInfo MyObject::kWrapperInfo = {gin::kEmbedderNativeGin};
 
 class PepperTryCatchForTest : public PepperTryCatch {
  public:
-  explicit PepperTryCatchForTest(PepperPluginInstanceImpl* instance)
-      : PepperTryCatch(instance, V8VarConverter::kAllowObjectVars),
+  PepperTryCatchForTest(PepperPluginInstanceImpl* instance,
+                        V8VarConverter* converter)
+      : PepperTryCatch(instance, converter),
         handle_scope_(instance->GetIsolate()),
         context_scope_(v8::Context::New(instance->GetIsolate())) {}
 
-  virtual void SetException(const char* message) OVERRIDE { NOTREACHED(); }
-  virtual bool HasException() OVERRIDE { return false; }
-  virtual v8::Handle<v8::Context> GetContext() OVERRIDE {
+  void SetException(const char* message) override { NOTREACHED(); }
+  bool HasException() override { return false; }
+  v8::Handle<v8::Context> GetContext() override {
     return instance_->GetIsolate()->GetCurrentContext();
   }
 
@@ -68,7 +70,7 @@ class HostVarTrackerTest : public PpapiUnittest {
  public:
   HostVarTrackerTest() {}
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     v8::Isolate::GetCurrent()->RequestGarbageCollectionForTesting(
         v8::Isolate::kFullGarbageCollection);
     EXPECT_EQ(0, g_v8objects_alive);
@@ -87,7 +89,9 @@ TEST_F(HostVarTrackerTest, DeleteObjectVarWithInstance) {
   PP_Instance pp_instance2 = instance2->pp_instance();
 
   {
-    PepperTryCatchForTest try_catch(instance2.get());
+    V8VarConverter converter(
+        instance2->pp_instance(), V8VarConverter::kAllowObjectVars);
+    PepperTryCatchForTest try_catch(instance2.get(), &converter);
     // Make an object var.
     ppapi::ScopedPPVar var = try_catch.FromV8(MyObject::Create(test_isolate));
     EXPECT_EQ(1, g_v8objects_alive);
@@ -104,7 +108,9 @@ TEST_F(HostVarTrackerTest, DeleteObjectVarWithInstance) {
 // Make sure that using the same v8 object should give the same PP_Var
 // each time.
 TEST_F(HostVarTrackerTest, ReuseVar) {
-  PepperTryCatchForTest try_catch(instance());
+  V8VarConverter converter(
+      instance()->pp_instance(), V8VarConverter::kAllowObjectVars);
+  PepperTryCatchForTest try_catch(instance(), &converter);
 
   v8::Handle<v8::Value> v8_object = MyObject::Create(v8::Isolate::GetCurrent());
   ppapi::ScopedPPVar pp_object1 = try_catch.FromV8(v8_object);

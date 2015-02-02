@@ -9,12 +9,13 @@
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
+#include "chrome/common/extensions/chrome_manifest_url_handlers.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
 #include "extensions/browser/component_extension_resource_manager.h"
@@ -58,18 +59,47 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
   }
 
   // Overridden from URLRequestSimpleJob:
-  virtual int GetData(std::string* mime_type,
-                      std::string* charset,
-                      std::string* data,
-                      const net::CompletionCallback& callback) const OVERRIDE {
+  int GetData(std::string* mime_type,
+              std::string* charset,
+              std::string* data,
+              const net::CompletionCallback& callback) const override {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422489 URLRequestResourceBundleJob::GetData"));
+
     const ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    *data = rb.GetRawDataResource(resource_id_).as_string();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422489 URLRequestResourceBundleJob::GetData 1"));
+
+    const base::StringPiece resource_as_string_piece =
+        rb.GetRawDataResource(resource_id_);
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+    tracked_objects::ScopedTracker tracking_profile15(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422489 URLRequestResourceBundleJob::GetData 1.5"));
+
+    *data = resource_as_string_piece.as_string();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422489 URLRequestResourceBundleJob::GetData 2"));
 
     // Add the Content-Length header now that we know the resource length.
     response_info_.headers->AddHeader(
         base::StringPrintf("%s: %s",
                            net::HttpRequestHeaders::kContentLength,
                            base::UintToString(data->size()).c_str()));
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+    tracked_objects::ScopedTracker tracking_profile3(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422489 URLRequestResourceBundleJob::GetData 3"));
 
     std::string* read_mime_type = new std::string;
     bool posted = base::PostTaskAndReplyWithResult(
@@ -90,12 +120,12 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
     return net::ERR_IO_PENDING;
   }
 
-  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE {
+  void GetResponseInfo(net::HttpResponseInfo* info) override {
     *info = response_info_;
   }
 
  private:
-  virtual ~URLRequestResourceBundleJob() {}
+  ~URLRequestResourceBundleJob() override {}
 
   void OnMimeTypeRead(std::string* out_mime_type,
                       std::string* charset,
@@ -143,7 +173,7 @@ bool AllowCrossRendererResourceLoad(net::URLRequest* request,
   // If there aren't any explicitly marked web accessible resources, the
   // load should be allowed only if it is by DevTools. A close approximation is
   // checking if the extension contains a DevTools page.
-  if (!ManifestURL::GetDevToolsPage(extension).is_empty()) {
+  if (!chrome_manifest_urls::GetDevToolsPage(extension).is_empty()) {
     *allowed = true;
     return true;
   }

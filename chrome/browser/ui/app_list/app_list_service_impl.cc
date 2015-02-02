@@ -21,6 +21,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "ui/app_list/app_list_model.h"
 
 namespace {
 
@@ -86,13 +87,12 @@ class ProfileStoreImpl : public ProfileStore {
         weak_factory_(this) {
   }
 
-  virtual void AddProfileObserver(ProfileInfoCacheObserver* observer) OVERRIDE {
+  void AddProfileObserver(ProfileInfoCacheObserver* observer) override {
     profile_manager_->GetProfileInfoCache().AddObserver(observer);
   }
 
-  virtual void LoadProfileAsync(
-      const base::FilePath& path,
-      base::Callback<void(Profile*)> callback) OVERRIDE {
+  void LoadProfileAsync(const base::FilePath& path,
+                        base::Callback<void(Profile*)> callback) override {
     profile_manager_->CreateProfileAsync(
         path,
         base::Bind(&ProfileStoreImpl::OnProfileCreated,
@@ -122,16 +122,15 @@ class ProfileStoreImpl : public ProfileStore {
     }
   }
 
-  virtual Profile* GetProfileByPath(const base::FilePath& path) OVERRIDE {
+  Profile* GetProfileByPath(const base::FilePath& path) override {
     return profile_manager_->GetProfileByPath(path);
   }
 
-  virtual base::FilePath GetUserDataDir() OVERRIDE {
+  base::FilePath GetUserDataDir() override {
     return profile_manager_->user_data_dir();
   }
 
-  virtual bool IsProfileSupervised(
-      const base::FilePath& profile_path) OVERRIDE {
+  bool IsProfileSupervised(const base::FilePath& profile_path) override {
     ProfileInfoCache& profile_info =
         g_browser_process->profile_manager()->GetProfileInfoCache();
     size_t profile_index = profile_info.GetIndexOfProfileWithPath(profile_path);
@@ -330,14 +329,36 @@ void AppListServiceImpl::Show() {
                  weak_factory_.GetWeakPtr()));
 }
 
-void AppListServiceImpl::AutoShowForProfile(Profile* requested_profile) {
-  if (local_state_->GetInt64(prefs::kAppListEnableTime) != 0) {
-    // User has not yet discovered the app launcher. Update the enable method to
-    // indicate this. It will then be recorded in UMA.
-    local_state_->SetInteger(prefs::kAppListEnableMethod,
-                             ENABLE_SHOWN_UNDISCOVERED);
+void AppListServiceImpl::ShowForVoiceSearch(Profile* profile) {
+  ShowForProfile(profile);
+  view_delegate_->ToggleSpeechRecognition();
+}
+
+void AppListServiceImpl::ShowForAppInstall(Profile* profile,
+                                           const std::string& extension_id,
+                                           bool start_discovery_tracking) {
+  if (start_discovery_tracking) {
+    CreateForProfile(profile);
+  } else {
+    // Check if the app launcher has not yet been shown ever. Since this will
+    // show it, if discoverability UMA hasn't yet been recorded, it needs to be
+    // counted as undiscovered.
+    if (local_state_->GetInt64(prefs::kAppListEnableTime) != 0) {
+      local_state_->SetInteger(prefs::kAppListEnableMethod,
+                               ENABLE_SHOWN_UNDISCOVERED);
+    }
+    ShowForProfile(profile);
   }
-  ShowForProfile(requested_profile);
+  if (extension_id.empty())
+    return;  // Nothing to highlight. Only used in tests.
+
+  // The only way an install can happen is with the profile already loaded. So,
+  // ShowForProfile() can never be asynchronous, and the model is guaranteed to
+  // exist after a show.
+  DCHECK(view_delegate_->GetModel());
+  view_delegate_->GetModel()
+      ->top_level_item_list()
+      ->HighlightItemInstalledFromUI(extension_id);
 }
 
 void AppListServiceImpl::EnableAppList(Profile* initial_profile,

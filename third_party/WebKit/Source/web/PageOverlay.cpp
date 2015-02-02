@@ -71,8 +71,6 @@ public:
 
     virtual ~OverlayGraphicsLayerClientImpl() { }
 
-    virtual void notifyAnimationStarted(const GraphicsLayer*, double monotonicTime) OVERRIDE { }
-
     virtual void paintContents(const GraphicsLayer*, GraphicsContext& gc, GraphicsLayerPaintingPhase, const IntRect& inClip)
     {
         gc.save();
@@ -80,7 +78,7 @@ public:
         gc.restore();
     }
 
-    virtual String debugName(const GraphicsLayer* graphicsLayer) OVERRIDE
+    virtual String debugName(const GraphicsLayer* graphicsLayer) override
     {
         return String("WebViewImpl Page Overlay Content Layer");
     }

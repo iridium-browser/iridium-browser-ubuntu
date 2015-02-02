@@ -120,7 +120,9 @@ class PListWriter(xml_formatted_writer.XMLFormattedWriter):
   def BeginTemplate(self):
     self._plist.attributes['version'] = '1'
     dict = self.AddElement(self._plist, 'dict')
-
+    if self._GetChromiumVersionString() is not None:
+      self.AddComment(self._plist, self.config['build'] + ' version: ' + \
+          self._GetChromiumVersionString())
     app_name = plist_helper.GetPlistFriendlyName(self.config['app_name'])
     self._AddStringKeyValuePair(dict, 'pfm_name', app_name)
     self._AddStringKeyValuePair(dict, 'pfm_description', '')

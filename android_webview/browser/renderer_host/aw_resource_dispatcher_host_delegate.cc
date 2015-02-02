@@ -66,9 +66,9 @@ class IoThreadClientThrottle : public content::ResourceThrottle {
   virtual ~IoThreadClientThrottle();
 
   // From content::ResourceThrottle
-  virtual void WillStartRequest(bool* defer) OVERRIDE;
-  virtual void WillRedirectRequest(const GURL& new_url, bool* defer) OVERRIDE;
-  virtual const char* GetNameForLogging() const OVERRIDE;
+  virtual void WillStartRequest(bool* defer) override;
+  virtual void WillRedirectRequest(const GURL& new_url, bool* defer) override;
+  virtual const char* GetNameForLogging() const override;
 
   void OnIoThreadClientReady(int new_render_process_id,
                              int new_render_frame_id);
@@ -102,12 +102,8 @@ const char* IoThreadClientThrottle::GetNameForLogging() const {
 
 void IoThreadClientThrottle::WillStartRequest(bool* defer) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  // TODO(sgurun): This block can be removed when crbug.com/277937 is fixed.
-  if (render_frame_id_ < 1) {
-    // OPTIONS is used for preflighted requests which are generated internally.
-    DCHECK_EQ("OPTIONS", request_->method());
+  if (render_frame_id_ < 1)
     return;
-  }
   DCHECK(render_process_id_);
   *defer = false;
 

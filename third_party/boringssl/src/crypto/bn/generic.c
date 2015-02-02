@@ -61,8 +61,13 @@
 #include "internal.h"
 
 
-#if defined(OPENSSL_WINDOWS) || defined(OPENSSL_NO_ASM) || \
-    (!defined(OPENSSL_X86_64) && !defined(OPENSSL_X86))
+/* Generic implementations of most operations are needed for:
+ * - Configurations without inline assembly.
+ * - Architectures other than x86 or x86_64.
+ * - Windows x84_64; x86_64-gcc.c does not build on MSVC. */
+#if defined(OPENSSL_NO_ASM) || \
+    (!defined(OPENSSL_X86_64) && !defined(OPENSSL_X86)) || \
+    (defined(OPENSSL_X86_64) && defined(OPENSSL_WINDOWS))
 
 #if defined(OPENSSL_WINDOWS)
 #define alloca _alloca
@@ -817,9 +822,9 @@ BN_ULONG bn_sub_words(BN_ULONG *r, const BN_ULONG *a, const BN_ULONG *b,
 #endif /* !BN_LLONG */
 
 void bn_mul_comba8(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b) {
-#ifdef BN_LLONG
+#if defined(BN_LLONG)
   BN_ULLONG t;
-#else
+#elif !defined(BN_UMULT_LOHI) && !defined(BN_UMULT_HIGH)
   BN_ULONG bl, bh;
 #endif
   BN_ULONG t1, t2;
@@ -925,9 +930,9 @@ void bn_mul_comba8(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b) {
 }
 
 void bn_mul_comba4(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b) {
-#ifdef BN_LLONG
+#if defined(BN_LLONG)
   BN_ULLONG t;
-#else
+#elif !defined(BN_UMULT_LOHI) && !defined(BN_UMULT_HIGH)
   BN_ULONG bl, bh;
 #endif
   BN_ULONG t1, t2;
@@ -969,9 +974,9 @@ void bn_mul_comba4(BN_ULONG *r, BN_ULONG *a, BN_ULONG *b) {
 }
 
 void bn_sqr_comba8(BN_ULONG *r, const BN_ULONG *a) {
-#ifdef BN_LLONG
+#if defined(BN_LLONG)
   BN_ULLONG t, tt;
-#else
+#elif !defined(BN_UMULT_LOHI) && !defined(BN_UMULT_HIGH)
   BN_ULONG bl, bh;
 #endif
   BN_ULONG t1, t2;
@@ -1049,9 +1054,9 @@ void bn_sqr_comba8(BN_ULONG *r, const BN_ULONG *a) {
 }
 
 void bn_sqr_comba4(BN_ULONG *r, const BN_ULONG *a) {
-#ifdef BN_LLONG
+#if defined(BN_LLONG)
   BN_ULLONG t, tt;
-#else
+#elif !defined(BN_UMULT_LOHI) && !defined(BN_UMULT_HIGH)
   BN_ULONG bl, bh;
 #endif
   BN_ULONG t1, t2;

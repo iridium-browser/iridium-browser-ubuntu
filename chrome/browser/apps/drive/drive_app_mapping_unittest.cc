@@ -12,10 +12,10 @@
 class DriveAppMappingTest : public testing::Test {
  public:
   DriveAppMappingTest() {}
-  virtual ~DriveAppMappingTest() {}
+  ~DriveAppMappingTest() override {}
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     pref_service_.reset(new TestingPrefServiceSyncable);
     DriveAppMapping::RegisterProfilePrefs(pref_service_->registry());
 
@@ -113,4 +113,14 @@ TEST_F(DriveAppMappingTest, Remove) {
   EXPECT_EQ("", mapping()->GetChromeApp("drive-2"));
   drive_app_ids = mapping()->GetDriveAppIds();
   EXPECT_EQ(0u, drive_app_ids.size());
+}
+
+TEST_F(DriveAppMappingTest, TrackUninstall) {
+  const std::string drive_app_id = "drive-1";
+
+  mapping()->AddUninstalledDriveApp(drive_app_id);
+  EXPECT_TRUE(mapping()->IsUninstalledDriveApp(drive_app_id));
+
+  mapping()->RemoveUninstalledDriveApp(drive_app_id);
+  EXPECT_FALSE(mapping()->IsUninstalledDriveApp(drive_app_id));
 }

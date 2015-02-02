@@ -24,20 +24,20 @@ PassRefPtrWillBeRawPtr<DOMException> createNoImplementationException()
 }
 
 // FIXME: Consider using CallbackPromiseAdapter.
-class CacheStorage::Callbacks FINAL : public WebServiceWorkerCacheStorage::CacheStorageCallbacks {
+class CacheStorage::Callbacks final : public WebServiceWorkerCacheStorage::CacheStorageCallbacks {
     WTF_MAKE_NONCOPYABLE(Callbacks);
 public:
     explicit Callbacks(PassRefPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
     virtual ~Callbacks() { }
 
-    virtual void onSuccess() OVERRIDE
+    virtual void onSuccess() override
     {
         m_resolver->resolve(true);
         m_resolver.clear();
     }
 
-    virtual void onError(WebServiceWorkerCacheError* reason) OVERRIDE
+    virtual void onError(WebServiceWorkerCacheError* reason) override
     {
         if (*reason == WebServiceWorkerCacheErrorNotFound)
             m_resolver->resolve(false);
@@ -51,14 +51,14 @@ private:
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
-class CacheStorage::WithCacheCallbacks FINAL : public WebServiceWorkerCacheStorage::CacheStorageWithCacheCallbacks {
+class CacheStorage::WithCacheCallbacks final : public WebServiceWorkerCacheStorage::CacheStorageWithCacheCallbacks {
     WTF_MAKE_NONCOPYABLE(WithCacheCallbacks);
 public:
     WithCacheCallbacks(const String& cacheName, CacheStorage* cacheStorage, PassRefPtr<ScriptPromiseResolver> resolver)
         : m_cacheName(cacheName), m_cacheStorage(cacheStorage), m_resolver(resolver) { }
     virtual ~WithCacheCallbacks() { }
 
-    virtual void onSuccess(WebServiceWorkerCache* webCache) OVERRIDE
+    virtual void onSuccess(WebServiceWorkerCache* webCache) override
     {
         // FIXME: Remove this once content's WebServiceWorkerCache implementation has landed.
         if (!webCache) {
@@ -71,7 +71,7 @@ public:
         m_resolver.clear();
     }
 
-    virtual void onError(WebServiceWorkerCacheError* reason) OVERRIDE
+    virtual void onError(WebServiceWorkerCacheError* reason) override
     {
         if (*reason == WebServiceWorkerCacheErrorNotFound)
             m_resolver->resolve();
@@ -87,21 +87,21 @@ private:
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
-class CacheStorage::DeleteCallbacks FINAL : public WebServiceWorkerCacheStorage::CacheStorageCallbacks {
+class CacheStorage::DeleteCallbacks final : public WebServiceWorkerCacheStorage::CacheStorageCallbacks {
     WTF_MAKE_NONCOPYABLE(DeleteCallbacks);
 public:
     DeleteCallbacks(const String& cacheName, CacheStorage* cacheStorage, PassRefPtr<ScriptPromiseResolver> resolver)
         : m_cacheName(cacheName), m_cacheStorage(cacheStorage), m_resolver(resolver) { }
     virtual ~DeleteCallbacks() { }
 
-    virtual void onSuccess() OVERRIDE
+    virtual void onSuccess() override
     {
         m_cacheStorage->m_nameToCacheMap.remove(m_cacheName);
         m_resolver->resolve(true);
         m_resolver.clear();
     }
 
-    virtual void onError(WebServiceWorkerCacheError* reason) OVERRIDE
+    virtual void onError(WebServiceWorkerCacheError* reason) override
     {
         if (*reason == WebServiceWorkerCacheErrorNotFound)
             m_resolver->resolve(false);
@@ -117,14 +117,14 @@ private:
 };
 
 // FIXME: Consider using CallbackPromiseAdapter.
-class CacheStorage::KeysCallbacks FINAL : public WebServiceWorkerCacheStorage::CacheStorageKeysCallbacks {
+class CacheStorage::KeysCallbacks final : public WebServiceWorkerCacheStorage::CacheStorageKeysCallbacks {
     WTF_MAKE_NONCOPYABLE(KeysCallbacks);
 public:
     explicit KeysCallbacks(PassRefPtr<ScriptPromiseResolver> resolver)
         : m_resolver(resolver) { }
     virtual ~KeysCallbacks() { }
 
-    virtual void onSuccess(WebVector<WebString>* keys) OVERRIDE
+    virtual void onSuccess(WebVector<WebString>* keys) override
     {
         Vector<String> wtfKeys;
         for (size_t i = 0; i < keys->size(); ++i)
@@ -133,7 +133,7 @@ public:
         m_resolver.clear();
     }
 
-    virtual void onError(WebServiceWorkerCacheError* reason) OVERRIDE
+    virtual void onError(WebServiceWorkerCacheError* reason) override
     {
         m_resolver->reject(Cache::domExceptionForCacheError(*reason));
         m_resolver.clear();
@@ -148,7 +148,7 @@ CacheStorage* CacheStorage::create(WebServiceWorkerCacheStorage* webCacheStorage
     return new CacheStorage(webCacheStorage);
 }
 
-ScriptPromise CacheStorage::get(ScriptState* scriptState, const String& cacheName)
+ScriptPromise CacheStorage::open(ScriptState* scriptState, const String& cacheName)
 {
     RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
@@ -160,7 +160,7 @@ ScriptPromise CacheStorage::get(ScriptState* scriptState, const String& cacheNam
     }
 
     if (m_webCacheStorage)
-        m_webCacheStorage->dispatchGet(new WithCacheCallbacks(cacheName, this, resolver), cacheName);
+        m_webCacheStorage->dispatchOpen(new WithCacheCallbacks(cacheName, this, resolver), cacheName);
     else
         resolver->reject(createNoImplementationException());
 
@@ -179,19 +179,6 @@ ScriptPromise CacheStorage::has(ScriptState* scriptState, const String& cacheNam
 
     if (m_webCacheStorage)
         m_webCacheStorage->dispatchHas(new Callbacks(resolver), cacheName);
-    else
-        resolver->reject(createNoImplementationException());
-
-    return promise;
-}
-
-ScriptPromise CacheStorage::createFunction(ScriptState* scriptState, const String& cacheName)
-{
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
-    const ScriptPromise promise = resolver->promise();
-
-    if (m_webCacheStorage)
-        m_webCacheStorage->dispatchCreate(new WithCacheCallbacks(cacheName, this, resolver), cacheName);
     else
         resolver->reject(createNoImplementationException());
 

@@ -4,6 +4,7 @@
 
 #include "base/android/build_info.h"
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -123,7 +124,7 @@ static void CheckDeviceNames(const AudioDeviceNames& device_names) {
 }
 
 // We clear the data bus to ensure that the test does not cause noise.
-static int RealOnMoreData(AudioBus* dest, AudioBuffersState buffers_state) {
+static int RealOnMoreData(AudioBus* dest, uint32 total_bytes_delay) {
   dest->Zero();
   return dest->frames();
 }
@@ -178,7 +179,7 @@ class FileAudioSource : public AudioOutputStream::AudioSourceCallback {
   // Use samples read from a data file and fill up the audio buffer
   // provided to us in the callback.
   virtual int OnMoreData(AudioBus* audio_bus,
-                         AudioBuffersState buffers_state) OVERRIDE {
+                         uint32 total_bytes_delay) override {
     bool stop_playing = false;
     int max_size =
         audio_bus->frames() * audio_bus->channels() * kBytesPerSample;
@@ -206,7 +207,7 @@ class FileAudioSource : public AudioOutputStream::AudioSourceCallback {
     return frames;
   }
 
-  virtual void OnError(AudioOutputStream* stream) OVERRIDE {}
+  virtual void OnError(AudioOutputStream* stream) override {}
 
   int file_size() { return file_->data_size(); }
 
@@ -265,7 +266,7 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
   virtual void OnData(AudioInputStream* stream,
                       const AudioBus* src,
                       uint32 hardware_delay_bytes,
-                      double volume) OVERRIDE {
+                      double volume) override {
     const int num_samples = src->frames() * src->channels();
     scoped_ptr<int16> interleaved(new int16[num_samples]);
     const int bytes_per_sample = sizeof(*interleaved);
@@ -279,7 +280,7 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
       event_->Signal();
   }
 
-  virtual void OnError(AudioInputStream* stream) OVERRIDE {}
+  virtual void OnError(AudioInputStream* stream) override {}
 
  private:
   base::WaitableEvent* event_;
@@ -313,7 +314,7 @@ class FullDuplexAudioSinkSource
   virtual void OnData(AudioInputStream* stream,
                       const AudioBus* src,
                       uint32 hardware_delay_bytes,
-                      double volume) OVERRIDE {
+                      double volume) override {
     const base::TimeTicks now_time = base::TimeTicks::Now();
     const int diff = (now_time - previous_time_).InMilliseconds();
 
@@ -350,11 +351,11 @@ class FullDuplexAudioSinkSource
     }
   }
 
-  virtual void OnError(AudioInputStream* stream) OVERRIDE {}
+  virtual void OnError(AudioInputStream* stream) override {}
 
   // AudioOutputStream::AudioSourceCallback implementation
   virtual int OnMoreData(AudioBus* dest,
-                         AudioBuffersState buffers_state) OVERRIDE {
+                         uint32 total_bytes_delay) override {
     const int size_in_bytes =
         (params_.bits_per_sample() / 8) * dest->frames() * dest->channels();
     EXPECT_EQ(size_in_bytes, params_.GetBytesPerBuffer());
@@ -382,7 +383,7 @@ class FullDuplexAudioSinkSource
     return dest->frames();
   }
 
-  virtual void OnError(AudioOutputStream* stream) OVERRIDE {}
+  virtual void OnError(AudioOutputStream* stream) override {}
 
  private:
   // Converts from bytes to milliseconds given number of bytes and existing
@@ -811,23 +812,9 @@ TEST_P(AudioAndroidInputTest,
   StartInputStreamCallbacks(params);
 }
 
-
-#if defined(__aarch64__)
-// Disable StartOutputStreamCallbacks and
-// StartOutputStreamCallbacksNonDefaultParameters on Arm64: crbug.com/418029
-#define MAYBE_StartOutputStreamCallbacks DISABLED_StartOutputStreamCallbacks
-#define MAYBE_StartOutputStreamCallbacksNonDefaultParameters  \
-    DISABLED_StartOutputStreamCallbacksNonDefaultParameters
-#else
-#define MAYBE_StartOutputStreamCallbacks StartOutputStreamCallbacks
-#define MAYBE_StartOutputStreamCallbacksNonDefaultParameters  \
-    StartOutputStreamCallbacksNonDefaultParameters
-#endif
-
-
 // Start output streaming using default output parameters and ensure that the
 // callback sequence is sane.
-TEST_F(AudioAndroidOutputTest, MAYBE_StartOutputStreamCallbacks) {
+TEST_F(AudioAndroidOutputTest, StartOutputStreamCallbacks) {
   GetDefaultOutputStreamParametersOnAudioThread();
   StartOutputStreamCallbacks(audio_output_parameters());
 }
@@ -837,8 +824,7 @@ TEST_F(AudioAndroidOutputTest, MAYBE_StartOutputStreamCallbacks) {
 // select a 10ms buffer size instead of the default size and to open up the
 // device in mono.
 // TODO(henrika): possibly add support for more variations.
-TEST_F(AudioAndroidOutputTest,
-       MAYBE_StartOutputStreamCallbacksNonDefaultParameters) {
+TEST_F(AudioAndroidOutputTest, StartOutputStreamCallbacksNonDefaultParameters) {
   GetDefaultOutputStreamParametersOnAudioThread();
   AudioParameters params(audio_output_parameters().format(),
                          CHANNEL_LAYOUT_MONO,

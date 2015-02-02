@@ -86,7 +86,7 @@ class Context
     GLuint createRenderbuffer();
     GLuint createSampler();
     GLuint createTransformFeedback();
-    GLsync createFenceSync(GLenum condition);
+    GLsync createFenceSync();
 
     void deleteBuffer(GLuint buffer);
     void deleteShader(GLuint shader);
@@ -130,8 +130,8 @@ class Context
     void bindPixelPackBuffer(GLuint buffer);
     void bindPixelUnpackBuffer(GLuint buffer);
     void useProgram(GLuint program);
-    void linkProgram(GLuint program);
-    void setProgramBinary(GLuint program, GLenum binaryFormat, const void *binary, GLint length);
+    Error linkProgram(GLuint program);
+    Error setProgramBinary(GLuint program, GLenum binaryFormat, const void *binary, GLint length);
     void bindTransformFeedback(GLuint transformFeedback);
 
     Error beginQuery(GLenum target, GLuint query);
@@ -189,11 +189,11 @@ class Context
     Error clearBufferfi(GLenum buffer, int drawbuffer, float depth, int stencil);
 
     Error readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei *bufSize, void* pixels);
-    void drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instances);
-    void drawElements(GLenum mode, GLsizei count, GLenum type,
-                      const GLvoid *indices, GLsizei instances,
-                      const rx::RangeUI &indexRange);
-    void sync(bool block);   // flush/finish
+    Error drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instances);
+    Error drawElements(GLenum mode, GLsizei count, GLenum type,
+                       const GLvoid *indices, GLsizei instances,
+                       const rx::RangeUI &indexRange);
+    Error sync(bool block);   // flush/finish
 
     void recordError(const Error &error);
 
@@ -215,8 +215,8 @@ class Context
 
     void getCurrentReadFormatType(GLenum *internalFormat, GLenum *format, GLenum *type);
 
-    void blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
-                         GLbitfield mask, GLenum filter);
+    Error blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+                          GLbitfield mask, GLenum filter);
 
     rx::Renderer *getRenderer() { return mRenderer; }
 
@@ -231,13 +231,13 @@ class Context
     // TODO: std::array may become unavailable using older versions of GCC
     typedef std::array<unsigned int, IMPLEMENTATION_MAX_FRAMEBUFFER_ATTACHMENTS> FramebufferTextureSerialArray;
 
-    void applyRenderTarget(GLenum drawMode, bool ignoreViewport);
-    void applyState(GLenum drawMode);
-    void applyShaders(ProgramBinary *programBinary, bool transformFeedbackActive);
-    void applyTextures(ProgramBinary *programBinary, SamplerType shaderType, const FramebufferTextureSerialArray &framebufferSerials,
-                       size_t framebufferSerialCount);
-    void applyTextures(ProgramBinary *programBinary);
-    bool applyUniformBuffers();
+    Error applyRenderTarget(GLenum drawMode, bool ignoreViewport);
+    Error applyState(GLenum drawMode);
+    Error applyShaders(ProgramBinary *programBinary, bool transformFeedbackActive);
+    Error applyTextures(ProgramBinary *programBinary, SamplerType shaderType, const FramebufferTextureSerialArray &framebufferSerials,
+                        size_t framebufferSerialCount);
+    Error applyTextures(ProgramBinary *programBinary);
+    Error applyUniformBuffers();
     bool applyTransformFeedbackBuffers();
     void markTransformFeedbackUsage();
 
@@ -249,8 +249,8 @@ class Context
     void detachTransformFeedback(GLuint transformFeedback);
     void detachSampler(GLuint sampler);
 
-    void generateSwizzles(ProgramBinary *programBinary, SamplerType type);
-    void generateSwizzles(ProgramBinary *programBinary);
+    Error generateSwizzles(ProgramBinary *programBinary, SamplerType type);
+    Error generateSwizzles(ProgramBinary *programBinary);
 
     Texture *getIncompleteTexture(GLenum type);
 

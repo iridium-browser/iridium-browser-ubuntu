@@ -28,24 +28,23 @@ class SupervisedUserImportHandler : public OptionsPageUIHandler,
       CallbackList;
 
   SupervisedUserImportHandler();
-  virtual ~SupervisedUserImportHandler();
+  ~SupervisedUserImportHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // SupervisedUserSyncServiceObserver implementation.
-  virtual void OnSupervisedUserAcknowledged(
-      const std::string& supervised_user_id) OVERRIDE {}
-  virtual void OnSupervisedUsersSyncingStopped() OVERRIDE {}
-  virtual void OnSupervisedUsersChanged() OVERRIDE;
+  void OnSupervisedUserAcknowledged(
+      const std::string& supervised_user_id) override {}
+  void OnSupervisedUsersSyncingStopped() override {}
+  void OnSupervisedUsersChanged() override;
 
   // SigninErrorController::Observer implementation.
-  virtual void OnErrorChanged() OVERRIDE;
+  void OnErrorChanged() override;
 
  private:
   // Clears the cached list of supervised users and fetches the new list of

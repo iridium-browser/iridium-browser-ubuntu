@@ -20,6 +20,7 @@
 #include "webrtc/config.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
 #include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
+#include "webrtc/modules/video_coding/codecs/vp9/include/vp9.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/rw_lock_wrapper.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
@@ -46,16 +47,31 @@ VideoEncoder* VideoEncoder::Create(VideoEncoder::EncoderType codec_type) {
   switch (codec_type) {
     case kVp8:
       return VP8Encoder::Create();
+    case kVp9:
+      return VP9Encoder::Create();
   }
   assert(false);
   return NULL;
 }
 
+VideoDecoder* VideoDecoder::Create(VideoDecoder::DecoderType codec_type) {
+  switch (codec_type) {
+    case kVp8:
+      return VP8Decoder::Create();
+    case kVp9:
+      return VP9Decoder::Create();
+  }
+  assert(false);
+  return NULL;
+}
+
+const int Call::Config::kDefaultStartBitrateBps = 300000;
+
 namespace internal {
 
 class CpuOveruseObserverProxy : public webrtc::CpuOveruseObserver {
  public:
-  explicit CpuOveruseObserverProxy(OveruseCallback* overuse_callback)
+  explicit CpuOveruseObserverProxy(LoadObserver* overuse_callback)
       : crit_(CriticalSectionWrapper::CreateCriticalSection()),
         overuse_callback_(overuse_callback) {
     assert(overuse_callback != NULL);
@@ -65,17 +81,17 @@ class CpuOveruseObserverProxy : public webrtc::CpuOveruseObserver {
 
   virtual void OveruseDetected() OVERRIDE {
     CriticalSectionScoped lock(crit_.get());
-    overuse_callback_->OnOveruse();
+    overuse_callback_->OnLoadUpdate(LoadObserver::kOveruse);
   }
 
   virtual void NormalUsage() OVERRIDE {
     CriticalSectionScoped lock(crit_.get());
-    overuse_callback_->OnNormalUse();
+    overuse_callback_->OnLoadUpdate(LoadObserver::kUnderuse);
   }
 
  private:
   const scoped_ptr<CriticalSectionWrapper> crit_;
-  OveruseCallback* overuse_callback_ GUARDED_BY(crit_);
+  LoadObserver* overuse_callback_ GUARDED_BY(crit_);
 };
 
 class Call : public webrtc::Call, public PacketReceiver {
@@ -98,8 +114,7 @@ class Call : public webrtc::Call, public PacketReceiver {
   virtual void DestroyVideoReceiveStream(
       webrtc::VideoReceiveStream* receive_stream) OVERRIDE;
 
-  virtual uint32_t SendBitrateEstimate() OVERRIDE;
-  virtual uint32_t ReceiveBitrateEstimate() OVERRIDE;
+  virtual Stats GetStats() const OVERRIDE;
 
   virtual DeliveryStatus DeliverPacket(const uint8_t* packet,
                                        size_t length) OVERRIDE;
@@ -150,8 +165,6 @@ Call* Call::Create(const Call::Config& config) {
 
 namespace internal {
 
-const int kDefaultVideoStreamBitrateBps = 300000;
-
 Call::Call(webrtc::VideoEngine* video_engine, const Call::Config& config)
     : config_(config),
       network_enabled_crit_(CriticalSectionWrapper::CreateCriticalSection()),
@@ -200,16 +213,15 @@ VideoSendStream* Call::CreateVideoSendStream(
 
   // TODO(mflodman): Base the start bitrate on a current bandwidth estimate, if
   // the call has already started.
-  VideoSendStream* send_stream = new VideoSendStream(
-      config_.send_transport,
-      overuse_observer_proxy_.get(),
-      video_engine_,
-      config,
-      encoder_config,
-      suspended_send_ssrcs_,
-      base_channel_id_,
-      config_.start_bitrate_bps != -1 ? config_.start_bitrate_bps
-                                      : kDefaultVideoStreamBitrateBps);
+  VideoSendStream* send_stream =
+      new VideoSendStream(config_.send_transport,
+                          overuse_observer_proxy_.get(),
+                          video_engine_,
+                          config,
+                          encoder_config,
+                          suspended_send_ssrcs_,
+                          base_channel_id_,
+                          config_.stream_start_bitrate_bps);
 
   // This needs to be taken before send_crit_ as both locks need to be held
   // while changing network state.
@@ -308,14 +320,26 @@ void Call::DestroyVideoReceiveStream(
   delete receive_stream_impl;
 }
 
-uint32_t Call::SendBitrateEstimate() {
-  // TODO(pbos): Return send-bitrate estimate
-  return 0;
-}
-
-uint32_t Call::ReceiveBitrateEstimate() {
-  // TODO(pbos): Return receive-bitrate estimate
-  return 0;
+Call::Stats Call::GetStats() const {
+  Stats stats;
+  // Ignoring return values.
+  uint32_t send_bandwidth = 0;
+  rtp_rtcp_->GetEstimatedSendBandwidth(base_channel_id_, &send_bandwidth);
+  stats.send_bandwidth_bps = send_bandwidth;
+  uint32_t recv_bandwidth = 0;
+  rtp_rtcp_->GetEstimatedReceiveBandwidth(base_channel_id_, &recv_bandwidth);
+  stats.recv_bandwidth_bps = recv_bandwidth;
+  {
+    ReadLockScoped read_lock(*send_crit_);
+    for (std::map<uint32_t, VideoSendStream*>::const_iterator it =
+             send_ssrcs_.begin();
+         it != send_ssrcs_.end();
+         ++it) {
+      stats.pacer_delay_ms =
+          std::max(it->second->GetPacerQueuingDelayMs(), stats.pacer_delay_ms);
+    }
+  }
+  return stats;
 }
 
 void Call::SignalNetworkState(NetworkState state) {

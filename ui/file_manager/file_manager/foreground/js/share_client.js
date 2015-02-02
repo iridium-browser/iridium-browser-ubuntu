@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * @param {WebView} webView Web View tag.
  * @param {string} url Share Url for an entry.
@@ -44,7 +42,7 @@ ShareClient.Observer.prototype.onLoaded = function() {
 /**
  * Notifies when the the embedded dialog failed to load.
  */
-ShareClient.Observer.prototype.onLoadingFailed = function() {
+ShareClient.Observer.prototype.onLoadFailed = function() {
 };
 
 /**

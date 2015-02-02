@@ -28,11 +28,8 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
-#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -49,6 +46,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/find_in_page_observer.h"
+#include "components/app_modal_dialogs/app_modal_dialog.h"
+#include "components/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/dom_operation_notification_details.h"
@@ -77,7 +76,6 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/size.h"
-#include "ui/snapshot/test/snapshot_desktop.h"
 
 #if defined(USE_AURA)
 #include "ash/shell.h"
@@ -98,33 +96,6 @@ namespace ui_test_utils {
 
 namespace {
 
-#if defined(OS_WIN)
-const char kSnapshotBaseName[] = "ChromiumSnapshot";
-const char kSnapshotExtension[] = ".png";
-
-base::FilePath GetSnapshotFileName(const base::FilePath& snapshot_directory) {
-  base::Time::Exploded the_time;
-
-  base::Time::Now().LocalExplode(&the_time);
-  std::string filename(base::StringPrintf("%s%04d%02d%02d%02d%02d%02d%s",
-      kSnapshotBaseName, the_time.year, the_time.month, the_time.day_of_month,
-      the_time.hour, the_time.minute, the_time.second, kSnapshotExtension));
-
-  base::FilePath snapshot_file = snapshot_directory.AppendASCII(filename);
-  if (base::PathExists(snapshot_file)) {
-    int index = 0;
-    std::string suffix;
-    base::FilePath trial_file;
-    do {
-      suffix = base::StringPrintf(" (%d)", ++index);
-      trial_file = snapshot_file.InsertBeforeExtensionASCII(suffix);
-    } while (base::PathExists(trial_file));
-    snapshot_file = trial_file;
-  }
-  return snapshot_file;
-}
-#endif  // defined(OS_WIN)
-
 Browser* WaitForBrowserNotInSet(std::set<Browser*> excluded_browsers) {
   Browser* new_browser = GetBrowserNotInSet(excluded_browsers);
   if (new_browser == NULL) {
@@ -135,6 +106,38 @@ Browser* WaitForBrowserNotInSet(std::set<Browser*> excluded_browsers) {
   }
   return new_browser;
 }
+
+class AppModalDialogWaiter : public AppModalDialogObserver {
+ public:
+  AppModalDialogWaiter()
+      : dialog_(NULL) {
+  }
+  ~AppModalDialogWaiter() override {
+  }
+
+  AppModalDialog* Wait() {
+    if (dialog_)
+      return dialog_;
+    message_loop_runner_ = new content::MessageLoopRunner;
+    message_loop_runner_->Run();
+    EXPECT_TRUE(dialog_);
+    return dialog_;
+  }
+
+  // AppModalDialogWaiter:
+  void Notify(AppModalDialog* dialog) override {
+    DCHECK(!dialog_);
+    dialog_ = dialog;
+    if (message_loop_runner_.get() && message_loop_runner_->loop_running())
+      message_loop_runner_->Quit();
+  }
+
+ private:
+  AppModalDialog* dialog_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(AppModalDialogWaiter);
+};
 
 }  // namespace
 
@@ -325,12 +328,8 @@ AppModalDialog* WaitForAppModalDialog() {
   AppModalDialogQueue* dialog_queue = AppModalDialogQueue::GetInstance();
   if (dialog_queue->HasActiveDialog())
     return dialog_queue->active_dialog();
-
-  content::WindowedNotificationObserver observer(
-      chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
-      content::NotificationService::AllSources());
-  observer.Wait();
-  return content::Source<AppModalDialog>(observer.source()).ptr();
+  AppModalDialogWaiter waiter;
+  return waiter.Wait();
 }
 
 int FindInPage(WebContents* tab,
@@ -504,46 +503,6 @@ Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
   EXPECT_EQ(original_browsers_.size() + 1, chrome::GetTotalBrowserCount());
   return GetBrowserNotInSet(original_browsers_);
 }
-
-#if defined(OS_WIN)
-
-bool SaveScreenSnapshotToDirectory(const base::FilePath& directory,
-                                   base::FilePath* screenshot_path) {
-  bool succeeded = false;
-  base::FilePath out_path(GetSnapshotFileName(directory));
-
-  MONITORINFO monitor_info = {};
-  monitor_info.cbSize = sizeof(monitor_info);
-  HMONITOR main_monitor = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
-  if (GetMonitorInfo(main_monitor, &monitor_info)) {
-    RECT& rect = monitor_info.rcMonitor;
-
-    std::vector<unsigned char> png_data;
-    gfx::Rect bounds(
-        gfx::Size(rect.right - rect.left, rect.bottom - rect.top));
-    if (ui::GrabDesktopSnapshot(bounds, &png_data) &&
-        png_data.size() <= INT_MAX) {
-      int bytes = static_cast<int>(png_data.size());
-      int written = base::WriteFile(
-          out_path, reinterpret_cast<char*>(&png_data[0]), bytes);
-      succeeded = (written == bytes);
-    }
-  }
-
-  if (succeeded && screenshot_path != NULL)
-    *screenshot_path = out_path;
-
-  return succeeded;
-}
-
-bool SaveScreenSnapshotToDesktop(base::FilePath* screenshot_path) {
-  base::FilePath desktop;
-
-  return PathService::Get(base::DIR_USER_DESKTOP, &desktop) &&
-      SaveScreenSnapshotToDirectory(desktop, screenshot_path);
-}
-
-#endif  // defined(OS_WIN)
 
 void OverrideGeolocation(double latitude, double longitude) {
   content::Geoposition position;

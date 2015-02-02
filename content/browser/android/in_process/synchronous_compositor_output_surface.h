@@ -65,10 +65,10 @@ class SynchronousCompositorOutputSurface
   virtual ~SynchronousCompositorOutputSurface();
 
   // OutputSurface.
-  virtual bool BindToClient(cc::OutputSurfaceClient* surface_client) OVERRIDE;
-  virtual void Reshape(const gfx::Size& size, float scale_factor) OVERRIDE;
-  virtual void SetNeedsBeginFrame(bool enable) OVERRIDE;
-  virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE;
+  virtual bool BindToClient(cc::OutputSurfaceClient* surface_client) override;
+  virtual void Reshape(const gfx::Size& size, float scale_factor) override;
+  virtual void SetNeedsBeginFrame(bool enable) override;
+  virtual void SwapBuffers(cc::CompositorFrame* frame) override;
 
   // Partial SynchronousCompositor API implementation.
   bool InitializeHwDraw(
@@ -83,7 +83,7 @@ class SynchronousCompositorOutputSurface
       const gfx::Transform& transform_for_tile_priority);
   void ReturnResources(const cc::CompositorFrameAck& frame_ack);
   scoped_ptr<cc::CompositorFrame> DemandDrawSw(SkCanvas* canvas);
-  void SetMemoryPolicy(const SynchronousCompositorMemoryPolicy& policy);
+  void SetMemoryPolicy(size_t bytes_limit);
   void GetMessagesToDeliver(ScopedVector<IPC::Message>* messages);
 
  private:

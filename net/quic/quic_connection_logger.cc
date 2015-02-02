@@ -46,21 +46,19 @@ base::Value* NetLogQuicPacketCallback(const IPEndPoint* self_address,
 }
 
 base::Value* NetLogQuicPacketSentCallback(
-    QuicPacketSequenceNumber sequence_number,
+    const SerializedPacket& serialized_packet,
     EncryptionLevel level,
     TransmissionType transmission_type,
     size_t packet_size,
-    WriteResult result,
+    QuicTime sent_time,
     NetLog::LogLevel /* log_level */) {
   base::DictionaryValue* dict = new base::DictionaryValue();
   dict->SetInteger("encryption_level", level);
   dict->SetInteger("transmission_type", transmission_type);
   dict->SetString("packet_sequence_number",
-                  base::Uint64ToString(sequence_number));
+                  base::Uint64ToString(serialized_packet.sequence_number));
   dict->SetInteger("size", packet_size);
-  if (result.status != WRITE_STATUS_OK) {
-    dict->SetInteger("net_error", result.error_code);
-  }
+  dict->SetInteger("sent_time_us", sent_time.ToDebuggingValue());
   return dict;
 }
 
@@ -333,8 +331,10 @@ AddressFamily GetRealAddressFamily(const IPAddressNumber& address) {
 
 }  // namespace
 
-QuicConnectionLogger::QuicConnectionLogger(const BoundNetLog& net_log)
+QuicConnectionLogger::QuicConnectionLogger(QuicSession* session,
+                                           const BoundNetLog& net_log)
     : net_log_(net_log),
+      session_(session),
       last_received_packet_sequence_number_(0),
       last_received_packet_size_(0),
       largest_received_packet_sequence_number_(0),
@@ -348,6 +348,8 @@ QuicConnectionLogger::QuicConnectionLogger(const BoundNetLog& net_log)
       num_incorrect_connection_ids_(0),
       num_undecryptable_packets_(0),
       num_duplicate_packets_(0),
+      num_blocked_frames_received_(0),
+      num_blocked_frames_sent_(0),
       connection_description_(GetConnectionDescriptionString()) {
 }
 
@@ -364,6 +366,10 @@ QuicConnectionLogger::~QuicConnectionLogger() {
                        num_undecryptable_packets_);
   UMA_HISTOGRAM_COUNTS("Net.QuicSession.DuplicatePacketsReceived",
                        num_duplicate_packets_);
+  UMA_HISTOGRAM_COUNTS("Net.QuicSession.BlockedFrames.Received",
+                       num_blocked_frames_received_);
+  UMA_HISTOGRAM_COUNTS("Net.QuicSession.BlockedFrames.Sent",
+                       num_blocked_frames_sent_);
 
   if (num_frames_received_ > 0) {
     int duplicate_stream_frame_per_thousand =
@@ -451,6 +457,7 @@ void QuicConnectionLogger::OnFrameAddedToPacket(const QuicFrame& frame) {
                      frame.window_update_frame));
       break;
     case BLOCKED_FRAME:
+      ++num_blocked_frames_sent_;
       net_log_.AddEvent(
           NetLog::TYPE_QUIC_SESSION_BLOCKED_FRAME_SENT,
           base::Bind(&NetLogQuicBlockedFrameCallback,
@@ -463,6 +470,10 @@ void QuicConnectionLogger::OnFrameAddedToPacket(const QuicFrame& frame) {
                      frame.stop_waiting_frame));
       break;
     case PING_FRAME:
+      UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.ConnectionFlowControlBlocked",
+                            session_->IsConnectionFlowControlBlocked());
+      UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.StreamFlowControlBlocked",
+                            session_->IsStreamFlowControlBlocked());
       // PingFrame has no contents to log, so just record that it was sent.
       net_log_.AddEvent(NetLog::TYPE_QUIC_SESSION_PING_FRAME_SENT);
       break;
@@ -472,24 +483,24 @@ void QuicConnectionLogger::OnFrameAddedToPacket(const QuicFrame& frame) {
 }
 
 void QuicConnectionLogger::OnPacketSent(
-    QuicPacketSequenceNumber sequence_number,
+    const SerializedPacket& serialized_packet,
+    QuicPacketSequenceNumber original_sequence_number,
     EncryptionLevel level,
     TransmissionType transmission_type,
     const QuicEncryptedPacket& packet,
-    WriteResult result) {
-  net_log_.AddEvent(
-      NetLog::TYPE_QUIC_SESSION_PACKET_SENT,
-      base::Bind(&NetLogQuicPacketSentCallback, sequence_number, level,
-                 transmission_type, packet.length(), result));
-}
-
-void QuicConnectionLogger:: OnPacketRetransmitted(
-      QuicPacketSequenceNumber old_sequence_number,
-      QuicPacketSequenceNumber new_sequence_number) {
-  net_log_.AddEvent(
-      NetLog::TYPE_QUIC_SESSION_PACKET_RETRANSMITTED,
-      base::Bind(&NetLogQuicPacketRetransmittedCallback,
-                 old_sequence_number, new_sequence_number));
+    QuicTime sent_time) {
+  if (original_sequence_number == 0) {
+    net_log_.AddEvent(
+        NetLog::TYPE_QUIC_SESSION_PACKET_SENT,
+        base::Bind(&NetLogQuicPacketSentCallback, serialized_packet,
+                   level, transmission_type, packet.length(), sent_time));
+  }  else {
+    net_log_.AddEvent(
+        NetLog::TYPE_QUIC_SESSION_PACKET_RETRANSMITTED,
+        base::Bind(&NetLogQuicPacketRetransmittedCallback,
+                   original_sequence_number,
+                   serialized_packet.sequence_number));
+  }
 }
 
 void QuicConnectionLogger::OnPacketReceived(const IPEndPoint& self_address,
@@ -648,6 +659,7 @@ void QuicConnectionLogger::OnWindowUpdateFrame(
 }
 
 void QuicConnectionLogger::OnBlockedFrame(const QuicBlockedFrame& frame) {
+  ++num_blocked_frames_received_;
   net_log_.AddEvent(
       NetLog::TYPE_QUIC_SESSION_BLOCKED_FRAME_RECEIVED,
       base::Bind(&NetLogQuicBlockedFrameCallback, &frame));

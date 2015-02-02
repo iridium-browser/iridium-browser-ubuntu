@@ -9,11 +9,13 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/scoped_observer.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/common/extensions/api/history.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
@@ -26,19 +28,24 @@ namespace extensions {
 
 // Observes History service and routes the notifications as events to the
 // extension system.
-class HistoryEventRouter : public content::NotificationObserver {
+class HistoryEventRouter : public content::NotificationObserver,
+                           public history::HistoryServiceObserver {
  public:
-  explicit HistoryEventRouter(Profile* profile);
-  virtual ~HistoryEventRouter();
+  HistoryEventRouter(Profile* profile, HistoryService* history_service);
+  ~HistoryEventRouter() override;
 
  private:
   // content::NotificationObserver::Observe.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
-  void HistoryUrlVisited(Profile* profile,
-                         const history::URLVisitedDetails* details);
+  // history::HistoryServiceObserver.
+  void OnURLVisited(HistoryService* history_service,
+                    ui::PageTransition transition,
+                    const history::URLRow& row,
+                    const history::RedirectList& redirects,
+                    base::Time visit_time) override;
 
   void HistoryUrlsRemoved(Profile* profile,
                           const history::URLsDeletedDetails* details);
@@ -49,6 +56,9 @@ class HistoryEventRouter : public content::NotificationObserver {
 
   // Used for tracking registrations to history service notifications.
   content::NotificationRegistrar registrar_;
+  Profile* profile_;
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryEventRouter);
 };
@@ -56,16 +66,16 @@ class HistoryEventRouter : public content::NotificationObserver {
 class HistoryAPI : public BrowserContextKeyedAPI, public EventRouter::Observer {
  public:
   explicit HistoryAPI(content::BrowserContext* context);
-  virtual ~HistoryAPI();
+  ~HistoryAPI() override;
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<HistoryAPI>* GetFactoryInstance();
 
   // EventRouter::Observer implementation.
-  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
+  void OnListenerAdded(const EventListenerInfo& details) override;
 
  private:
   friend class BrowserContextKeyedAPIFactory<HistoryAPI>;
@@ -88,7 +98,7 @@ void BrowserContextKeyedAPIFactory<HistoryAPI>::DeclareFactoryDependencies();
 // Base class for history function APIs.
 class HistoryFunction : public ChromeAsyncExtensionFunction {
  protected:
-  virtual ~HistoryFunction() {}
+  ~HistoryFunction() override {}
 
   bool ValidateUrl(const std::string& url_string, GURL* url);
   bool VerifyDeleteAllowed();
@@ -102,10 +112,10 @@ class HistoryFunctionWithCallback : public HistoryFunction {
   HistoryFunctionWithCallback();
 
  protected:
-  virtual ~HistoryFunctionWithCallback();
+  ~HistoryFunctionWithCallback() override;
 
   // ExtensionFunction:
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 
   // Return true if the async call was completed, false otherwise.
   virtual bool RunAsyncImpl() = 0;
@@ -128,10 +138,10 @@ class HistoryGetVisitsFunction : public HistoryFunctionWithCallback {
   DECLARE_EXTENSION_FUNCTION("history.getVisits", HISTORY_GETVISITS)
 
  protected:
-  virtual ~HistoryGetVisitsFunction() {}
+  ~HistoryGetVisitsFunction() override {}
 
   // HistoryFunctionWithCallback:
-  virtual bool RunAsyncImpl() OVERRIDE;
+  bool RunAsyncImpl() override;
 
   // Callback for the history function to provide results.
   void QueryComplete(bool success,
@@ -144,10 +154,10 @@ class HistorySearchFunction : public HistoryFunctionWithCallback {
   DECLARE_EXTENSION_FUNCTION("history.search", HISTORY_SEARCH)
 
  protected:
-  virtual ~HistorySearchFunction() {}
+  ~HistorySearchFunction() override {}
 
   // HistoryFunctionWithCallback:
-  virtual bool RunAsyncImpl() OVERRIDE;
+  bool RunAsyncImpl() override;
 
   // Callback for the history function to provide results.
   void SearchComplete(history::QueryResults* results);
@@ -158,10 +168,10 @@ class HistoryAddUrlFunction : public HistoryFunction {
   DECLARE_EXTENSION_FUNCTION("history.addUrl", HISTORY_ADDURL)
 
  protected:
-  virtual ~HistoryAddUrlFunction() {}
+  ~HistoryAddUrlFunction() override {}
 
   // HistoryFunctionWithCallback:
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 };
 
 class HistoryDeleteAllFunction : public HistoryFunctionWithCallback {
@@ -169,10 +179,10 @@ class HistoryDeleteAllFunction : public HistoryFunctionWithCallback {
   DECLARE_EXTENSION_FUNCTION("history.deleteAll", HISTORY_DELETEALL)
 
  protected:
-  virtual ~HistoryDeleteAllFunction() {}
+  ~HistoryDeleteAllFunction() override {}
 
   // HistoryFunctionWithCallback:
-  virtual bool RunAsyncImpl() OVERRIDE;
+  bool RunAsyncImpl() override;
 
   // Callback for the history service to acknowledge deletion.
   void DeleteComplete();
@@ -184,10 +194,10 @@ class HistoryDeleteUrlFunction : public HistoryFunction {
   DECLARE_EXTENSION_FUNCTION("history.deleteUrl", HISTORY_DELETEURL)
 
  protected:
-  virtual ~HistoryDeleteUrlFunction() {}
+  ~HistoryDeleteUrlFunction() override {}
 
   // HistoryFunctionWithCallback:
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 };
 
 class HistoryDeleteRangeFunction : public HistoryFunctionWithCallback {
@@ -195,10 +205,10 @@ class HistoryDeleteRangeFunction : public HistoryFunctionWithCallback {
   DECLARE_EXTENSION_FUNCTION("history.deleteRange", HISTORY_DELETERANGE)
 
  protected:
-  virtual ~HistoryDeleteRangeFunction() {}
+  ~HistoryDeleteRangeFunction() override {}
 
   // HistoryFunctionWithCallback:
-  virtual bool RunAsyncImpl() OVERRIDE;
+  bool RunAsyncImpl() override;
 
   // Callback for the history service to acknowledge deletion.
   void DeleteComplete();

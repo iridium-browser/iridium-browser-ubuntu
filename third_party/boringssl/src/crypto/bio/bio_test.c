@@ -12,19 +12,43 @@
  * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 
-#define _BSD_SOURCE
+#if !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 201410L
+#endif
 
+#include <openssl/base.h>
+
+#if !defined(OPENSSL_WINDOWS)
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#else
+#include <io.h>
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#endif
 
 #include <openssl/bio.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 
+
+#if !defined(OPENSSL_WINDOWS)
+static int closesocket(int sock) {
+  return close(sock);
+}
+
+static void print_socket_error(const char *func) {
+  perror(func);
+}
+#else
+static void print_socket_error(const char *func) {
+  fprintf(stderr, "%s: %d\n", func, WSAGetLastError());
+}
+#endif
 
 static int test_socket_connect(void) {
   int listening_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -37,29 +61,29 @@ static int test_socket_connect(void) {
 
   memset(&sin, 0, sizeof(sin));
   sin.sin_family = AF_INET;
-  if (!inet_aton("127.0.0.1", &sin.sin_addr)) {
-    perror("inet_aton");
+  if (!inet_pton(AF_INET, "127.0.0.1", &sin.sin_addr)) {
+    print_socket_error("inet_pton");
     return 0;
   }
 
   if (bind(listening_sock, (struct sockaddr *)&sin, sizeof(sin)) != 0) {
-    perror("bind");
+    print_socket_error("bind");
     return 0;
   }
 
   if (listen(listening_sock, 1)) {
-    perror("listen");
+    print_socket_error("listen");
     return 0;
   }
 
   if (getsockname(listening_sock, (struct sockaddr *)&sin, &sockaddr_len) ||
       sockaddr_len != sizeof(sin)) {
-    perror("getsockname");
+    print_socket_error("getsockname");
     return 0;
   }
 
-  snprintf(hostname, sizeof(hostname), "%s:%d", "127.0.0.1",
-           ntohs(sin.sin_port));
+  BIO_snprintf(hostname, sizeof(hostname), "%s:%d", "127.0.0.1",
+               ntohs(sin.sin_port));
   bio = BIO_new_connect(hostname);
   if (!bio) {
     fprintf(stderr, "BIO_new_connect failed.\n");
@@ -75,12 +99,12 @@ static int test_socket_connect(void) {
 
   sock = accept(listening_sock, (struct sockaddr *) &sin, &sockaddr_len);
   if (sock < 0) {
-    perror("accept");
+    print_socket_error("accept");
     return 0;
   }
 
-  if (read(sock, buf, sizeof(buf)) != sizeof(kTestMessage)) {
-    perror("read");
+  if (recv(sock, buf, sizeof(buf), 0) != sizeof(kTestMessage)) {
+    print_socket_error("read");
     return 0;
   }
 
@@ -88,8 +112,8 @@ static int test_socket_connect(void) {
     return 0;
   }
 
-  close(sock);
-  close(listening_sock);
+  closesocket(sock);
+  closesocket(listening_sock);
   BIO_free(bio);
 
   return 1;
@@ -121,7 +145,7 @@ static int test_printf(void) {
 
     ret = BIO_printf(bio, "test %s", string);
     if (ret != 5 + kLengths[i]) {
-      fprintf(stderr, "BIO_printf failed\n");
+      fprintf(stderr, "BIO_printf failed: %d\n", ret);
       return 0;
     }
     if (!BIO_mem_contents(bio, &contents, &len)) {
@@ -146,8 +170,28 @@ static int test_printf(void) {
 }
 
 int main(void) {
+#if defined(OPENSSL_WINDOWS)
+  WSADATA wsa_data;
+  WORD wsa_version;
+  int wsa_err;
+#endif
+
   CRYPTO_library_init();
   ERR_load_crypto_strings();
+
+#if defined(OPENSSL_WINDOWS)
+  /* Initialize Winsock. */
+  wsa_version = MAKEWORD(2, 2);
+  wsa_err = WSAStartup(wsa_version, &wsa_data);
+  if (wsa_err != 0) {
+    fprintf(stderr, "WSAStartup failed: %d\n", wsa_err);
+    return 1;
+  }
+  if (wsa_data.wVersion != wsa_version) {
+    fprintf(stderr, "Didn't get expected version: %x\n", wsa_data.wVersion);
+    return 1;
+  }
+#endif
 
   if (!test_socket_connect()) {
     return 1;

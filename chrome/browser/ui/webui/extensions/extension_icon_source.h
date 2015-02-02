@@ -70,19 +70,19 @@ class ExtensionIconSource : public content::URLDataSource,
   static SkBitmap* LoadImageByResourceId(int resource_id);
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual std::string GetMimeType(const std::string&) const OVERRIDE;
-  virtual void StartDataRequest(
+  std::string GetSource() const override;
+  std::string GetMimeType(const std::string&) const override;
+  void StartDataRequest(
       const std::string& path,
       int render_process_id,
       int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
+      const content::URLDataSource::GotDataCallback& callback) override;
 
  private:
   // Encapsulates the request parameters for |request_id|.
   struct ExtensionIconRequest;
 
-  virtual ~ExtensionIconSource();
+  ~ExtensionIconSource() override;
 
   // Returns the bitmap for the default app image.
   const SkBitmap* GetDefaultAppImage();

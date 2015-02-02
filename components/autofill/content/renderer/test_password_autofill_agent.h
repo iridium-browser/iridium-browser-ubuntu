@@ -12,14 +12,14 @@ namespace autofill {
 class TestPasswordAutofillAgent : public PasswordAutofillAgent {
  public:
   explicit TestPasswordAutofillAgent(content::RenderView* render_view);
-  virtual ~TestPasswordAutofillAgent();
+  ~TestPasswordAutofillAgent() override;
 
  private:
   // Always returns true. This allows browser tests with "data: " URL scheme to
   // work with the password manager.
   // PasswordAutofillAgent:
-  virtual bool OriginCanAccessPasswordManager(
-      const blink::WebSecurityOrigin& origin) OVERRIDE;
+  bool OriginCanAccessPasswordManager(
+      const blink::WebSecurityOrigin& origin) override;
 };
 
 }  // namespace autofill

@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/webui/set_as_default_browser_ui.h"
-#include "chrome/common/pref_names.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -41,7 +40,7 @@ class SetMetroBrowserFlowLauncher : public content::NotificationObserver {
   // content::NotificationObserver override:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details) override;
 
   content::NotificationRegistrar registrar_;
   Profile* profile_;

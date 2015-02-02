@@ -17,6 +17,7 @@
 #include "base/threading/worker_pool.h"
 #include "content/child/webcrypto/algorithm_dispatch.h"
 #include "content/child/webcrypto/crypto_data.h"
+#include "content/child/webcrypto/generate_key_result.h"
 #include "content/child/webcrypto/status.h"
 #include "content/child/webcrypto/structured_clone.h"
 #include "content/child/webcrypto/webcrypto_util.h"
@@ -210,25 +211,18 @@ typedef EncryptState DigestState;
 struct GenerateKeyState : public BaseState {
   GenerateKeyState(const blink::WebCryptoAlgorithm& algorithm,
                    bool extractable,
-                   blink::WebCryptoKeyUsageMask usage_mask,
+                   blink::WebCryptoKeyUsageMask usages,
                    const blink::WebCryptoResult& result)
       : BaseState(result),
         algorithm(algorithm),
         extractable(extractable),
-        usage_mask(usage_mask),
-        public_key(blink::WebCryptoKey::createNull()),
-        private_key(blink::WebCryptoKey::createNull()),
-        is_asymmetric(false) {}
+        usages(usages) {}
 
   const blink::WebCryptoAlgorithm algorithm;
   const bool extractable;
-  const blink::WebCryptoKeyUsageMask usage_mask;
+  const blink::WebCryptoKeyUsageMask usages;
 
-  // If |is_asymmetric| is false, then |public_key| is understood to mean the
-  // symmetric key, and |private_key| is unused.
-  blink::WebCryptoKey public_key;
-  blink::WebCryptoKey private_key;
-  bool is_asymmetric;
+  webcrypto::GenerateKeyResult generate_key_result;
 };
 
 struct ImportKeyState : public BaseState {
@@ -237,21 +231,20 @@ struct ImportKeyState : public BaseState {
                  unsigned int key_data_size,
                  const blink::WebCryptoAlgorithm& algorithm,
                  bool extractable,
-                 blink::WebCryptoKeyUsageMask usage_mask,
+                 blink::WebCryptoKeyUsageMask usages,
                  const blink::WebCryptoResult& result)
       : BaseState(result),
         format(format),
         key_data(key_data, key_data + key_data_size),
         algorithm(algorithm),
         extractable(extractable),
-        usage_mask(usage_mask),
-        key(blink::WebCryptoKey::createNull()) {}
+        usages(usages) {}
 
   const blink::WebCryptoKeyFormat format;
   const std::vector<uint8_t> key_data;
   const blink::WebCryptoAlgorithm algorithm;
   const bool extractable;
-  const blink::WebCryptoKeyUsageMask usage_mask;
+  const blink::WebCryptoKeyUsageMask usages;
 
   blink::WebCryptoKey key;
 };
@@ -330,8 +323,7 @@ struct UnwrapKeyState : public BaseState {
         unwrap_algorithm(unwrap_algorithm),
         unwrapped_key_algorithm(unwrapped_key_algorithm),
         extractable(extractable),
-        usages(usages),
-        unwrapped_key(blink::WebCryptoKey::createNull()) {}
+        usages(usages) {}
 
   const blink::WebCryptoKeyFormat format;
   const std::vector<uint8_t> wrapped_key;
@@ -401,10 +393,7 @@ void DoGenerateKeyReply(scoped_ptr<GenerateKeyState> state) {
   if (state->status.IsError()) {
     CompleteWithError(state->status, &state->result);
   } else {
-    if (state->is_asymmetric)
-      state->result.completeWithKeyPair(state->public_key, state->private_key);
-    else
-      state->result.completeWithKey(state->public_key);
+    state->generate_key_result.Complete(&state->result);
   }
 }
 
@@ -412,37 +401,10 @@ void DoGenerateKey(scoped_ptr<GenerateKeyState> passed_state) {
   GenerateKeyState* state = passed_state.get();
   if (state->cancelled())
     return;
-  state->is_asymmetric =
-      webcrypto::IsAlgorithmAsymmetric(state->algorithm.id());
-  if (state->is_asymmetric) {
-    state->status = webcrypto::GenerateKeyPair(state->algorithm,
-                                               state->extractable,
-                                               state->usage_mask,
-                                               &state->public_key,
-                                               &state->private_key);
-
-    if (state->status.IsSuccess()) {
-      DCHECK(state->public_key.handle());
-      DCHECK(state->private_key.handle());
-      DCHECK_EQ(state->algorithm.id(), state->public_key.algorithm().id());
-      DCHECK_EQ(state->algorithm.id(), state->private_key.algorithm().id());
-      DCHECK_EQ(true, state->public_key.extractable());
-      DCHECK_EQ(state->extractable, state->private_key.extractable());
-    }
-  } else {
-    blink::WebCryptoKey* key = &state->public_key;
-
-    state->status = webcrypto::GenerateSecretKey(
-        state->algorithm, state->extractable, state->usage_mask, key);
-
-    if (state->status.IsSuccess()) {
-      DCHECK(key->handle());
-      DCHECK_EQ(state->algorithm.id(), key->algorithm().id());
-      DCHECK_EQ(state->extractable, key->extractable());
-      DCHECK_EQ(state->usage_mask, key->usages());
-    }
-  }
-
+  state->status = webcrypto::GenerateKey(state->algorithm,
+                                         state->extractable,
+                                         state->usages,
+                                         &state->generate_key_result);
   state->origin_thread->PostTask(
       FROM_HERE, base::Bind(DoGenerateKeyReply, Passed(&passed_state)));
 }
@@ -459,7 +421,7 @@ void DoImportKey(scoped_ptr<ImportKeyState> passed_state) {
                                        webcrypto::CryptoData(state->key_data),
                                        state->algorithm,
                                        state->extractable,
-                                       state->usage_mask,
+                                       state->usages,
                                        &state->key);
   if (state->status.IsSuccess()) {
     DCHECK(state->key.handle());
@@ -629,12 +591,12 @@ void WebCryptoImpl::digest(const blink::WebCryptoAlgorithm& algorithm,
 
 void WebCryptoImpl::generateKey(const blink::WebCryptoAlgorithm& algorithm,
                                 bool extractable,
-                                blink::WebCryptoKeyUsageMask usage_mask,
+                                blink::WebCryptoKeyUsageMask usages,
                                 blink::WebCryptoResult result) {
   DCHECK(!algorithm.isNull());
 
   scoped_ptr<GenerateKeyState> state(
-      new GenerateKeyState(algorithm, extractable, usage_mask, result));
+      new GenerateKeyState(algorithm, extractable, usages, result));
   if (!CryptoThreadPool::PostTask(FROM_HERE,
                                   base::Bind(DoGenerateKey, Passed(&state)))) {
     CompleteWithThreadPoolError(&result);
@@ -646,15 +608,10 @@ void WebCryptoImpl::importKey(blink::WebCryptoKeyFormat format,
                               unsigned int key_data_size,
                               const blink::WebCryptoAlgorithm& algorithm,
                               bool extractable,
-                              blink::WebCryptoKeyUsageMask usage_mask,
+                              blink::WebCryptoKeyUsageMask usages,
                               blink::WebCryptoResult result) {
-  scoped_ptr<ImportKeyState> state(new ImportKeyState(format,
-                                                      key_data,
-                                                      key_data_size,
-                                                      algorithm,
-                                                      extractable,
-                                                      usage_mask,
-                                                      result));
+  scoped_ptr<ImportKeyState> state(new ImportKeyState(
+      format, key_data, key_data_size, algorithm, extractable, usages, result));
   if (!CryptoThreadPool::PostTask(FROM_HERE,
                                   base::Bind(DoImportKey, Passed(&state)))) {
     CompleteWithThreadPoolError(&result);

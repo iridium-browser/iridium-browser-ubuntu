@@ -153,6 +153,9 @@ class EasyUnlockService : public KeyedService {
   // exists.
   void FinalizeSignin(const std::string& secret);
 
+  // Handles Easy Unlock auth failure for the user.
+  void HandleAuthFailure(const std::string& user_id);
+
   // Checks the consistency between pairing data and cryptohome keys. Set
   // hardlock state if the two do not match.
   void CheckCryptohomeKeysAndMaybeHardlock();
@@ -166,7 +169,7 @@ class EasyUnlockService : public KeyedService {
 
  protected:
   explicit EasyUnlockService(Profile* profile);
-  virtual ~EasyUnlockService();
+  ~EasyUnlockService() override;
 
   // Does a service type specific initialization.
   virtual void InitializeInternal() = 0;
@@ -180,7 +183,7 @@ class EasyUnlockService : public KeyedService {
   virtual bool IsAllowedInternal() = 0;
 
   // KeyedService override:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Exposes the profile to which the service is attached to subclasses.
   Profile* profile() const { return profile_; }

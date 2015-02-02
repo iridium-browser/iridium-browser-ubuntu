@@ -39,12 +39,12 @@ class CONTENT_EXPORT WifiDataProviderCommon : public WifiDataProvider {
   WifiDataProviderCommon();
 
   // WifiDataProvider implementation
-  virtual void StartDataProvider() OVERRIDE;
-  virtual void StopDataProvider() OVERRIDE;
-  virtual bool GetData(WifiData* data) OVERRIDE;
+  void StartDataProvider() override;
+  void StopDataProvider() override;
+  bool GetData(WifiData* data) override;
 
  protected:
-  virtual ~WifiDataProviderCommon();
+  ~WifiDataProviderCommon() override;
 
   // Returns ownership.
   virtual WlanApiInterface* NewWlanApi() = 0;

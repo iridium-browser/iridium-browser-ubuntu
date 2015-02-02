@@ -5,6 +5,9 @@
 #include "extensions/browser/api/extensions_api_client.h"
 
 #include "base/logging.h"
+#include "extensions/browser/api/device_permissions_prompt.h"
+#include "extensions/browser/api/virtual_keyboard_private/virtual_keyboard_delegate.h"
+#include "extensions/browser/api/web_request/web_request_event_router_delegate.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest_delegate.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper_delegate.h"
 
@@ -55,16 +58,9 @@ WebViewPermissionHelperDelegate* ExtensionsAPIClient::
   return new WebViewPermissionHelperDelegate(web_view_permission_helper);
 }
 
-scoped_refptr<RulesRegistry> ExtensionsAPIClient::GetRulesRegistry(
-    content::BrowserContext* browser_context,
-    const RulesRegistry::WebViewKey& webview_key,
-    const std::string& event_name) {
-  return scoped_refptr<RulesRegistry>();
-}
-
 WebRequestEventRouterDelegate*
 ExtensionsAPIClient::CreateWebRequestEventRouterDelegate() const {
-  return NULL;
+  return new WebRequestEventRouterDelegate();
 }
 
 scoped_refptr<ContentRulesRegistry>
@@ -72,6 +68,22 @@ ExtensionsAPIClient::CreateContentRulesRegistry(
     content::BrowserContext* browser_context,
     RulesCacheDelegate* cache_delegate) const {
   return scoped_refptr<ContentRulesRegistry>();
+}
+
+scoped_ptr<DevicePermissionsPrompt>
+ExtensionsAPIClient::CreateDevicePermissionsPrompt(
+    content::WebContents* web_contents) const {
+  return nullptr;
+}
+
+scoped_ptr<VirtualKeyboardDelegate>
+ExtensionsAPIClient::CreateVirtualKeyboardDelegate() const {
+  return nullptr;
+}
+
+ManagementAPIDelegate* ExtensionsAPIClient::CreateManagementAPIDelegate()
+    const {
+  return nullptr;
 }
 
 }  // namespace extensions

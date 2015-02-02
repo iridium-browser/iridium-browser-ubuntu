@@ -40,7 +40,6 @@ namespace blink {
 
 class DirectoryEntry;
 class EntryCallback;
-class EntrySync;
 class ErrorCallback;
 class MetadataCallback;
 class VoidCallback;
@@ -56,7 +55,7 @@ public:
     void remove(VoidCallback* successCallback = nullptr, ErrorCallback* = nullptr) const;
     void getParent(EntryCallback* successCallback = nullptr, ErrorCallback* = nullptr) const;
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 protected:
     Entry(DOMFileSystemBase*, const String& fullPath);

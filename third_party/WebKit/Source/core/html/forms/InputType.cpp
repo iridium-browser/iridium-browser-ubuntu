@@ -239,6 +239,11 @@ bool InputType::tooLong(const String&, HTMLTextFormControlElement::NeedsToCheckD
     return false;
 }
 
+bool InputType::tooShort(const String&, HTMLTextFormControlElement::NeedsToCheckDirtyFlag) const
+{
+    return false;
+}
+
 bool InputType::patternMismatch(const String&) const
 {
     return false;
@@ -370,6 +375,9 @@ String InputType::validationMessage() const
     if (element().tooLong())
         return locale().validationMessageTooLongText(value.length(), element().maxLength());
 
+    if (element().tooShort())
+        return locale().validationMessageTooShortText(value.length(), element().minLength());
+
     if (!isSteppable())
         return emptyString();
 
@@ -434,7 +442,7 @@ Chrome* InputType::chrome() const
 {
     if (FrameHost* host = element().document().frameHost())
         return &host->chrome();
-    return 0;
+    return nullptr;
 }
 
 Locale& InputType::locale() const
@@ -500,10 +508,10 @@ bool InputType::rendererIsNeeded()
 
 FileList* InputType::files()
 {
-    return 0;
+    return nullptr;
 }
 
-void InputType::setFiles(PassRefPtrWillBeRawPtr<FileList>)
+void InputType::setFiles(FileList*)
 {
 }
 
@@ -545,7 +553,7 @@ bool InputType::shouldDispatchFormControlChangeEvent(String& oldValue, String& n
 void InputType::setValue(const String& sanitizedValue, bool valueChanged, TextFieldEventBehavior eventBehavior)
 {
     element().setValueInternal(sanitizedValue, eventBehavior);
-    element().setNeedsStyleRecalc(SubtreeStyleChange);
+    element().setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::ControlValue));
     if (!valueChanged)
         return;
     switch (eventBehavior) {
@@ -650,6 +658,11 @@ int InputType::maxLength() const
     return HTMLInputElement::maximumLength;
 }
 
+int InputType::minLength() const
+{
+    return 0;
+}
+
 bool InputType::supportsPlaceholder() const
 {
     return false;
@@ -717,7 +730,7 @@ TextDirection InputType::computedTextDirection()
 
 ColorChooserClient* InputType::colorChooserClient()
 {
-    return 0;
+    return nullptr;
 }
 
 void InputType::applyStep(const Decimal& current, int count, AnyStepHandling anyStepHandling, TextFieldEventBehavior eventBehavior, ExceptionState& exceptionState)
@@ -747,7 +760,7 @@ void InputType::applyStep(const Decimal& current, int count, AnyStepHandling any
         if (count < 0)
             newValue = base + ((current - base) / step).floor() * step;
         else if (count > 0)
-            newValue = base + ((current - base) / step).ceiling() * step;
+            newValue = base + ((current - base) / step).ceil() * step;
         else
             newValue = current;
 
@@ -779,7 +792,7 @@ void InputType::applyStep(const Decimal& current, int count, AnyStepHandling any
         setValueAsDecimal(newValue, eventBehavior, exceptionState);
     }
     if (AXObjectCache* cache = element().document().existingAXObjectCache())
-        cache->postNotification(&element(), AXObjectCache::AXValueChanged, true);
+        cache->handleValueChanged(&element());
 }
 
 bool InputType::getAllowedValueStep(Decimal* step) const

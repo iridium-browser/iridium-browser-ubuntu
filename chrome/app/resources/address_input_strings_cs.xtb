@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="cs">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="cs">
 <translation id="777702478322588152">Prefektura</translation>
 <translation id="3713769522066937702">Tento formát kódu ZIP není platný. Příklad platného kódu ZIP: <ph name="EXAMPLE"/>. Neznáte svůj kód ZIP? Vyhledejte ho <ph name="BEGIN_LINK"/>zde<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Ulice a číslo popisné</translation>

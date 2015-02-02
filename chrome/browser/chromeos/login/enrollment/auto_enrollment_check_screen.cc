@@ -8,14 +8,29 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/screen_manager.h"
-#include "chrome/browser/chromeos/login/screens/screen_observer.h"
+#include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 
 namespace chromeos {
+
+namespace {
+
+NetworkPortalDetector::CaptivePortalStatus GetCaptivePortalStatus() {
+  const NetworkState* default_network =
+      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
+  return default_network
+             ? NetworkPortalDetector::Get()
+                   ->GetCaptivePortalState(default_network->guid())
+                   .status
+             : NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN;
+}
+
+}  // namespace
 
 // static
 AutoEnrollmentCheckScreen* AutoEnrollmentCheckScreen::Get(
@@ -25,13 +40,15 @@ AutoEnrollmentCheckScreen* AutoEnrollmentCheckScreen::Get(
 }
 
 AutoEnrollmentCheckScreen::AutoEnrollmentCheckScreen(
-    ScreenObserver* observer,
+    BaseScreenDelegate* base_screen_delegate,
     AutoEnrollmentCheckScreenActor* actor)
-    : WizardScreen(observer),
+    : BaseScreen(base_screen_delegate),
       actor_(actor),
       captive_portal_status_(
           NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN),
-      auto_enrollment_state_(policy::AUTO_ENROLLMENT_STATE_IDLE) {
+      auto_enrollment_state_(policy::AUTO_ENROLLMENT_STATE_IDLE),
+      histogram_helper_(new ErrorScreensHistogramHelper("Enrollment")),
+      weak_ptr_factory_(this) {
   if (actor_)
     actor_->SetDelegate(this);
 }
@@ -42,50 +59,60 @@ AutoEnrollmentCheckScreen::~AutoEnrollmentCheckScreen() {
     actor_->SetDelegate(NULL);
 }
 
-void AutoEnrollmentCheckScreen::Start() {
-  if (!IsStartNeeded())
-    return;
+void AutoEnrollmentCheckScreen::ClearState() {
+  auto_enrollment_progress_subscription_.reset();
+  NetworkPortalDetector::Get()->RemoveObserver(this);
 
-  // Make sure the auto-enrollment client is running.
-  auto_enrollment_controller_->Start();
-
-  auto_enrollment_progress_subscription_ =
-      auto_enrollment_controller_->RegisterProgressCallback(
-          base::Bind(
-              &AutoEnrollmentCheckScreen::OnAutoEnrollmentCheckProgressed,
-              base::Unretained(this)));
-  auto_enrollment_state_ = auto_enrollment_controller_->state();
-
-  // NB: AddAndFireObserver below call back into OnPortalDetectionCompleted.
-  // This guarantees that the UI gets synced to current state.
-  NetworkPortalDetector* portal_detector = NetworkPortalDetector::Get();
-  portal_detector->StartDetectionIfIdle();
-  portal_detector->AddAndFireObserver(this);
-}
-
-bool AutoEnrollmentCheckScreen::IsStartNeeded() {
-  // Check that forced reenrollment is wanted and if the check is needed or we
-  // already know the outcome.
-  if (AutoEnrollmentController::GetMode() !=
-      AutoEnrollmentController::MODE_FORCED_RE_ENROLLMENT ||
-      auto_enrollment_state_ ==
-      policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT ||
-      auto_enrollment_state_ == policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT) {
-    SignalCompletion();
-    return false;
-  }
-  return true;
+   auto_enrollment_state_ = policy::AUTO_ENROLLMENT_STATE_IDLE;
+   captive_portal_status_ =
+       NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN;
 }
 
 void AutoEnrollmentCheckScreen::PrepareToShow() {
 }
 
 void AutoEnrollmentCheckScreen::Show() {
-  if (IsStartNeeded()) {
-    Start();
-    if (actor_)
-      actor_->Show();
+  // If the decision got made already, don't show the screen at all.
+  if (AutoEnrollmentController::GetMode() !=
+          AutoEnrollmentController::MODE_FORCED_RE_ENROLLMENT ||
+      IsCompleted()) {
+    SignalCompletion();
+    return;
   }
+
+  // Start from a clean slate.
+  ClearState();
+
+  // Bring up the screen. It's important to do this before updating the UI,
+  // because the latter may switch to the error screen, which needs to stay on
+  // top.
+  actor_->Show();
+  histogram_helper_->OnScreenShow();
+
+  // Set up state change observers.
+  auto_enrollment_progress_subscription_ =
+      auto_enrollment_controller_->RegisterProgressCallback(
+          base::Bind(
+              &AutoEnrollmentCheckScreen::OnAutoEnrollmentCheckProgressed,
+              base::Unretained(this)));
+  NetworkPortalDetector* portal_detector = NetworkPortalDetector::Get();
+  portal_detector->AddObserver(this);
+
+  // Perform an initial UI update.
+  NetworkPortalDetector::CaptivePortalStatus new_captive_portal_status =
+      GetCaptivePortalStatus();
+  policy::AutoEnrollmentState new_auto_enrollment_state =
+      auto_enrollment_controller_->state();
+
+  if (!UpdateCaptivePortalStatus(new_captive_portal_status))
+    UpdateAutoEnrollmentState(new_auto_enrollment_state);
+
+  captive_portal_status_ = new_captive_portal_status;
+  auto_enrollment_state_ = new_auto_enrollment_state;
+
+  // Make sure gears are in motion in the background.
+  auto_enrollment_controller_->Start();
+  portal_detector->StartDetectionIfIdle();
 }
 
 void AutoEnrollmentCheckScreen::Hide() {
@@ -93,11 +120,6 @@ void AutoEnrollmentCheckScreen::Hide() {
 
 std::string AutoEnrollmentCheckScreen::GetName() const {
   return WizardController::kAutoEnrollmentCheckScreenName;
-}
-
-void AutoEnrollmentCheckScreen::OnExit() {
-  get_screen_observer()->OnExit(
-      ScreenObserver::ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED);
 }
 
 void AutoEnrollmentCheckScreen::OnActorDestroyed(
@@ -108,24 +130,32 @@ void AutoEnrollmentCheckScreen::OnActorDestroyed(
 
 void AutoEnrollmentCheckScreen::OnPortalDetectionCompleted(
     const NetworkState* /* network */,
-    const NetworkPortalDetector::CaptivePortalState& state) {
-  UpdateState(state.status, auto_enrollment_state_);
+    const NetworkPortalDetector::CaptivePortalState& /* state */) {
+  UpdateState();
 }
 
 void AutoEnrollmentCheckScreen::OnAutoEnrollmentCheckProgressed(
     policy::AutoEnrollmentState state) {
-  UpdateState(captive_portal_status_, state);
+  if (IsCompleted()) {
+    SignalCompletion();
+    return;
+  }
+
+  UpdateState();
 }
 
-void AutoEnrollmentCheckScreen::UpdateState(
-    NetworkPortalDetector::CaptivePortalStatus new_captive_portal_status,
-    policy::AutoEnrollmentState new_auto_enrollment_state) {
-  // Configure the error screen to show the approriate error message.
+void AutoEnrollmentCheckScreen::UpdateState() {
+  NetworkPortalDetector::CaptivePortalStatus new_captive_portal_status =
+      GetCaptivePortalStatus();
+  policy::AutoEnrollmentState new_auto_enrollment_state =
+      auto_enrollment_controller_->state();
+
+  // Configure the error screen to show the appropriate error message.
   if (!UpdateCaptivePortalStatus(new_captive_portal_status))
     UpdateAutoEnrollmentState(new_auto_enrollment_state);
 
   // Update the connecting indicator.
-  ErrorScreen* error_screen = get_screen_observer()->GetErrorScreen();
+  ErrorScreen* error_screen = get_base_screen_delegate()->GetErrorScreen();
   error_screen->ShowConnectingIndicator(
       new_auto_enrollment_state == policy::AUTO_ENROLLMENT_STATE_PENDING);
 
@@ -138,23 +168,6 @@ void AutoEnrollmentCheckScreen::UpdateState(
   // Save the new state.
   captive_portal_status_ = new_captive_portal_status;
   auto_enrollment_state_ = new_auto_enrollment_state;
-
-  // Check whether a decision got made.
-  switch (new_auto_enrollment_state) {
-    case policy::AUTO_ENROLLMENT_STATE_IDLE:
-      NOTREACHED();
-      // fall through.
-    case policy::AUTO_ENROLLMENT_STATE_PENDING:
-    case policy::AUTO_ENROLLMENT_STATE_CONNECTION_ERROR:
-      break;
-    case policy::AUTO_ENROLLMENT_STATE_SERVER_ERROR:
-      // Server errors don't block OOBE.
-    case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
-    case policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT:
-      // Decision made, ready to proceed.
-      SignalCompletion();
-      return;
-  }
 
   // Retry if applicable. This is last so eventual callbacks find consistent
   // state.
@@ -174,7 +187,7 @@ bool AutoEnrollmentCheckScreen::UpdateCaptivePortalStatus(
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL:
       ShowErrorScreen(ErrorScreen::ERROR_STATE_PORTAL);
       if (captive_portal_status_ != new_captive_portal_status)
-        get_screen_observer()->GetErrorScreen()->FixCaptivePortal();
+        get_base_screen_delegate()->GetErrorScreen()->FixCaptivePortal();
       return true;
     case NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PROXY_AUTH_REQUIRED:
       ShowErrorScreen(ErrorScreen::ERROR_STATE_PROXY);
@@ -215,19 +228,47 @@ void AutoEnrollmentCheckScreen::ShowErrorScreen(
     ErrorScreen::ErrorState error_state) {
   const NetworkState* network =
       NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-  ErrorScreen* error_screen = get_screen_observer()->GetErrorScreen();
+  ErrorScreen* error_screen = get_base_screen_delegate()->GetErrorScreen();
   error_screen->SetUIState(ErrorScreen::UI_STATE_AUTO_ENROLLMENT_ERROR);
   error_screen->AllowGuestSignin(true);
   error_screen->SetErrorState(error_state,
                               network ? network->name() : std::string());
-  get_screen_observer()->ShowErrorScreen();
+  get_base_screen_delegate()->ShowErrorScreen();
+  histogram_helper_->OnErrorShow(error_state);
 }
 
 void AutoEnrollmentCheckScreen::SignalCompletion() {
   NetworkPortalDetector::Get()->RemoveObserver(this);
   auto_enrollment_progress_subscription_.reset();
-  get_screen_observer()->OnExit(
-      ScreenObserver::ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED);
+
+  // Calling Finish() can cause |this| destruction, so let other methods finish
+  // their work before.
+  weak_ptr_factory_.InvalidateWeakPtrs();
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&AutoEnrollmentCheckScreen::CallOnExit,
+                            weak_ptr_factory_.GetWeakPtr()));
+}
+
+void AutoEnrollmentCheckScreen::CallOnExit() {
+  get_base_screen_delegate()->OnExit(
+      BaseScreenDelegate::ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED);
+}
+
+bool AutoEnrollmentCheckScreen::IsCompleted() const {
+  switch (auto_enrollment_controller_->state()) {
+    case policy::AUTO_ENROLLMENT_STATE_IDLE:
+    case policy::AUTO_ENROLLMENT_STATE_PENDING:
+    case policy::AUTO_ENROLLMENT_STATE_CONNECTION_ERROR:
+      return false;
+    case policy::AUTO_ENROLLMENT_STATE_SERVER_ERROR:
+      // Server errors don't block OOBE.
+    case policy::AUTO_ENROLLMENT_STATE_TRIGGER_ENROLLMENT:
+    case policy::AUTO_ENROLLMENT_STATE_NO_ENROLLMENT:
+      // Decision made, ready to proceed.
+      return true;
+  }
+  NOTREACHED();
+  return false;
 }
 
 }  // namespace chromeos

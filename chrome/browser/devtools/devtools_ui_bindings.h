@@ -57,11 +57,11 @@ class DevToolsUIBindings : public content::NotificationObserver,
     virtual void InspectedContentsClosing() = 0;
     virtual void OnLoadCompleted() = 0;
     virtual InfoBarService* GetInfoBarService() = 0;
-    virtual void RenderProcessGone() = 0;
+    virtual void RenderProcessGone(bool crashed) = 0;
   };
 
   explicit DevToolsUIBindings(content::WebContents* web_contents);
-  virtual ~DevToolsUIBindings();
+  ~DevToolsUIBindings() override;
 
   content::WebContents* web_contents() { return web_contents_; }
   Profile* profile() { return profile_; }
@@ -80,69 +80,68 @@ class DevToolsUIBindings : public content::NotificationObserver,
 
  private:
   // content::NotificationObserver overrides.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // content::DevToolsFrontendHost::Delegate implementation.
-  virtual void HandleMessageFromDevToolsFrontend(
-      const std::string& message) OVERRIDE;
-  virtual void HandleMessageFromDevToolsFrontendToBackend(
-      const std::string& message) OVERRIDE;
+  void HandleMessageFromDevToolsFrontend(const std::string& message) override;
+  void HandleMessageFromDevToolsFrontendToBackend(
+      const std::string& message) override;
 
   // content::DevToolsAgentHostClient implementation.
-  virtual void DispatchProtocolMessage(
-      content::DevToolsAgentHost* agent_host,
-      const std::string& message) OVERRIDE;
-  virtual void AgentHostClosed(
-       content::DevToolsAgentHost* agent_host,
-       bool replaced_with_another_client) OVERRIDE;
+  void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
+                               const std::string& message) override;
+  void AgentHostClosed(content::DevToolsAgentHost* agent_host,
+                       bool replaced_with_another_client) override;
 
   // DevToolsEmbedderMessageDispatcher::Delegate implementation.
-  virtual void ActivateWindow() OVERRIDE;
-  virtual void CloseWindow() OVERRIDE;
-  virtual void SetInspectedPageBounds(const gfx::Rect& rect) OVERRIDE;
-  virtual void InspectElementCompleted() OVERRIDE;
-  virtual void InspectedURLChanged(const std::string& url) OVERRIDE;
-  virtual void MoveWindow(int x, int y) OVERRIDE;
-  virtual void SetIsDocked(bool is_docked) OVERRIDE;
-  virtual void OpenInNewTab(const std::string& url) OVERRIDE;
-  virtual void SaveToFile(const std::string& url,
-                          const std::string& content,
-                          bool save_as) OVERRIDE;
-  virtual void AppendToFile(const std::string& url,
-                            const std::string& content) OVERRIDE;
-  virtual void RequestFileSystems() OVERRIDE;
-  virtual void AddFileSystem() OVERRIDE;
-  virtual void RemoveFileSystem(const std::string& file_system_path) OVERRIDE;
-  virtual void UpgradeDraggedFileSystemPermissions(
-      const std::string& file_system_url) OVERRIDE;
-  virtual void IndexPath(int request_id,
-                         const std::string& file_system_path) OVERRIDE;
-  virtual void StopIndexing(int request_id) OVERRIDE;
-  virtual void SearchInPath(int request_id,
-                            const std::string& file_system_path,
-                            const std::string& query) OVERRIDE;
-  virtual void SetWhitelistedShortcuts(const std::string& message) OVERRIDE;
-  virtual void ZoomIn() OVERRIDE;
-  virtual void ZoomOut() OVERRIDE;
-  virtual void ResetZoom() OVERRIDE;
-  virtual void OpenUrlOnRemoteDeviceAndInspect(const std::string& browser_id,
-                                               const std::string& url) OVERRIDE;
-  virtual void SetDeviceCountUpdatesEnabled(bool enabled) OVERRIDE;
-  virtual void SetDevicesUpdatesEnabled(bool enabled) OVERRIDE;
-  virtual void SendMessageToBrowser(const std::string& message) OVERRIDE;
+  void ActivateWindow() override;
+  void CloseWindow() override;
+  void LoadCompleted() override;
+  void SetInspectedPageBounds(const gfx::Rect& rect) override;
+  void InspectElementCompleted() override;
+  void InspectedURLChanged(const std::string& url) override;
+  void MoveWindow(int x, int y) override;
+  void SetIsDocked(bool is_docked) override;
+  void OpenInNewTab(const std::string& url) override;
+  void SaveToFile(const std::string& url,
+                  const std::string& content,
+                  bool save_as) override;
+  void AppendToFile(const std::string& url,
+                    const std::string& content) override;
+  void RequestFileSystems() override;
+  void AddFileSystem() override;
+  void RemoveFileSystem(const std::string& file_system_path) override;
+  void UpgradeDraggedFileSystemPermissions(
+      const std::string& file_system_url) override;
+  void IndexPath(int request_id, const std::string& file_system_path) override;
+  void StopIndexing(int request_id) override;
+  void SearchInPath(int request_id,
+                    const std::string& file_system_path,
+                    const std::string& query) override;
+  void SetWhitelistedShortcuts(const std::string& message) override;
+  void ZoomIn() override;
+  void ZoomOut() override;
+  void ResetZoom() override;
+  void OpenUrlOnRemoteDeviceAndInspect(const std::string& browser_id,
+                                       const std::string& url) override;
+  void SetDeviceCountUpdatesEnabled(bool enabled) override;
+  void SetDevicesUpdatesEnabled(bool enabled) override;
+  void SendMessageToBrowser(const std::string& message) override;
 
   void EnableRemoteDeviceCounter(bool enable);
 
   // DevToolsAndroidBridge::DeviceCountListener override:
-  virtual void DeviceCountChanged(int count) OVERRIDE;
+  void DeviceCountChanged(int count) override;
 
   // Forwards discovered devices to frontend.
   virtual void DevicesUpdated(const std::string& source,
                               const base::ListValue& targets);
 
   void DocumentOnLoadCompletedInMainFrame();
+  void DidNavigateMainFrame();
+  void FrontendLoaded();
 
   // DevToolsFileHelper callbacks.
   void FileSavedAs(const std::string& url);
@@ -189,6 +188,7 @@ class DevToolsUIBindings : public content::NotificationObserver,
 
   bool device_count_updates_enabled_;
   bool devices_updates_enabled_;
+  bool frontend_loaded_;
   scoped_ptr<DevToolsTargetsUIHandler> remote_targets_handler_;
   scoped_ptr<DevToolsEmbedderMessageDispatcher> embedder_message_dispatcher_;
   GURL url_;

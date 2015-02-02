@@ -18,14 +18,11 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 
-//#include "base/compiler_specific.h"
-//#include "base/logging.h"
-//#include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 namespace chromeos {
 namespace {
 
-const char* kTestAccount1 = "user1@test.com";
-const char* kTestAccount2 = "user2@test.com";
+const char kTestAccount1[] = "user1@test.com";
+const char kTestAccount2[] = "user2@test.com";
 
 class WallpaperPrivateApiUnittest : public ash::test::AshTestBase {
  public:
@@ -51,7 +48,7 @@ class TestMinimizeFunction
  public:
   TestMinimizeFunction() {}
 
-  virtual bool RunAsync() OVERRIDE {
+  virtual bool RunAsync() override {
     return WallpaperPrivateMinimizeInactiveWindowsFunction::RunAsync();
   }
 
@@ -64,7 +61,7 @@ class TestRestoreFunction
  public:
   TestRestoreFunction() {}
 
-  virtual bool RunAsync() OVERRIDE {
+  virtual bool RunAsync() override {
     return WallpaperPrivateRestoreMinimizedWindowsFunction::RunAsync();
   }
  protected:
@@ -186,8 +183,8 @@ class WallpaperPrivateApiMultiUserUnittest
       : multi_user_window_manager_(NULL),
         session_state_delegate_(NULL) {}
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  virtual void SetUp() override;
+  virtual void TearDown() override;
 
  protected:
   void SetUpMultiUserWindowManager(

@@ -20,6 +20,7 @@
 #include "content/common/webplugin_geometry.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/favicon_url.h"
+#include "content/public/common/file_chooser_file_info.h"
 #include "content/public/common/file_chooser_params.h"
 #include "content/public/common/menu_item.h"
 #include "content/public/common/page_state.h"
@@ -55,7 +56,6 @@
 #include "ui/gfx/rect_f.h"
 #include "ui/gfx/vector2d.h"
 #include "ui/gfx/vector2d_f.h"
-#include "ui/shell_dialogs/selected_file_info.h"
 
 #if defined(OS_MACOSX)
 #include "content/common/mac/font_descriptor.h"
@@ -83,8 +83,11 @@ IPC_ENUM_TRAITS(WindowContainerType)
 IPC_ENUM_TRAITS(content::FaviconURL::IconType)
 IPC_ENUM_TRAITS(content::FileChooserParams::Mode)
 IPC_ENUM_TRAITS(content::MenuItem::Type)
-IPC_ENUM_TRAITS(content::NavigationGesture)
-IPC_ENUM_TRAITS(content::PageZoom)
+IPC_ENUM_TRAITS_MAX_VALUE(content::NavigationGesture,
+                          content::NavigationGestureLast)
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(content::PageZoom,
+                              content::PageZoom::PAGE_ZOOM_OUT,
+                              content::PageZoom::PAGE_ZOOM_IN)
 IPC_ENUM_TRAITS(gfx::FontRenderParams::Hinting)
 IPC_ENUM_TRAITS(gfx::FontRenderParams::SubpixelRendering)
 IPC_ENUM_TRAITS_MAX_VALUE(content::TapMultipleTargetsStrategy,
@@ -169,11 +172,21 @@ IPC_STRUCT_TRAITS_BEGIN(content::FaviconURL)
   IPC_STRUCT_TRAITS_MEMBER(icon_sizes)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(content::FileChooserFileInfo)
+  IPC_STRUCT_TRAITS_MEMBER(file_path)
+  IPC_STRUCT_TRAITS_MEMBER(display_name)
+  IPC_STRUCT_TRAITS_MEMBER(file_system_url)
+  IPC_STRUCT_TRAITS_MEMBER(modification_time)
+  IPC_STRUCT_TRAITS_MEMBER(length)
+  IPC_STRUCT_TRAITS_MEMBER(is_directory)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(content::FileChooserParams)
   IPC_STRUCT_TRAITS_MEMBER(mode)
   IPC_STRUCT_TRAITS_MEMBER(title)
   IPC_STRUCT_TRAITS_MEMBER(default_file_name)
   IPC_STRUCT_TRAITS_MEMBER(accept_types)
+  IPC_STRUCT_TRAITS_MEMBER(need_local_path)
 #if defined(OS_ANDROID)
   IPC_STRUCT_TRAITS_MEMBER(capture)
 #endif
@@ -245,12 +258,6 @@ IPC_STRUCT_TRAITS_BEGIN(media::MediaLogEvent)
   IPC_STRUCT_TRAITS_MEMBER(type)
   IPC_STRUCT_TRAITS_MEMBER(params)
   IPC_STRUCT_TRAITS_MEMBER(time)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(ui::SelectedFileInfo)
-  IPC_STRUCT_TRAITS_MEMBER(file_path)
-  IPC_STRUCT_TRAITS_MEMBER(local_path)
-  IPC_STRUCT_TRAITS_MEMBER(display_name)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Params)
@@ -406,6 +413,26 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   IPC_STRUCT_MEMBER(int, flags)
 IPC_STRUCT_END()
 
+IPC_STRUCT_BEGIN(ViewMsg_Resize_Params)
+  // Information about the screen (dpi, depth, etc..).
+  IPC_STRUCT_MEMBER(blink::WebScreenInfo, screen_info)
+  // The size of the renderer.
+  IPC_STRUCT_MEMBER(gfx::Size, new_size)
+  // The size of the view's backing surface in non-DPI-adjusted pixels.
+  IPC_STRUCT_MEMBER(gfx::Size, physical_backing_size)
+  // The amount that the viewport size given to Blink was shrunk by the URL-bar
+  // (always 0 on platforms where URL-bar hiding isn't supported).
+  IPC_STRUCT_MEMBER(float, top_controls_layout_height)
+  // The size of the visible viewport, which may be smaller than the view if the
+  // view is partially occluded (e.g. by a virtual keyboard).  The size is in
+  // DPI-adjusted pixels.
+  IPC_STRUCT_MEMBER(gfx::Size, visible_viewport_size)
+  // The resizer rect.
+  IPC_STRUCT_MEMBER(gfx::Rect, resizer_rect)
+  // Indicates whether a page is fullscreen or not.
+  IPC_STRUCT_MEMBER(bool, is_fullscreen)
+IPC_STRUCT_END()
+
 IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // Renderer-wide preferences.
   IPC_STRUCT_MEMBER(content::RendererPreferences, renderer_preferences)
@@ -453,8 +480,17 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // to a view and are only updated by the renderer after this initial value.
   IPC_STRUCT_MEMBER(int32, next_page_id)
 
-  // The properties of the screen associated with the view.
-  IPC_STRUCT_MEMBER(blink::WebScreenInfo, screen_info)
+  // The initial renderer size.
+  IPC_STRUCT_MEMBER(ViewMsg_Resize_Params, initial_size)
+
+  // Whether to enable auto-resize.
+  IPC_STRUCT_MEMBER(bool, enable_auto_resize)
+
+  // The minimum size to layout the page if auto-resize is enabled.
+  IPC_STRUCT_MEMBER(gfx::Size, min_size)
+
+  // The maximum size to layout the page if auto-resize is enabled.
+  IPC_STRUCT_MEMBER(gfx::Size, max_size)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewMsg_PostMessage_Params)
@@ -557,16 +593,6 @@ IPC_MESSAGE_CONTROL0(ViewMsg_TimezoneChange)
 // Expects a Close_ACK message when finished.
 IPC_MESSAGE_ROUTED0(ViewMsg_Close)
 
-IPC_STRUCT_BEGIN(ViewMsg_Resize_Params)
-  IPC_STRUCT_MEMBER(blink::WebScreenInfo, screen_info)
-  IPC_STRUCT_MEMBER(gfx::Size, new_size)
-  IPC_STRUCT_MEMBER(gfx::Size, physical_backing_size)
-  IPC_STRUCT_MEMBER(float, top_controls_layout_height)
-  IPC_STRUCT_MEMBER(gfx::Size, visible_viewport_size)
-  IPC_STRUCT_MEMBER(gfx::Rect, resizer_rect)
-  IPC_STRUCT_MEMBER(bool, is_fullscreen)
-IPC_STRUCT_END()
-
 // Tells the render view to change its size.  A ViewHostMsg_UpdateRect message
 // is generated in response provided new_size is not empty and not equal to
 // the view's current size.  The generated ViewHostMsg_UpdateRect message will
@@ -574,6 +600,11 @@ IPC_STRUCT_END()
 // we don't have to fetch it every time WebKit asks for it.
 IPC_MESSAGE_ROUTED1(ViewMsg_Resize,
                     ViewMsg_Resize_Params /* params */)
+
+// Sent to inform the renderer of its screen device color profile. An empty
+// profile tells the renderer use the default sRGB color profile.
+IPC_MESSAGE_ROUTED1(ViewMsg_ColorProfile,
+                    std::vector<char> /* color profile */)
 
 // Tells the render view that the resize rect has changed.
 IPC_MESSAGE_ROUTED1(ViewMsg_ChangeResizeRect,
@@ -710,7 +741,7 @@ IPC_MESSAGE_ROUTED0(ViewMsg_CandidateWindowHidden)
 IPC_MESSAGE_ROUTED0(ViewMsg_UpdateTargetURL_ACK)
 
 IPC_MESSAGE_ROUTED1(ViewMsg_RunFileChooserResponse,
-                    std::vector<ui::SelectedFileInfo>)
+                    std::vector<content::FileChooserFileInfo>)
 
 // Provides the results of directory enumeration.
 IPC_MESSAGE_ROUTED2(ViewMsg_EnumerateDirectoryResponse,
@@ -1318,9 +1349,6 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_SetTooltipText,
                     base::string16 /* tooltip text string */,
                     blink::WebTextDirection /* text direction hint */)
 
-IPC_MESSAGE_ROUTED0(ViewHostMsg_SelectRange_ACK)
-IPC_MESSAGE_ROUTED0(ViewHostMsg_MoveCaret_ACK)
-
 // Notification that the text selection has changed.
 // Note: The secound parameter is the character based offset of the
 // base::string16
@@ -1363,10 +1391,11 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_TakeFocus,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_OpenDateTimeDialog,
                     ViewHostMsg_DateTimeDialogValue_Params /* value */)
 
-IPC_MESSAGE_ROUTED3(ViewHostMsg_TextInputTypeChanged,
+IPC_MESSAGE_ROUTED4(ViewHostMsg_TextInputTypeChanged,
                     ui::TextInputType /* TextInputType of the focused node */,
                     ui::TextInputMode /* TextInputMode of the focused node */,
-                    bool /* can_compose_inline in the focused node */)
+                    bool /* can_compose_inline in the focused node */,
+                    int /* flags in the focused node */)
 
 // Required for updating text input state.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_TextInputStateChanged,

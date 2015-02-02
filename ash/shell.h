@@ -368,9 +368,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   MruWindowTracker* mru_window_tracker() {
     return mru_window_tracker_.get();
   }
-  ::wm::UserActivityDetector* user_activity_detector() {
-    return user_activity_detector_.get();
-  }
   VideoDetector* video_detector() {
     return video_detector_.get();
   }
@@ -384,11 +381,11 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   DisplayController* display_controller() {
     return display_controller_.get();
   }
-#if defined(OS_CHROMEOS) && defined(USE_X11)
+#if defined(OS_CHROMEOS)
   TouchTransformerController* touch_transformer_controller() {
     return touch_transformer_controller_.get();
   }
-#endif  // defined(OS_CHROMEOS) && defined(USE_X11)
+#endif  // defined(OS_CHROMEOS)
   MouseCursorEventFilter* mouse_cursor_filter() {
     return mouse_cursor_filter_.get();
   }
@@ -537,6 +534,10 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   LogoutConfirmationController* logout_confirmation_controller() {
     return logout_confirmation_controller_.get();
   }
+
+  VirtualKeyboardController* virtual_keyboard_controller() {
+    return virtual_keyboard_controller_.get();
+  }
 #endif  // defined(OS_CHROMEOS)
 
   ShelfModel* shelf_model() {
@@ -589,7 +590,7 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
 
   // Takes ownership of |delegate|.
   explicit Shell(ShellDelegate* delegate);
-  virtual ~Shell();
+  ~Shell() override;
 
   void Init(const ShellInitParams& init_params);
 
@@ -600,18 +601,18 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   void InitRootWindow(aura::Window* root_window);
 
   // ash::SystemModalContainerEventFilterDelegate overrides:
-  virtual bool CanWindowReceiveEvents(aura::Window* window) OVERRIDE;
+  bool CanWindowReceiveEvents(aura::Window* window) override;
 
   // Overridden from ui::EventTarget:
-  virtual bool CanAcceptEvent(const ui::Event& event) OVERRIDE;
-  virtual EventTarget* GetParentTarget() OVERRIDE;
-  virtual scoped_ptr<ui::EventTargetIterator> GetChildIterator() const OVERRIDE;
-  virtual ui::EventTargeter* GetEventTargeter() OVERRIDE;
-  virtual void OnEvent(ui::Event* event) OVERRIDE;
+  bool CanAcceptEvent(const ui::Event& event) override;
+  EventTarget* GetParentTarget() override;
+  scoped_ptr<ui::EventTargetIterator> GetChildIterator() const override;
+  ui::EventTargeter* GetEventTargeter() override;
+  void OnEvent(ui::Event* event) override;
 
   // Overridden from aura::client::ActivationChangeObserver:
-  virtual void OnWindowActivated(aura::Window* gained_active,
-                                 aura::Window* lost_active) OVERRIDE;
+  void OnWindowActivated(aura::Window* gained_active,
+                         aura::Window* lost_active) override;
 
   static Shell* instance_;
 
@@ -667,7 +668,6 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   scoped_ptr<WindowSelectorController> window_selector_controller_;
   scoped_ptr<FocusCycler> focus_cycler_;
   scoped_ptr<DisplayController> display_controller_;
-  scoped_ptr<VirtualKeyboardController> virtual_keyboard_controller_;
   scoped_ptr<HighContrastController> high_contrast_controller_;
   scoped_ptr<MagnificationController> magnification_controller_;
   scoped_ptr<PartialMagnificationController> partial_magnification_controller_;
@@ -720,6 +720,7 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   scoped_ptr<LogoutConfirmationController> logout_confirmation_controller_;
   scoped_ptr<LastWindowClosedLogoutReminder>
       last_window_closed_logout_reminder_;
+  scoped_ptr<VirtualKeyboardController> virtual_keyboard_controller_;
   // Controls video output device state.
   scoped_ptr<ui::DisplayConfigurator> display_configurator_;
   scoped_ptr<DisplayConfiguratorAnimation> display_configurator_animation_;
@@ -729,10 +730,11 @@ class ASH_EXPORT Shell : public SystemModalContainerEventFilterDelegate,
   // Listens for output changes and updates the display manager.
   scoped_ptr<DisplayChangeObserver> display_change_observer_;
 
+  scoped_ptr<TouchTransformerController> touch_transformer_controller_;
+
 #if defined(USE_X11)
   scoped_ptr<ui::EventHandler> magnifier_key_scroll_handler_;
   scoped_ptr<ui::EventHandler> speech_feedback_handler_;
-  scoped_ptr<TouchTransformerController> touch_transformer_controller_;
 #endif  // defined(USE_X11)
 #endif  // defined(OS_CHROMEOS)
 

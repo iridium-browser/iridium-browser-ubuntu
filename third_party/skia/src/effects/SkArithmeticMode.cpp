@@ -253,7 +253,7 @@ public:
     GrGLArithmeticEffect(const GrBackendProcessorFactory&, const GrProcessor&);
     virtual ~GrGLArithmeticEffect();
 
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -289,8 +289,6 @@ public:
     static const char* Name() { return "Arithmetic"; }
     GrTexture* backgroundTexture() const { return fBackgroundAccess.getTexture(); }
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     float k1() const { return fK1; }
     float k2() const { return fK2; }
     float k3() const { return fK3; }
@@ -298,7 +296,9 @@ public:
     bool enforcePMColor() const { return fEnforcePMColor; }
 
 private:
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GrArithmeticEffect(float k1, float k2, float k3, float k4, bool enforcePMColor,
                        GrTexture* background);
@@ -330,23 +330,22 @@ GrArithmeticEffect::GrArithmeticEffect(float k1, float k2, float k3, float k4,
 GrArithmeticEffect::~GrArithmeticEffect() {
 }
 
-bool GrArithmeticEffect::onIsEqual(const GrProcessor& sBase) const {
+bool GrArithmeticEffect::onIsEqual(const GrFragmentProcessor& sBase) const {
     const GrArithmeticEffect& s = sBase.cast<GrArithmeticEffect>();
     return fK1 == s.fK1 &&
            fK2 == s.fK2 &&
            fK3 == s.fK3 &&
            fK4 == s.fK4 &&
-           fEnforcePMColor == s.fEnforcePMColor &&
-           backgroundTexture() == s.backgroundTexture();
+           fEnforcePMColor == s.fEnforcePMColor;
 }
 
 const GrBackendFragmentProcessorFactory& GrArithmeticEffect::getFactory() const {
     return GrTBackendFragmentProcessorFactory<GrArithmeticEffect>::getInstance();
 }
 
-void GrArithmeticEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
+void GrArithmeticEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
     // TODO: optimize this
-    *validFlags = 0;
+    inout->setToUnknown(InvariantOutput::kWill_ReadInput);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -360,7 +359,7 @@ GrGLArithmeticEffect::GrGLArithmeticEffect(const GrBackendProcessorFactory& fact
 GrGLArithmeticEffect::~GrGLArithmeticEffect() {
 }
 
-void GrGLArithmeticEffect::emitCode(GrGLProgramBuilder* builder,
+void GrGLArithmeticEffect::emitCode(GrGLFPBuilder* builder,
                                     const GrFragmentProcessor& fp,
                                     const GrProcessorKey& key,
                                     const char* outputColor,
@@ -369,7 +368,7 @@ void GrGLArithmeticEffect::emitCode(GrGLProgramBuilder* builder,
                                     const TextureSamplerArray& samplers) {
 
     GrTexture* backgroundTex = fp.cast<GrArithmeticEffect>().backgroundTexture();
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* dstColor;
     if (backgroundTex) {
         fsBuilder->codeAppend("\t\tvec4 bgColor = ");

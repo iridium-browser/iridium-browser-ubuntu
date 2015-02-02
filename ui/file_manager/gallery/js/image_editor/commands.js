@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Command queue is the only way to modify images.
  * Supports undo/redo.
@@ -11,7 +9,7 @@
  *
  * @param {Document} document Document to create canvases in.
  * @param {HTMLCanvasElement} canvas The canvas with the original image.
- * @param {function(callback)} saveFunction Function to save the image.
+ * @param {function(function())} saveFunction Function to save the image.
  * @constructor
  */
 function CommandQueue(document, canvas, saveFunction) {
@@ -61,7 +59,7 @@ CommandQueue.prototype.attachUI = function(imageView, prompt, lock) {
 
 /**
  * Execute the action when the queue is not busy.
- * @param {function} callback Callback.
+ * @param {function()} callback Callback.
  */
 CommandQueue.prototype.executeWhenReady = function(callback) {
   if (this.isBusy())
@@ -126,7 +124,7 @@ CommandQueue.prototype.commit_ = function(opt_delay) {
  *
  * @param {Command} command The command to execute.
  * @param {Object} uiContext The UI context.
- * @param {function} callback Completion callback.
+ * @param {function(number=)} callback Completion callback.
  * @private
  */
 CommandQueue.prototype.doExecute_ = function(command, uiContext, callback) {
@@ -364,7 +362,7 @@ Command.Rotate.prototype.revertView = function(canvas, imageView) {
 /**
  * Crop command.
  *
- * @param {Rect} imageRect Crop rectangle in image coordinates.
+ * @param {ImageRect} imageRect Crop rectangle in image coordinates.
  * @constructor
  * @extends {Command}
  */
@@ -380,7 +378,8 @@ Command.Crop.prototype.execute = function(
     document, srcCanvas, callback, uiContext) {
   var result = this.createCanvas_(
       document, srcCanvas, this.imageRect_.width, this.imageRect_.height);
-  Rect.drawImage(result.getContext('2d'), srcCanvas, null, this.imageRect_);
+  ImageRect.drawImage(
+      result.getContext('2d'), srcCanvas, null, this.imageRect_);
   var delay;
   if (uiContext.imageView) {
     delay = uiContext.imageView.replaceAndAnimate(result, this.imageRect_, 0);
@@ -427,11 +426,11 @@ Command.Filter.prototype.execute = function(
     } else {
       var viewport = uiContext.imageView.viewport_;
 
-      var imageStrip = new Rect(viewport.getImageBounds());
+      var imageStrip = new ImageRect(viewport.getImageBounds());
       imageStrip.top = previousRow;
       imageStrip.height = updatedRow - previousRow;
 
-      var screenStrip = new Rect(viewport.getImageBoundsOnScreen());
+      var screenStrip = new ImageRect(viewport.getImageBoundsOnScreen());
       screenStrip.top = Math.round(viewport.imageToScreenY(previousRow));
       screenStrip.height =
           Math.round(viewport.imageToScreenY(updatedRow)) - screenStrip.top;

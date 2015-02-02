@@ -21,11 +21,11 @@ class OriginPowerMapFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<OriginPowerMapFactory>;
 
   OriginPowerMapFactory();
-  virtual ~OriginPowerMapFactory();
+  ~OriginPowerMapFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(OriginPowerMapFactory);
 };

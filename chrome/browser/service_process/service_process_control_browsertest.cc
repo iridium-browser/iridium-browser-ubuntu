@@ -17,9 +17,9 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/service_process_util.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 class ServiceProcessControlBrowserTest
@@ -68,11 +68,11 @@ class ServiceProcessControlBrowserTest
     ServiceProcessControl::GetInstance()->Disconnect();
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     service_process_handle_ = base::kNullProcessHandle;
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     if (ServiceProcessControl::GetInstance()->IsConnected())
       EXPECT_TRUE(ServiceProcessControl::GetInstance()->Shutdown());
 #if defined(OS_MACOSX)
@@ -118,7 +118,7 @@ class ServiceProcessControlBrowserTest
 class RealServiceProcessControlBrowserTest
       : public ServiceProcessControlBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ServiceProcessControlBrowserTest::SetUpCommandLine(command_line);
     base::FilePath exe;
     PathService::Get(base::DIR_EXE, &exe);

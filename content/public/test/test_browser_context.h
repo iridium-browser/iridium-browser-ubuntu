@@ -19,7 +19,7 @@ class MockResourceContext;
 class TestBrowserContext : public BrowserContext {
  public:
   TestBrowserContext();
-  virtual ~TestBrowserContext();
+  ~TestBrowserContext() override;
 
   // Takes ownership of the temporary directory so that it's not deleted when
   // this object is destructed.
@@ -27,24 +27,23 @@ class TestBrowserContext : public BrowserContext {
 
   void SetSpecialStoragePolicy(storage::SpecialStoragePolicy* policy);
 
-  virtual base::FilePath GetPath() const OVERRIDE;
-  virtual bool IsOffTheRecord() const OVERRIDE;
-  virtual DownloadManagerDelegate* GetDownloadManagerDelegate() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter*
-      GetMediaRequestContextForStoragePartition(
-          const base::FilePath& partition_path,
-          bool in_memory) OVERRIDE;
-  virtual ResourceContext* GetResourceContext() OVERRIDE;
-  virtual BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
-  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
-  virtual PushMessagingService* GetPushMessagingService() OVERRIDE;
-  virtual SSLHostStateDelegate* GetSSLHostStateDelegate() OVERRIDE;
+  base::FilePath GetPath() const override;
+  bool IsOffTheRecord() const override;
+  DownloadManagerDelegate* GetDownloadManagerDelegate() override;
+  net::URLRequestContextGetter* GetRequestContext() override;
+  net::URLRequestContextGetter* GetRequestContextForRenderProcess(
+      int renderer_child_id) override;
+  net::URLRequestContextGetter* GetMediaRequestContext() override;
+  net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
+      int renderer_child_id) override;
+  net::URLRequestContextGetter* GetMediaRequestContextForStoragePartition(
+      const base::FilePath& partition_path,
+      bool in_memory) override;
+  ResourceContext* GetResourceContext() override;
+  BrowserPluginGuestManager* GetGuestManager() override;
+  storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
+  PushMessagingService* GetPushMessagingService() override;
+  SSLHostStateDelegate* GetSSLHostStateDelegate() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(DOMStorageTest, SessionOnly);

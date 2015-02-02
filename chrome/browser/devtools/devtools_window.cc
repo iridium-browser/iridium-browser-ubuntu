@@ -90,19 +90,18 @@ class DevToolsToolboxDelegate
   DevToolsToolboxDelegate(
       WebContents* toolbox_contents,
       DevToolsWindow::ObserverWithAccessor* web_contents_observer);
-  virtual ~DevToolsToolboxDelegate();
+  ~DevToolsToolboxDelegate() override;
 
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
-  virtual bool PreHandleKeyboardEvent(
+      const content::OpenURLParams& params) override;
+  bool PreHandleKeyboardEvent(content::WebContents* source,
+                              const content::NativeWebKeyboardEvent& event,
+                              bool* is_keyboard_shortcut) override;
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event,
-      bool* is_keyboard_shortcut) OVERRIDE;
-  virtual void HandleKeyboardEvent(
-      content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void WebContentsDestroyed() OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) override;
+  void WebContentsDestroyed() override;
 
  private:
   BrowserWindow* GetInspectedBrowserWindow();
@@ -822,7 +821,7 @@ void DevToolsWindow::ActivateContents(WebContents* contents) {
   if (is_docked_) {
     WebContents* inspected_tab = GetInspectedWebContents();
     inspected_tab->GetDelegate()->ActivateContents(inspected_tab);
-  } else {
+  } else if (browser_) {
     browser_->window()->Activate();
   }
 }
@@ -861,7 +860,7 @@ void DevToolsWindow::WebContentsCreated(WebContents* source_contents,
                                         const GURL& target_url,
                                         WebContents* new_contents) {
   if (target_url.SchemeIs(content::kChromeDevToolsScheme) &&
-      target_url.query().find("toolbox=true") != std::string::npos) {
+      target_url.path().rfind("toolbox.html") != std::string::npos) {
     CHECK(can_dock_);
     toolbox_web_contents_ = new_contents;
   }
@@ -968,6 +967,8 @@ bool DevToolsWindow::PreHandleGestureEvent(
 }
 
 void DevToolsWindow::ActivateWindow() {
+  if (life_stage_ != kLoadCompleted)
+    return;
   if (is_docked_ && GetInspectedBrowserWindow())
     main_web_contents_->Focus();
   else if (!is_docked_ && !browser_->window()->IsActive())
@@ -998,6 +999,8 @@ void DevToolsWindow::InspectElementCompleted() {
 }
 
 void DevToolsWindow::MoveWindow(int x, int y) {
+  if (life_stage_ != kLoadCompleted)
+    return;
   if (!is_docked_) {
     gfx::Rect bounds = browser_->window()->GetBounds();
     bounds.Offset(x, y);
@@ -1088,12 +1091,15 @@ InfoBarService* DevToolsWindow::GetInfoBarService() {
       InfoBarService::FromWebContents(main_web_contents_);
 }
 
-void DevToolsWindow::RenderProcessGone() {
+void DevToolsWindow::RenderProcessGone(bool crashed) {
   // Docked DevToolsWindow owns its main_web_contents_ and must delete it.
   // Undocked main_web_contents_ are owned and handled by browser.
   // see crbug.com/369932
-  if (is_docked_)
+  if (is_docked_) {
     CloseContents(main_web_contents_);
+  } else if (browser_ && crashed) {
+    browser_->window()->Close();
+  }
 }
 
 void DevToolsWindow::OnLoadCompleted() {
